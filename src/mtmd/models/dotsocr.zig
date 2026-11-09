@@ -26,7 +26,7 @@ pub const MropeVision = struct {
     }
 };
 
-/// Ports `build` (dotsocr.cpp:3 @8642541b2), a member of `clip_graph_dotsocr`.
+/// Ports `build` (dotsocr.cpp:3 @cd959bae9), a member of `clip_graph_dotsocr`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

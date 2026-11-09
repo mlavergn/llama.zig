@@ -29,7 +29,7 @@ fn doubleToFloat(comptime x: f64) f32 {
 }
 
 /// Ports `llm_build_rwkv7_base`'s `build_rwkv7_channel_mix`
-/// (models/rwkv7-base.cpp:9 @8642541b2): the squared-ReLU feed-forward.
+/// (models/rwkv7-base.cpp:9 @cd959bae9): the squared-ReLU feed-forward.
 pub fn buildRwkv7ChannelMix(b: *const graph.Builder, layer: *const Layer, cur_: *Tensor, x_prev: *Tensor, arch: arch_mod.Arch) *Tensor {
     const ctx = b.ctx0;
     var cur = cur_;
@@ -48,7 +48,7 @@ pub fn buildRwkv7ChannelMix(b: *const graph.Builder, layer: *const Layer, cur_: 
 }
 
 /// Ports `llm_build_rwkv7_base`'s `build_rwkv7_time_mix`
-/// (models/rwkv7-base.cpp:30 @8642541b2): the WKV-7 recurrence.
+/// (models/rwkv7-base.cpp:30 @cd959bae9): the WKV-7 recurrence.
 /// `first_layer_value` is the first layer's value, set by the first call
 /// and mixed back into every later layer's.
 pub fn buildRwkv7TimeMix(model: *const Model, b: *const graph.Builder, inp: *const graph.InpRs, cur_: *Tensor, x_prev: *Tensor, first_layer_value: *?*Tensor, ubatch: *const batch.Ubatch, il: c_int) *Tensor {

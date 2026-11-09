@@ -36,13 +36,13 @@ const has_f16c = builtin.cpu.arch == .x86_64 and
 // still-C++ half of the backend reaches them through `simd-mappings.h`:
 // `GGML_CPU_UE4M3_TO_FP32` indexes `ggml_table_f32_ue4m3` directly on NEON.
 
-/// Ports `ggml_table_f32_f16` (ggml-cpu.c:81 @8642541b2). 256 KB.
+/// Ports `ggml_table_f32_f16` (ggml-cpu.c:81 @cd959bae9). 256 KB.
 pub export var ggml_table_f32_f16: [1 << 16]f32 = @splat(0);
 
-/// Ports `ggml_table_f32_e8m0_half` (ggml-cpu.c:84 @8642541b2). 1 KB.
+/// Ports `ggml_table_f32_e8m0_half` (ggml-cpu.c:84 @cd959bae9). 1 KB.
 pub export var ggml_table_f32_e8m0_half: [1 << 8]f32 = @splat(0);
 
-/// Ports `ggml_table_f32_ue4m3` (ggml-cpu.c:87 @8642541b2). 1 KB.
+/// Ports `ggml_table_f32_ue4m3` (ggml-cpu.c:87 @cd959bae9). 1 KB.
 pub export var ggml_table_f32_ue4m3: [1 << 8]f32 = @splat(0);
 
 /// The GELU tables, still C++ in `ggml-cpu/vec.cpp` but filled here because
@@ -61,8 +61,8 @@ const ggml_table_gelu_quick_f16 = &vec.ggml_table_gelu_quick_f16;
 // and narrowing is the instruction, and the asymmetry is easy to miss, so
 // each direction is named separately here.
 
-/// Ports `GGML_CPU_FP16_TO_FP32` (simd-mappings.h:44 @8642541b2), the NEON
-/// arm, and `ggml_lookup_fp16_to_fp32` (simd-mappings.h:164 @8642541b2),
+/// Ports `GGML_CPU_FP16_TO_FP32` (simd-mappings.h:46 @cd959bae9), the NEON
+/// arm, and `ggml_lookup_fp16_to_fp32` (simd-mappings.h:168 @cd959bae9),
 /// every other.
 ///
 /// On ARM the C widens through `__fp16`, a hardware conversion; elsewhere it
@@ -76,7 +76,7 @@ pub inline fn cpuFp16ToFp32(h: c.ggml_fp16_t) f32 {
 }
 
 /// Ports `GGML_CPU_FP32_TO_FP16`, `GGML_CPU_FP32_TO_FP16` and
-/// `GGML_CPU_FP32_TO_FP16` (simd-mappings.h:45, 151, 173 @8642541b2): the NEON
+/// `GGML_CPU_FP32_TO_FP16` (simd-mappings.h:47, 155, 177 @cd959bae9): the NEON
 /// arm, the F16C arm on x86-64-v3 and up, and the fallback everywhere else.
 ///
 /// Since v0.8.0 the NEON block selects its own `neon_compute_fp32_to_fp16`, a
@@ -107,7 +107,7 @@ pub inline fn cpuFp32ToFp16(f: f32) c.ggml_fp16_t {
 // These are what the traits table's `from_float` slots point at for the
 // non-quantised types.
 
-/// Ports `ggml_cpu_fp32_to_fp32` (ggml-cpu.c:3486 @8642541b2).
+/// Ports `ggml_cpu_fp32_to_fp32` (ggml-cpu.c:3495 @cd959bae9).
 ///
 /// Parameters:
 /// - `x`: source row.
@@ -133,7 +133,7 @@ const has_avx512f = builtin.cpu.arch == .x86_64 and std.Target.x86.featureSetHas
 /// `_MM_FROUND_TO_NEAREST_INT`, the rounding immediate the C passes.
 const round_nearest: i32 = 0;
 
-/// Ports `ggml_cpu_fp32_to_fp16` (ggml-cpu.c:3490 @8642541b2): with F16C,
+/// Ports `ggml_cpu_fp32_to_fp16` (ggml-cpu.c:3499 @cd959bae9): with F16C,
 /// blocks of sixteen under `__AVX512F__`, then eight and four, through
 /// `vcvtps2ph`, then the tail through `GGML_CPU_FP32_TO_FP16` -- F16C again
 /// since v0.7.0. The s390x `__VXE__` block v0.7.0 adds is not a target here.
@@ -185,7 +185,7 @@ pub export fn ggml_cpu_fp16_to_fp32(x: [*c]const c.ggml_fp16_t, y: [*c]f32, n: i
     while (i < nn) : (i += 1) y[i] = cpuFp16ToFp32(x[i]);
 }
 
-/// Ports `ggml_cpu_fp32_to_bf16` (ggml-cpu.c:3583 @8642541b2).
+/// Ports `ggml_cpu_fp32_to_bf16` (ggml-cpu.c:3592 @cd959bae9).
 pub export fn ggml_cpu_fp32_to_bf16(x: [*c]const f32, y: [*c]c.ggml_bf16_t, n: i64) void {
     for (0..@intCast(n)) |i| y[i] = .{ .bits = impl.fp32ToBf16(x[i]) };
 }
@@ -199,7 +199,7 @@ pub export fn ggml_cpu_bf16_to_fp32(x: [*c]const c.ggml_bf16_t, y: [*c]f32, n: i
     for (0..@intCast(n)) |i| y[i] = impl.bf16ToFp32(x[i].bits);
 }
 
-/// Ports `ggml_cpu_fp32_to_i32` (ggml-cpu.c:3590 @8642541b2).
+/// Ports `ggml_cpu_fp32_to_i32` (ggml-cpu.c:3599 @cd959bae9).
 ///
 /// The C writes `y[i] = x[i]`, a float-to-int conversion: truncation toward
 /// zero, and undefined once the value leaves `int32_t`'s range. `impl.truncTo`
@@ -234,16 +234,16 @@ pub fn initTables() void {
     }
 }
 
-/// Ports `GELU_COEF_A` (vec.h:962 @8642541b2).
+/// Ports `GELU_COEF_A` (vec.h:962 @cd959bae9).
 const gelu_coef_a: f32 = 0.044715;
 
-/// Ports `GELU_QUICK_COEF` (vec.h:963 @8642541b2).
+/// Ports `GELU_QUICK_COEF` (vec.h:963 @cd959bae9).
 const gelu_quick_coef: f32 = -1.702;
 
-/// Ports `SQRT_2_OVER_PI` (vec.h:964 @8642541b2).
+/// Ports `SQRT_2_OVER_PI` (vec.h:964 @cd959bae9).
 const sqrt_2_over_pi: f32 = 0.79788456080286535587989211986876;
 
-/// Ports `ggml_gelu_f32` (vec.h:967 @8642541b2).
+/// Ports `ggml_gelu_f32` (vec.h:967 @cd959bae9).
 ///
 /// `static inline` in a header the port cannot import, and used only to fill
 /// the table above, so it lives here rather than being reached across.
@@ -255,7 +255,7 @@ fn gelu(x: f32) f32 {
     return 0.5 * x * (1.0 + tanhf(sqrt_2_over_pi * x * @mulAdd(f32, gelu_coef_a * x, x, 1.0)));
 }
 
-/// Ports `ggml_gelu_quick_f32` (vec.h:1029 @8642541b2).
+/// Ports `ggml_gelu_quick_f32` (vec.h:1029 @cd959bae9).
 fn geluQuick(x: f32) f32 {
     return x * (1.0 / (1.0 + expf(gelu_quick_coef * x)));
 }

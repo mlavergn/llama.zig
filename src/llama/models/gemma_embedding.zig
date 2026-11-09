@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_gemma_embedding`'s `load_arch_hparams` (models/gemma-embedding.cpp:3 @8642541b2).
+/// Ports `llama_model_gemma_embedding`'s `load_arch_hparams` (models/gemma-embedding.cpp:3 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -53,7 +53,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.f_attention_scale = 1.0 / impl.sqrtf(@floatFromInt(hp.nEmbdHeadK(0)));
 }
 
-/// Ports `llama_model_gemma_embedding`'s `load_arch_tensors` (models/gemma-embedding.cpp:30 @8642541b2).
+/// Ports `llama_model_gemma_embedding`'s `load_arch_tensors` (models/gemma-embedding.cpp:30 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -95,13 +95,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_gemma_embedding`'s `build_arch_graph` (models/gemma-embedding.cpp:69 @8642541b2).
+/// Ports `llama_model_gemma_embedding`'s `build_arch_graph` (models/gemma-embedding.cpp:69 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_gemma_embedding`'s `graph`
-/// (models/gemma-embedding.cpp:73 @8642541b2).
+/// (models/gemma-embedding.cpp:73 @cd959bae9).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

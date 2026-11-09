@@ -19,7 +19,7 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `launch_moe_weighted_reduction` (moe-weighted-reduction.cu:27 @8642541b2),
+/// Ports `launch_moe_weighted_reduction` (moe-weighted-reduction.cu:27 @cd959bae9),
 /// which launches with `<<<>>>`.
 fn launch(experts: ?*const anyopaque, expert_scale: ?*const anyopaque, weights: ?*const anyopaque, dst: ?*anyopaque, n_embd: i64, n_tokens: i64, n_expert_used: c_int, stream: cu.cudaStream_t) void {
     const threads = 256;
@@ -36,7 +36,7 @@ fn launch(experts: ?*const anyopaque, expert_scale: ?*const anyopaque, weights: 
     }, .{ experts, expert_scale, weights, dst, n_embd, n_expert_used });
 }
 
-/// Ports `ggml_cuda_op_moe_weighted_reduction` (moe-weighted-reduction.cu:41 @8642541b2).
+/// Ports `ggml_cuda_op_moe_weighted_reduction` (moe-weighted-reduction.cu:41 @cd959bae9).
 pub fn opMoeWeightedReduction(ctx: *common.Context, experts: *const Tensor, expert_scale: ?*const Tensor, weights: *const Tensor, dst: *Tensor) void {
     impl.assert(experts.type == c.GGML_TYPE_F32, "experts->type == GGML_TYPE_F32");
     impl.assert(weights.type == c.GGML_TYPE_F32, "weights->type == GGML_TYPE_F32");

@@ -43,7 +43,7 @@ fn role(m: *const Value) Error![]const u8 {
     return m.value("role", []const u8, "") catch |e| util.fromJson(e);
 }
 
-/// Ports `deepseek_v4_sort_tool_results` (parsers/deepseek.cpp:7 @8642541b2): each
+/// Ports `deepseek_v4_sort_tool_results` (parsers/deepseek.cpp:7 @cd959bae9): each
 /// run of user and tool messages with its tool results put in the order of
 /// the preceding assistant message's tool calls, matched by id.
 ///
@@ -295,7 +295,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_deepseek_v3_2` (parsers/deepseek.cpp:70 @8642541b2).
+/// Ports `common_chat_params_init_deepseek_v3_2` (parsers/deepseek.cpp:70 @cd959bae9).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

@@ -14,7 +14,7 @@ const model_mod = @import("../model.zig");
 const c = impl.c;
 const T = graph.T;
 
-/// Ports `build` (youtuvl.cpp:3 @8642541b2), a member of `clip_graph_youtuvl`.
+/// Ports `build` (youtuvl.cpp:3 @cd959bae9), a member of `clip_graph_youtuvl`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

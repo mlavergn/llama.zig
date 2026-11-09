@@ -33,11 +33,11 @@ fn oom() noreturn {
     impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
-/// Ports `dna_kmer_marker` (llama-vocab.cpp:1820 @8642541b2): U+E000.
+/// Ports `dna_kmer_marker` (llama-vocab.cpp:1827 @cd959bae9): U+E000.
 pub const dna_kmer_marker = "\xee\x80\x80";
 
 /// The hybriddna session's constants: `open_tag`, `close_tag` and `k`
-/// (llama-vocab.cpp:2010, 2011, 2012 @8642541b2).
+/// (llama-vocab.cpp:2017, 2018, 2019 @cd959bae9).
 const dna_open_tag = "<dna>";
 const dna_close_tag = "</dna>";
 const dna_k = 6;
@@ -225,7 +225,7 @@ pub const Tokenizer = struct {
     pub fn deinit(_: *Tokenizer) void {}
 };
 
-/// Ports `llm_bigram_bpe` (llama-vocab.cpp:265 @8642541b2). `text` is a
+/// Ports `llm_bigram_bpe` (llama-vocab.cpp:265 @cd959bae9). `text` is a
 /// span of the word, which the two symbols are adjacent parts of.
 const Bigram = struct {
     left: i32,
@@ -250,7 +250,7 @@ const Symbol = struct {
 /// Which session `llama_vocab::impl`'s `tokenize` builds.
 const Mode = enum { plain, hybriddna, whitespace };
 
-/// Ports `llm_tokenizer_bpe_session` (llama-vocab.cpp:603 @8642541b2),
+/// Ports `llm_tokenizer_bpe_session` (llama-vocab.cpp:610 @cd959bae9),
 /// and through `mode` the two sessions derived from it.
 pub const Session = struct {
     vocab: *const Vocab,
@@ -267,7 +267,7 @@ pub const Session = struct {
     pad_char: u8 = 'A',
 
     /// The session `llama_vocab::impl`'s `tokenize` makes for `vocab`'s
-    /// tokenizer model (llama-vocab.cpp:3870 @8642541b2).
+    /// tokenizer model (llama-vocab.cpp:3883 @cd959bae9).
     ///
     /// Return: the session; free it with `deinit`.
     pub fn init(vocab: *const Vocab, tokenizer: *const Tokenizer) Session {
@@ -286,7 +286,7 @@ pub const Session = struct {
     /// Ports `llm_tokenizer_bpe_session`'s `append_bos`.
     pub fn appendBos(self: *const Session, output: *std.ArrayList(Token)) void {
         if (self.vocab.add_bos) {
-            impl.assert(self.vocab.special_bos_id != token_null, "llama-vocab.cpp", 614, "vocab.token_bos() != LLAMA_TOKEN_NULL");
+            impl.assert(self.vocab.special_bos_id != token_null, "llama-vocab.cpp", 621, "vocab.token_bos() != LLAMA_TOKEN_NULL");
             output.append(allocator, self.vocab.special_bos_id) catch oom();
         }
     }
@@ -294,7 +294,7 @@ pub const Session = struct {
     /// Ports `llm_tokenizer_bpe_session`'s `append_eos`.
     pub fn appendEos(self: *const Session, output: *std.ArrayList(Token)) void {
         if (self.vocab.add_eos) {
-            impl.assert(self.vocab.special_eos_id != token_null, "llama-vocab.cpp", 623, "vocab.token_eos() != LLAMA_TOKEN_NULL");
+            impl.assert(self.vocab.special_eos_id != token_null, "llama-vocab.cpp", 630, "vocab.token_eos() != LLAMA_TOKEN_NULL");
             output.append(allocator, self.vocab.special_eos_id) catch oom();
         }
     }
@@ -333,8 +333,8 @@ pub const Session = struct {
         self.work_queue.push(allocator, .{ .left = left, .right = right, .text = t, .rank = rank_found, .size = lt.len + rt.len }) catch oom();
     }
 
-    /// Ports `llm_tokenizer_bpe_session`'s `tokenize` (llama-vocab.cpp:645
-    /// @8642541b2). Nemotron 3.5 Embed drops the zero-width non-joiner after
+    /// Ports `llm_tokenizer_bpe_session`'s `tokenize` (llama-vocab.cpp:652
+    /// @cd959bae9). Nemotron 3.5 Embed drops the zero-width non-joiner after
     /// `[` and `<`; Soprano folds whitespace runs to one space and lowercases.
     /// mmBERT's Metaspace pre-tokenizer: a text starts with an escaped space,
     /// and each escaped space starts a new word.
@@ -522,8 +522,8 @@ pub const Session = struct {
         }
     }
 
-    /// Ports `llm_tokenizer_hybriddna_session`'s `tokenize` (llama-vocab.cpp:1827
-    /// @8642541b2), which mirrors HybridDNATokenizer.encode: text inside
+    /// Ports `llm_tokenizer_hybriddna_session`'s `tokenize` (llama-vocab.cpp:1834
+    /// @cd959bae9), which mirrors HybridDNATokenizer.encode: text inside
     /// `<dna>...</dna>` is cut into fixed 6-mers, everything else goes
     /// through the base BPE, with optional tagging of untagged DNA
     /// (`auto_dna_tags`, Carbon-14B) and tail="pad_n" vocabularies, whose
@@ -720,8 +720,8 @@ pub const Session = struct {
         return if (tok != token_null) tok else self.dna_oov_id;
     }
 
-    /// Ports `llm_tokenizer_whitespace_session`'s `tokenize` (llama-vocab.cpp:2025
-    /// @8642541b2): whitespace dropped, each run between lowercased if the
+    /// Ports `llm_tokenizer_whitespace_session`'s `tokenize` (llama-vocab.cpp:2032
+    /// @cd959bae9): whitespace dropped, each run between lowercased if the
     /// normalizer says so, and BPE'd alone.
     fn tokenizeWhitespace(self: *Session, text: []const u8, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
         const lowercase = self.vocab.normalizer_opts.lowercase;

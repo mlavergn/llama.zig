@@ -13,7 +13,7 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `ggml_cuda_argmax` (argmax.cu:69 @8642541b2), which launches with
+/// Ports `ggml_cuda_argmax` (argmax.cu:69 @cd959bae9), which launches with
 /// `<<<>>>`.
 pub fn opArgmax(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);

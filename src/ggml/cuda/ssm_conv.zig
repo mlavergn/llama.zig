@@ -30,7 +30,7 @@ fn dim(x: i64) u32 {
     return @truncate(@as(u64, @bitCast(x)));
 }
 
-/// Ports `ssm_conv_f32_cuda` (ssm-conv.cu:127 @8642541b2).
+/// Ports `ssm_conv_f32_cuda` (ssm-conv.cu:127 @cd959bae9).
 fn ssmConvF32Cuda(
     comptime apply_silu: bool,
     src0: ?*const anyopaque,
@@ -106,7 +106,7 @@ fn ssmConvF32Cuda(
     }
 }
 
-/// Ports `ggml_cuda_op_ssm_conv` (ssm-conv.cu:161 @8642541b2).
+/// Ports `ggml_cuda_op_ssm_conv` (ssm-conv.cu:161 @cd959bae9).
 ///
 /// Parameters:
 /// - `bias_add_node`: the fused `ADD` whose other operand is the bias, or

@@ -20,7 +20,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_qwen3`'s `load_arch_hparams` (models/qwen3.cpp:3 @8642541b2).
+/// Ports `llama_model_qwen3`'s `load_arch_hparams` (models/qwen3.cpp:3 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
@@ -34,7 +34,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_qwen3`'s `load_arch_tensors` (models/qwen3.cpp:15 @8642541b2).
+/// Ports `llama_model_qwen3`'s `load_arch_tensors` (models/qwen3.cpp:15 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -75,13 +75,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_qwen3`'s `build_arch_graph` (models/qwen3.cpp:53 @8642541b2).
+/// Ports `llama_model_qwen3`'s `build_arch_graph` (models/qwen3.cpp:53 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_qwen3`'s `graph` (models/qwen3.cpp:57
-/// @8642541b2): the backbone and the LM head.
+/// @cd959bae9): the backbone and the LM head.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     var cur = buildBackbone(model, b);
 
@@ -93,8 +93,8 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_qwen3::graph`'s `build_backbone` (models/qwen3.cpp:67
-/// @8642541b2): the layers and the final norm. The C++'s `no_build`
-/// constructor (src/models/models.h:647 @8642541b2), which gives a derived
+/// @cd959bae9): the layers and the final norm. The C++'s `no_build`
+/// constructor (src/models/models.h:647 @cd959bae9), which gives a derived
 /// graph the helpers without this body, needs no counterpart: a derived
 /// graph calls this with the same `Builder`.
 ///

@@ -3,8 +3,8 @@
 //!
 //! **Not a port.** Upstream gives each architecture a class deriving from
 //! `llama_model_base` and overriding three virtuals -- `load_arch_hparams`,
-//! `load_arch_tensors` and `build_arch_graph` (llama-model.h:922, 923, 924
-//! @8642541b2) -- and `llama_model_mapping` (llama-model.cpp:43 @8642541b2) picks the
+//! `load_arch_tensors` and `build_arch_graph` (llama-model.h:986, 987, 988
+//! @cd959bae9) -- and `llama_model_mapping` (llama-model.cpp:43 @8642541b2) picks the
 //! class. Here a class is a file exporting those three functions, and
 //! `forArch` is the mapping. An architecture with no entry is one the port
 //! has not reached: loading it stops at `error.Unported`, which

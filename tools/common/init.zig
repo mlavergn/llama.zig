@@ -48,7 +48,7 @@ fn comErr(comptime func: [*:0]const u8, comptime fmt: []const u8, args: anytype)
     log.err(comPrefix(fmt), .{ @as(c_int, 12), func } ++ args);
 }
 
-/// Ports `common_init_result` (common/common.h:1001 @8642541b2).
+/// Ports `common_init_result` (common/common.h:998 @cd959bae9).
 pub const InitResult = struct {
     model: ?*c.llama_model = null,
     context: ?*c.llama_context = null,
@@ -57,12 +57,12 @@ pub const InitResult = struct {
     threadpool: ?*c.ggml_threadpool = null,
     threadpool_batch: ?*c.ggml_threadpool = null,
 
-    /// Ports `reset_samplers` (common/common.cpp:1428 @8642541b2), a member of `common_init_result`.
+    /// Ports `reset_samplers` (common/common.cpp:1439 @cd959bae9), a member of `common_init_result`.
     fn resetSamplers(self: *InitResult) void {
         for (self.samplers.items) |s| c.llama_sampler_reset(s.get());
     }
 
-    /// Ports `sampler` (common/common.cpp:1421 @8642541b2), a member of
+    /// Ports `sampler` (common/common.cpp:1432 @cd959bae9), a member of
     /// `common_init_result`.
     ///
     /// Return: the sampler for `seq_id`, or null past the last; owned by
@@ -82,7 +82,7 @@ pub const InitResult = struct {
     }
 };
 
-/// Ports `common_init_sampler_from_model` (common/common.cpp:1099 @8642541b2): the
+/// Ports `common_init_sampler_from_model` (common/common.cpp:1110 @cd959bae9): the
 /// model's recommended sampling, where the command line set none.
 fn initSamplerFromModel(p: *Params, model: ?*const c.llama_model) !void {
     const sp = &p.sampling;
@@ -149,7 +149,7 @@ pub fn samplerInit(p: *Params, model: ?*const c.llama_model) !*sampling.Sampler 
     return sampling.init(model, &p.sampling);
 }
 
-/// Ports `ggml_threadpool_params_from_cpu_params` (common/common.cpp:1784 @8642541b2).
+/// Ports `ggml_threadpool_params_from_cpu_params` (common/common.cpp:1795 @cd959bae9).
 fn threadpoolParams(cp: *const params_mod.CpuParams) c.ggml_threadpool_params {
     var tpp: c.ggml_threadpool_params = undefined;
     c.ggml_threadpool_params_init(&tpp, cp.n_threads); // setup the defaults
@@ -160,7 +160,7 @@ fn threadpoolParams(cp: *const params_mod.CpuParams) c.ggml_threadpool_params {
     return tpp;
 }
 
-/// Ports `init` (common/common.cpp:1808 @8642541b2), a member of `common_threadpools`.
+/// Ports `init` (common/common.cpp:1819 @cd959bae9), a member of `common_threadpools`.
 fn threadpoolsInit(res: *InitResult, ctx: ?*c.llama_context, p: *const Params) void {
     const func = "init";
     comInf(func, "llama threadpool init, n_threads = %d\n", .{p.cpuparams.n_threads});
@@ -199,7 +199,7 @@ fn threadpoolsInit(res: *InitResult, ctx: ?*c.llama_context, p: *const Params) v
 extern fn setpriority(which: c_int, who: c_uint, prio: c_int) c_int;
 extern fn strerror(e: c_int) [*:0]const u8;
 
-/// Ports `set_process_priority` (common/common.cpp:264 @8642541b2), the POSIX arm;
+/// Ports `set_process_priority` (common/common.cpp:281 @cd959bae9), the POSIX arm;
 /// Windows has its own, through `SetPriorityClass`.
 pub fn setProcessPriority(prio: c.ggml_sched_priority) bool {
     if (prio == c.GGML_SCHED_PRIO_NORMAL) return true;
@@ -237,7 +237,7 @@ pub fn setProcessPriority(prio: c.ggml_sched_priority) bool {
     return true;
 }
 
-/// Ports `common_control_vector_data` (common/common.h:1226 @8642541b2).
+/// Ports `common_control_vector_data` (common/common.h:1228 @cd959bae9).
 const ControlVectorData = struct { n_embd: i32, data: std.ArrayList(f32) };
 
 /// Ports `common_control_vector_load_one` (common/common.cpp:1998 @8642541b2).
@@ -353,7 +353,7 @@ fn controlVectorLoad(a: std.mem.Allocator, infos: []const params_mod.ControlVect
     return result;
 }
 
-/// Ports `common_fit_apply` (common/common.cpp:1258 @8642541b2): applies
+/// Ports `common_fit_apply` (common/common.cpp:1269 @cd959bae9): applies
 /// `--fit` to `mparams` and `cparams`, a no-op if `fit_params` is false.
 ///
 /// Parameters:
@@ -407,7 +407,7 @@ pub fn fitApply(gpa: std.mem.Allocator, p: *Params, mparams: *c.llama_model_para
     );
 }
 
-/// Ports `common_memory_reports` (fit.h:64 @8642541b2): the memory a model
+/// Ports `common_memory_reports` (fit.h:64 @cd959bae9): the memory a model
 /// needs at the smallest and largest context `--fit` may pick.
 pub const MemoryReports = struct {
     n_ctx_train: u32 = 0,
@@ -417,7 +417,7 @@ pub const MemoryReports = struct {
     info_min: []fit.MemoryBreakdownRow = &.{}, // breakdown at n_ctx_min
 };
 
-/// Ports `common_measure_memory` (fit.cpp:199 @8642541b2): measures the
+/// Ports `common_measure_memory` (fit.cpp:199 @cd959bae9): measures the
 /// smallest and largest context without allocating. `p` may be modified as
 /// with `--fit`.
 ///
@@ -466,7 +466,7 @@ pub fn measureMemory(gpa: std.mem.Allocator, p: *Params, what_out: *[]const u8) 
     return res;
 }
 
-/// Ports `common_init_result` (common/common.cpp:1296 @8642541b2), a member of `common_init_result`.
+/// Ports `common_init_result` (common/common.cpp:1307 @cd959bae9), a member of `common_init_result`.
 fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitResult) !void {
     const a = p.arena;
     var mparams = common.modelParamsToLlama(p);
@@ -652,7 +652,7 @@ pub fn initFromParams(gpa: std.mem.Allocator, p: *Params, model_only: bool) !Ini
     }
 
     if (!p.lora_init_without_apply) {
-        // `common_set_adapter_lora` (common/common.cpp:1688 @8642541b2)
+        // `common_set_adapter_lora` (common/common.cpp:1699 @cd959bae9)
         var loras: std.ArrayList(?*c.llama_adapter_lora) = .empty;
         var scales: std.ArrayList(f32) = .empty;
         for (p.lora_adapters.items) |la| {

@@ -19,7 +19,7 @@ const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 
-/// Ports `llama_model_nomic_bert`'s `load_arch_hparams` (models/nomic-bert.cpp:3 @8642541b2).
+/// Ports `llama_model_nomic_bert`'s `load_arch_hparams` (models/nomic-bert.cpp:3 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_eps = (try ml.meta.getKey(f32, .attention_layernorm_eps, true, exc)).?;
@@ -30,13 +30,13 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_nomic_bert`'s `load_arch_tensors` (models/nomic-bert.cpp:13 @8642541b2):
+/// Ports `llama_model_nomic_bert`'s `load_arch_tensors` (models/nomic-bert.cpp:13 @cd959bae9):
 /// BERT's body without positions or classifier, with a SwiGLU gate.
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     return bert.loadBertTensors(self, .{ .pos_cls = false, .moe = false, .gate = true }, exc);
 }
 
-/// Ports `llama_model_nomic_bert`'s `build_arch_graph` (models/nomic-bert.cpp:48 @8642541b2).
+/// Ports `llama_model_nomic_bert`'s `build_arch_graph` (models/nomic-bert.cpp:48 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     bert.buildGraph(model, b);
 }

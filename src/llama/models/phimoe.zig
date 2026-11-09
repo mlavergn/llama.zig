@@ -18,7 +18,7 @@ const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 
-/// Ports `llama_model_phimoe`'s `load_arch_hparams` (models/phimoe.cpp:3 @8642541b2).
+/// Ports `llama_model_phimoe`'s `load_arch_hparams` (models/phimoe.cpp:3 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -31,7 +31,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_phimoe`'s `load_arch_tensors` (models/phimoe.cpp:12 @8642541b2).
+/// Ports `llama_model_phimoe`'s `load_arch_tensors` (models/phimoe.cpp:12 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -72,7 +72,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_phimoe`'s `build_arch_graph` (models/phimoe.cpp:48 @8642541b2),
+/// Ports `llama_model_phimoe`'s `build_arch_graph` (models/phimoe.cpp:48 @cd959bae9),
 /// which builds `llama_model_phi3`'s `graph` exactly as Phi-3's own does.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     phi3.buildArchGraph(model, b, params);

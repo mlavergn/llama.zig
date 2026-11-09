@@ -57,7 +57,7 @@ fn absMax(srcv: *const [8]f32x4) f32 {
     return neon.maxvq_f32(amaxv[0]);
 }
 
-/// Ports `quantize_row_q8_0` (arch/arm/quants.c:41 @8642541b2).
+/// Ports `quantize_row_q8_0` (arch/arm/quants.c:41 @cd959bae9).
 ///
 /// Parameters:
 /// - `x`: the source row.
@@ -95,7 +95,7 @@ pub export fn quantize_row_q8_0(x: [*c]const f32, vy: ?*anyopaque, k: i64) void 
     }
 }
 
-/// Ports `quantize_row_q8_1` (arch/arm/quants.c:85 @8642541b2).
+/// Ports `quantize_row_q8_1` (arch/arm/quants.c:85 @cd959bae9).
 ///
 /// Identical to `q8_0` but for the per-block sum in `s`, which the `q4_1` and
 /// `q5_1` dot products need to apply their minimum without a second pass.
@@ -140,7 +140,7 @@ pub export fn quantize_row_q8_1(x: [*c]const f32, vy: ?*anyopaque, k: i64) void 
     }
 }
 
-/// Ports `quantize_row_q8_K` (arch/arm/quants.c:134 @8642541b2).
+/// Ports `quantize_row_q8_K` (arch/arm/quants.c:134 @cd959bae9).
 ///
 /// The C's comment calls this a "placeholder implementation for Apple
 /// targets": there is no NEON version, so the symbol exists only to occupy the

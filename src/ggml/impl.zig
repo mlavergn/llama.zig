@@ -118,7 +118,7 @@ pub inline fn cVaList(ap: *std.lang.VaList) CVaList {
 
 pub extern fn ggml_log_internal(level: c_uint, format: [*:0]const u8, ...) void;
 
-/// Ports the `GGML_LOG_ERROR` macro (ggml-impl.h:121 @8642541b2).
+/// Ports the `GGML_LOG_ERROR` macro (ggml-impl.h:121 @cd959bae9).
 pub const logError = struct {
     pub fn f(comptime fmt: [*:0]const u8, args: anytype) void {
         @call(.auto, ggml_log_internal, .{ c.GGML_LOG_LEVEL_ERROR, fmt } ++ args);
@@ -151,35 +151,35 @@ pub const fprintfStderr = struct {
     }
 }.f;
 
-/// Ports the `GGML_LOG_INFO` macro (ggml-impl.h:119 @8642541b2).
+/// Ports the `GGML_LOG_INFO` macro (ggml-impl.h:119 @cd959bae9).
 pub const logInfo = struct {
     pub fn f(comptime fmt: [*:0]const u8, args: anytype) void {
         @call(.auto, ggml_log_internal, .{ c.GGML_LOG_LEVEL_INFO, fmt } ++ args);
     }
 }.f;
 
-/// Ports the `GGML_LOG_WARN` macro (ggml-impl.h:120 @8642541b2).
+/// Ports the `GGML_LOG_WARN` macro (ggml-impl.h:120 @cd959bae9).
 pub const logWarn = struct {
     pub fn f(comptime fmt: [*:0]const u8, args: anytype) void {
         @call(.auto, ggml_log_internal, .{ c.GGML_LOG_LEVEL_WARN, fmt } ++ args);
     }
 }.f;
 
-/// Ports the `GGML_LOG_CONT` macro (ggml-impl.h:123 @8642541b2).
+/// Ports the `GGML_LOG_CONT` macro (ggml-impl.h:123 @cd959bae9).
 pub const logCont = struct {
     pub fn f(comptime fmt: [*:0]const u8, args: anytype) void {
         @call(.auto, ggml_log_internal, .{ c.GGML_LOG_LEVEL_CONT, fmt } ++ args);
     }
 }.f;
 
-/// Ports `GGML_DEBUG` (ggml-impl.h:125 @8642541b2).
+/// Ports `GGML_DEBUG` (ggml-impl.h:125 @cd959bae9).
 ///
 /// Zero upstream, and upstream never changes it: it is a compile-time knob a
 /// developer edits by hand. Kept as a named constant so the gate below reads
 /// as the port of a real macro rather than as dead code someone might delete.
 pub const debug_level = 0;
 
-/// Ports the `GGML_PRINT_DEBUG` macro (ggml-impl.h:128 @8642541b2).
+/// Ports the `GGML_PRINT_DEBUG` macro (ggml-impl.h:128 @cd959bae9).
 ///
 /// **Emits nothing**, because `GGML_DEBUG` is 0 and the macro expands to an
 /// empty statement. This matters: calling `logDebug` here instead would put a
@@ -190,14 +190,14 @@ pub inline fn printDebug(comptime fmt: [*:0]const u8, args: anytype) void {
     if (debug_level >= 1) logDebug(fmt, args);
 }
 
-/// Ports the `GGML_LOG_DEBUG` macro (ggml-impl.h:122 @8642541b2).
+/// Ports the `GGML_LOG_DEBUG` macro (ggml-impl.h:122 @cd959bae9).
 pub const logDebug = struct {
     pub fn f(comptime fmt: [*:0]const u8, args: anytype) void {
         @call(.auto, ggml_log_internal, .{ c.GGML_LOG_LEVEL_DEBUG, fmt } ++ args);
     }
 }.f;
 
-/// Ports the `GGML_ABORT` macro (ggml.h:287 @8642541b2).
+/// Ports the `GGML_ABORT` macro (ggml.h:287 @cd959bae9).
 ///
 /// Aborts through ggml's own handler rather than Zig's panic, so a failure in
 /// ported code surfaces the same way a failure in C code does.
@@ -211,7 +211,7 @@ pub fn abort(comptime msg: []const u8) noreturn {
     unreachable;
 }
 
-/// Ports the `GGML_ASSERT` macro (ggml.h:288 @8642541b2).
+/// Ports the `GGML_ASSERT` macro (ggml.h:288 @cd959bae9).
 ///
 /// Unlike `std.debug.assert`, this stays live in release builds, matching the C
 /// macro, which is not gated on `NDEBUG`.
@@ -228,7 +228,7 @@ pub fn assert(ok: bool, comptime msg: []const u8) void {
 // -----------------------------------------------------------------------------
 // Heap allocation
 //
-// Ports `ggml_malloc` (ggml.c:417 @8642541b2) and `ggml_calloc` (ggml.c:431 @8642541b2), plus the
+// Ports `ggml_malloc` (ggml.c:418 @cd959bae9) and `ggml_calloc` (ggml.c:431 @8642541b2), plus the
 // `GGML_MALLOC` / `GGML_CALLOC` macros that wrap them. They are `inline
 // static` in the C, so there is no symbol to call and they have to be
 // reproduced -- and they are declared here rather than in the file that ports
@@ -237,7 +237,7 @@ pub fn assert(ok: bool, comptime msg: []const u8) void {
 // Note the zero-size case returns null rather than aborting, which callers
 // depend on: a graph built without gradients allocates no gradient arrays.
 
-/// Ports `ggml_malloc` (ggml.c:417 @8642541b2). Aborts on failure, as the C does.
+/// Ports `ggml_malloc` (ggml.c:418 @cd959bae9). Aborts on failure, as the C does.
 pub fn ggmlMalloc(size: usize) ?*anyopaque {
     if (size == 0) {
         logWarn("Behavior may be unexpected when allocating 0 bytes for ggml_malloc!\n", .{});
@@ -249,7 +249,7 @@ pub fn ggmlMalloc(size: usize) ?*anyopaque {
     };
 }
 
-/// Ports `ggml_calloc` (ggml.c:431 @8642541b2). Aborts on failure, as the C does.
+/// Ports `ggml_calloc` (ggml.c:432 @cd959bae9). Aborts on failure, as the C does.
 pub fn ggmlCalloc(num: usize, size: usize) ?*anyopaque {
     if (num == 0 or size == 0) {
         logWarn("Behavior may be unexpected when allocating 0 bytes for ggml_calloc!\n", .{});
@@ -264,14 +264,14 @@ pub fn ggmlCalloc(num: usize, size: usize) ?*anyopaque {
 // -----------------------------------------------------------------------------
 // Arithmetic macros
 
-/// Ports the `GGML_PAD` macro (ggml.h:267 @8642541b2): rounds `x` up to a multiple of `n`.
+/// Ports the `GGML_PAD` macro (ggml.h:267 @cd959bae9): rounds `x` up to a multiple of `n`.
 ///
 /// Parameters:
 /// - `x`: value to round up.
 /// - `n`: alignment; must be a power of two, as in the C macro.
 ///
 /// Return: `x` rounded up to the next multiple of `n`.
-/// Ports `TENSOR_ALIGNMENT` (ggml-impl.h:44 @8642541b2).
+/// Ports `TENSOR_ALIGNMENT` (ggml-impl.h:44 @cd959bae9).
 ///
 /// The alignment every backend buffer rounds its base up to. Lives here
 /// rather than in `backend.zig` because `context.zig` wants it too, and
@@ -316,16 +316,16 @@ pub inline fn one(comptime T: type, p: [*c]T) *T {
 // -----------------------------------------------------------------------------
 // Tensor predicates
 
-/// Ports `ggml_impl_is_view` (ggml-impl.h:103 @8642541b2).
+/// Ports `ggml_impl_is_view` (ggml-impl.h:103 @cd959bae9).
 pub inline fn isView(t: *const c.ggml_tensor) bool {
     return t.view_src != null;
 }
 
-/// Ports `ggml_are_same_layout` (ggml-impl.h:75 @8642541b2).
+/// Ports `ggml_are_same_layout` (ggml-impl.h:75 @cd959bae9).
 ///
 /// Parameters:
 /// - `a`, `b`: tensors to compare; borrowed for the call only.
-/// Ports `ggml_op_is_empty` (ggml-impl.h:90 @8642541b2).
+/// Ports `ggml_op_is_empty` (ggml-impl.h:90 @cd959bae9).
 ///
 /// True for the five ops that produce a view rather than data. The graph
 /// walks past them: there is nothing to compute.
@@ -364,7 +364,7 @@ pub fn areSameLayout(a: *const c.ggml_tensor, b: *const c.ggml_tensor) bool {
 // byte array, reinterpreted as i32 or f32. Ported from `ggml-impl.h` lines
 // 147-171, where they are `static inline` and so have no symbol to link.
 
-/// Ports `ggml_set_op_params` (ggml-impl.h:147 @8642541b2).
+/// Ports `ggml_set_op_params` (ggml-impl.h:147 @cd959bae9).
 ///
 /// Parameters:
 /// - `tensor`: tensor whose parameters to set.
@@ -384,19 +384,19 @@ pub fn setOpParamsValue(tensor: *c.ggml_tensor, value: anytype) void {
     setOpParams(tensor, bytes);
 }
 
-/// Ports `ggml_get_op_params_i32` (ggml-impl.h:153 @8642541b2).
+/// Ports `ggml_get_op_params_i32` (ggml-impl.h:153 @cd959bae9).
 pub inline fn getOpParamsI32(tensor: *const c.ggml_tensor, i: usize) i32 {
     std.debug.assert(i < c.GGML_MAX_OP_PARAMS / @sizeOf(i32));
     return tensor.op_params[i];
 }
 
-/// Ports `ggml_get_op_params_f32` (ggml-impl.h:158 @8642541b2).
+/// Ports `ggml_get_op_params_f32` (ggml-impl.h:158 @cd959bae9).
 pub inline fn getOpParamsF32(tensor: *const c.ggml_tensor, i: usize) f32 {
     std.debug.assert(i < c.GGML_MAX_OP_PARAMS / @sizeOf(f32));
     return @bitCast(tensor.op_params[i]);
 }
 
-/// Ports `ggml_set_op_params_i32` (ggml-impl.h:175 @8642541b2).
+/// Ports `ggml_set_op_params_i32` (ggml-impl.h:175 @cd959bae9).
 ///
 /// The `[TAG_GGML_PREC]` comment just above it in the C records
 /// the slots `MUL_MAT` and `MUL_MAT_ID` keep: 0 the accumulator precision,
@@ -408,13 +408,13 @@ pub inline fn setOpParamsI32(tensor: *c.ggml_tensor, i: usize, value: i32) void 
     tensor.op_params[i] = value;
 }
 
-/// Ports `ggml_set_op_params_f32` (ggml-impl.h:180 @8642541b2).
+/// Ports `ggml_set_op_params_f32` (ggml-impl.h:180 @cd959bae9).
 pub inline fn setOpParamsF32(tensor: *c.ggml_tensor, i: usize, value: f32) void {
     std.debug.assert(i < c.GGML_MAX_OP_PARAMS / @sizeOf(f32));
     tensor.op_params[i] = @bitCast(value);
 }
 
-/// Ports `ggml_compute_softplus_f32` (ggml-impl.h:107 @8642541b2).
+/// Ports `ggml_compute_softplus_f32` (ggml-impl.h:107 @cd959bae9).
 ///
 /// The branch at 20 is not an approximation shortcut: above it `expf` would
 /// overflow while `log(1 + e^x)` is already indistinguishable from `x`.
@@ -430,7 +430,7 @@ pub inline fn softplus(input: f32) f32 {
 
 /// Ports `struct ggml_map_custom1_op_params`,
 /// `struct ggml_map_custom2_op_params`, `struct ggml_map_custom3_op_params`
-/// and `struct ggml_custom_op_params` (ggml-impl.h:185, 191, 197, 203 @8642541b2).
+/// and `struct ggml_custom_op_params` (ggml-impl.h:185, 191, 197, 203 @cd959bae9).
 ///
 /// One struct covers all four: the C declares them separately because each
 /// names a differently-typed function pointer, but the layout is identical and
@@ -444,13 +444,13 @@ pub const CustomOpParams = extern struct {
     userdata: ?*anyopaque,
 };
 
-/// Ports `ggml_bitset_t` (ggml-impl.h:211 @8642541b2).
+/// Ports `ggml_bitset_t` (ggml-impl.h:211 @cd959bae9).
 pub const Bitset = u32;
 
 const bitset_shr = 5; // log2(@bitSizeOf(Bitset))
 const bitset_mask = @bitSizeOf(Bitset) - 1;
 
-/// Ports `struct ggml_hash_set` (ggml-impl.h:238 @8642541b2).
+/// Ports `struct ggml_hash_set` (ggml-impl.h:238 @cd959bae9).
 ///
 /// Layout must match the C definition exactly: instances cross the ABI
 /// boundary via `ggml_hash_set_new` and `ggml_hash_set_free`.
@@ -460,12 +460,12 @@ pub const HashSet = extern struct {
     keys: [*c]?*c.ggml_tensor,
 };
 
-/// Ports `struct ggml_cgraph` (ggml-impl.h:341 @8642541b2).
+/// Ports `struct ggml_cgraph` (ggml-impl.h:341 @cd959bae9).
 ///
 /// Declared here rather than imported: the definition is in `ggml-impl.h`, so
 /// `@cImport` only yields an opaque type. Layout must match the C exactly --
 /// graphs are built by C and read here.
-/// Ports `struct ggml_object` (ggml.c:966 @8642541b2).
+/// Ports `struct ggml_object` (ggml.c:973 @cd959bae9).
 ///
 /// The header ggml puts in front of every allocation inside a context, forming
 /// a linked list so the context can be walked and reset. Declared here rather
@@ -483,7 +483,7 @@ pub const Object = extern struct {
     padding: [4]u8,
 };
 
-/// Ports `enum ggml_cgraph_eval_order` (ggml-impl.h:335 @8642541b2).
+/// Ports `enum ggml_cgraph_eval_order` (ggml-impl.h:335 @cd959bae9).
 ///
 /// The values are spelled out rather than imported: the enum is declared in
 /// `ggml-impl.h`, which `@cImport` cannot read.
@@ -510,29 +510,29 @@ pub const CGraph = extern struct {
     uid: u64,
 };
 
-/// Ports `GGML_HASHSET_FULL` (ggml-impl.h:235 @8642541b2): the table was walked
+/// Ports `GGML_HASHSET_FULL` (ggml-impl.h:235 @cd959bae9): the table was walked
 /// end to end without finding the key or a free slot.
 pub const hashset_full = std.math.maxInt(usize);
 
-/// Ports `GGML_HASHSET_ALREADY_EXISTS` (ggml-impl.h:236 @8642541b2).
+/// Ports `GGML_HASHSET_ALREADY_EXISTS` (ggml-impl.h:236 @cd959bae9).
 pub const hashset_already_exists = std.math.maxInt(usize) - 1;
 
-/// Ports `ggml_bitset_size` (ggml-impl.h:217 @8642541b2): words needed for `n` bits.
+/// Ports `ggml_bitset_size` (ggml-impl.h:217 @cd959bae9): words needed for `n` bits.
 pub inline fn bitsetSize(n: usize) usize {
     return (n + bitset_mask) >> bitset_shr;
 }
 
-/// Ports `ggml_bitset_get` (ggml-impl.h:221 @8642541b2).
+/// Ports `ggml_bitset_get` (ggml-impl.h:221 @cd959bae9).
 pub inline fn bitsetGet(bitset: [*c]const Bitset, i: usize) bool {
     return (bitset[i >> bitset_shr] & (@as(Bitset, 1) << @intCast(i & bitset_mask))) != 0;
 }
 
-/// Ports `ggml_bitset_set` (ggml-impl.h:225 @8642541b2).
+/// Ports `ggml_bitset_set` (ggml-impl.h:225 @cd959bae9).
 pub inline fn bitsetSet(bitset: [*c]Bitset, i: usize) void {
     bitset[i >> bitset_shr] |= @as(Bitset, 1) << @intCast(i & bitset_mask);
 }
 
-/// Ports `ggml_hash` (ggml-impl.h:266 @8642541b2).
+/// Ports `ggml_hash` (ggml-impl.h:266 @cd959bae9).
 ///
 /// The low four bits are always zero because tensors are aligned, so the C
 /// version shifts them out before taking the modulus.
@@ -540,7 +540,7 @@ pub inline fn hash(p: *const c.ggml_tensor) usize {
     return @intFromPtr(p) >> 4;
 }
 
-/// Ports `ggml_hash_find_or_insert` (ggml-impl.h:312 @8642541b2).
+/// Ports `ggml_hash_find_or_insert` (ggml-impl.h:312 @cd959bae9).
 ///
 /// Linear probing from the hash position. Aborts when the table is full, which
 /// callers rely on: the returned index is always valid.
@@ -566,7 +566,7 @@ pub fn hashFindOrInsert(set: *HashSet, key: *c.ggml_tensor) usize {
     abort("fatal error");
 }
 
-/// Ports `ggml_hash_find` (ggml-impl.h:271 @8642541b2).
+/// Ports `ggml_hash_find` (ggml-impl.h:271 @cd959bae9).
 ///
 /// Return: the index where `key` is or would go, or `hashset_full` if the
 /// table holds neither it nor a free slot. A returned index is only a *hit*
@@ -582,7 +582,7 @@ pub fn hashFind(set: *const HashSet, key: *const c.ggml_tensor) usize {
     return i;
 }
 
-/// Ports `ggml_hash_insert` (ggml-impl.h:291 @8642541b2).
+/// Ports `ggml_hash_insert` (ggml-impl.h:291 @cd959bae9).
 ///
 /// Return: the index it was inserted at, or `hashset_already_exists` when the
 /// key was already present. Aborts when the table is full.
@@ -602,7 +602,7 @@ pub fn hashInsert(set: *HashSet, key: *c.ggml_tensor) usize {
     abort("fatal error");
 }
 
-/// Ports `ggml_hash_contains` (ggml-impl.h:286 @8642541b2).
+/// Ports `ggml_hash_contains` (ggml-impl.h:286 @cd959bae9).
 pub fn hashContains(set: *const HashSet, key: *const c.ggml_tensor) bool {
     const i = hashFind(set, key);
     return i != hashset_full and bitsetGet(set.used, i);
@@ -622,7 +622,7 @@ pub fn hashContains(set: *const HashSet, key: *const c.ggml_tensor) bool {
 // hardware conversion. The tests at the bottom of this file check every one of
 // the 65,536 half-precision inputs against the C implementation.
 
-/// Ports `ggml_e8m0_to_fp32_half` (ggml-impl.h:489 @8642541b2), the expansion of
+/// Ports `ggml_e8m0_to_fp32_half` (ggml-impl.h:489 @cd959bae9), the expansion of
 /// `GGML_E8M0_TO_FP32_HALF`.
 ///
 /// MXFP4's shared exponent, halved: `kvalues_mxfp4` holds twice the E2M1
@@ -706,17 +706,17 @@ pub inline fn truncTo(comptime T: type, f: anytype) T {
     return @intFromFloat(t);
 }
 
-/// Ports `fp32_from_bits` (ggml-impl.h:378 @8642541b2).
+/// Ports `fp32_from_bits` (ggml-impl.h:378 @cd959bae9).
 inline fn fp32FromBits(w: u32) f32 {
     return @bitCast(w);
 }
 
-/// Ports `fp32_to_bits` (ggml-impl.h:387 @8642541b2).
+/// Ports `fp32_to_bits` (ggml-impl.h:387 @cd959bae9).
 inline fn fp32ToBits(f: f32) u32 {
     return @bitCast(f);
 }
 
-/// Ports `ggml_compute_fp16_to_fp32` (ggml-impl.h:396 @8642541b2), the expansion of
+/// Ports `ggml_compute_fp16_to_fp32` (ggml-impl.h:396 @cd959bae9), the expansion of
 /// `GGML_FP16_TO_FP32`.
 ///
 /// Widens a half to a float by rebuilding the exponent rather than by a
@@ -750,7 +750,7 @@ pub fn fp16ToFp32(h: u16) f32 {
     return fp32FromBits(result);
 }
 
-/// Ports `ggml_compute_fp32_to_fp16` (ggml-impl.h:419 @8642541b2), the expansion of
+/// Ports `ggml_compute_fp32_to_fp16` (ggml-impl.h:419 @cd959bae9), the expansion of
 /// `GGML_FP32_TO_FP16`.
 ///
 /// Narrows a float to a half by scaling through the exponent range so that
@@ -785,7 +785,7 @@ pub fn fp32ToFp16(f: f32) u16 {
         nonsign));
 }
 
-/// Ports `ggml_compute_bf16_to_fp32` (ggml-impl.h:606 @8642541b2), the expansion of
+/// Ports `ggml_compute_bf16_to_fp32` (ggml-impl.h:664 @cd959bae9), the expansion of
 /// `GGML_BF16_TO_FP32`.
 ///
 /// A brain float is the top half of a float, so widening is a shift.
@@ -793,7 +793,7 @@ pub inline fn bf16ToFp32(bits: u16) f32 {
     return @bitCast(@as(u32, bits) << 16);
 }
 
-/// Ports `ggml_compute_fp32_to_bf16` (ggml-impl.h:623 @8642541b2), the expansion of
+/// Ports `ggml_compute_fp32_to_bf16` (ggml-impl.h:681 @cd959bae9), the expansion of
 /// `GGML_FP32_TO_BF16`.
 ///
 /// Round-to-nearest-even on the discarded low half. Subnormals are preserved

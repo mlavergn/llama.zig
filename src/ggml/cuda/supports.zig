@@ -36,7 +36,7 @@ fn src(op: *const Tensor, i: usize) *const Tensor {
 
 /// `ggml_cuda_lightning_indexer_supported`; see `lightning_indexer.zig`.
 const lightningIndexerSupported = lightning_indexer.supported;
-/// Ports `ggml_backend_cuda_device_supports_op` (ggml-cuda.cu:5650 @8642541b2).
+/// Ports `ggml_backend_cuda_device_supports_op` (ggml-cuda.cu:5850 @cd959bae9).
 /// v0.7.0: `UNARY` takes any strides for F16, F32 and BF16 (the kernels
 /// index by stride now), `CLAMP` and `ROLL` take non-contiguous views,
 /// `SWIGLU_OAI` refuses F16, and `TOP_K`/`ARGSORT` are bounded by

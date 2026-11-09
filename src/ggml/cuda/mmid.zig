@@ -14,7 +14,7 @@ const kernels = @import("kernels.zig");
 
 const cu = common.cu;
 
-/// Ports `launch_mm_ids_helper` (mmid.cu:131 @8642541b2).
+/// Ports `launch_mm_ids_helper` (mmid.cu:131 @cd959bae9).
 fn launchMmIdsHelper(
     comptime n_expert_used_template: comptime_int,
     ids: ?*const i32,
@@ -50,7 +50,7 @@ fn launchMmIdsHelper(
     }, .{ ids, ids_src1, ids_dst, expert_bounds, n_tokens, n_expert_used_var, nchannels_y, si1, sis1, write_inverse });
 }
 
-/// Ports `ggml_cuda_launch_mm_ids_helper` (mmid.cu:150 @8642541b2).
+/// Ports `ggml_cuda_launch_mm_ids_helper` (mmid.cu:150 @cd959bae9).
 pub fn launchMmIdsHelperDispatch(
     ids: ?*const i32,
     ids_src1: ?*i32,

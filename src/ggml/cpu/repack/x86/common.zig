@@ -31,33 +31,33 @@ inline fn cvtph(h: [8]c.ggml_half) m256 {
     return @floatCast(v);
 }
 
-/// Ports `GGML_F32Cx8_LOAD` (arch/x86/repack.cpp:34 @8642541b2), the
+/// Ports `GGML_F32Cx8_LOAD` (arch/x86/repack.cpp:34 @cd959bae9), the
 /// `__F16C__` arm x86-64-v3 compiles.
 pub inline fn f32cx8Load(x: *const [8]c.ggml_half) m256 {
     return cvtph(x.*);
 }
 
-/// Ports `GGML_F32Cx8_REPEAT_LOAD` (arch/x86/repack.cpp:35 @8642541b2), the
+/// Ports `GGML_F32Cx8_REPEAT_LOAD` (arch/x86/repack.cpp:35 @cd959bae9), the
 /// `__F16C__` arm: a masked load of four halves, repeated by
 /// `_mm_shuffle_epi32(.., 68)` into both 64-bit halves, then widened.
 pub inline fn f32cx8RepeatLoad(x: *const [4]c.ggml_half) m256 {
     return cvtph(x.* ++ x.*);
 }
 
-/// Ports `GGML_F32Cx8_REARRANGE_LOAD` (arch/x86/repack.cpp:36 @8642541b2),
+/// Ports `GGML_F32Cx8_REARRANGE_LOAD` (arch/x86/repack.cpp:36 @cd959bae9),
 /// the `__F16C__` arm: the eight halves reordered by a byte shuffle, then
 /// widened.
 pub inline fn f32cx8RearrangeLoad(x: *const [8]c.ggml_half, arrangeMask: m128i) m256 {
     return cvtph(avx.as([8]u16, avx.mm_shuffle_epi8(avx.mm_loadu_si128(x), arrangeMask)));
 }
 
-/// Ports `sum_i16_pairs_acc_int32x8` (arch/x86/repack.cpp:146 @8642541b2).
+/// Ports `sum_i16_pairs_acc_int32x8` (arch/x86/repack.cpp:146 @cd959bae9).
 pub inline fn sum_i16_pairs_acc_int32x8(acc: m256i, x: m256i) m256i {
     const ones = avx.mm256_set1_epi16(1);
     return avx.mm256_add_epi32(acc, avx.mm256_madd_epi16(ones, x));
 }
 
-/// Ports `mul_sum_us8_pairs_acc_int32x8` (arch/x86/repack.cpp:151 @8642541b2):
+/// Ports `mul_sum_us8_pairs_acc_int32x8` (arch/x86/repack.cpp:151 @cd959bae9):
 /// the `__AVX512VNNI__ && __AVX512VL__` arm where the target has it, the
 /// plain arm otherwise -- no VNNI at x86-64-v3 or v4.
 pub inline fn mul_sum_us8_pairs_acc_int32x8(acc: m256i, ax: m256i, sy: m256i) m256i {
@@ -67,7 +67,7 @@ pub inline fn mul_sum_us8_pairs_acc_int32x8(acc: m256i, ax: m256i, sy: m256i) m2
     return sum_i16_pairs_acc_int32x8(acc, dot);
 }
 
-/// Ports `mul_sum_i8_pairs_acc_int32x8` (arch/x86/repack.cpp:165 @8642541b2),
+/// Ports `mul_sum_i8_pairs_acc_int32x8` (arch/x86/repack.cpp:165 @cd959bae9),
 /// the arm without `__AVXVNNIINT8__`.
 pub inline fn mul_sum_i8_pairs_acc_int32x8(acc: m256i, x: m256i, y: m256i) m256i {
     if (comptime avx.has_avxvnniint8) @compileError("the __AVXVNNIINT8__ arm of mul_sum_i8_pairs_acc_int32x8 is not ported");

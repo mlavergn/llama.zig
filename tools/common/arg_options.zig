@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `common_params_parser_init` (arg.cpp:1405 @8642541b2) from
+//! Ports `common_params_parser_init` (arg.cpp:1344 @cd959bae9) from
 //! `llama.cpp/common/arg.cpp` (v0.8.0, `8642541b2`): every option an example
 //! this project ports admits -- `common`'s, and `tokenize`'s, `fit_params`',
 //! `export_lora`'s, `bench`'s, `cvector_generator`'s, `imatrix`'s,
@@ -56,7 +56,7 @@ fn ed(b: bool) [*:0]const u8 {
 /// A value hint or a spelling.
 const S = [:0]const u8;
 
-/// Ports `read_file` (arg.cpp:67 @8642541b2).
+/// Ports `read_file` (arg.cpp:43 @cd959bae9).
 pub fn readFile(p: *Params, fname: [:0]const u8) ![]const u8 {
     const f = std.c.fopen(fname.ptr, "r") orelse return throw("error: failed to open file '%s'\n", .{fname.ptr});
     defer _ = std.c.fclose(f);
@@ -89,7 +89,7 @@ fn jsonSchemaGrammar(q: *Params, text: []const u8) !void {
     q.sampling.grammar = grammar;
 }
 
-/// Ports `parse_csv_row` (arg.cpp:1361 @8642541b2).
+/// Ports `parse_csv_row` (arg.cpp:1300 @cd959bae9).
 pub fn parseCsvRow(a: std.mem.Allocator, input: []const u8) !std.ArrayList([:0]const u8) {
     var fields: std.ArrayList([:0]const u8) = .empty;
     var field: std.ArrayList(u8) = .empty;
@@ -145,7 +145,7 @@ fn stoull(a: std.mem.Allocator, s: []const u8) !u64 {
 }
 extern fn strtoull(s: [*:0]const u8, end: *?[*:0]const u8, base: c_int) c_ulonglong;
 
-/// Ports `parse_cpu_range` (common/common.cpp:316 @8642541b2).
+/// Ports `parse_cpu_range` (common/common.cpp:333 @cd959bae9).
 pub fn parseCpuRange(a: std.mem.Allocator, range: []const u8, boolmask: *[c.GGML_MAX_N_THREADS]bool) !bool {
     const func = "parse_cpu_range";
     const dash_loc = std.mem.indexOfScalar(u8, range, '-') orelse {
@@ -179,7 +179,7 @@ pub fn parseCpuRange(a: std.mem.Allocator, range: []const u8, boolmask: *[c.GGML
     return true;
 }
 
-/// Ports `parse_cpu_mask` (common/common.cpp:353 @8642541b2).
+/// Ports `parse_cpu_mask` (common/common.cpp:370 @cd959bae9).
 pub fn parseCpuMask(mask: []const u8, boolmask: *[c.GGML_MAX_N_THREADS]bool) bool {
     // Discard potential 0x prefix
     var start_i: usize = 0;

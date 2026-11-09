@@ -47,13 +47,13 @@ fn logf(level: Level, comptime fmt: []const u8, args: anytype) void {
     sink(level, text);
 }
 
-/// Ports `common_chat_tool_call` (chat.h:35 @8642541b2).
+/// Ports `common_chat_tool_call` (chat.h:35 @cd959bae9).
 pub const ToolCall = struct {
     name: []const u8 = "",
     arguments: []const u8 = "",
     id: []const u8 = "",
 
-    /// Ports its `operator`== (chat.h:40 @8642541b2).
+    /// Ports its `operator`== (chat.h:40 @cd959bae9).
     pub fn eql(a: ToolCall, b: ToolCall) bool {
         return std.mem.eql(u8, a.name, b.name) and std.mem.eql(u8, a.arguments, b.arguments) and std.mem.eql(u8, a.id, b.id);
     }
@@ -76,19 +76,19 @@ pub const ToolCall = struct {
     }
 };
 
-/// Ports `common_chat_msg_content_part` (chat.h:45 @8642541b2).
+/// Ports `common_chat_msg_content_part` (chat.h:45 @cd959bae9).
 pub const ContentPart = struct {
     type: []const u8 = "",
     text: []const u8 = "",
     name: []const u8 = "", // tool_reference: name of a tool from the request tools
 
-    /// Ports its `operator`== (chat.h:55 @8642541b2).
+    /// Ports its `operator`== (chat.h:55 @cd959bae9).
     pub fn eql(a: ContentPart, b: ContentPart) bool {
         return std.mem.eql(u8, a.type, b.type) and std.mem.eql(u8, a.text, b.text) and std.mem.eql(u8, a.name, b.name);
     }
 };
 
-/// Ports `common_chat_msg` (chat.h:90 @8642541b2).
+/// Ports `common_chat_msg` (chat.h:90 @cd959bae9).
 pub const Msg = struct {
     role: []const u8 = "",
     content: []const u8 = "",
@@ -170,13 +170,13 @@ pub const Msg = struct {
         field.* = copy;
     }
 
-    /// Ports `common_chat_msg`'s `empty` (chat.h:106 @8642541b2).
+    /// Ports `common_chat_msg`'s `empty` (chat.h:106 @cd959bae9).
     pub fn empty(self: *const Msg) bool {
         return self.content.len == 0 and self.content_parts.items.len == 0 and self.tool_calls.items.len == 0 and
             self.reasoning_content.len == 0 and self.tool_name.len == 0 and self.tool_call_id.len == 0;
     }
 
-    /// Ports `common_chat_msg`'s `contains_media` (chat.h:110 @8642541b2).
+    /// Ports `common_chat_msg`'s `contains_media` (chat.h:110 @cd959bae9).
     pub fn containsMedia(self: *const Msg) bool {
         for (self.content_parts.items) |p| {
             if (std.mem.eql(u8, p.type, "media_marker")) return true;
@@ -184,7 +184,7 @@ pub const Msg = struct {
         return false;
     }
 
-    /// Ports `common_chat_msg`'s `set_tool_call_ids` (chat.h:119 @8642541b2):
+    /// Ports `common_chat_msg`'s `set_tool_call_ids` (chat.h:119 @cd959bae9):
     /// gives every tool call the id cached for its position, drawing a new
     /// one for a call that has none when the cache is short.
     ///
@@ -208,7 +208,7 @@ pub const Msg = struct {
         }
     }
 
-    /// Ports `common_chat_msg`'s `operator`== (chat.h:133 @8642541b2).
+    /// Ports `common_chat_msg`'s `operator`== (chat.h:133 @cd959bae9).
     pub fn eql(a: *const Msg, b: *const Msg) bool {
         if (!std.mem.eql(u8, a.role, b.role) or !std.mem.eql(u8, a.content, b.content)) return false;
         if (a.content_parts.items.len != b.content_parts.items.len) return false;
@@ -219,7 +219,7 @@ pub const Msg = struct {
             std.mem.eql(u8, a.tool_name, b.tool_name) and std.mem.eql(u8, a.tool_call_id, b.tool_call_id);
     }
 
-    /// Ports `common_chat_msg`'s `render_content` (chat.cpp:77 @8642541b2): the
+    /// Ports `common_chat_msg`'s `render_content` (chat.cpp:77 @cd959bae9): the
     /// content, or the text parts joined by `delimiter`.
     ///
     /// Return: owned by the caller.
@@ -240,7 +240,7 @@ pub const Msg = struct {
         return text.toOwnedSlice(gpa);
     }
 
-    /// Ports `common_chat_msg`'s `to_json_oaicompat` (chat.cpp:156 @8642541b2).
+    /// Ports `common_chat_msg`'s `to_json_oaicompat` (chat.cpp:156 @cd959bae9).
     ///
     /// Return: owned by the caller.
     pub fn toJsonOaicompat(self: *const Msg, gpa: std.mem.Allocator, concat_typed_text: bool) Error!Value {
@@ -317,7 +317,7 @@ pub const Msg = struct {
     }
 };
 
-/// Ports `string_diff` (chat.cpp:58 @8642541b2): what `current` adds to
+/// Ports `string_diff` (chat.cpp:58 @cd959bae9): what `current` adds to
 /// `last`.
 ///
 /// Return: a slice of `current`.
@@ -337,7 +337,7 @@ pub fn stringDiff(last: []const u8, current: []const u8) Error![]const u8 {
 /// `std::string::npos`, `tool_call_index`'s "no tool call".
 pub const npos: usize = std.math.maxInt(usize);
 
-/// Ports `common_chat_msg_diff` (chat.h:142 @8642541b2). The strings are
+/// Ports `common_chat_msg_diff` (chat.h:142 @cd959bae9). The strings are
 /// borrowed from the messages `computeDiffs` compared.
 pub const MsgDiff = struct {
     reasoning_content_delta: []const u8 = "",
@@ -345,7 +345,7 @@ pub const MsgDiff = struct {
     tool_call_index: usize = npos,
     tool_call_delta: ToolCall = .{},
 
-    /// Ports its `operator`== (chat.h:151 @8642541b2), which leaves out the
+    /// Ports its `operator`== (chat.h:151 @cd959bae9), which leaves out the
     /// reasoning delta.
     pub fn eql(a: MsgDiff, b: MsgDiff) bool {
         return std.mem.eql(u8, a.content_delta, b.content_delta) and a.tool_call_index == b.tool_call_index and
@@ -353,7 +353,7 @@ pub const MsgDiff = struct {
     }
 };
 
-/// Ports `common_chat_msg_diff`'s `compute_diffs` (chat.cpp:243 @8642541b2).
+/// Ports `common_chat_msg_diff`'s `compute_diffs` (chat.cpp:243 @cd959bae9).
 ///
 /// Return: owned by the caller (the list only; the strings are borrowed
 /// from `msg_prv` and `msg_new`).
@@ -416,7 +416,7 @@ pub fn computeDiffs(gpa: std.mem.Allocator, msg_prv: *const Msg, msg_new: *const
     return diffs;
 }
 
-/// Ports `common_chat_role` (chat.h:157 @8642541b2).
+/// Ports `common_chat_role` (chat.h:157 @cd959bae9).
 pub const Role = enum(c_int) {
     unknown,
     system,
@@ -424,7 +424,7 @@ pub const Role = enum(c_int) {
     user,
     tool,
 
-    /// Ports `common_chat_role_from_string` (chat.cpp:97 @8642541b2).
+    /// Ports `common_chat_role_from_string` (chat.cpp:97 @cd959bae9).
     pub fn fromString(role: []const u8) Role {
         if (std.mem.eql(u8, role, "system")) return .system;
         if (std.mem.eql(u8, role, "assistant")) return .assistant;
@@ -433,7 +433,7 @@ pub const Role = enum(c_int) {
         return .unknown;
     }
 
-    /// Ports `common_chat_role_to_string` (chat.cpp:105 @8642541b2).
+    /// Ports `common_chat_role_to_string` (chat.cpp:105 @cd959bae9).
     pub fn toString(role: Role) []const u8 {
         return switch (role) {
             .system => "system",
@@ -445,19 +445,19 @@ pub const Role = enum(c_int) {
     }
 };
 
-/// Ports `common_chat_msg_span` (chat.h:168 @8642541b2).
+/// Ports `common_chat_msg_span` (chat.h:168 @cd959bae9).
 pub const MsgSpan = struct {
     role: Role = .unknown,
     pos: usize = 0,
     len: usize = 0,
 
-    /// Ports `valid` (chat.h:173 @8642541b2).
+    /// Ports `valid` (chat.h:173 @cd959bae9).
     pub fn valid(self: MsgSpan) bool {
         return self.role != .unknown;
     }
 };
 
-/// Ports `common_chat_msg_spans` (chat.h:178 @8642541b2).
+/// Ports `common_chat_msg_spans` (chat.h:178 @cd959bae9).
 pub const MsgSpans = struct {
     spans: std.ArrayList(MsgSpan) = .empty,
 
@@ -465,12 +465,12 @@ pub const MsgSpans = struct {
         self.spans.deinit(gpa);
     }
 
-    /// Ports `add` (chat.h:181 @8642541b2).
+    /// Ports `add` (chat.h:181 @cd959bae9).
     pub fn add(self: *MsgSpans, gpa: std.mem.Allocator, role: Role, pos: usize, len: usize) !void {
         try self.spans.append(gpa, .{ .role = role, .pos = pos, .len = len });
     }
 
-    /// Ports `is_user_start` (chat.h:185 @8642541b2).
+    /// Ports `is_user_start` (chat.h:185 @cd959bae9).
     pub fn isUserStart(self: *const MsgSpans, pos: i32) bool {
         for (self.spans.items) |s| {
             if (s.role == .user and pos == @as(i32, @truncate(@as(isize, @bitCast(s.pos))))) return true;
@@ -478,7 +478,7 @@ pub const MsgSpans = struct {
         return false;
     }
 
-    /// Ports `last_user_message_pos` (chat.h:194 @8642541b2).
+    /// Ports `last_user_message_pos` (chat.h:194 @cd959bae9).
     pub fn lastUserMessagePos(self: *const MsgSpans) i32 {
         var i = self.spans.items.len;
         while (i > 0) {
@@ -490,14 +490,14 @@ pub const MsgSpans = struct {
     }
 };
 
-/// Ports `common_chat_msg_delimiter` (chat.h:204 @8642541b2).
+/// Ports `common_chat_msg_delimiter` (chat.h:204 @cd959bae9).
 pub const MsgDelimiter = struct {
     role: Role = .unknown,
     delimiter: []const u8 = "",
     tokens: std.ArrayList(i32) = .empty,
 };
 
-/// Ports `common_chat_msg_delimiters` (chat.h:210 @8642541b2). Owns its
+/// Ports `common_chat_msg_delimiters` (chat.h:210 @cd959bae9). Owns its
 /// strings and token lists.
 pub const MsgDelimiters = struct {
     delimiters: std.ArrayList(MsgDelimiter) = .empty,
@@ -510,14 +510,14 @@ pub const MsgDelimiters = struct {
         self.delimiters.deinit(gpa);
     }
 
-    /// Ports `add` (chat.h:216 @8642541b2).
+    /// Ports `add` (chat.h:216 @cd959bae9).
     pub fn add(self: *MsgDelimiters, gpa: std.mem.Allocator, role: Role, delimiter: []const u8) !void {
         const d = try gpa.dupe(u8, delimiter);
         errdefer gpa.free(d);
         try self.delimiters.append(gpa, .{ .role = role, .delimiter = d });
     }
 
-    /// Ports `common_chat_msg_delimiters`'s `tokenize` (chat.cpp:116 @8642541b2):
+    /// Ports `common_chat_msg_delimiters`'s `tokenize` (chat.cpp:116 @cd959bae9):
     /// each delimiter through `common_tokenize(vocab, delimiter, false, true)`,
     /// which the caller supplies -- this module links no libllama.
     pub fn tokenize(
@@ -533,7 +533,7 @@ pub const MsgDelimiters = struct {
         }
     }
 
-    /// Ports `common_chat_msg_delimiters`'s `split` (chat.cpp:122 @8642541b2):
+    /// Ports `common_chat_msg_delimiters`'s `split` (chat.cpp:122 @cd959bae9):
     /// the tokens cut into message spans at each delimiter, jumping over the
     /// regions `skips` names (start, length), which must be sorted by start.
     ///
@@ -575,7 +575,7 @@ pub const MsgDelimiters = struct {
     }
 };
 
-/// Ports `common_chat_tool` (chat.h:226 @8642541b2).
+/// Ports `common_chat_tool` (chat.h:226 @cd959bae9).
 pub const Tool = struct {
     name: []const u8 = "",
     description: []const u8 = "",
@@ -591,10 +591,10 @@ pub const Tool = struct {
     }
 };
 
-/// Ports `common_chat_tool_choice` (chat.h:235 @8642541b2).
+/// Ports `common_chat_tool_choice` (chat.h:235 @cd959bae9).
 pub const ToolChoice = enum(c_int) { auto, required, none };
 
-/// Ports `common_chat_tool_choice_parse_oaicompat` (chat.cpp:322 @8642541b2).
+/// Ports `common_chat_tool_choice_parse_oaicompat` (chat.cpp:322 @cd959bae9).
 pub fn toolChoiceParseOaicompat(tool_choice: []const u8) Error!ToolChoice {
     if (std.mem.eql(u8, tool_choice, "auto")) return .auto;
     if (std.mem.eql(u8, tool_choice, "none")) return .none;
@@ -602,7 +602,7 @@ pub fn toolChoiceParseOaicompat(tool_choice: []const u8) Error!ToolChoice {
     return throw(error.InvalidArgument, "Invalid tool_choice: {s}", .{tool_choice});
 }
 
-/// Ports `common_chat_format` (chat.h:241 @8642541b2).
+/// Ports `common_chat_format` (chat.h:241 @cd959bae9).
 pub const Format = enum(c_int) {
     content_only,
     peg_simple,
@@ -610,7 +610,7 @@ pub const Format = enum(c_int) {
     peg_gemma4,
     peg_minimax_m3,
 
-    /// Ports `common_chat_format_name` (chat.cpp:994 @8642541b2). Every
+    /// Ports `common_chat_format_name` (chat.cpp:994 @cd959bae9). Every
     /// value has a name, so the C++'s `default:` throw is unreachable.
     pub fn name(self: Format) []const u8 {
         return switch (self) {
@@ -623,10 +623,10 @@ pub const Format = enum(c_int) {
     }
 };
 
-/// Ports `common_chat_continuation` (chat.h:255 @8642541b2).
+/// Ports `common_chat_continuation` (chat.h:255 @cd959bae9).
 pub const Continuation = enum(c_int) { none, auto, reasoning, content };
 
-/// Ports `common_chat_continuation_parse` (chat.cpp:695 @8642541b2): null
+/// Ports `common_chat_continuation_parse` (chat.cpp:695 @cd959bae9): null
 /// and false are none, true is auto; anything but those and the two
 /// field names throws `invalid_argument`.
 pub fn continuationParse(value: *const Value) Error!Continuation {
@@ -639,14 +639,14 @@ pub fn continuationParse(value: *const Value) Error!Continuation {
     return throw(error.InvalidArgument, "Invalid continue_final_message: expected a boolean, \"content\" or \"reasoning_content\"", .{});
 }
 
-/// Ports `common_reasoning_format` (common/common.h:428 @8642541b2).
+/// Ports `common_reasoning_format` (common/common.h:428 @cd959bae9).
 pub const ReasoningFormat = enum(c_int) {
     none,
     auto,
     deepseek_legacy,
     deepseek,
 
-    /// Ports `common_reasoning_format_name` (chat.cpp:1011 @8642541b2).
+    /// Ports `common_reasoning_format_name` (chat.cpp:1011 @cd959bae9).
     pub fn name(self: ReasoningFormat) []const u8 {
         return switch (self) {
             .none => "none",
@@ -656,7 +656,7 @@ pub const ReasoningFormat = enum(c_int) {
         };
     }
 
-    /// Ports `common_reasoning_format_from_name` (chat.cpp:1026 @8642541b2).
+    /// Ports `common_reasoning_format_from_name` (chat.cpp:1026 @cd959bae9).
     pub fn fromName(format: []const u8) Error!ReasoningFormat {
         if (std.mem.eql(u8, format, "none")) return .none;
         if (std.mem.eql(u8, format, "auto")) return .auto;
@@ -681,7 +681,7 @@ fn isString(v: *const Value, s: []const u8) bool {
     return v.* == .string and std.mem.eql(u8, v.string, s);
 }
 
-/// Ports `common_chat_msgs_parse_oaicompat` (chat.cpp:350 @8642541b2).
+/// Ports `common_chat_msgs_parse_oaicompat` (chat.cpp:350 @cd959bae9).
 ///
 /// Return: owned by the caller; free each message with `deinit(gpa)`.
 pub fn msgsParseOaicompat(gpa: std.mem.Allocator, messages: *Value) Error!std.ArrayList(Msg) {
@@ -809,7 +809,7 @@ fn msgsParseInner(gpa: std.mem.Allocator, messages: *Value, msgs: *std.ArrayList
     }
 }
 
-/// The block of `common_chat_msgs_parse_oaicompat` (chat.cpp:350 @8642541b2)
+/// The block of `common_chat_msgs_parse_oaicompat` (chat.cpp:350 @cd959bae9)
 /// that keeps a message's keys beyond OpenAI's in `extra_json`, a tool call's
 /// beyond its own under `__tool_call_extras`.
 fn collectExtraJson(gpa: std.mem.Allocator, message: *Value, has_tool_calls: bool, msg: *Msg) Error!void {
@@ -872,7 +872,7 @@ pub const ContentCaps = struct {
     supports_typed_content: bool = true,
 };
 
-/// Ports `messages_inp_normalizer`'s `concat_content_parts` (chat.cpp:527 @8642541b2).
+/// Ports `messages_inp_normalizer`'s `concat_content_parts` (chat.cpp:527 @cd959bae9).
 fn concatContentParts(gpa: std.mem.Allocator, parts: *Value) Error![]u8 {
     var text: std.ArrayList(u8) = .empty;
     errdefer text.deinit(gpa);
@@ -898,7 +898,7 @@ fn concatContentParts(gpa: std.mem.Allocator, parts: *Value) Error![]u8 {
     return text.toOwnedSlice(gpa);
 }
 
-/// Ports `messages_inp_normalizer`'s `normalize` (chat.cpp:499 @8642541b2): a
+/// Ports `messages_inp_normalizer`'s `normalize` (chat.cpp:499 @cd959bae9): a
 /// message's content turned into the one form the template takes, when it
 /// takes only one.
 ///
@@ -934,7 +934,7 @@ pub fn normalizeMessages(gpa: std.mem.Allocator, caps: ContentCaps, messages: *c
     return normalized;
 }
 
-/// Ports `render_message_to_json` (chat.cpp:554 @8642541b2).
+/// Ports `render_message_to_json` (chat.cpp:554 @cd959bae9).
 ///
 /// Return: owned by the caller.
 pub fn renderMessagesToJson(gpa: std.mem.Allocator, msgs: []const Msg, caps: ContentCaps) Error!Value {
@@ -947,7 +947,7 @@ pub fn renderMessagesToJson(gpa: std.mem.Allocator, msgs: []const Msg, caps: Con
     return normalizeMessages(gpa, caps, &messages);
 }
 
-/// Ports `render_message_to_json_deepseek_v4_1` (chat.cpp:568 @8642541b2):
+/// Ports `render_message_to_json_deepseek_v4_1` (chat.cpp:568 @cd959bae9):
 /// DeepSeek V4.1 reads non-OpenAI message keys and joins content blocks with
 /// "\n\n" around images, so media markers stay separate text parts and the
 /// extra keys are restored.
@@ -1005,14 +1005,14 @@ pub fn renderMessagesToJsonDeepseekV41(gpa: std.mem.Allocator, msgs: []const Msg
     return normalizeMessages(gpa, caps, &messages);
 }
 
-/// Ports `common_chat_msgs_to_json_oaicompat` (chat.cpp:611 @8642541b2).
+/// Ports `common_chat_msgs_to_json_oaicompat` (chat.cpp:611 @cd959bae9).
 ///
 /// Return: owned by the caller.
 pub fn msgsToJsonOaicompat(gpa: std.mem.Allocator, msgs: []const Msg, concat_typed_text: bool) Error!Value {
     return renderMessagesToJson(gpa, msgs, .{ .supports_string_content = true, .supports_typed_content = !concat_typed_text });
 }
 
-/// Ports `common_chat_tools_to_json_oaicompat` (chat.cpp:618 @8642541b2).
+/// Ports `common_chat_tools_to_json_oaicompat` (chat.cpp:618 @cd959bae9).
 ///
 /// Return: owned by the caller; null for no tools.
 pub fn toolsToJsonOaicompat(gpa: std.mem.Allocator, tools: []const Tool) Error!Value {
@@ -1037,7 +1037,7 @@ pub fn toolsToJsonOaicompat(gpa: std.mem.Allocator, tools: []const Tool) Error!V
     return result;
 }
 
-/// Ports `common_chat_tool_parameters` (chat.cpp:641 @8642541b2): a
+/// Ports `common_chat_tool_parameters` (chat.cpp:641 @cd959bae9): a
 /// function's parameters, or an empty object schema.
 ///
 /// Return: owned by the caller.
@@ -1053,7 +1053,7 @@ pub fn toolParameters(gpa: std.mem.Allocator, function: *const Value) Error!Valu
     return out;
 }
 
-/// Ports `common_chat_tools_parse_oaicompat` (chat.cpp:651 @8642541b2).
+/// Ports `common_chat_tools_parse_oaicompat` (chat.cpp:651 @cd959bae9).
 ///
 /// Return: owned by the caller; free each tool with `deinit(gpa)`.
 pub fn toolsParseOaicompat(gpa: std.mem.Allocator, tools: *Value) Error!std.ArrayList(Tool) {

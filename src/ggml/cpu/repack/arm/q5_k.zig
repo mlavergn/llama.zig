@@ -62,7 +62,7 @@ const sh3: @Vector(16, u3) = @splat(3);
 const sh4: @Vector(16, u3) = @splat(4);
 const sh2: @Vector(16, u3) = @splat(2);
 
-/// Ports `ggml_gemv_q5_K_8x4_q8_K` (arch/arm/repack.cpp:881 @8642541b2).
+/// Ports `ggml_gemv_q5_K_8x4_q8_K` (arch/arm/repack.cpp:935 @cd959bae9).
 pub export fn ggml_gemv_q5_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !neon.has_dotprod) return ggml_gemv_q5_K_8x4_q8_K_generic(n, s, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 256);
@@ -181,7 +181,7 @@ pub export fn ggml_gemv_q5_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
     }
 }
 
-/// Ports `ggml_gemv_q5_K_8x8_q8_K` (arch/arm/repack.cpp:1040 @8642541b2).
+/// Ports `ggml_gemv_q5_K_8x8_q8_K` (arch/arm/repack.cpp:1094 @cd959bae9).
 ///
 /// `q4_K`'s 8x8 shape — column pairs, 64-bit-dup activations, pairwise
 /// merge — with this file's fifth-bit folding. The C unrolls the column
@@ -305,7 +305,7 @@ pub export fn ggml_gemv_q5_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
     }
 }
 
-/// Ports `ggml_gemm_q5_K_8x4_q8_K` (arch/arm/repack.cpp:3667 @8642541b2).
+/// Ports `ggml_gemm_q5_K_8x4_q8_K` (arch/arm/repack.cpp:3786 @cd959bae9).
 ///
 /// `q4_k.zig`'s gemm with this file's fifth-bit fold. `qh` is again
 /// per-block running state, shifted right by two once per `k` read —

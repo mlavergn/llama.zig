@@ -73,7 +73,7 @@ fn arrayOf(a: Allocator, v: Value) Error!Value {
 // the Responses API
 
 /// Ports `server_chat_convert_responses_tools` (server-chat.cpp:6
-/// @8642541b2): OpenAI Responses API tools as Chat Completions API tools,
+/// @cd959bae9): OpenAI Responses API tools as Chat Completions API tools,
 /// non-function tools skipped.
 ///
 /// Return: owned by `a`.
@@ -399,8 +399,8 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
 // -----------------------------------------------------------------------------
 // the Anthropic Messages API
 
-/// Ports `normalize_anthropic_billing_header` (server-chat.cpp:331
-/// @8642541b2): the five-character `cch=` stamp of an
+/// Ports `normalize_anthropic_billing_header` (server-chat.cpp:341
+/// @cd959bae9): the five-character `cch=` stamp of an
 /// `x-anthropic-billing-header:` system prompt overwritten with `f`s, so it
 /// does not break prefix caching. Any other prompt is left alone.
 ///
@@ -450,8 +450,8 @@ fn imageUrlOf(a: Allocator, source: *const Value) Error!?Value {
     return null;
 }
 
-/// Ports `server_chat_convert_anthropic_to_oai` (server-chat.cpp:353
-/// @8642541b2): an Anthropic Messages request as a `/chat/completions`
+/// Ports `server_chat_convert_anthropic_to_oai` (server-chat.cpp:363
+/// @cd959bae9): an Anthropic Messages request as a `/chat/completions`
 /// one -- the system prompt a message, content blocks as parts, thinking
 /// blocks as reasoning, `tool_use` blocks as tool calls and `tool_result`
 /// blocks as tool messages after their turn; tools, `tool_choice`,
@@ -786,8 +786,8 @@ pub fn stof(s: []const u8) Error!f32 {
     return r;
 }
 
-/// Ports `convert_transcriptions_to_chatcmpl` (server-chat.cpp:673
-/// @8642541b2): a transcription request -- its form fields as JSON, its
+/// Ports `convert_transcriptions_to_chatcmpl` (server-chat.cpp:683
+/// @cd959bae9): a transcription request -- its form fields as JSON, its
 /// uploaded `file` -- as a `/chat/completions` body: the template's ASR
 /// preset as the system and user messages, the prompt ending in the media
 /// marker, and the form's string fields typed.
@@ -865,7 +865,7 @@ pub fn transcriptionsToChatcmpl(
 // -----------------------------------------------------------------------------
 // the "asr" chat template
 
-/// Ports `server_chat_get_asr_prompt` (server-chat.cpp:730 @8642541b2):
+/// Ports `server_chat_get_asr_prompt` (server-chat.cpp:740 @cd959bae9):
 /// prompt of the "asr" chat template, live ASR models (e.g. LFM3-Audio live
 /// ASR) transcribe with it; empty if the model has no such template,
 /// `error.RuntimeError` on a template error.

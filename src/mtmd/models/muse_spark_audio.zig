@@ -16,7 +16,7 @@ const graph = @import("../graph.zig");
 const c = impl.c;
 const ne = graph.ne;
 
-/// Ports `build` (muse-spark-audio.cpp:5 @8642541b2), a member of
+/// Ports `build` (muse-spark-audio.cpp:5 @cd959bae9), a member of
 /// `clip_graph_muse_spark_audio`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;

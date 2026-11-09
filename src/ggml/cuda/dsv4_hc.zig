@@ -17,7 +17,7 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `DSV4_HC` (dsv4-hc.cu:5 @8642541b2).
+/// Ports `DSV4_HC` (dsv4-hc.cu:5 @cd959bae9).
 const hc_n = 4;
 
 /// An `int64_t` into a `dim3` member, which is `unsigned int`.
@@ -35,7 +35,7 @@ fn srcOf(dst: *const Tensor, i: usize) *const Tensor {
     return impl.one(Tensor, dst.src[i]);
 }
 
-/// Ports `ggml_cuda_op_dsv4_hc_comb` (dsv4-hc.cu:205 @8642541b2).
+/// Ports `ggml_cuda_op_dsv4_hc_comb` (dsv4-hc.cu:205 @cd959bae9).
 pub fn opDsv4HcComb(ctx: *common.Context, dst: *Tensor) void {
     const mixes = srcOf(dst, 0);
     const scale = srcOf(dst, 1);
@@ -73,7 +73,7 @@ pub fn opDsv4HcComb(ctx: *common.Context, dst: *Tensor) void {
     });
 }
 
-/// Ports `ggml_cuda_op_dsv4_hc_pre` (dsv4-hc.cu:248 @8642541b2). Op params
+/// Ports `ggml_cuda_op_dsv4_hc_pre` (dsv4-hc.cu:248 @cd959bae9). Op params
 /// slot 0 is a scale the sum is multiplied by and slot 1 says whether the
 /// weights are gated: `ggml_dsv4_hc_pre_gated` gives one weight per
 /// element, put through a sigmoid in the kernel, where the plain op gives
@@ -110,7 +110,7 @@ pub fn opDsv4HcPre(ctx: *common.Context, dst: *Tensor) void {
     });
 }
 
-/// Ports `ggml_cuda_op_dsv4_hc_post` (dsv4-hc.cu:283 @8642541b2). A null
+/// Ports `ggml_cuda_op_dsv4_hc_post` (dsv4-hc.cu:283 @cd959bae9). A null
 /// `comb` (`src[3]`) is the identity: each stream adds its own residual,
 /// through `dsv4_hc_post_f32<false, gated>`, which never reads `comb` or its
 /// strides, both passed as zero. Since v0.8.0 `gate_scale_in` and

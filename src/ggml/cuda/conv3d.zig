@@ -33,7 +33,7 @@ const cu = common.cu;
 const Tensor = c.ggml_tensor;
 const half = kernels.half;
 
-/// Ports `conv3d_params` (conv3d.cu:5 @8642541b2), passed to the kernels by
+/// Ports `conv3d_params` (conv3d.cu:5 @cd959bae9), passed to the kernels by
 /// value: 22 `int64_t`.
 const Conv3dParams = extern struct {
     IW: i64,
@@ -64,7 +64,7 @@ const Conv3dParams = extern struct {
     }
 };
 
-/// Ports `conv3d_launch_implicit_gemm` (conv3d.cu:253 @8642541b2): the
+/// Ports `conv3d_launch_implicit_gemm` (conv3d.cu:253 @cd959bae9): the
 /// 3x3x3, 1x1x3 and 1x1x1 kernels have their sizes as template arguments,
 /// the rest read them from `params`. Vector loads of the weights need the
 /// base pointer and every weight row 16-byte aligned; the kernel is told
@@ -98,7 +98,7 @@ fn conv3dLaunchImplicitGemm(
     }
 }
 
-/// Ports `ggml_cuda_op_conv3d` (conv3d.cu:279 @8642541b2).
+/// Ports `ggml_cuda_op_conv3d` (conv3d.cu:279 @cd959bae9).
 ///
 /// Parameters:
 /// - `ctx`: the backend context whose stream, pool and cuBLAS handle are used.

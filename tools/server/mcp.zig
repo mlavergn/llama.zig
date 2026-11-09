@@ -105,7 +105,7 @@ const StringPipe = common.Pipe([]u8);
 // -----------------------------------------------------------------------------
 // the NDJSON pump
 
-/// Ports `mcp_pump_ndjson` (server-mcp.cpp:27 @8642541b2): reads NDJSON lines
+/// Ports `mcp_pump_ndjson` (server-mcp.cpp:27 @cd959bae9): reads NDJSON lines
 /// from a child pipe, calling `on_line` per line until `running` clears, EOF
 /// or an error, or `on_line` returns false. Polled, not blocking: a
 /// grandchild can inherit the pipe's write end and hold it open.
@@ -167,7 +167,7 @@ fn pumpNdjson(f: ?*anyopaque, running: *std.atomic.Value(bool), ctx: anytype, co
     }
 }
 
-/// Ports `mcp_write_all` (server-mcp.cpp:517 @8642541b2): writes all of
+/// Ports `mcp_write_all` (server-mcp.cpp:517 @cd959bae9): writes all of
 /// `data` to the child's stdin, non-blocking and polled so teardown never
 /// hangs.
 ///
@@ -202,7 +202,7 @@ fn writeAll(f: ?*anyopaque, data: []const u8, running: *std.atomic.Value(bool)) 
 // -----------------------------------------------------------------------------
 // configuration
 
-/// Ports `server_mcp_server_config` (server-mcp.h:19 @8642541b2): one entry
+/// Ports `server_mcp_server_config` (server-mcp.h:19 @cd959bae9): one entry
 /// of `mcpServers`. Strings are owned by `gpa` and live as long as the
 /// manager.
 pub const ServerConfig = struct {
@@ -237,7 +237,7 @@ pub const ServerConfig = struct {
         return false;
     }
 
-    /// Ports `server_mcp_server_config`'s `parse_from_json` (server-mcp.cpp:136 @8642541b2).
+    /// Ports `server_mcp_server_config`'s `parse_from_json` (server-mcp.cpp:136 @cd959bae9).
     pub fn parseFromJson(out: *std.ArrayList(ServerConfig), json_str: []const u8) !void {
         var arena = std.heap.ArenaAllocator.init(gpa);
         defer arena.deinit();
@@ -245,7 +245,7 @@ pub const ServerConfig = struct {
         return parseCursorFormat(out, &j);
     }
 
-    /// Ports `server_mcp_server_config`'s `parse_cursor_format` (server-mcp.cpp:140 @8642541b2):
+    /// Ports `server_mcp_server_config`'s `parse_cursor_format` (server-mcp.cpp:140 @cd959bae9):
     /// a missing `mcpServers` yields nothing; an entry without a `command`
     /// is skipped with a warning.
     pub fn parseCursorFormat(out: *std.ArrayList(ServerConfig), j: *const Value) !void {
@@ -277,7 +277,7 @@ pub const ServerConfig = struct {
     }
 };
 
-/// Ports `server_mcp_tool_def` (server-mcp.h:33 @8642541b2): a tool an MCP
+/// Ports `server_mcp_tool_def` (server-mcp.h:33 @cd959bae9): a tool an MCP
 /// server advertises. Owned by `gpa`.
 pub const ToolDef = struct {
     server_name: []const u8,
@@ -299,10 +299,10 @@ pub const ToolDef = struct {
 // -----------------------------------------------------------------------------
 // the transport
 
-/// Ports `MCP_PROTOCOL_VERSION` (server-mcp.cpp:180 @8642541b2).
+/// Ports `MCP_PROTOCOL_VERSION` (server-mcp.cpp:180 @cd959bae9).
 const protocol_version = "2024-11-05";
 
-/// Ports `rpc_error_message` (server-mcp.cpp:182 @8642541b2).
+/// Ports `rpc_error_message` (server-mcp.cpp:182 @cd959bae9).
 ///
 /// Return: borrowed from `resp`, or a literal.
 fn rpcErrorMessage(resp: *const Value) ![]const u8 {
@@ -314,7 +314,7 @@ fn rpcErrorMessage(resp: *const Value) ![]const u8 {
     return "unknown error";
 }
 
-/// Ports `mcp_result_to_response` (server-mcp.cpp:197 @8642541b2): the text
+/// Ports `mcp_result_to_response` (server-mcp.cpp:197 @cd959bae9): the text
 /// parts of `result.content[]` joined, and an `isError` result surfaced.
 fn resultToResponse(a: Allocator, result: *const Value) !Value {
     var text: std.ArrayList(u8) = .empty;
@@ -345,8 +345,8 @@ fn rpcError(a: Allocator, msg: []const u8) !Value {
     return o.done();
 }
 
-/// Ports `server_mcp_transport` (server-mcp.h:50 @8642541b2) and
-/// `server_mcp_stdio` (server-mcp.h:94 @8642541b2): one MCP server session
+/// Ports `server_mcp_transport` (server-mcp.h:50 @cd959bae9) and
+/// `server_mcp_stdio` (server-mcp.h:94 @cd959bae9): one MCP server session
 /// over a child's standard streams.
 ///
 ///   caller --send_rpc--> to_server   --[writer]--> framing --> server
@@ -381,7 +381,7 @@ pub const Transport = struct {
     /// The `shared_ptr`'s count.
     refs: std.atomic.Value(u32) = .init(1),
 
-    /// Ports the constructor of `server_mcp_stdio` (server-mcp.cpp:441 @8642541b2).
+    /// Ports the constructor of `server_mcp_stdio` (server-mcp.cpp:441 @cd959bae9).
     ///
     /// Return: a transport with one reference; `release` frees it.
     pub fn create(config: *const ServerConfig) !*Transport {
@@ -431,7 +431,7 @@ pub const Transport = struct {
         self.last_error.print(gpa, fmt, args) catch {};
     }
 
-    /// Ports `server_mcp_transport`'s `send_rpc` (server-mcp.cpp:215 @8642541b2): the
+    /// Ports `server_mcp_transport`'s `send_rpc` (server-mcp.cpp:215 @cd959bae9): the
     /// reply, or an `{"error": ...}`. Assumes `rpc_mutex` is held.
     fn sendRpc(self: *Transport, a: Allocator, request: *const Value, should_stop: ?StopFn) !Value {
         const dumped = try json.dump(gpa, request, -1);
@@ -474,7 +474,7 @@ pub const Transport = struct {
         return rpcError(a, "transport closed");
     }
 
-    /// Ports `server_mcp_transport`'s `ensure_init` (server-mcp.cpp:255 @8642541b2): the
+    /// Ports `server_mcp_transport`'s `ensure_init` (server-mcp.cpp:255 @cd959bae9): the
     /// `initialize` handshake, once. Assumes `rpc_mutex` is held.
     fn ensureInit(self: *Transport, a: Allocator, should_stop: ?StopFn) !bool {
         if (self.initialized) return true;
@@ -512,7 +512,7 @@ pub const Transport = struct {
         return true;
     }
 
-    /// Ports `server_mcp_transport`'s `list_tools` (server-mcp.cpp:284 @8642541b2): the
+    /// Ports `server_mcp_transport`'s `list_tools` (server-mcp.cpp:284 @cd959bae9): the
     /// server's tools, asked once and cached.
     ///
     /// Return: copies, owned by the caller (`freeDefs`).
@@ -553,7 +553,7 @@ pub const Transport = struct {
         return cloneDefs(self.tools.items);
     }
 
-    /// Ports `server_mcp_transport`'s `call_tool` (server-mcp.cpp:316 @8642541b2): the
+    /// Ports `server_mcp_transport`'s `call_tool` (server-mcp.cpp:316 @cd959bae9): the
     /// `tools/call` result in the `/tools` shape, or an `{"error": ...}`.
     ///
     /// Return: allocated by `a`.
@@ -588,7 +588,7 @@ pub const Transport = struct {
         return o.done();
     }
 
-    /// Ports `server_mcp_stdio`'s `start` (server-mcp.cpp:452 @8642541b2): spawns the
+    /// Ports `server_mcp_stdio`'s `start` (server-mcp.cpp:452 @cd959bae9): spawns the
     /// child and its three pumps.
     pub fn start(self: *Transport) bool {
         const config = self.config;
@@ -628,19 +628,19 @@ pub const Transport = struct {
         return true;
     }
 
-    /// Ports `server_mcp_stdio`'s `close` (server-mcp.cpp:483 @8642541b2): blocking and
+    /// Ports `server_mcp_stdio`'s `close` (server-mcp.cpp:483 @cd959bae9): blocking and
     /// idempotent.
     pub fn close(self: *Transport) void {
         self.joinPumps();
     }
 
-    /// Ports `server_mcp_stdio`'s `is_alive` (server-mcp.cpp:487 @8642541b2): never
+    /// Ports `server_mcp_stdio`'s `is_alive` (server-mcp.cpp:487 @cd959bae9): never
     /// blocks behind an in-flight `send_rpc()`.
     pub fn isAlive(self: *Transport) bool {
         return self.running.load(.seq_cst);
     }
 
-    /// Ports `server_mcp_stdio`'s `diagnostics` (server-mcp.cpp:491 @8642541b2): the last
+    /// Ports `server_mcp_stdio`'s `diagnostics` (server-mcp.cpp:491 @cd959bae9): the last
     /// RPC error and the tail of the child's stderr.
     ///
     /// Return: owned by `a`.
@@ -661,7 +661,7 @@ pub const Transport = struct {
         return out.items;
     }
 
-    /// Ports `server_mcp_stdio`'s `reader_loop` (server-mcp.cpp:507 @8642541b2).
+    /// Ports `server_mcp_stdio`'s `reader_loop` (server-mcp.cpp:507 @cd959bae9).
     fn readerLoop(self: *Transport) void {
         const P = struct {
             fn onLine(t: *Transport, line: []u8) bool {
@@ -676,7 +676,7 @@ pub const Transport = struct {
         self.from_server.closeWrite(); // EOF to any waiting caller
     }
 
-    /// Ports `server_mcp_stdio`'s `writer_loop` (server-mcp.cpp:583 @8642541b2).
+    /// Ports `server_mcp_stdio`'s `writer_loop` (server-mcp.cpp:583 @cd959bae9).
     fn writerLoop(self: *Transport) void {
         const Stop = struct {
             fn f(ctx: *anyopaque) bool {
@@ -699,7 +699,7 @@ pub const Transport = struct {
         self.from_server.closeWrite(); // wake any caller waiting for a reply
     }
 
-    /// Ports `server_mcp_stdio`'s `errlog_loop` (server-mcp.cpp:597 @8642541b2): drains
+    /// Ports `server_mcp_stdio`'s `errlog_loop` (server-mcp.cpp:597 @cd959bae9): drains
     /// stderr (an undrained pipe blocks the child), logging it and keeping a
     /// bounded tail for when the server dies.
     fn errlogLoop(self: *Transport) void {
@@ -729,7 +729,7 @@ pub const Transport = struct {
         pumpNdjson(self.proc.?.stderrFile(), &self.running, self, P.onLine);
     }
 
-    /// Ports `server_mcp_stdio`'s `join_pumps` (server-mcp.cpp:613 @8642541b2).
+    /// Ports `server_mcp_stdio`'s `join_pumps` (server-mcp.cpp:613 @cd959bae9).
     fn joinPumps(self: *Transport) void {
         const proc = self.proc orelse return;
         self.running.store(false, .seq_cst);
@@ -752,8 +752,8 @@ pub const Transport = struct {
     }
 };
 
-/// Ports `mcp_build_env` (server-mcp.cpp:426 @8642541b2) over
-/// `mcp_parent_env` (server-mcp.cpp:405 @8642541b2): the parent's
+/// Ports `mcp_build_env` (server-mcp.cpp:426 @cd959bae9) over
+/// `mcp_parent_env` (server-mcp.cpp:405 @cd959bae9): the parent's
 /// environment with the configured overrides applied, `KEY=VALUE`.
 fn buildEnv(a: Allocator, config: *const ServerConfig) ![]const []const u8 {
     var env: std.ArrayList([]const u8) = .empty;
@@ -790,13 +790,13 @@ pub fn freeDefs(defs: []ToolDef) void {
 // -----------------------------------------------------------------------------
 // server_mcp
 
-/// Ports `MCP_COOLDOWN_SECONDS` (server-mcp.cpp:636 @8642541b2).
+/// Ports `MCP_COOLDOWN_SECONDS` (server-mcp.cpp:636 @cd959bae9).
 const cooldown_seconds = 5;
-/// Ports `MCP_WARMUP_TIMEOUT_SECONDS` (server-mcp.cpp:637 @8642541b2): caps
+/// Ports `MCP_WARMUP_TIMEOUT_SECONDS` (server-mcp.cpp:637 @cd959bae9): caps
 /// per-server tool discovery at startup.
 const warmup_timeout_seconds = 10;
 
-/// Ports `server_mcp` (server-mcp.h:132 @8642541b2): the configured servers,
+/// Ports `server_mcp` (server-mcp.h:132 @cd959bae9): the configured servers,
 /// a live transport per server spawned on first use, and the tools
 /// discovered at startup. Declare it before the HTTP context, so it
 /// outlives every `/tools` handler.
@@ -815,7 +815,7 @@ pub const Mcp = struct {
         return struct { name: []const u8, value: V };
     }
 
-    /// Ports `server_mcp`'s destructor (server-mcp.cpp:639 @8642541b2): shuts
+    /// Ports `server_mcp`'s destructor (server-mcp.cpp:639 @cd959bae9): shuts
     /// down, then closes every transport.
     pub fn deinit(self: *Mcp) void {
         self.shutdown();
@@ -839,19 +839,19 @@ pub const Mcp = struct {
         self.registry.deinit(gpa);
     }
 
-    /// Ports `server_mcp`'s `create_transport` (server-mcp.cpp:655 @8642541b2): the
+    /// Ports `server_mcp`'s `create_transport` (server-mcp.cpp:655 @cd959bae9): the
     /// only place that names a concrete transport.
     fn createTransport(cfg: *const ServerConfig) !*Transport {
         return Transport.create(cfg);
     }
 
-    /// Ports `server_mcp`'s `shutdown` (server-mcp.cpp:659 @8642541b2): flips the cancel
+    /// Ports `server_mcp`'s `shutdown` (server-mcp.cpp:659 @cd959bae9): flips the cancel
     /// flag so in-flight calls return. Idempotent.
     pub fn shutdown(self: *Mcp) void {
         self.stopping.store(true, .seq_cst);
     }
 
-    /// Ports `server_mcp`'s `find_config` (server-mcp.cpp:663 @8642541b2).
+    /// Ports `server_mcp`'s `find_config` (server-mcp.cpp:663 @cd959bae9).
     fn findConfig(self: *const Mcp, name: []const u8) ?*const ServerConfig {
         for (self.configs.items) |*cfg| {
             if (std.mem.eql(u8, cfg.name, name)) return cfg;
@@ -859,7 +859,7 @@ pub const Mcp = struct {
         return null;
     }
 
-    /// Ports `server_mcp`'s `empty` (server-mcp.h:143 @8642541b2): true until
+    /// Ports `server_mcp`'s `empty` (server-mcp.h:143 @cd959bae9): true until
     /// `start` has parsed a server.
     pub fn empty(self: *const Mcp) bool {
         return self.configs.items.len == 0;
@@ -889,7 +889,7 @@ pub const Mcp = struct {
         }
     }
 
-    /// Ports `server_mcp`'s `start` (server-mcp.cpp:672 @8642541b2): parses the
+    /// Ports `server_mcp`'s `start` (server-mcp.cpp:672 @cd959bae9): parses the
     /// configuration (file and inline JSON), then spawns each server once,
     /// lists its tools and shuts it down. Throws on a parse error; a spawn
     /// failure is logged.
@@ -948,7 +948,7 @@ pub const Mcp = struct {
         self.registry = discovered;
     }
 
-    /// Ports `server_mcp`'s `list_tools` (server-mcp.cpp:730 @8642541b2).
+    /// Ports `server_mcp`'s `list_tools` (server-mcp.cpp:730 @cd959bae9).
     ///
     /// Return: copies, owned by the caller (`freeDefs`).
     pub fn listTools(self: *Mcp) ![]ToolDef {
@@ -957,7 +957,7 @@ pub const Mcp = struct {
         return cloneDefs(self.registry.items);
     }
 
-    /// Ports `server_mcp`'s `call_tool` (server-mcp.cpp:735 @8642541b2): lazily
+    /// Ports `server_mcp`'s `call_tool` (server-mcp.cpp:735 @cd959bae9): lazily
     /// (re)spawns the transport; the MCP result or an `{"error": ...}`.
     /// `should_stop` is or-ed with the manager's cancel flag.
     ///
@@ -982,7 +982,7 @@ pub const Mcp = struct {
         return transport.callTool(a, tool_name, arguments, .{ .ctx = &stop, .f = Stop.f });
     }
 
-    /// Ports `server_mcp`'s `get_or_create` (server-mcp.cpp:750 @8642541b2): the live
+    /// Ports `server_mcp`'s `get_or_create` (server-mcp.cpp:750 @cd959bae9): the live
     /// transport, respawned when its child died; null during the cooldown
     /// after a failed spawn, or during shutdown.
     ///

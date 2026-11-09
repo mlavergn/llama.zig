@@ -26,7 +26,7 @@ const c = impl.c;
 const Tensor = common.Tensor;
 const ComputeParams = common.ComputeParams;
 
-/// Ports `ggml_compute_forward_sum_f32` (ops.cpp:1289 @8642541b2).
+/// Ports `ggml_compute_forward_sum_f32` (ops.cpp:1301 @cd959bae9).
 fn sumF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -83,7 +83,7 @@ fn sumF32(params: *const ComputeParams, dst: *Tensor) void {
 }
 
 /// Ports `ggml_compute_forward_sum_f16` and `ggml_compute_forward_sum_bf16`
-/// (ops.cpp:1334, 1367 @8642541b2).
+/// (ops.cpp:1346, 1379 @cd959bae9).
 ///
 /// The two differ only in the element type and in which `_ggf` helper they
 /// call, so they are one function over a comptime type. Both accumulate in
@@ -125,7 +125,7 @@ fn sumNarrow(comptime T: type, params: *const ComputeParams, dst: *Tensor) void 
     @as([*]T, @ptrCast(@alignCast(dst.data.?)))[0] = common.fromF32(T, sum);
 }
 
-/// Ports `ggml_compute_forward_sum` (ops.cpp:1400 @8642541b2).
+/// Ports `ggml_compute_forward_sum` (ops.cpp:1412 @cd959bae9).
 pub export fn ggml_compute_forward_sum(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -137,7 +137,7 @@ pub export fn ggml_compute_forward_sum(params: *const ComputeParams, dst: *Tenso
     }
 }
 
-/// Ports `ggml_compute_forward_cumsum_f32` (ops.cpp:1428 @8642541b2).
+/// Ports `ggml_compute_forward_cumsum_f32` (ops.cpp:1440 @cd959bae9).
 fn cumsumF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -171,7 +171,7 @@ fn cumsumF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_cumsum` (ops.cpp:1458 @8642541b2).
+/// Ports `ggml_compute_forward_cumsum` (ops.cpp:1470 @cd959bae9).
 pub export fn ggml_compute_forward_cumsum(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -181,7 +181,7 @@ pub export fn ggml_compute_forward_cumsum(params: *const ComputeParams, dst: *Te
     }
 }
 
-/// Ports `ggml_compute_forward_sum_rows_f32` (ops.cpp:1478 @8642541b2).
+/// Ports `ggml_compute_forward_sum_rows_f32` (ops.cpp:1490 @cd959bae9).
 fn sumRowsF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -218,7 +218,7 @@ fn sumRowsF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_sum_rows` (ops.cpp:1511 @8642541b2).
+/// Ports `ggml_compute_forward_sum_rows` (ops.cpp:1523 @cd959bae9).
 pub export fn ggml_compute_forward_sum_rows(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -228,7 +228,7 @@ pub export fn ggml_compute_forward_sum_rows(params: *const ComputeParams, dst: *
     }
 }
 
-/// Ports `ggml_compute_forward_mean_f32` (ops.cpp:1531 @8642541b2).
+/// Ports `ggml_compute_forward_mean_f32` (ops.cpp:1543 @cd959bae9).
 fn meanF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -262,7 +262,7 @@ fn meanF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_mean` (ops.cpp:1568 @8642541b2).
+/// Ports `ggml_compute_forward_mean` (ops.cpp:1580 @cd959bae9).
 pub export fn ggml_compute_forward_mean(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -272,7 +272,7 @@ pub export fn ggml_compute_forward_mean(params: *const ComputeParams, dst: *Tens
     }
 }
 
-/// Ports `ggml_compute_forward_argmax_f32` (ops.cpp:1588 @8642541b2).
+/// Ports `ggml_compute_forward_argmax_f32` (ops.cpp:1600 @cd959bae9).
 fn argmaxF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -299,7 +299,7 @@ fn argmaxF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_argmax` (ops.cpp:1616 @8642541b2).
+/// Ports `ggml_compute_forward_argmax` (ops.cpp:1628 @cd959bae9).
 pub export fn ggml_compute_forward_argmax(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -309,7 +309,7 @@ pub export fn ggml_compute_forward_argmax(params: *const ComputeParams, dst: *Te
     }
 }
 
-/// Ports `ggml_compute_forward_count_equal_i32` (ops.cpp:1636 @8642541b2).
+/// Ports `ggml_compute_forward_count_equal_i32` (ops.cpp:1648 @cd959bae9).
 fn countEqualI32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -341,7 +341,7 @@ fn countEqualI32(params: *const ComputeParams, dst: *Tensor) void {
     while (ir < ir1) : (ir += 1) {
         // The C divides by `ne03` and `ne02` here where the pattern every
         // other kernel follows would use `ne02*ne01` and `ne01` -- see `i02`
-        // and `i01` (ops.cpp:1668, 1669 @8642541b2). Reproduced verbatim -- it only
+        // and `i01` (ops.cpp:1680, 1681 @cd959bae9). Reproduced verbatim -- it only
         // coincides with the usual form when the trailing dimensions are 1,
         // which is the shape this op is used at, and the reference's
         // behaviour is what the port is measured against.
@@ -373,7 +373,7 @@ fn countEqualI32(params: *const ComputeParams, dst: *Tensor) void {
     @as(*i64, @ptrCast(@alignCast(dst.data.?))).* = sum_thread;
 }
 
-/// Ports `ggml_compute_forward_count_equal` (ops.cpp:1696 @8642541b2).
+/// Ports `ggml_compute_forward_count_equal` (ops.cpp:1708 @cd959bae9).
 pub export fn ggml_compute_forward_count_equal(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 

@@ -44,7 +44,7 @@ pub const fs_stat = @import("fs_stat.zig");
 pub const clock = @import("clock.zig");
 
 /// `LLM_KV_SPLIT_NO`, `LLM_KV_SPLIT_COUNT`, `LLM_KV_SPLIT_TENSORS_COUNT`
-/// (common/common.h:1249, 1250, 1251 @8642541b2).
+/// (common/common.h:1252, 1253, 1254 @cd959bae9).
 pub const kv_split_no = "split.no";
 pub const kv_split_count = "split.count";
 pub const kv_split_tensors_count = "split.tensors.count";

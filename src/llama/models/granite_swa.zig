@@ -25,7 +25,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_granite_swa`'s `load_arch_hparams` (models/granite-swa.cpp:5 @8642541b2).
+/// Ports `llama_model_granite_swa`'s `load_arch_hparams` (models/granite-swa.cpp:5 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -84,7 +84,7 @@ fn oom() noreturn {
     impl.abort("models/granite-swa.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_model_granite_swa`'s `load_arch_tensors` (models/granite-swa.cpp:56 @8642541b2).
+/// Ports `llama_model_granite_swa`'s `load_arch_tensors` (models/granite-swa.cpp:56 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -151,13 +151,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_granite_swa`'s `build_arch_graph` (models/granite-swa.cpp:117 @8642541b2).
+/// Ports `llama_model_granite_swa`'s `build_arch_graph` (models/granite-swa.cpp:117 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_granite_swa`'s `graph`
-/// (models/granite-swa.cpp:121 @8642541b2).
+/// (models/granite-swa.cpp:121 @cd959bae9).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -225,7 +225,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_granite_swa`'s `graph`'s `build_attention_layer`
-/// (models/granite-swa.cpp:200 @8642541b2).
+/// (models/granite-swa.cpp:200 @cd959bae9).
 fn buildAttentionLayer(
     b: *const graph.Builder,
     cur_: *Tensor,
@@ -264,7 +264,7 @@ fn buildAttentionLayer(
 }
 
 /// Ports `llama_model_granite_swa`'s `graph`'s `build_layer_ffn`
-/// (models/granite-swa.cpp:241 @8642541b2).
+/// (models/granite-swa.cpp:241 @cd959bae9).
 fn buildLayerFfn(b: *const graph.Builder, cur_: *Tensor, inpSA: *Tensor, model: *const Model, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;

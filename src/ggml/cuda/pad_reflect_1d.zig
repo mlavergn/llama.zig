@@ -18,14 +18,14 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_PAD_REFLECT_1D_BLOCK_SIZE` (pad_reflect_1d.cuh:3 @8642541b2).
+/// Ports `CUDA_PAD_REFLECT_1D_BLOCK_SIZE` (pad_reflect_1d.cuh:3 @cd959bae9).
 const block_size = 256;
 
 fn uint(x: i64) u32 {
     return @truncate(@as(u64, @bitCast(x)));
 }
 
-/// Ports `ggml_cuda_op_pad_reflect_1d` (pad_reflect_1d.cu:58 @8642541b2),
+/// Ports `ggml_cuda_op_pad_reflect_1d` (pad_reflect_1d.cu:58 @cd959bae9),
 /// which launches with `<<<>>>`.
 pub fn opPadReflect1d(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);

@@ -182,39 +182,39 @@ pub fn sleepUs(us: u32) void {
 }
 
 /// `signal(SIGPIPE, SIG_IGN)`, as `Server`'s constructor does
-/// (httplib.cpp:8662 @8642541b2).
+/// (httplib.cpp:8703 @cd959bae9).
 pub fn ignoreSigpipe() void {
     _ = signal(k.SIGPIPE, 1);
 }
 
-/// Ports `set_socket_opt_impl` (httplib.cpp:509 @8642541b2).
+/// Ports `set_socket_opt_impl` (httplib.cpp:515 @cd959bae9).
 fn setSocketOptImpl(sock: Socket, level: c_int, optname: c_int, optval: *const anyopaque, optlen: u32) bool {
     return setsockopt(sock, level, optname, optval, optlen) == 0;
 }
 
-/// Ports `set_socket_opt_time` (httplib.cpp:520 @8642541b2).
+/// Ports `set_socket_opt_time` (httplib.cpp:526 @cd959bae9).
 pub fn setSocketOptTime(sock: Socket, level: c_int, optname: c_int, sec: i64, usec: i64) bool {
     const timeout: Timeval = .{ .tv_sec = @intCast(sec), .tv_usec = @intCast(usec) };
     return setSocketOptImpl(sock, level, optname, &timeout, @sizeOf(Timeval));
 }
 
-/// Ports `set_socket_opt` (httplib.cpp:6623 @8642541b2).
+/// Ports `set_socket_opt` (httplib.cpp:6648 @cd959bae9).
 pub fn setSocketOpt(sock: Socket, level: c_int, optname: c_int, optval: c_int) bool {
     return setSocketOptImpl(sock, level, optname, &optval, @sizeOf(c_int));
 }
 
-/// Ports `close_socket` (httplib.cpp:1796 @8642541b2).
+/// Ports `close_socket` (httplib.cpp:1795 @cd959bae9).
 pub fn closeSocket(sock: Socket) c_int {
     return close(sock);
 }
 
-/// Ports `shutdown_socket` (httplib.cpp:2115 @8642541b2).
+/// Ports `shutdown_socket` (httplib.cpp:2114 @cd959bae9).
 pub fn shutdownSocket(sock: Socket) c_int {
     return shutdown(sock, k.SHUT_RDWR);
 }
 
-/// Ports `read_socket` (httplib.cpp:1831 @8642541b2), with `handle_EINTR`
-/// (httplib.cpp:1804 @8642541b2): retried after a microsecond while
+/// Ports `read_socket` (httplib.cpp:1830 @cd959bae9), with `handle_EINTR`
+/// (httplib.cpp:1803 @cd959bae9): retried after a microsecond while
 /// interrupted.
 pub fn readSocket(sock: Socket, ptr: [*]u8, size: usize, flags: c_int) isize {
     while (true) {
@@ -227,7 +227,7 @@ pub fn readSocket(sock: Socket, ptr: [*]u8, size: usize, flags: c_int) isize {
     }
 }
 
-/// Ports `send_socket` (httplib.cpp:1843 @8642541b2), under `handle_EINTR`.
+/// Ports `send_socket` (httplib.cpp:1842 @cd959bae9), under `handle_EINTR`.
 pub fn sendSocket(sock: Socket, ptr: [*]const u8, size: usize, flags: c_int) isize {
     while (true) {
         const res = send(sock, ptr, size, flags);
@@ -239,7 +239,7 @@ pub fn sendSocket(sock: Socket, ptr: [*]const u8, size: usize, flags: c_int) isi
     }
 }
 
-/// Ports `select_impl` (httplib.cpp:1864 @8642541b2): `poll` on one socket;
+/// Ports `select_impl` (httplib.cpp:1863 @cd959bae9): `poll` on one socket;
 /// a negative `sec` waits forever.
 fn selectImpl(sock: Socket, events: c_short, sec: i64, usec: i64) isize {
     var pfd: PollFd = .{ .fd = sock, .events = events, .revents = 0 };
@@ -254,12 +254,12 @@ fn selectImpl(sock: Socket, events: c_short, sec: i64, usec: i64) isize {
     }
 }
 
-/// Ports `select_read` (httplib.cpp:1878 @8642541b2).
+/// Ports `select_read` (httplib.cpp:1877 @cd959bae9).
 pub fn selectRead(sock: Socket, sec: i64, usec: i64) isize {
     return selectImpl(sock, k.POLLIN, sec, usec);
 }
 
-/// Ports `select_write` (httplib.cpp:1882 @8642541b2).
+/// Ports `select_write` (httplib.cpp:1881 @cd959bae9).
 pub fn selectWrite(sock: Socket, sec: i64, usec: i64) isize {
     return selectImpl(sock, k.POLLOUT, sec, usec);
 }
@@ -270,7 +270,7 @@ pub const ReadInterrupt = struct {
     func: *const fn (ctx: ?*anyopaque) bool,
 };
 
-/// Ports `select_read_interruptible` (httplib.cpp:1913 @8642541b2):
+/// Ports `select_read_interruptible` (httplib.cpp:1912 @cd959bae9):
 /// `select_read`, but waits in slices and gives up once `interrupted`
 /// returns true. A `sec` below zero never comes (`deadline_after`,
 /// httplib.cpp:1888 @8642541b2), as it waits forever in `select_impl`.
@@ -287,7 +287,7 @@ pub fn selectReadInterruptible(sock: Socket, sec: i64, usec: i64, interrupted: ?
     return 0;
 }
 
-/// Ports `is_socket_alive` (httplib.cpp:1956 @8642541b2): nothing to read,
+/// Ports `is_socket_alive` (httplib.cpp:1955 @cd959bae9): nothing to read,
 /// or a byte to peek at, means the peer is still there.
 pub fn isSocketAlive(sock: Socket) bool {
     const val = selectRead(sock, 0, 0);
@@ -297,13 +297,13 @@ pub fn isSocketAlive(sock: Socket) bool {
     return readSocket(sock, &buf, 1, k.MSG_PEEK) > 0;
 }
 
-/// Ports `is_accept_resource_error` (httplib.cpp:2674 @8642541b2).
+/// Ports `is_accept_resource_error` (httplib.cpp:2673 @cd959bae9).
 pub fn isAcceptResourceError() bool {
     const err = errno();
     return err == k.EMFILE or err == k.ENFILE or err == k.ENOBUFS or err == k.ENOMEM;
 }
 
-/// Ports `is_accept_transient_error` (httplib.cpp:2689 @8642541b2).
+/// Ports `is_accept_transient_error` (httplib.cpp:2688 @cd959bae9).
 pub fn isAcceptTransientError() bool {
     const err = errno();
     return err == k.EINTR or err == k.EAGAIN or err == k.EWOULDBLOCK or err == k.ECONNABORTED;
@@ -316,7 +316,7 @@ pub fn acceptSocket(sock: Socket) Socket {
     return accept(sock, null, null);
 }
 
-/// Ports `drain_and_close_socket` (httplib.cpp:2128 @8642541b2): half-close,
+/// Ports `drain_and_close_socket` (httplib.cpp:2127 @cd959bae9): half-close,
 /// read off what the peer still sends for up to 100 ms or 1 MiB, then shut
 /// down and close, so the peer sees a FIN rather than a reset.
 pub fn drainAndCloseSocket(sock: Socket) void {
@@ -336,7 +336,7 @@ pub fn drainAndCloseSocket(sock: Socket) void {
     _ = closeSocket(sock);
 }
 
-/// Ports `get_ip_and_port` (httplib.cpp:2830 @8642541b2).
+/// Ports `get_ip_and_port` (httplib.cpp:2829 @cd959bae9).
 fn getIpAndPort(a: std.mem.Allocator, addr: *const SockaddrStorage, addr_len: u32, ip: *[]const u8, port: *c_int) error{OutOfMemory}!bool {
     const fam = addr.family();
     if (fam != k.AF_INET and fam != k.AF_INET6) return false;
@@ -347,14 +347,14 @@ fn getIpAndPort(a: std.mem.Allocator, addr: *const SockaddrStorage, addr_len: u3
     return true;
 }
 
-/// Ports `get_local_ip_and_port` (httplib.cpp:2852 @8642541b2).
+/// Ports `get_local_ip_and_port` (httplib.cpp:2851 @cd959bae9).
 pub fn getLocalIpAndPort(a: std.mem.Allocator, sock: Socket, ip: *[]const u8, port: *c_int) error{OutOfMemory}!void {
     var addr: SockaddrStorage = .{};
     var len: u32 = @sizeOf(SockaddrStorage);
     if (getsockname(sock, &addr, &len) == 0) _ = try getIpAndPort(a, &addr, len, ip, port);
 }
 
-/// Ports `get_remote_ip_and_port` (httplib.cpp:2861 @8642541b2). A Unix
+/// Ports `get_remote_ip_and_port` (httplib.cpp:2860 @cd959bae9). A Unix
 /// socket's peer is left alone: Linux's `SO_PEERCRED` pid is not taken, and
 /// Darwin defines no `SO_PEERPID`, so the C takes nothing there either.
 pub fn getRemoteIpAndPort(a: std.mem.Allocator, sock: Socket, ip: *[]const u8, port: *c_int) error{OutOfMemory}!void {
@@ -376,13 +376,13 @@ pub const SocketOptions = struct {
     }
 };
 
-/// Ports `default_socket_options` (httplib.cpp:6613 @8642541b2).
+/// Ports `default_socket_options` (httplib.cpp:6638 @cd959bae9).
 pub fn defaultSocketOptions(_: ?*anyopaque, sock: Socket) void {
     _ = setSocketOpt(sock, k.SOL_SOCKET, k.SO_REUSEPORT, 1);
 }
 
-/// Ports `unescape_abstract_namespace_unix_domain` (httplib.cpp:2166
-/// @8642541b2): a leading `@` names Linux's abstract namespace.
+/// Ports `unescape_abstract_namespace_unix_domain` (httplib.cpp:2165
+/// @cd959bae9): a leading `@` names Linux's abstract namespace.
 fn unescapeAbstractNamespaceUnixDomain(dst: []u8, s: []const u8) void {
     @memcpy(dst[0..s.len], s);
     if (s.len > 1 and s[0] == '@') dst[0] = 0;
@@ -395,7 +395,7 @@ pub const BindOrConnect = struct {
     func: *const fn (ctx: ?*anyopaque, sock: Socket, addr: ?*const anyopaque, addrlen: u32, quit: *bool) bool,
 };
 
-/// Ports `create_socket` (httplib.cpp:2508 @8642541b2), for a server: no
+/// Ports `create_socket` (httplib.cpp:2507 @cd959bae9), for a server: no
 /// `ip`, so `host` goes to `getaddrinfo` with `address_family` and
 /// `socket_flags`, or -- for `AF_UNIX` -- straight into a `sockaddr_un`.
 ///
@@ -507,7 +507,7 @@ extern "c" fn sysconf(name: c_int) c_long;
 /// readers -- `BodyReader` -- look.
 pub const StreamError = enum { success, timeout, connection_closed, read };
 
-/// Ports `SocketStream` (httplib.cpp:7786 @8642541b2), the server's stream:
+/// Ports `SocketStream` (httplib.cpp:7816 @cd959bae9), the server's stream:
 /// reads through a 4 KiB buffer of its own, writes straight to the socket
 /// once it polls writable. One is made per request, so bytes buffered past
 /// the end of one request are dropped with it, as the C drops them.
@@ -530,15 +530,15 @@ pub const SocketStream = struct {
 
     const read_buff_size: usize = 1024 * 4;
 
-    /// Ports `is_readable` (httplib.cpp:7800 @8642541b2), a member of
+    /// Ports `is_readable` (httplib.cpp:7830 @cd959bae9), a member of
     /// `SocketStream`: buffered bytes remain.
     pub fn isReadable(self: *const SocketStream) bool {
         return self.read_buff_off < self.read_buff_content_size;
     }
 
-    /// Ports `wait_readable` (httplib.cpp:7804 @8642541b2), a member of
-    /// `SocketStream`, under `calc_actual_timeout` (httplib.cpp:7770
-    /// @8642541b2).
+    /// Ports `wait_readable` (httplib.cpp:7834 @cd959bae9), a member of
+    /// `SocketStream`, under `calc_actual_timeout` (httplib.cpp:7800
+    /// @cd959bae9).
     fn waitReadable(self: *const SocketStream) bool {
         if (self.max_timeout_msec <= 0) {
             return selectReadInterruptible(self.sock, self.read_timeout_sec, self.read_timeout_usec, self.read_interrupted) > 0;
@@ -550,14 +550,14 @@ pub const SocketStream = struct {
         return selectReadInterruptible(self.sock, @divTrunc(actual, 1000), @rem(actual, 1000) * 1000, self.read_interrupted) > 0;
     }
 
-    /// Ports `set_read_timeout` (httplib.cpp:7937 @8642541b2), a member of
+    /// Ports `set_read_timeout` (httplib.cpp:7967 @cd959bae9), a member of
     /// `SocketStream`.
     pub fn setReadTimeout(self: *SocketStream, sec: i64, usec: i64) void {
         self.read_timeout_sec = sec;
         self.read_timeout_usec = usec;
     }
 
-    /// Ports `set_max_timeout` (httplib.cpp:7942 @8642541b2), a member of
+    /// Ports `set_max_timeout` (httplib.cpp:7972 @cd959bae9), a member of
     /// `SocketStream`: bounds the reads from now on to `msec` in total, on
     /// top of the timeout of each one. 0 lifts the bound.
     pub fn setMaxTimeout(self: *SocketStream, msec: i64) void {
@@ -565,19 +565,19 @@ pub const SocketStream = struct {
         self.start_time_us = steadyNowUs();
     }
 
-    /// Ports `set_read_interrupt` (httplib.cpp:7948 @8642541b2), a member
+    /// Ports `set_read_interrupt` (httplib.cpp:7978 @cd959bae9), a member
     /// of `SocketStream`.
     pub fn setReadInterrupt(self: *SocketStream, interrupted: ?ReadInterrupt) void {
         self.read_interrupted = interrupted;
     }
 
-    /// Ports `wait_writable` (httplib.cpp:7819 @8642541b2), a member of
+    /// Ports `wait_writable` (httplib.cpp:7849 @cd959bae9), a member of
     /// `SocketStream`.
     pub fn waitWritable(self: *const SocketStream) bool {
         return selectWrite(self.sock, self.write_timeout_sec, self.write_timeout_usec) > 0;
     }
 
-    /// Ports `ensure_readable` (httplib.cpp:7823 @8642541b2), a member of
+    /// Ports `ensure_readable` (httplib.cpp:7853 @cd959bae9), a member of
     /// `SocketStream`: the keep-alive loop's readiness, once.
     fn ensureReadable(self: *SocketStream) bool {
         if (self.readable_hint) {
@@ -587,25 +587,25 @@ pub const SocketStream = struct {
         return self.waitReadable();
     }
 
-    /// Ports `buffered_data` (httplib.cpp:7831 @8642541b2), a member of
+    /// Ports `buffered_data` (httplib.cpp:7861 @cd959bae9), a member of
     /// `SocketStream`.
     pub fn bufferedData(self: *const SocketStream) []const u8 {
         return self.read_buff[self.read_buff_off..self.read_buff_content_size];
     }
 
-    /// Ports `consume_buffered` (httplib.cpp:7836 @8642541b2), a member of
+    /// Ports `consume_buffered` (httplib.cpp:7866 @cd959bae9), a member of
     /// `SocketStream`.
     pub fn consumeBuffered(self: *SocketStream, size: usize) void {
         self.read_buff_off += size;
     }
 
-    /// Ports `is_peer_alive` (httplib.cpp:7841 @8642541b2), a member of
+    /// Ports `is_peer_alive` (httplib.cpp:7871 @cd959bae9), a member of
     /// `SocketStream`.
     pub fn isPeerAlive(self: *const SocketStream) bool {
         return isSocketAlive(self.sock);
     }
 
-    /// Ports `read` (httplib.cpp:7845 @8642541b2), a member of
+    /// Ports `read` (httplib.cpp:7875 @cd959bae9), a member of
     /// `SocketStream`: buffered bytes first; otherwise, for a small read, a
     /// 4 KiB `recv` into the buffer, and for a large one straight into
     /// `ptr`.
@@ -648,7 +648,7 @@ pub const SocketStream = struct {
         }
     }
 
-    /// Ports `write` (httplib.cpp:7907 @8642541b2), a member of
+    /// Ports `write` (httplib.cpp:7937 @cd959bae9), a member of
     /// `SocketStream`: one `send` once the socket polls writable.
     ///
     /// Return: bytes sent, or -1.
@@ -658,9 +658,9 @@ pub const SocketStream = struct {
     }
 };
 
-/// Ports `BufferStream` (httplib.h:3849 @8642541b2), the write side the
-/// server stages a response's head in: `write` (httplib.cpp:7969
-/// @8642541b2) appends, `get_buffer` (httplib.cpp:7984 @8642541b2) is
+/// Ports `BufferStream` (httplib.h:3899 @cd959bae9), the write side the
+/// server stages a response's head in: `write` (httplib.cpp:7999
+/// @cd959bae9) appends, `get_buffer` (httplib.cpp:8014 @cd959bae9) is
 /// `buffer.items`.
 pub const BufferStream = struct {
     a: std.mem.Allocator,
@@ -676,7 +676,7 @@ pub const BufferStream = struct {
     }
 };
 
-/// Ports `stream_line_reader` (httplib.h:3988 @8642541b2) over a
+/// Ports `stream_line_reader` (httplib.h:4038 @cd959bae9) over a
 /// `SocketStream`: one line at a time into a fixed buffer, spilling into a
 /// growable one past it.
 pub const LineReader = struct {
@@ -694,8 +694,8 @@ pub const LineReader = struct {
         self.growable.deinit(self.a);
     }
 
-    /// Ports `ptr` (httplib.cpp:1572 @8642541b2), a member of
-    /// `stream_line_reader`, with `size` (httplib.cpp:1580 @8642541b2):
+    /// Ports `ptr` (httplib.cpp:1571 @cd959bae9), a member of
+    /// `stream_line_reader`, with `size` (httplib.cpp:1579 @cd959bae9):
     /// the line read so far.
     pub fn line(self: *const LineReader) []const u8 {
         if (self.growable.items.len == 0) return self.fixed[0..self.fixed_used];
@@ -708,14 +708,14 @@ pub const LineReader = struct {
         return std.mem.sliceTo(self.line(), 0);
     }
 
-    /// Ports `end_with_crlf` (httplib.cpp:1588 @8642541b2), a member of
+    /// Ports `end_with_crlf` (httplib.cpp:1587 @cd959bae9), a member of
     /// `stream_line_reader`.
     pub fn endWithCrlf(self: *const LineReader) bool {
         const l = self.line();
         return l.len >= 2 and l[l.len - 2] == '\r' and l[l.len - 1] == '\n';
     }
 
-    /// Ports `append` (httplib.cpp:1675 @8642541b2), a member of
+    /// Ports `append` (httplib.cpp:1674 @cd959bae9), a member of
     /// `stream_line_reader`.
     fn append(self: *LineReader, data: []const u8) error{OutOfMemory}!void {
         if (self.growable.items.len == 0 and self.fixed_used + data.len < self.fixed.len) {
@@ -728,7 +728,7 @@ pub const LineReader = struct {
         }
     }
 
-    /// Ports `getline` (httplib.cpp:1593 @8642541b2), a member of
+    /// Ports `getline` (httplib.cpp:1592 @cd959bae9), a member of
     /// `stream_line_reader`: through the first CRLF, scanning what the
     /// stream has buffered in one pass and reading a byte at a time
     /// otherwise. A bare LF does not end a line.
@@ -779,7 +779,7 @@ pub const LineReader = struct {
     }
 };
 
-/// Ports `keep_alive` (httplib.cpp:2020 @8642541b2): waits, polling every
+/// Ports `keep_alive` (httplib.cpp:2019 @cd959bae9): waits, polling every
 /// 10 ms, for the next request's first byte, until the server socket
 /// closes or `keep_alive_timeout_sec` passes.
 pub fn keepAlive(svr_sock: *const std.atomic.Value(Socket), sock: Socket, keep_alive_timeout_sec: i64) bool {

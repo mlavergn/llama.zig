@@ -20,7 +20,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_bloom`'s `load_arch_hparams` (models/bloom.cpp:3 @8642541b2).
+/// Ports `llama_model_bloom`'s `load_arch_hparams` (models/bloom.cpp:3 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_eps = (try ml.meta.getKey(f32, .attention_layernorm_eps, true, exc)).?;
@@ -39,7 +39,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.f_max_alibi_bias = 8.0;
 }
 
-/// Ports `llama_model_bloom`'s `load_arch_tensors` (models/bloom.cpp:21 @8642541b2).
+/// Ports `llama_model_bloom`'s `load_arch_tensors` (models/bloom.cpp:21 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -83,8 +83,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_bloom`'s `build_arch_graph` (models/bloom.cpp:61 @8642541b2)
-/// and the constructor of its `graph` (models/bloom.cpp:65 @8642541b2).
+/// Ports `llama_model_bloom`'s `build_arch_graph` (models/bloom.cpp:61 @cd959bae9)
+/// and the constructor of its `graph` (models/bloom.cpp:65 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

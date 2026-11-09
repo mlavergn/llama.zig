@@ -34,7 +34,7 @@ const think_start = "<think>";
 const think_end = "</think>";
 const gen_prompt = "<|im_start|>assistant\n";
 
-/// Ports `is_lfm2_template` (parsers/lfm2.cpp:5 @8642541b2): the tool list wrapped
+/// Ports `is_lfm2_template` (parsers/lfm2.cpp:5 @cd959bae9): the tool list wrapped
 /// in `<|tool_list_start|>` and `<|tool_list_end|>`.
 pub fn isLfm2Template(src: []const u8) bool {
     return util.contains(src, "<|tool_list_start|>") and util.contains(src, "<|tool_list_end|>");
@@ -72,7 +72,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_lfm2` (parsers/lfm2.cpp:14 @8642541b2).
+/// Ports `common_chat_params_init_lfm2` (parsers/lfm2.cpp:14 @cd959bae9).
 /// `tool_list_tokens` preserves LFM2's system tool-list markers; LFM2.5
 /// renders without them.
 ///

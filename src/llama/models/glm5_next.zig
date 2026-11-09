@@ -53,7 +53,7 @@ fn oom() noreturn {
     impl.abort(src, 0, "out of memory");
 }
 
-/// Ports `llama_model_glm5_next`'s `load_arch_hparams` (models/glm5-next.cpp:7 @8642541b2).
+/// Ports `llama_model_glm5_next`'s `load_arch_hparams` (models/glm5-next.cpp:7 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -113,7 +113,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_glm5_next`'s `load_arch_tensors` (models/glm5-next.cpp:61 @8642541b2).
+/// Ports `llama_model_glm5_next`'s `load_arch_tensors` (models/glm5-next.cpp:61 @cd959bae9).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -246,14 +246,14 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// `conv`, a lambda of `load_arch_tensors` (models/glm5-next.cpp:61
-/// @8642541b2): a conv1d weight, 4D or else 3D.
+/// @cd959bae9): a conv1d weight, 4D or else 3D.
 fn loadConv(self: *Model, tid: arch.Tensor, il: i32, d_conv: i64, d_inner: i64, flags: u32, exc: *Exception) Thrown!?*Tensor {
     const t = try self.createTensor(.{ .tensor = tid, .suffix = "weight", .bid = il }, &.{ d_conv, 1, d_inner, 1 }, loader.tensor_not_required, exc);
     return t orelse try self.createTensor(.{ .tensor = tid, .suffix = "weight", .bid = il }, &.{ d_conv, 1, d_inner }, flags, exc);
 }
 
 /// Ports `llama_model_glm5_next`'s `build_arch_graph` (models/glm5-next.cpp:186
-/// @8642541b2): the NextN draft head for an MTP context, else the trunk.
+/// @cd959bae9): the NextN draft head for an MTP context, else the trunk.
 pub fn buildArchGraph(model: *const Model, b: *const Builder, params: *const graph.Params) void {
     var g: Graph = .{ .model = model, .b = b };
     if (params.gtype == .decoder_mtp) {
@@ -263,7 +263,7 @@ pub fn buildArchGraph(model: *const Model, b: *const Builder, params: *const gra
     g.build();
 }
 
-/// Ports `glm5_conv1d` (models/glm5-next.cpp:194 @8642541b2): the causal
+/// Ports `glm5_conv1d` (models/glm5-next.cpp:194 @cd959bae9): the causal
 /// conv1d over one of Q (`qkv` 0), K (1) or V (2), writing `K_rs` conv
 /// windows back, group `s` the window `s` tokens back.
 fn conv1d(gf: *c.ggml_cgraph, ctx: *c.ggml_context, conv_states_all: *Tensor, conv_state_all: *Tensor, qkv: i64, x: *Tensor, proj_w: ?*Tensor, conv_w: ?*Tensor, d_conv: i64, head_dim: i64, n_head: i64, n_seq_tokens: i64, n_seqs: i64, n_tokens: i64, kv_head: i64, mem_size: i64, K_rs: i64) *Tensor {
@@ -298,7 +298,7 @@ fn conv1d(gf: *c.ggml_cgraph, ctx: *c.ggml_context, conv_states_all: *Tensor, co
 }
 
 /// Ports `llama_model_glm5_next`'s `llm_graph_input_kpool` (models/glm5-next.cpp:237
-/// @8642541b2): the k-pool indexer's inputs, which the memory's k-pool
+/// @cd959bae9): the k-pool indexer's inputs, which the memory's k-pool
 /// layout fills.
 pub const InpKpool = struct {
     /// I64 `[n_tokens]`.
@@ -327,14 +327,14 @@ pub const InpKpool = struct {
     n_sel: u32 = 0,
     n_kv: u32 = 0,
 
-    /// Ports `llm_graph_input_kpool`'s `set_input` (models/glm5-next.cpp:242 @8642541b2).
+    /// Ports `llm_graph_input_kpool`'s `set_input` (models/glm5-next.cpp:242 @cd959bae9).
     pub fn setInput(self: *InpKpool, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         self.mctx.getIdx().?.setInputKIdxs(self.k_idxs.?, ubatch);
         self.mctx.setInputKpool(self.pool_cells.?, self.pool_idxs.?, self.pool_mask.?, self.tail_idxs.?, self.sel_mask, self.new_pool_idxs.?, self.new_pool_rep.?, ubatch, null);
     }
 
-    /// Ports `llm_graph_input_kpool`'s `can_reuse` (models/glm5-next.cpp:247 @8642541b2).
+    /// Ports `llm_graph_input_kpool`'s `can_reuse` (models/glm5-next.cpp:247 @cd959bae9).
     pub fn canReuse(self: *InpKpool, params: *const graph.Params) bool {
         self.mctx = HybridIdxContext.fromBase(params.mctx.?.cast(HybridContext));
 
@@ -356,38 +356,38 @@ pub const InpKpool = struct {
     }
 };
 
-/// Ports `dsv4_elem_offset` (models/glm5-next.cpp:344 @8642541b2).
+/// Ports `dsv4_elem_offset` (models/glm5-next.cpp:344 @cd959bae9).
 fn elemOffset(t: *const Tensor, i: i64) usize {
     return c.ggml_row_size(t.type, i);
 }
 
-/// Ports `dsv4_view_1d` (models/glm5-next.cpp:348 @8642541b2).
+/// Ports `dsv4_view_1d` (models/glm5-next.cpp:348 @cd959bae9).
 fn view1d(ctx: *c.ggml_context, t: *Tensor, ne0: i64, j0: i64) *Tensor {
     return c.ggml_view_1d(ctx, t, ne0, elemOffset(t, j0));
 }
 
-/// Ports `dsv4_view_2d` (models/glm5-next.cpp:352 @8642541b2).
+/// Ports `dsv4_view_2d` (models/glm5-next.cpp:352 @cd959bae9).
 fn view2d(ctx: *c.ggml_context, t: *Tensor, ne0: i64, ne1: i64, j0: i64) *Tensor {
     return c.ggml_view_2d(ctx, t, ne0, ne1, t.nb[1], elemOffset(t, j0));
 }
 
-/// Ports `dsv4_hc_affine` (models/glm5-next.cpp:371 @8642541b2).
+/// Ports `dsv4_hc_affine` (models/glm5-next.cpp:371 @cd959bae9).
 fn hcAffine(ctx: *c.ggml_context, x_: *Tensor, scale: *Tensor, base: *Tensor) *Tensor {
     var x: *Tensor = c.ggml_mul(ctx, x_, scale);
     x = c.ggml_add(ctx, x, base);
     return x;
 }
 
-/// Mirrors `llama_model_glm5_next`'s `graph` (src/models/models.h:2998 @8642541b2): the
+/// Mirrors `llama_model_glm5_next`'s `graph` (src/models/models.h:3082 @cd959bae9): the
 /// builder and the model. Its `no_build` constructor
-/// (src/models/models.h:3003 @8642541b2), which builds nothing so that `graph_mtp` can reuse the
+/// (src/models/models.h:3087 @cd959bae9), which builds nothing so that `graph_mtp` can reuse the
 /// helpers, is this struct before `build` or `buildMtp` runs.
 const Graph = struct {
     model: *const Model,
     b: *const Builder,
 
     /// Ports `llama_model_glm5_next::graph`'s `build_inp_kpool`
-    /// (models/glm5-next.cpp:285 @8642541b2).
+    /// (models/glm5-next.cpp:285 @cd959bae9).
     fn buildInpKpool(self: *const Graph, mctx_hyb: *const HybridIdxContext) *InpKpool {
         const b = self.b;
         const ctx = b.ctx0;
@@ -458,7 +458,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_glm5_next::graph`'s `build_hc_mean`
-    /// (models/glm5-next.cpp:361 @8642541b2): the mean over the
+    /// (models/glm5-next.cpp:361 @cd959bae9): the mean over the
     /// hyper-connection streams, `[n_embd, hc, n_tokens]` to `[n_embd,
     /// n_tokens]`.
     fn buildHcMean(self: *const Graph, x: *Tensor) *Tensor {
@@ -474,7 +474,7 @@ const Graph = struct {
     }
 
     /// Ports the overload of `llama_model_glm5_next::graph`'s `build_hc_pre`
-    /// that takes the weights (models/glm5-next.cpp:381 @8642541b2): the
+    /// that takes the weights (models/glm5-next.cpp:381 @cd959bae9): the
     /// streams' weighted sum.
     fn buildHcPreWeighted(self: *const Graph, x: *Tensor, weights: *Tensor, il: c_int) *Tensor {
         const b = self.b;
@@ -505,7 +505,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_glm5_next::graph`'s `build_hc_sinkhorn`
-    /// (models/glm5-next.cpp:408 @8642541b2). `comb` is `[dst_hc, src_hc,
+    /// (models/glm5-next.cpp:408 @cd959bae9). `comb` is `[dst_hc, src_hc,
     /// n_tokens]`: a row softmax over dst, one column normalization, then
     /// repeated row and column normalization.
     fn buildHcSinkhorn(self: *const Graph, comb_: *Tensor, il: c_int) *Tensor {
@@ -546,7 +546,7 @@ const Graph = struct {
         return comb;
     }
 
-    /// Mirrors the graph's `hc_pre` (src/models/models.h:3015 @8642541b2):
+    /// Mirrors the graph's `hc_pre` (src/models/models.h:3099 @cd959bae9):
     /// `cur` is the collapsed input,
     /// `post` and `comb` feed `build_hc_post`.
     const HcPre = struct {
@@ -556,7 +556,7 @@ const Graph = struct {
     };
 
     /// Ports `llama_model_glm5_next::graph`'s `build_hc_pre`
-    /// (models/glm5-next.cpp:446 @8642541b2): a hyper-connection's mixes --
+    /// (models/glm5-next.cpp:446 @cd959bae9): a hyper-connection's mixes --
     /// the pre weights it collapses the streams with, here; the post weights
     /// and the stream combination for `build_hc_post`.
     fn buildHcPre(self: *const Graph, x: *Tensor, hc_fn: *Tensor, hc_scale: *Tensor, hc_base: *Tensor, il: c_int) HcPre {
@@ -613,7 +613,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_glm5_next::graph`'s `build_hc_post`
-    /// (models/glm5-next.cpp:502 @8642541b2): the block's output spread over
+    /// (models/glm5-next.cpp:502 @cd959bae9): the block's output spread over
     /// the streams by `post`, plus the residual streams mixed by `comb`.
     fn buildHcPost(self: *const Graph, x: *Tensor, residual: *Tensor, post: *Tensor, comb: *Tensor, il: c_int) *Tensor {
         const b = self.b;
@@ -653,7 +653,7 @@ const Graph = struct {
     }
 
     /// Ports the constructor of `llama_model_glm5_next`'s `graph`
-    /// (models/glm5-next.cpp:674 @8642541b2).
+    /// (models/glm5-next.cpp:674 @cd959bae9).
     fn build(self: *Graph) void {
         const model = self.model;
         const b = self.b;
@@ -785,7 +785,7 @@ const Graph = struct {
     }
 
     /// Ports the constructor of `llama_model_glm5_next`'s `graph_mtp`
-    /// (models/glm5-next.cpp:544 @8642541b2): the NextN draft head, one DSA
+    /// (models/glm5-next.cpp:544 @cd959bae9): the NextN draft head, one DSA
     /// block after the trunk, fed by the trunk's post-norm hidden state.
     fn buildMtp(self: *Graph) void {
         const model = self.model;
@@ -919,7 +919,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_glm5_next::graph`'s `build_kda_layer`
-    /// (models/glm5-next.cpp:809 @8642541b2): KDA with the g_a/g_b output
+    /// (models/glm5-next.cpp:809 @cd959bae9): KDA with the g_a/g_b output
     /// gate.
     fn buildKdaLayer(self: *const Graph, cur_: *Tensor, layer: *const Layer, inp_rs: *graph.InpRs, d_conv: i64, head_dim: i64, n_head_kda: i64, d_inner: i64, n_seq_tokens: i64, n_seqs: i64, il: c_int) *Tensor {
         const b = self.b;
@@ -1002,7 +1002,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_glm5_next::graph`'s `build_kpool_select`
-    /// (models/glm5-next.cpp:889 @8642541b2): score the pools of kpool
+    /// (models/glm5-next.cpp:889 @cd959bae9): score the pools of kpool
     /// consecutive tokens, and expand the selected pools and the
     /// incomplete tail into an additive `[n_kv, n_tokens]` mask.
     fn buildKpoolSelect(self: *const Graph, cur: *Tensor, qr: *Tensor, layer: *const Layer, mctx_hyb: *const HybridIdxContext, inp_kpool: *InpKpool, il: c_int) *Tensor {
@@ -1165,7 +1165,7 @@ const Graph = struct {
         return sel;
     }
 
-    /// Mirrors the graph's `dsa_out` (src/models/models.h:3052 @8642541b2): the
+    /// Mirrors the graph's `dsa_out` (src/models/models.h:3136 @cd959bae9): the
     /// attention output and the
     /// selection to carry to the next shared layer.
     const DsaOut = struct {

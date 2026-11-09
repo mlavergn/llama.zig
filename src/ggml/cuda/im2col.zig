@@ -17,11 +17,11 @@ const cu = common.cu;
 const Tensor = c.ggml_tensor;
 const half = kernels.half;
 
-/// Ports `CUDA_IM2COL_BLOCK_SIZE` (im2col.cuh:3 @8642541b2).
+/// Ports `CUDA_IM2COL_BLOCK_SIZE` (im2col.cuh:3 @cd959bae9).
 const block_size = 256;
-/// Ports `MAX_GRIDDIM_Y` (im2col.cu:3 @8642541b2).
+/// Ports `MAX_GRIDDIM_Y` (im2col.cu:3 @cd959bae9).
 const max_griddim_y = 65535;
-/// Ports `MAX_GRIDDIM_Z` (im2col.cu:4 @8642541b2).
+/// Ports `MAX_GRIDDIM_Z` (im2col.cu:4 @cd959bae9).
 const max_griddim_z = 65535;
 
 /// An `int64_t` into a `dim3` member, which is `unsigned int`.
@@ -29,8 +29,8 @@ fn dim(x: i64) u32 {
     return @truncate(@as(u64, @bitCast(x)));
 }
 
-/// Ports `im2col_cuda` (im2col.cu:49 @8642541b2), reached through
-/// `im2col_cuda_f16` and `im2col_cuda_f32` (im2col.cu:65, 73 @8642541b2).
+/// Ports `im2col_cuda` (im2col.cu:49 @cd959bae9), reached through
+/// `im2col_cuda_f16` and `im2col_cuda_f32` (im2col.cu:65, 73 @cd959bae9).
 /// One block per output position (`x` the column, `y` the batch and row),
 /// its threads striding over the `IC*KH*KW` channels.
 fn im2colCuda(
@@ -69,7 +69,7 @@ fn im2colCuda(
     }, .{ x, dst, IC, IW, IH, OH, OW, KW, KH, N, IC_IH_IW, IH_IW, N_OH, KH_KW, IC_KH_KW, s0, s1, p0, p1, d0, d1 });
 }
 
-/// Ports `ggml_cuda_op_im2col` (im2col.cu:81 @8642541b2).
+/// Ports `ggml_cuda_op_im2col` (im2col.cu:81 @cd959bae9).
 pub fn opIm2col(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -110,9 +110,9 @@ pub fn opIm2col(ctx: *common.Context, dst: *Tensor) void {
     }
 }
 
-/// Ports `im2col_3d_cuda` (im2col.cu:168 @8642541b2), reached through
+/// Ports `im2col_3d_cuda` (im2col.cu:168 @cd959bae9), reached through
 /// `im2col_3d_cuda_f16` and `im2col_3d_cuda_f32` (im2col.cu:196, 207
-/// @8642541b2).
+/// @cd959bae9).
 fn im2col3dCuda(
     comptime T: type,
     src: ?*const anyopaque,
@@ -173,7 +173,7 @@ fn im2col3dCuda(
     });
 }
 
-/// Ports `ggml_cuda_op_im2col_3d` (im2col.cu:218 @8642541b2).
+/// Ports `ggml_cuda_op_im2col_3d` (im2col.cu:218 @cd959bae9).
 pub fn opIm2col3d(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);

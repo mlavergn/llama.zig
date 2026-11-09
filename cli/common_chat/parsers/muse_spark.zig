@@ -139,7 +139,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_muse_spark` (parsers/muse-spark.cpp:13 @8642541b2).
+/// Ports `common_chat_params_init_muse_spark` (parsers/muse-spark.cpp:13 @cd959bae9).
 /// The generation prompt is just `<|start|>assistant`; the model emits its
 /// own ` to=...<|message|>`.
 ///

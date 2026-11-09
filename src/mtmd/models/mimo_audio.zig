@@ -19,7 +19,7 @@ const gpa = impl.gpa;
 const ne = graph.ne;
 const nb = graph.nb;
 
-/// The `add_pos` lambda (mimo-audio.cpp:46 @8642541b2) of `build`. `ctx` is
+/// The `add_pos` lambda (mimo-audio.cpp:46 @cd959bae9) of `build`. `ctx` is
 /// the positions tensor.
 fn addPos(ctx: ?*anyopaque, g: *graph.Graph, x: T, layer: *const model_mod.Layer) T {
     _ = layer;
@@ -27,11 +27,11 @@ fn addPos(ctx: ?*anyopaque, g: *graph.Graph, x: T, layer: *const model_mod.Layer
     return c.ggml_rope_ext(g.ctx0, x, inp_pos, null, g.d_head, c.GGML_ROPE_TYPE_NEOX, 0, g.hparams.rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
 }
 
-/// `skip_capture_il` (mimo-audio.cpp:37 @8642541b2): encoder_skip_layer_id=3
+/// `skip_capture_il` (mimo-audio.cpp:37 @cd959bae9): encoder_skip_layer_id=3
 /// (1-indexed) captures the output of layer index 2.
 const skip_capture_il: c_int = 2;
 
-/// The `callback_layer_out` lambda (mimo-audio.cpp:40 @8642541b2) of `build`. `ctx` is the `skip_hidden` it writes.
+/// The `callback_layer_out` lambda (mimo-audio.cpp:40 @cd959bae9) of `build`. `ctx` is the `skip_hidden` it writes.
 fn captureSkip(ctx: ?*anyopaque, g: *graph.Graph, layer_cur: T, il: c_int) void {
     _ = g;
     const skip_hidden: *T = @ptrCast(@alignCast(ctx.?));
@@ -40,12 +40,12 @@ fn captureSkip(ctx: ?*anyopaque, g: *graph.Graph, layer_cur: T, il: c_int) void 
     }
 }
 
-/// The `apply_local_rope` lambda (mimo-audio.cpp:151 @8642541b2) of `build`.
+/// The `apply_local_rope` lambda (mimo-audio.cpp:151 @cd959bae9) of `build`.
 fn applyLocalRope(g: *const graph.Graph, x: T, local_pos: T, local_rope_theta: f32) T {
     return c.ggml_rope_ext(g.ctx0, x, local_pos, null, g.d_head, c.GGML_ROPE_TYPE_NEOX, 0, local_rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
 }
 
-/// Ports `build` (mimo-audio.cpp:3 @8642541b2), a member of
+/// Ports `build` (mimo-audio.cpp:3 @cd959bae9), a member of
 /// `clip_graph_mimo_audio`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;

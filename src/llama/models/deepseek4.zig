@@ -32,7 +32,7 @@ const Tensor = c.ggml_tensor;
 
 const src = "models/deepseek4.cpp";
 
-/// Ports `dsv4_rope_attn_factor` (src/models/models.h:1340 @8642541b2): the
+/// Ports `dsv4_rope_attn_factor` (src/models/models.h:1340 @cd959bae9): the
 /// YaRN attention factor that cancels ggml's RoPE mscale, as the DeepSeek-V4
 /// reference applies none.
 pub fn ropeAttnFactor(freq_scale: f32, ext_factor: f32) f32 {
@@ -40,7 +40,7 @@ pub fn ropeAttnFactor(freq_scale: f32, ext_factor: f32) f32 {
     return 1.0 / (1.0 + 0.1 * impl.logf(1.0 / freq_scale));
 }
 
-/// Ports `llama_model_deepseek4`'s `load_arch_hparams` (models/deepseek4.cpp:11 @8642541b2).
+/// Ports `llama_model_deepseek4`'s `load_arch_hparams` (models/deepseek4.cpp:11 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -110,7 +110,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_deepseek4`'s `load_arch_tensors` (models/deepseek4.cpp:74 @8642541b2).
+/// Ports `llama_model_deepseek4`'s `load_arch_tensors` (models/deepseek4.cpp:74 @cd959bae9).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -219,7 +219,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// Ports `llama_model_deepseek4`'s `build_arch_graph` (models/deepseek4.cpp:177
-/// @8642541b2): the MTP draft head for that graph type, the main model
+/// @cd959bae9): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -229,24 +229,24 @@ pub fn buildArchGraph(model: *const Model, b: *const Builder, params: *const gra
 // -----------------------------------------------------------------------------
 // Views and the compressor state
 
-/// Ports `dsv4_elem_offset` (models/deepseek4.cpp:184 @8642541b2).
+/// Ports `dsv4_elem_offset` (models/deepseek4.cpp:184 @cd959bae9).
 fn elemOffset(t: *const Tensor, i: i64) usize {
     return c.ggml_row_size(t.type, i);
 }
 
-/// Ports `dsv4_view_1d` (models/deepseek4.cpp:188 @8642541b2): `ne0`
+/// Ports `dsv4_view_1d` (models/deepseek4.cpp:188 @cd959bae9): `ne0`
 /// elements from element `j0`.
 fn view1d(ctx: *c.ggml_context, t: *Tensor, ne0: i64, j0: i64) *Tensor {
     return c.ggml_view_1d(ctx, t, ne0, elemOffset(t, j0));
 }
 
-/// Ports `dsv4_view_2d` (models/deepseek4.cpp:192 @8642541b2): `ne0` by
+/// Ports `dsv4_view_2d` (models/deepseek4.cpp:192 @cd959bae9): `ne0` by
 /// `ne1` from element `j0` of each row.
 fn view2d(ctx: *c.ggml_context, t: *Tensor, ne0: i64, ne1: i64, j0: i64) *Tensor {
     return c.ggml_view_2d(ctx, t, ne0, ne1, t.nb[1], elemOffset(t, j0));
 }
 
-/// Ports `dsv4_append_zero_row` (models/deepseek4.cpp:201 @8642541b2): one
+/// Ports `dsv4_append_zero_row` (models/deepseek4.cpp:201 @cd959bae9): one
 /// more row, zero or -inf, built from the first row so it stays in the
 /// graph.
 fn appendZeroRow(ctx: *c.ggml_context, t: *Tensor, neg_inf: bool) *Tensor {
@@ -257,13 +257,13 @@ fn appendZeroRow(ctx: *c.ggml_context, t: *Tensor, neg_inf: bool) *Tensor {
     return c.ggml_concat(ctx, t, row, 1);
 }
 
-/// Mirrors `dsv4_state_tensors` (models/deepseek4.cpp:209 @8642541b2).
+/// Mirrors `dsv4_state_tensors` (models/deepseek4.cpp:209 @cd959bae9).
 const StateTensors = struct {
     kv: ?*Tensor = null,
     score: ?*Tensor = null,
 };
 
-/// Ports `dsv4_build_state_restore` (models/deepseek4.cpp:214 @8642541b2):
+/// Ports `dsv4_build_state_restore` (models/deepseek4.cpp:214 @cd959bae9):
 /// a compressor's state, with a pending rollback's snapshot rows copied
 /// back over the current plane first.
 fn buildStateRestore(ctx: *c.ggml_context, inp: *const graph.InpDsv4Comp, state: *const kv_cache_dsv4.CompState, il: c_int) StateTensors {
@@ -284,7 +284,7 @@ fn buildStateRestore(ctx: *c.ggml_context, inp: *const graph.InpDsv4Comp, state:
     return restored;
 }
 
-/// Ports `dsv4_build_state_snapshot` (models/deepseek4.cpp:237 @8642541b2):
+/// Ports `dsv4_build_state_snapshot` (models/deepseek4.cpp:237 @cd959bae9):
 /// the rollback planes, from the graph-local `[state | current]` rows.
 fn buildStateSnapshot(ctx: *c.ggml_context, inp: *const graph.InpDsv4Comp, state: *const kv_cache_dsv4.CompState, source_kv: ?*Tensor, source_score: ?*Tensor, il: c_int) StateTensors {
     const snap_src = inp.state_snapshot_src_idxs orelse return .{};
@@ -300,13 +300,13 @@ fn buildStateSnapshot(ctx: *c.ggml_context, inp: *const graph.InpDsv4Comp, state
     return .{ .kv = kv, .score = score };
 }
 
-/// `DSV4_CSA_RATIO` (models/deepseek4.cpp:258 @8642541b2).
+/// `DSV4_CSA_RATIO` (models/deepseek4.cpp:258 @cd959bae9).
 const csa_ratio: i64 = 4;
-/// `DSV4_HCA_RATIO` (models/deepseek4.cpp:259 @8642541b2).
+/// `DSV4_HCA_RATIO` (models/deepseek4.cpp:259 @cd959bae9).
 const hca_ratio: i64 = 128;
 
 /// Ports `llama_model_deepseek4`'s `graph`'s `build_hc_mean`
-/// (models/deepseek4.cpp:261 @8642541b2), a free function `dsv4_hc_mean`
+/// (models/deepseek4.cpp:261 @cd959bae9), a free function `dsv4_hc_mean`
 /// before v0.6.0: the mean over the hyper-connection streams, `[n_embd,
 /// hc, n_tokens]` to `[n_embd, n_tokens]`.
 pub fn hcMean(ctx: *c.ggml_context, x: *Tensor) *Tensor {
@@ -320,7 +320,7 @@ pub fn hcMean(ctx: *c.ggml_context, x: *Tensor) *Tensor {
     return c.ggml_scale(ctx, acc, 1.0 / @as(f32, @floatFromInt(hc)));
 }
 
-/// Ports `dsv4_hc_affine` (models/deepseek4.cpp:271 @8642541b2).
+/// Ports `dsv4_hc_affine` (models/deepseek4.cpp:271 @cd959bae9).
 fn hcAffine(ctx: *c.ggml_context, x_: *Tensor, scale: *Tensor, base: *Tensor) *Tensor {
     var x: *Tensor = c.ggml_mul(ctx, x_, scale);
     x = c.ggml_add(ctx, x, base);
@@ -331,7 +331,7 @@ fn hcAffine(ctx: *c.ggml_context, x_: *Tensor, scale: *Tensor, base: *Tensor) *T
 // Hyper-connections
 
 /// Ports the overload of `llama_model_deepseek4`'s graph's `build_hc_pre`
-/// that takes the weights (models/deepseek4.cpp:281 @8642541b2): the
+/// that takes the weights (models/deepseek4.cpp:281 @cd959bae9): the
 /// streams' weighted sum, `[n_embd, hc, n_tokens]` by `[hc, n_tokens]`.
 pub fn buildHcPreWeighted(b: *const Builder, x: *Tensor, weights: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -360,7 +360,7 @@ pub fn buildHcPreWeighted(b: *const Builder, x: *Tensor, weights: *Tensor, il: c
 }
 
 /// Ports `llama_model_deepseek4`'s graph's `build_hc_sinkhorn`
-/// (models/deepseek4.cpp:308 @8642541b2). `comb` is `[dst_hc, src_hc,
+/// (models/deepseek4.cpp:308 @cd959bae9). `comb` is `[dst_hc, src_hc,
 /// n_tokens]`, and Sinkhorn follows the reference: a row softmax over dst,
 /// one column normalization, then repeated row and column normalization.
 pub fn buildHcSinkhorn(b: *const Builder, comb_: *Tensor, il: c_int) *Tensor {
@@ -400,7 +400,7 @@ pub fn buildHcSinkhorn(b: *const Builder, comb_: *Tensor, il: c_int) *Tensor {
     return comb;
 }
 
-/// Mirrors the graph's `hc_pre` (src/models/models.h:1369 @8642541b2): `cur` is the collapsed input, `post` and `comb` feed
+/// Mirrors the graph's `hc_pre` (src/models/models.h:1369 @cd959bae9): `cur` is the collapsed input, `post` and `comb` feed
 /// `build_hc_post`.
 pub const HcPre = struct {
     cur: *Tensor,
@@ -408,7 +408,7 @@ pub const HcPre = struct {
     comb: *Tensor,
 };
 
-/// Mirrors the graph's `hc_mixes` (src/models/models.h:1375 @8642541b2): `pre` is the pre weights, `post`
+/// Mirrors the graph's `hc_mixes` (src/models/models.h:1375 @cd959bae9): `pre` is the pre weights, `post`
 /// and `comb` feed `build_hc_post`.
 pub const HcMixes = struct {
     pre: *Tensor,
@@ -417,7 +417,7 @@ pub const HcMixes = struct {
 };
 
 /// Ports `llama_model_deepseek4`'s graph's `build_hc_pre`
-/// (models/deepseek4.cpp:346 @8642541b2): a hyper-connection's mixes, and
+/// (models/deepseek4.cpp:346 @cd959bae9): a hyper-connection's mixes, and
 /// the streams collapsed with their pre weights.
 pub fn buildHcPre(b: *const Builder, x: *Tensor, hc_fn: *Tensor, hc_scale: *Tensor, hc_base: *Tensor, il: c_int) HcPre {
     const mixes = buildHcMixes(b, x, hc_fn, hc_scale, hc_base, il);
@@ -425,7 +425,7 @@ pub fn buildHcPre(b: *const Builder, x: *Tensor, hc_fn: *Tensor, hc_scale: *Tens
 }
 
 /// Ports `llama_model_deepseek4`'s graph's `build_hc_mixes`
-/// (models/deepseek4.cpp:357 @8642541b2): a hyper-connection's mixes -- the
+/// (models/deepseek4.cpp:357 @cd959bae9): a hyper-connection's mixes -- the
 /// pre weights it reduces the streams with, and the post weights and the
 /// stream combination for `build_hc_post`.
 pub fn buildHcMixes(b: *const Builder, x: *Tensor, hc_fn: *Tensor, hc_scale: *Tensor, hc_base: *Tensor, il: c_int) HcMixes {
@@ -481,7 +481,7 @@ pub fn buildHcMixes(b: *const Builder, x: *Tensor, hc_fn: *Tensor, hc_scale: *Te
 }
 
 /// Ports `llama_model_deepseek4`'s graph's `build_hc_post`
-/// (models/deepseek4.cpp:413 @8642541b2): the block's output spread over
+/// (models/deepseek4.cpp:413 @cd959bae9): the block's output spread over
 /// the streams by `post`, plus the residual streams mixed by `comb`.
 pub fn buildHcPost(b: *const Builder, x: *Tensor, residual: *Tensor, post: *Tensor, comb: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -520,7 +520,7 @@ pub fn buildHcPost(b: *const Builder, x: *Tensor, residual: *Tensor, post: *Tens
 }
 
 /// Ports `llama_model_deepseek4`'s graph's `build_hc_head`
-/// (models/deepseek4.cpp:450 @8642541b2): the streams reduced to one for
+/// (models/deepseek4.cpp:450 @cd959bae9): the streams reduced to one for
 /// the output head.
 pub fn buildHcHead(b: *const Builder, x: *Tensor, hc_fn: *Tensor, hc_scale: *Tensor, hc_base: *Tensor) *Tensor {
     const ctx = b.ctx0;
@@ -545,7 +545,7 @@ pub fn buildHcHead(b: *const Builder, x: *Tensor, hc_fn: *Tensor, hc_scale: *Ten
 // Compressors
 
 /// Ports `llama_model_deepseek4`'s graph's `build_hca_compressed_kv_from_state`
-/// (models/deepseek4.cpp:472 @8642541b2): each completed block's 128 state
+/// (models/deepseek4.cpp:472 @cd959bae9): each completed block's 128 state
 /// rows, softmax-weighted by their scores into one row, normalized and
 /// rotated at the block's first position.
 pub fn buildHcaCompressedKvFromState(b: *const Builder, kv_state: *Tensor, score_state: *Tensor, state_read_idxs: ?*Tensor, comp_pos: ?*Tensor, norm: ?*Tensor, n_embd_head: i64, name: [*:0]const u8, il: c_int) *Tensor {
@@ -588,7 +588,7 @@ pub fn buildHcaCompressedKvFromState(b: *const Builder, kv_state: *Tensor, score
 }
 
 /// Ports `llama_model_deepseek4`'s graph's `build_overlap_compressed_kv_from_state`
-/// (models/deepseek4.cpp:519 @8642541b2): CSA's and the indexer's
+/// (models/deepseek4.cpp:519 @cd959bae9): CSA's and the indexer's
 /// overlapping compression -- each block weighs its previous window's
 /// first half of the state with its own window's second half.
 pub fn buildOverlapCompressedKvFromState(b: *const Builder, kv_state_: *Tensor, score_state_: *Tensor, state_read_idxs: ?*Tensor, comp_pos: ?*Tensor, norm: ?*Tensor, ratio: i64, n_embd_head: i64, name: [*:0]const u8, il: c_int) *Tensor {
@@ -735,7 +735,7 @@ pub fn buildLidTopK(b: *const Builder, model: *const Model, inp_dsv4: *const gra
 }
 
 /// Ports `llama_model_deepseek4`'s graph's `build_top_k_mask`
-/// (models/deepseek4.cpp:680 @8642541b2): the compressed mask with
+/// (models/deepseek4.cpp:680 @cd959bae9): the compressed mask with
 /// everything outside each query's top-k rows masked too.
 pub fn buildTopKMask(b: *const Builder, kq_mask: *Tensor, top_k: *Tensor, name: [*:0]const u8, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -909,7 +909,7 @@ pub const AttnInput = union(enum) {
 };
 
 /// Ports `llama_model_deepseek4`'s graph's `build_attention`, both overloads
-/// (models/deepseek4.cpp:869, 878 @8642541b2), and the
+/// (models/deepseek4.cpp:869, 878 @cd959bae9), and the
 /// `build_attention_impl` they forward to (models/deepseek4.cpp:887
 /// @8642541b2): one shared K/V head, RoPE'd on its tail, with the layer's
 /// compressor states updated and its compressed rows committed before
@@ -1327,7 +1327,7 @@ pub fn buildGraph(model: *const Model, b: *const Builder) void {
 }
 
 /// Ports the constructor of `llama_model_deepseek4`'s `graph_mtp`
-/// (models/deepseek4.cpp:1367 @8642541b2): the MTP block over the trunk's
+/// (models/deepseek4.cpp:1367 @cd959bae9): the MTP block over the trunk's
 /// hidden streams and the next token's embedding, through the same
 /// hyper-connections, then the shared head.
 pub fn buildGraphMtp(model: *const Model, b: *const Builder) void {

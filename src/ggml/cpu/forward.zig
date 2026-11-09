@@ -160,7 +160,7 @@ const kernels = struct {
     extern fn ggml_compute_forward_opt_step_sgd(params: *const ComputeParams, dst: *Tensor) void;
 };
 
-/// Ports `ggml_compute_forward` (ggml-cpu.c:1745 @8642541b2).
+/// Ports `ggml_compute_forward` (ggml-cpu.c:1754 @cd959bae9).
 ///
 /// Parameters:
 /// - `params`: this thread's index, count, and slice of the work buffer.

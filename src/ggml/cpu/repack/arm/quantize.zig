@@ -38,7 +38,7 @@ const c = impl.c;
 const f32x4 = neon.f32x4;
 
 /// Ports `ggml_quantize_mat_q8_0_4x4` and `ggml_quantize_mat_q8_0_4x8`
-/// (arch/arm/repack.cpp:69, 137 @8642541b2).
+/// (arch/arm/repack.cpp:69, 137 @cd959bae9).
 fn quantizeMat(comptime blck: i64, x: [*]const f32, vy: *anyopaque, k: i64) void {
     const nb = @divTrunc(k, 32);
     const y: [*]blocks.block_q8_0x4 = @ptrCast(@alignCast(vy));

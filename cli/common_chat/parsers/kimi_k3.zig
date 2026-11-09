@@ -166,7 +166,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_kimi_k3` (parsers/kimi-k3.cpp:8 @8642541b2).
+/// Ports `common_chat_params_init_kimi_k3` (parsers/kimi-k3.cpp:8 @cd959bae9).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

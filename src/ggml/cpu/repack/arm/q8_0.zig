@@ -72,7 +72,7 @@ inline fn load4d(p: [*]const i8) [4]i8x8 {
     };
 }
 
-/// Ports `ggml_gemv_q8_0_4x4_q8_0` (arch/arm/repack.cpp:1717 @8642541b2).
+/// Ports `ggml_gemv_q8_0_4x4_q8_0` (arch/arm/repack.cpp:1771 @cd959bae9).
 pub export fn ggml_gemv_q8_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !neon.has_dotprod) return ggml_gemv_q8_0_4x4_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 32);
@@ -161,7 +161,7 @@ pub export fn ggml_gemv_q8_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
     }
 }
 
-/// Ports `ggml_gemm_q8_0_4x4_q8_0` (arch/arm/repack.cpp:5082 @8642541b2).
+/// Ports `ggml_gemm_q8_0_4x4_q8_0` (arch/arm/repack.cpp:5388 @cd959bae9).
 ///
 /// Four row accumulators, each fed by `vdotq_laneq_s32` on a different
 /// 32-bit lane of the activation — so one pass over the weights serves all

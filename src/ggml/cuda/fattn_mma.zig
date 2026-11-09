@@ -35,7 +35,7 @@ const Tensor = c.ggml_tensor;
 /// `sizeof(half2)`.
 const sizeof_half2 = 4;
 
-/// Ports `fattn_mma_config` (fattn-mma-f16.cuh:10 @8642541b2).
+/// Ports `fattn_mma_config` (fattn-mma-f16.cuh:10 @cd959bae9).
 pub const Config = struct {
     /// Number of threads per CUDA block.
     nthreads: c_int,
@@ -65,7 +65,7 @@ fn lookup(t: *const table.MmaTable, DKQ: c_int, DV: c_int, ncols: c_int) Config 
     return lookup(t.fallthrough.?, DKQ, DV, ncols);
 }
 
-/// Ports the host `ggml_cuda_fattn_mma_get_config` (fattn-mma-f16.cuh:234 @8642541b2).
+/// Ports the host `ggml_cuda_fattn_mma_get_config` (fattn-mma-f16.cuh:234 @cd959bae9).
 /// The `amd_mfma_available` and `amd_wmma_available` arms, which pick the
 /// CDNA and RDNA tables, are false for every CUDA compute capability; those
 /// tables are not generated.
@@ -80,7 +80,7 @@ fn getConfig(DKQ: c_int, DV: c_int, ncols: c_int, cc: c_int) Config {
     return lookup(&table.mma_volta, DKQ, DV, ncols);
 }
 
-/// Ports `get_cols_per_warp` (fattn-mma-f16.cuh:340 @8642541b2).
+/// Ports `get_cols_per_warp` (fattn-mma-f16.cuh:340 @cd959bae9).
 fn getColsPerWarp(cc: c_int) c_int {
     if (common.turingMmaAvailable(cc) or fattn_common.amdWmmaAvailable(cc) or fattn_common.amdMfmaAvailable(cc)) {
         return 16;
@@ -90,8 +90,8 @@ fn getColsPerWarp(cc: c_int) c_int {
     }
 }
 
-/// Ports the host `ggml_cuda_fattn_mma_get_nstages` (fattn-mma-f16.cuh:365 @8642541b2),
-/// with `ggml_cuda_fattn_mma_get_nstages_target` (fattn-mma-f16.cuh:316 @8642541b2)
+/// Ports the host `ggml_cuda_fattn_mma_get_nstages` (fattn-mma-f16.cuh:365 @cd959bae9),
+/// with `ggml_cuda_fattn_mma_get_nstages_target` (fattn-mma-f16.cuh:316 @cd959bae9)
 /// inlined.
 fn getNstages(DKQ: c_int, DV: c_int, ncols1: c_int, ncols2: c_int, cc: c_int) c_int {
     return if (common.cpAsyncAvailable(cc) and ncols2 >= 2) getConfig(DKQ, DV, ncols1 * ncols2, cc).nstages_target else 0;
@@ -136,7 +136,7 @@ fn library(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols
         "fattn";
 }
 
-/// Ports the host `ggml_cuda_fattn_mma_get_swizzled` (fattn-mma-f16.cuh:349 @8642541b2):
+/// Ports the host `ggml_cuda_fattn_mma_get_swizzled` (fattn-mma-f16.cuh:349 @cd959bae9):
 /// a K/V shared-memory tile is XOR-swizzled instead of padded by four
 /// `half2` when there is ldmatrix (Turing and later) and both the K and the
 /// V batch are a multiple of 32 `half2`. The kernels compute the same at
@@ -150,7 +150,7 @@ fn getSwizzled(DKQ: c_int, DV: c_int, ncols: c_int, cc: c_int) bool {
         @rem(cfg.nbatch_K2, 32) == 0 and @rem(cfg.nbatch_V2, 32) == 0;
 }
 
-/// Ports `ggml_cuda_flash_attn_ext_mma_f16_may_use_sparse` (fattn-mma-f16.cuh:1788 @8642541b2):
+/// Ports `ggml_cuda_flash_attn_ext_mma_f16_may_use_sparse` (fattn-mma-f16.cuh:1794 @cd959bae9):
 /// the `(DKQ, DV, ncols1, ncols2)` instantiations that have a sparse-gather
 /// kernel, `use_sparse = true`. `fattn.zig`'s `ncols1` switch asks it too,
 /// at compile time, and `getBestKernel` at run time.

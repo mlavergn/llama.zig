@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_exaone_moe`'s `load_arch_hparams` (models/exaone-moe.cpp:3 @8642541b2).
+/// Ports `llama_model_exaone_moe`'s `load_arch_hparams` (models/exaone-moe.cpp:3 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -51,7 +51,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_exaone_moe`'s `load_arch_tensors` (models/exaone-moe.cpp:28 @8642541b2).
+/// Ports `llama_model_exaone_moe`'s `load_arch_tensors` (models/exaone-moe.cpp:28 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -135,13 +135,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_exaone_moe`'s `build_arch_graph` (models/exaone-moe.cpp:104 @8642541b2).
+/// Ports `llama_model_exaone_moe`'s `build_arch_graph` (models/exaone-moe.cpp:104 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_exaone_moe`'s `graph`
-/// (models/exaone-moe.cpp:108 @8642541b2).
+/// (models/exaone-moe.cpp:108 @cd959bae9).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

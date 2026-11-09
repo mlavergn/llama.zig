@@ -40,7 +40,7 @@ const Node = schema.Node;
 pub const Error = schema.Error;
 const raise = schema.raise;
 
-/// Ports `common_grammar_options` (json-schema-to-grammar.h:17 @8642541b2).
+/// Ports `common_grammar_options` (json-schema-to-grammar.h:17 @cd959bae9).
 pub const Options = struct {
     dotall: bool = false,
 };
@@ -53,19 +53,19 @@ pub var warning_sink: ?*const fn (line: []const u8) void = null;
 // -----------------------------------------------------------------------------
 // common.cpp's string helpers
 
-/// Ports `string_join` (common/common.cpp:533 @8642541b2).
+/// Ports `string_join` (common/common.cpp:550 @cd959bae9).
 fn stringJoin(a: std.mem.Allocator, values: []const []const u8, sep: []const u8) Error![]u8 {
     return std.mem.join(a, sep, values);
 }
 
-/// Ports `string_repeat` (common/common.cpp:560 @8642541b2).
+/// Ports `string_repeat` (common/common.cpp:577 @cd959bae9).
 fn stringRepeat(a: std.mem.Allocator, s: []const u8, n: usize) Error![]u8 {
     const out = try a.alloc(u8, s.len * n);
     for (0..n) |k| @memcpy(out[k * s.len ..][0..s.len], s);
     return out;
 }
 
-/// Ports `string_split` (common/common.cpp:544 @8642541b2), the overload
+/// Ports `string_split` (common/common.cpp:561 @cd959bae9), the overload
 /// taking a string delimiter: every piece, empty ones included.
 fn stringSplit(a: std.mem.Allocator, s: []const u8, delim: []const u8) Error![][]const u8 {
     var parts: std.ArrayList([]const u8) = .empty;
@@ -107,7 +107,7 @@ fn intText(a: std.mem.Allocator, v: anytype) Error![]u8 {
 // -----------------------------------------------------------------------------
 // Repetition and integer ranges
 
-/// Ports `build_repetition` (json-schema-to-grammar.cpp:18 @8642541b2).
+/// Ports `build_repetition` (json-schema-to-grammar.cpp:18 @cd959bae9).
 /// `max_items == maxInt(c_int)` means unbounded. The C++'s `int`
 /// arithmetic wraps here, where a pattern's `{-1,}` reaches it.
 fn buildRepetition(a: std.mem.Allocator, item_rule: []const u8, min_items: c_int, max_items: c_int, separator_rule: []const u8) Error![]u8 {
@@ -153,7 +153,7 @@ const Out = struct {
         try self.buf.print(self.a, "{d}", .{v});
     }
 
-    /// the `digit_range` lambda (json-schema-to-grammar.cpp:49 @8642541b2)
+    /// the `digit_range` lambda (json-schema-to-grammar.cpp:49 @cd959bae9)
     fn digitRange(self: *Out, from: u8, to: u8) Error!void {
         try self.ch('[');
         if (from == to) {
@@ -166,7 +166,7 @@ const Out = struct {
         try self.ch(']');
     }
 
-    /// the `more_digits` lambda (json-schema-to-grammar.cpp:58 @8642541b2)
+    /// the `more_digits` lambda (json-schema-to-grammar.cpp:58 @cd959bae9)
     fn moreDigits(self: *Out, min_digits: c_int, max_digits: c_int) Error!void {
         try self.s("[0-9]");
         if (min_digits == max_digits and min_digits == 1) return;
@@ -179,7 +179,7 @@ const Out = struct {
         try self.ch('}');
     }
 
-    /// the `uniform_range` lambda (json-schema-to-grammar.cpp:73 @8642541b2)
+    /// the `uniform_range` lambda (json-schema-to-grammar.cpp:73 @cd959bae9)
     fn uniformRange(self: *Out, from: []const u8, to: []const u8) Error!void {
         var i: usize = 0;
         while (i < from.len and i < to.len and from[i] == to[i]) i += 1;
@@ -241,7 +241,7 @@ const Out = struct {
     }
 };
 
-/// Ports `build_min_max_int` (json-schema-to-grammar.cpp:45 @8642541b2).
+/// Ports `build_min_max_int` (json-schema-to-grammar.cpp:45 @cd959bae9).
 /// `minInt(i64)` and `maxInt(i64)` mean unbounded. Negating a bound is
 /// signed overflow in the C++ at `minInt(i64)`, which wraps; so it does
 /// here.
@@ -358,17 +358,17 @@ fn buildMinMaxInt(min_in: i64, max_value: i64, out: *Out, decimals_left: c_int, 
 // -----------------------------------------------------------------------------
 // The built-in rules
 
-/// Ports `SPACE_RULE` (json-schema-to-grammar.cpp:229 @8642541b2).
+/// Ports `SPACE_RULE` (json-schema-to-grammar.cpp:229 @cd959bae9).
 const space_rule = "| \" \" | \"\\n\"{1,2} [ \\t]{0,20}";
 
-/// Ports `BuiltinRule` (json-schema-to-grammar.cpp:231 @8642541b2).
+/// Ports `BuiltinRule` (json-schema-to-grammar.cpp:231 @cd959bae9).
 const BuiltinRule = struct {
     name: []const u8,
     content: []const u8,
     deps: []const []const u8 = &.{},
 };
 
-/// Ports `PRIMITIVE_RULES` (json-schema-to-grammar.cpp:236 @8642541b2).
+/// Ports `PRIMITIVE_RULES` (json-schema-to-grammar.cpp:236 @cd959bae9).
 /// The C++ map is unordered and only ever looked up.
 const primitive_rules = [_]BuiltinRule{
     .{ .name = "boolean", .content = "(\"true\" | \"false\")" },
@@ -385,7 +385,7 @@ const primitive_rules = [_]BuiltinRule{
     .{ .name = "null", .content = "\"null\"" },
 };
 
-/// Ports `STRING_FORMAT_RULES` (json-schema-to-grammar.cpp:251 @8642541b2).
+/// Ports `STRING_FORMAT_RULES` (json-schema-to-grammar.cpp:251 @cd959bae9).
 const string_format_rules = [_]BuiltinRule{
     .{ .name = "date", .content = "[0-9]{4} \"-\" ( \"0\" [1-9] | \"1\" [0-2] ) \"-\" ( \"0\" [1-9] | [1-2] [0-9] | \"3\" [0-1] )" },
     .{ .name = "time", .content = "([01] [0-9] | \"2\" [0-3]) \":\" [0-5] [0-9] \":\" [0-5] [0-9] ( \".\" [0-9]{3} )? ( \"Z\" | ( \"+\" | \"-\" ) ( [01] [0-9] | \"2\" [0-3] ) \":\" [0-5] [0-9] )" },
@@ -406,27 +406,27 @@ fn primitive(name: []const u8) *const BuiltinRule {
     return findRule(&primitive_rules, name).?;
 }
 
-/// Ports `is_reserved_name` (json-schema-to-grammar.cpp:260 @8642541b2).
+/// Ports `is_reserved_name` (json-schema-to-grammar.cpp:260 @cd959bae9).
 fn isReservedName(name: []const u8) bool {
     if (std.mem.eql(u8, name, "root")) return true;
     return findRule(&primitive_rules, name) != null or findRule(&string_format_rules, name) != null;
 }
 
-/// Ports `NON_LITERAL_SET` (json-schema-to-grammar.cpp:281 @8642541b2).
+/// Ports `NON_LITERAL_SET` (json-schema-to-grammar.cpp:281 @cd959bae9).
 fn isNonLiteral(c: u8) bool {
     return std.mem.indexOfScalar(u8, "|.()[]{}*+?^$", c) != null;
 }
 
-/// Ports `ESCAPED_IN_REGEXPS_BUT_NOT_IN_LITERALS` (json-schema-to-grammar.cpp:282 @8642541b2).
+/// Ports `ESCAPED_IN_REGEXPS_BUT_NOT_IN_LITERALS` (json-schema-to-grammar.cpp:282 @cd959bae9).
 fn isEscapedInRegexpsButNotInLiterals(c: u8) bool {
     return std.mem.indexOfScalar(u8, "^$.[]()|{}*+?", c) != null;
 }
 
-/// Ports `GRAMMAR_LITERAL_ESCAPE_RE` (json-schema-to-grammar.cpp:275 @8642541b2).
+/// Ports `GRAMMAR_LITERAL_ESCAPE_RE` (json-schema-to-grammar.cpp:275 @cd959bae9).
 /// `GRAMMAR_RANGE_LITERAL_ESCAPE_RE` beside it is never used.
 const grammar_literal_escape_re = "[\r\n\"\\\\]";
 
-/// Ports `GRAMMAR_LITERAL_ESCAPES` (json-schema-to-grammar.cpp:277 @8642541b2).
+/// Ports `GRAMMAR_LITERAL_ESCAPES` (json-schema-to-grammar.cpp:277 @cd959bae9).
 fn grammarLiteralEscape(c: u8) []const u8 {
     return switch (c) {
         '\r' => "\\r",
@@ -443,7 +443,7 @@ fn compileRegex(pattern: []const u8) regex.Regex {
     return regex.Regex.compile(pattern) catch |e| regex.throwRegexError(e);
 }
 
-/// Ports `replacePattern` (json-schema-to-grammar.cpp:284 @8642541b2):
+/// Ports `replacePattern` (json-schema-to-grammar.cpp:284 @cd959bae9):
 /// `regex_search` from each match's end, each match replaced by
 /// `replacement` of its first character.
 fn replacePattern(a: std.mem.Allocator, input: []const u8, re: *const regex.Regex, comptime replacement: fn (u8) []const u8) Error![]u8 {
@@ -461,13 +461,13 @@ fn replacePattern(a: std.mem.Allocator, input: []const u8, re: *const regex.Rege
     return out.items;
 }
 
-/// Ports `format_literal` (json-schema-to-grammar.cpp:302 @8642541b2).
+/// Ports `format_literal` (json-schema-to-grammar.cpp:302 @cd959bae9).
 fn formatLiteral(a: std.mem.Allocator, re: *const regex.Regex, literal: []const u8) Error![]u8 {
     const escaped = try replacePattern(a, literal, re, grammarLiteralEscape);
     return std.mem.concat(a, u8, &.{ "\"", escaped, "\"" });
 }
 
-/// Ports `gbnf_format_literal` (json-schema-to-grammar.cpp:310 @8642541b2).
+/// Ports `gbnf_format_literal` (json-schema-to-grammar.cpp:310 @cd959bae9).
 ///
 /// Parameters:
 /// - `gpa`: allocates the result.
@@ -482,7 +482,7 @@ pub fn gbnfFormatLiteral(gpa: std.mem.Allocator, literal: []const u8) Error![]u8
     return gpa.dupe(u8, try formatLiteral(arena.allocator(), &re, literal));
 }
 
-/// Ports `gbnf_escape_length` (json-schema-to-grammar.cpp:328 @8642541b2):
+/// Ports `gbnf_escape_length` (json-schema-to-grammar.cpp:328 @cd959bae9):
 /// the length of a GBNF-compatible escape at `pos`, 0 if there is none.
 /// The two-byte escapes are the ones `parse_char` in `llama-grammar.cpp`
 /// reads; `\-` joined them at v0.5.0.
@@ -520,7 +520,7 @@ const PropRef = struct {
 const StringSet = std.StringHashMapUnmanaged(void);
 const RuleMap = std.StringHashMapUnmanaged([]const u8);
 
-/// Ports `gbnf_format_rule_name` (json-schema-to-grammar.cpp:313 @8642541b2):
+/// Ports `gbnf_format_rule_name` (json-schema-to-grammar.cpp:313 @cd959bae9):
 /// every run of bytes outside `[a-zA-Z0-9-]` becomes one `-`.
 ///
 /// Parameters:
@@ -543,7 +543,7 @@ pub fn gbnfFormatRuleName(a: std.mem.Allocator, name: []const u8) Error![]u8 {
     return out.items;
 }
 
-/// Ports `common_chat_schema_converter` (json-schema-to-grammar.cpp:355 @8642541b2).
+/// Ports `common_chat_schema_converter` (json-schema-to-grammar.cpp:355 @cd959bae9).
 pub const Converter = struct {
     a: std.mem.Allocator,
     dotall: bool,
@@ -551,11 +551,11 @@ pub const Converter = struct {
     refs_being_resolved: StringSet = .empty,
     errors: std.ArrayList([]const u8) = .empty,
     warnings: std.ArrayList([]const u8) = .empty,
-    /// `_depth`: how deep `visit` is, `depth_guard` (json-schema-to-grammar.cpp:365 @8642541b2)
+    /// `_depth`: how deep `visit` is, `depth_guard` (json-schema-to-grammar.cpp:365 @cd959bae9)
     depth: c_int = 0,
     re_literal_escape: regex.Regex,
 
-    /// Ports `common_chat_schema_converter` (json-schema-to-grammar.cpp:843 @8642541b2),
+    /// Ports `common_chat_schema_converter` (json-schema-to-grammar.cpp:843 @cd959bae9),
     /// the constructor.
     ///
     /// Parameters:
@@ -586,7 +586,7 @@ pub const Converter = struct {
         return std.fmt.allocPrint(self.a, "{s}{d}", .{ prefix, i });
     }
 
-    /// Ports `_add_rule` (json-schema-to-grammar.cpp:380 @8642541b2).
+    /// Ports `_add_rule` (json-schema-to-grammar.cpp:380 @cd959bae9).
     ///
     /// Return: the rule's name, borrowed from the converter's arena.
     pub fn addRule(self: *Converter, name: []const u8, rule: []const u8) Error![]const u8 {
@@ -608,7 +608,7 @@ pub const Converter = struct {
         return esc_name;
     }
 
-    /// Ports `_generate_union_rule` (json-schema-to-grammar.cpp:395 @8642541b2).
+    /// Ports `_generate_union_rule` (json-schema-to-grammar.cpp:395 @cd959bae9).
     fn generateUnionRule(self: *Converter, name: []const u8, alts: []const *Node) Error![]u8 {
         const rules = try self.a.alloc([]const u8, alts.len);
         for (alts, 0..) |alt, i| {
@@ -618,7 +618,7 @@ pub const Converter = struct {
         return stringJoin(self.a, rules, " | ");
     }
 
-    /// Ports `_visit_pattern` (json-schema-to-grammar.cpp:414 @8642541b2):
+    /// Ports `_visit_pattern` (json-schema-to-grammar.cpp:414 @cd959bae9):
     /// a pattern with no grammar equivalent degrades to any string with a
     /// warning; an invalid one is an error.
     fn visitPattern(self: *Converter, pattern: []const u8, name: []const u8) Error![]const u8 {
@@ -641,7 +641,7 @@ pub const Converter = struct {
         }
     }
 
-    /// Ports `_not_strings` (json-schema-to-grammar.cpp:665 @8642541b2): a
+    /// Ports `_not_strings` (json-schema-to-grammar.cpp:665 @cd959bae9): a
     /// rule matching a JSON string that is none of `strings`.
     fn notStrings(self: *Converter, strings: []const []const u8) Error![]u8 {
         var t = try trie_mod.Trie.init(self.a, strings);
@@ -655,7 +655,7 @@ pub const Converter = struct {
         return out.buf.items;
     }
 
-    /// Ports the lambda `visit` (json-schema-to-grammar.cpp:672 @8642541b2), in
+    /// Ports the lambda `visit` (json-schema-to-grammar.cpp:672 @cd959bae9), in
     /// `_not_strings`: one level per char of the longest name.
     fn notStringsVisit(self: *Converter, t: *const trie_mod.Trie, idx: usize, depth: c_int, char_rule: []const u8, out: *Out) Error!void {
         if (depth >= schema.recursive_limit) {
@@ -696,7 +696,7 @@ pub const Converter = struct {
         }
     }
 
-    /// Ports `_resolve_ref` (json-schema-to-grammar.cpp:710 @8642541b2).
+    /// Ports `_resolve_ref` (json-schema-to-grammar.cpp:710 @cd959bae9).
     fn resolveRef(self: *Converter, ref: *const schema.Ref) Error![]const u8 {
         const fragment = if (std.mem.indexOfScalar(u8, ref.ref, '#')) |at| ref.ref[at + 1 ..] else ref.ref;
         var ref_name: []const u8 = try self.cat(&.{ "ref", try gbnfFormatRuleName(self.a, fragment) });
@@ -719,7 +719,7 @@ pub const Converter = struct {
         return false;
     }
 
-    /// Ports `_build_object_rule` (json-schema-to-grammar.cpp:726 @8642541b2).
+    /// Ports `_build_object_rule` (json-schema-to-grammar.cpp:726 @cd959bae9).
     fn buildObjectRule(
         self: *Converter,
         properties: []const PropRef,
@@ -791,7 +791,7 @@ pub const Converter = struct {
         return rule.items;
     }
 
-    /// Ports the lambda `get_recursive_refs` (json-schema-to-grammar.cpp:784 @8642541b2),
+    /// Ports the lambda `get_recursive_refs` (json-schema-to-grammar.cpp:784 @cd959bae9),
     /// in `_build_object_rule`.
     fn recursiveRefs(self: *Converter, kv_names: *const RuleMap, name: []const u8, ks: []const []const u8, first_is_optional: bool) Error![]u8 {
         if (ks.len == 0) return self.a.dupe(u8, "");
@@ -812,7 +812,7 @@ pub const Converter = struct {
         return res;
     }
 
-    /// Ports `_add_primitive` (json-schema-to-grammar.cpp:823 @8642541b2).
+    /// Ports `_add_primitive` (json-schema-to-grammar.cpp:823 @cd959bae9).
     fn addPrimitive(self: *Converter, name: []const u8, rule: *const BuiltinRule) Error![]const u8 {
         const n = try self.addRule(name, rule.content);
         for (rule.deps) |dep| {
@@ -825,7 +825,7 @@ pub const Converter = struct {
         return n;
     }
 
-    /// Ports `add_schema` (json-schema-to-grammar.cpp:847 @8642541b2).
+    /// Ports `add_schema` (json-schema-to-grammar.cpp:847 @cd959bae9).
     ///
     /// Return: the rule's name, borrowed from the converter's arena.
     pub fn addSchema(self: *Converter, name: []const u8, node: *const Node) Error![]const u8 {
@@ -839,19 +839,19 @@ pub const Converter = struct {
         return json.dump(self.a, &v, -1) catch |e| schema.fromJson(e);
     }
 
-    /// Ports `_generate_constant_rule` (json-schema-to-grammar.cpp:851 @8642541b2).
+    /// Ports `_generate_constant_rule` (json-schema-to-grammar.cpp:851 @cd959bae9).
     fn generateConstantRule(self: *Converter, value: *const Value) Error![]u8 {
         const text = json.dump(self.a, value, -1) catch |e| return schema.fromJson(e);
         return formatLiteral(self.a, &self.re_literal_escape, text);
     }
 
-    /// Ports `_visit_primitive` (json-schema-to-grammar.cpp:855 @8642541b2).
+    /// Ports `_visit_primitive` (json-schema-to-grammar.cpp:855 @cd959bae9).
     fn visitPrimitive(self: *Converter, rule_name: []const u8, type_name: []const u8) Error![]const u8 {
         const n: []const u8 = if (std.mem.eql(u8, rule_name, "root")) "root" else type_name;
         return self.addPrimitive(n, primitive(type_name));
     }
 
-    /// Ports `_visit_all_of` (json-schema-to-grammar.cpp:859 @8642541b2).
+    /// Ports `_visit_all_of` (json-schema-to-grammar.cpp:859 @cd959bae9).
     fn visitAllOf(self: *Converter, children: []const *Node, name: []const u8, rule_name: []const u8) Error![]const u8 {
         var st: AllOfState = .{ .conv = self };
         for (children) |child| {
@@ -876,7 +876,7 @@ pub const Converter = struct {
         return self.addRule(rule_name, try self.buildObjectRule(st.properties.items, st.required.items, name, null));
     }
 
-    /// Ports `visit` (json-schema-to-grammar.cpp:907 @8642541b2).
+    /// Ports `visit` (json-schema-to-grammar.cpp:907 @cd959bae9).
     pub fn visit(self: *Converter, node: *const Node, name: []const u8) Error![]const u8 {
         // the $ref targets are visited too, a $ref chain is not bounded by the builder
         try schema.depthEnter(&self.depth);
@@ -966,7 +966,7 @@ pub const Converter = struct {
         }
     }
 
-    /// Ports `check_errors` (json-schema-to-grammar.cpp:1007 @8642541b2).
+    /// Ports `check_errors` (json-schema-to-grammar.cpp:1007 @cd959bae9).
     pub fn checkErrors(self: *Converter) Error!void {
         if (self.errors.items.len != 0) {
             return raise(error.InvalidArgument, &.{ "JSON schema conversion failed:\n", try stringJoin(self.a, self.errors.items, "\n") });
@@ -979,7 +979,7 @@ pub const Converter = struct {
         }
     }
 
-    /// Ports `format_grammar` (json-schema-to-grammar.cpp:1016 @8642541b2):
+    /// Ports `format_grammar` (json-schema-to-grammar.cpp:1016 @cd959bae9):
     /// every rule, in `std::map` order.
     ///
     /// Return: the grammar, in the converter's arena.
@@ -1006,7 +1006,7 @@ const AllOfState = struct {
     properties: std.ArrayList(PropRef) = .empty,
     enum_values: std.StringHashMapUnmanaged(usize) = .empty,
 
-    /// Ports the lambda `add_component` (json-schema-to-grammar.cpp:863 @8642541b2),
+    /// Ports the lambda `add_component` (json-schema-to-grammar.cpp:863 @cd959bae9),
     /// in `_visit_all_of`.
     fn addComponent(self: *AllOfState, comp: *const Node, is_required: bool, depth: c_int) Error!void {
         if (depth >= schema.recursive_limit) {
@@ -1059,7 +1059,7 @@ const PatternState = struct {
         return if (ls.literal) std.mem.concat(a, u8, &.{ "\"", ls.s, "\"" }) else ls.s;
     }
 
-    /// Ports `_pattern_to_rule` (json-schema-to-grammar.cpp:430 @8642541b2).
+    /// Ports `_pattern_to_rule` (json-schema-to-grammar.cpp:430 @cd959bae9).
     fn toRule(self: *PatternState, pattern: []const u8) PatternError![]const u8 {
         if (pattern.len < 2 or pattern[0] != '^' or pattern[pattern.len - 1] != '$') {
             return self.unsupported(&.{"not anchored with '^' and '$'"});
@@ -1070,13 +1070,13 @@ const PatternState = struct {
         return self.conv.addRule(self.name, try std.mem.concat(self.conv.a, u8, &.{ "\"\\\"\" (", rule, ") \"\\\"\"" }));
     }
 
-    /// the `get_dot` lambda (json-schema-to-grammar.cpp:450 @8642541b2)
+    /// the `get_dot` lambda (json-schema-to-grammar.cpp:450 @cd959bae9)
     fn getDot(self: *PatternState) Error![]const u8 {
         const rule: []const u8 = if (self.conv.dotall) "[\\U00000000-\\U0010FFFF]" else "[^\\x0A\\x0D]";
         return self.conv.addRule("dot", rule);
     }
 
-    /// the `join_seq` lambda (json-schema-to-grammar.cpp:461 @8642541b2):
+    /// the `join_seq` lambda (json-schema-to-grammar.cpp:461 @cd959bae9):
     /// consecutive literals merge into one.
     fn joinSeq(self: *PatternState, seq: []const LitOrRule) Error!LitOrRule {
         const a = self.conv.a;
@@ -1097,7 +1097,7 @@ const PatternState = struct {
         return .{ .s = try stringJoin(a, results.items, " "), .literal = false };
     }
 
-    /// the `transform` lambda (json-schema-to-grammar.cpp:447 @8642541b2)
+    /// the `transform` lambda (json-schema-to-grammar.cpp:447 @cd959bae9)
     fn transform(self: *PatternState) PatternError!LitOrRule {
         const a = self.conv.a;
         const sub = self.sub;
@@ -1246,7 +1246,7 @@ fn lessBytes(_: void, x: []const u8, y: []const u8) bool {
 // -----------------------------------------------------------------------------
 // Entry points
 
-/// Ports `json_schema_to_grammar` (json-schema-to-grammar.cpp:1025 @8642541b2),
+/// Ports `json_schema_to_grammar` (json-schema-to-grammar.cpp:1025 @cd959bae9),
 /// the overload taking JSON: every `std::runtime_error` on the way --
 /// the schema outside the subset, a JSON error -- becomes a
 /// `std::invalid_argument` naming the conversion.
@@ -1271,7 +1271,7 @@ pub fn jsonSchemaToGrammar(gpa: std.mem.Allocator, value: *const Value, force_gb
     };
 }
 
-/// Ports `json_schema_to_grammar` (json-schema-to-grammar.cpp:1040 @8642541b2),
+/// Ports `json_schema_to_grammar` (json-schema-to-grammar.cpp:1040 @cd959bae9),
 /// the overload taking a parsed document.
 ///
 /// Parameters:
@@ -1290,7 +1290,7 @@ pub fn documentToGrammar(gpa: std.mem.Allocator, doc: *const schema.Document) Er
     return gpa.dupe(u8, try conv.formatGrammar());
 }
 
-/// Ports `common_grammar_builder` (json-schema-to-grammar.h:12 @8642541b2):
+/// Ports `common_grammar_builder` (json-schema-to-grammar.h:12 @cd959bae9):
 /// what `build_grammar`'s callback is handed.
 pub const GrammarBuilder = struct {
     conv: *Converter,
@@ -1310,7 +1310,7 @@ pub const GrammarBuilder = struct {
     }
 };
 
-/// Ports `build_grammar` (json-schema-to-grammar.cpp:1047 @8642541b2): a
+/// Ports `build_grammar` (json-schema-to-grammar.cpp:1047 @cd959bae9): a
 /// grammar assembled by a callback. Errors the callback returns are not
 /// wrapped.
 ///

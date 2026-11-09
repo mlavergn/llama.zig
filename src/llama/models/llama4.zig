@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_llama4`'s `load_arch_hparams` (src/models/llama4.cpp:3 @8642541b2).
+/// Ports `llama_model_llama4`'s `load_arch_hparams` (src/models/llama4.cpp:3 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -69,7 +69,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.use_kq_norm = self.type != .@"17b_128e";
 }
 
-/// Ports `llama_model_llama4`'s `load_arch_tensors` (src/models/llama4.cpp:44 @8642541b2).
+/// Ports `llama_model_llama4`'s `load_arch_tensors` (src/models/llama4.cpp:44 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -127,7 +127,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_llama4`'s `build_arch_graph` (src/models/llama4.cpp:96 @8642541b2).
+/// Ports `llama_model_llama4`'s `build_arch_graph` (src/models/llama4.cpp:96 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     if (@as(hparams_mod.SwaType, @fromBackingInt(@intCast(model.hparams.swa_type))) == .none) {
         buildGraph(false, model, b);
@@ -137,7 +137,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_llama4`'s `graph<iswa>`
-/// (src/models/llama4.cpp:105 @8642541b2).
+/// (src/models/llama4.cpp:105 @cd959bae9).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

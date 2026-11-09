@@ -49,7 +49,7 @@ const StopType = task.StopType;
 
 extern fn time(t: ?*i64) i64;
 
-/// Ports `llama_build_info` (build-info.cpp.in:27 @8642541b2): `b<number>-<commit>`.
+/// Ports `llama_build_info` (build-info.cpp.in:27 @cd959bae9): `b<number>-<commit>`.
 pub const build_info = std.fmt.comptimePrint("b{d}-{s}", .{ tools.build_info.build_number, tools.build_info.commit });
 
 /// `{"event": name, "data": data}`, the shape every streamed event has.
@@ -61,7 +61,7 @@ fn event(a: Allocator, name: []const u8, data: Value) Error!Value {
     return o.done();
 }
 
-/// Ports `server_chat_msg_diff_to_json_oaicompat` (server-chat.cpp:643 @8642541b2):
+/// Ports `server_chat_msg_diff_to_json_oaicompat` (server-chat.cpp:653 @cd959bae9):
 /// one OpenAI chat delta.
 ///
 /// Return: owned by `a`.
@@ -104,7 +104,7 @@ pub fn chatMsgDiffToJsonOaicompat(a: Allocator, diff: *const chat.MsgDiff) Error
 // -----------------------------------------------------------------------------
 // the subclasses' members
 
-/// Ports `server_task_result_cmpl_final` (server-task.h:406 @8642541b2).
+/// Ports `server_task_result_cmpl_final` (server-task.h:406 @cd959bae9).
 /// `content` is in the result's arena.
 pub const CmplFinal = struct {
     content: chat.input.Input = .{ .gpa = std.heap.c_allocator },
@@ -146,7 +146,7 @@ pub const CmplFinal = struct {
     oai_resp_message_id: []const u8 = "",
 };
 
-/// Ports `server_task_result_cmpl_partial` (server-task.h:481 @8642541b2).
+/// Ports `server_task_result_cmpl_partial` (server-task.h:481 @cd959bae9).
 /// `content` is in the result's arena.
 pub const CmplPartial = struct {
     content: chat.input.Input = .{ .gpa = std.heap.c_allocator },
@@ -188,7 +188,7 @@ pub const CmplPartial = struct {
     anthropic_has_reasoning: bool = false,
 };
 
-/// Ports `server_task_result_embd` (server-task.h:541 @8642541b2).
+/// Ports `server_task_result_embd` (server-task.h:541 @cd959bae9).
 pub const Embd = struct {
     embedding: []const []const f32 = &.{},
 
@@ -198,7 +198,7 @@ pub const Embd = struct {
     res_type: ResponseType = .none,
 };
 
-/// Ports `server_task_result_realtime` (server-task.h:557 @8642541b2): one
+/// Ports `server_task_result_realtime` (server-task.h:557 @cd959bae9): one
 /// event of a realtime conversation: text and audio of the response being
 /// generated, or its end. `text` and `audio` are in the result's arena.
 pub const Realtime = struct {
@@ -209,7 +209,7 @@ pub const Realtime = struct {
     n_decoded: i32 = 0,
 };
 
-/// Ports `server_task_result_tts` (server-task.h:571 @8642541b2). `audio` is
+/// Ports `server_task_result_tts` (server-task.h:571 @cd959bae9). `audio` is
 /// in the result's arena.
 pub const Tts = struct {
     audio: []const u8 = "", // raw bytes for this chunk (WAV or PCM, per request's out_type)
@@ -217,21 +217,21 @@ pub const Tts = struct {
     final: bool = false, // true for the last chunk of a request
 };
 
-/// Ports `server_task_result_rerank` (server-task.h:581 @8642541b2).
+/// Ports `server_task_result_rerank` (server-task.h:581 @cd959bae9).
 pub const Rerank = struct {
     score: f32 = -1e6,
 
     n_tokens: i32 = 0,
 };
 
-/// Ports `server_task_result_decision` (server-task.h:589 @8642541b2).
+/// Ports `server_task_result_decision` (server-task.h:589 @cd959bae9).
 pub const Decision = struct {
     scores: []const f32 = &.{}, // one raw model output per option
 
     n_tokens: i32 = 0,
 };
 
-/// Ports `server_task_result_error` (server-task.h:597 @8642541b2).
+/// Ports `server_task_result_error` (server-task.h:597 @cd959bae9).
 pub const ErrorResult = struct {
     err_type: common.ErrorType = .server,
     err_msg: []const u8 = "",
@@ -241,7 +241,7 @@ pub const ErrorResult = struct {
     n_ctx: i32 = 0,
 };
 
-/// Ports `server_task_result_metrics` (server-task.h:613 @8642541b2): used by
+/// Ports `server_task_result_metrics` (server-task.h:613 @cd959bae9): used by
 /// `/metrics`.
 pub const MetricsResult = struct {
     // these are immediate stats, not accumulated (server_metrics is cumulative)
@@ -251,14 +251,14 @@ pub const MetricsResult = struct {
     metrics: common.Metrics = .{},
 };
 
-/// Ports `server_task_result_metrics`'s `metric_item` (server-task.h:622 @8642541b2).
+/// Ports `server_task_result_metrics`'s `metric_item` (server-task.h:622 @cd959bae9).
 pub const MetricItem = struct {
     name: []const u8,
     description: []const u8,
     value: f64, // prometheus values are always float64
 };
 
-/// Ports `server_task_result_slots` (server-task.h:631 @8642541b2): used by `/slots`.
+/// Ports `server_task_result_slots` (server-task.h:631 @cd959bae9): used by `/slots`.
 pub const Slots = struct {
     n_idle_slots: c_int = 0,
 
@@ -267,7 +267,7 @@ pub const Slots = struct {
     slots_data: Value = .{ .array = .empty },
 };
 
-/// Ports `server_task_result_slot_save_load` (server-task.h:641 @8642541b2).
+/// Ports `server_task_result_slot_save_load` (server-task.h:641 @cd959bae9).
 pub const SlotSaveLoad = struct {
     filename: []const u8 = "",
     is_save: bool = false, // true = save, false = load
@@ -277,20 +277,20 @@ pub const SlotSaveLoad = struct {
     t_ms: f64 = 0,
 };
 
-/// Ports `server_task_result_slot_erase` (server-task.h:652 @8642541b2).
+/// Ports `server_task_result_slot_erase` (server-task.h:652 @cd959bae9).
 pub const SlotErase = struct {
     n_erased: usize = 0,
 };
 
-/// Ports `server_task_result_control` (server-task.h:658 @8642541b2).
+/// Ports `server_task_result_control` (server-task.h:658 @cd959bae9).
 pub const Control = struct {
     success: bool = false,
     message: []const u8 = "", // optional detail when success is false
 };
 
-/// Ports `server_task_result_get_lora` (server-task.h:671 @8642541b2).
+/// Ports `server_task_result_get_lora` (server-task.h:671 @cd959bae9).
 pub const GetLora = struct {
-    /// Ports `server_task_result_get_lora`'s `lora` (server-task.h:672 @8642541b2).
+    /// Ports `server_task_result_get_lora`'s `lora` (server-task.h:672 @cd959bae9).
     pub const Lora = struct {
         info: common.LoraInfo,
         alora_invocation_string: []const u8 = "",
@@ -299,7 +299,7 @@ pub const GetLora = struct {
     loras: []const Lora = &.{},
 };
 
-/// Ports `server_task_result_router` (server-task.h:758 @8642541b2): used
+/// Ports `server_task_result_router` (server-task.h:758 @cd959bae9): used
 /// exclusively by router mode.
 pub const Router = struct {
     data: Value = .null,
@@ -308,7 +308,7 @@ pub const Router = struct {
 // -----------------------------------------------------------------------------
 // server_task_result
 
-/// Ports `server_task_result` (server-task.h:357 @8642541b2) and its
+/// Ports `server_task_result` (server-task.h:357 @cd959bae9) and its
 /// subclasses, as one type (see the file's doc comment).
 pub const Result = struct {
     id: c_int = -1,
@@ -360,12 +360,12 @@ pub const Result = struct {
         gpa.destroy(self);
     }
 
-    /// Ports `is_error` (server-task.h:364 @8642541b2), a virtual member of `server_task_result`.
+    /// Ports `is_error` (server-task.h:364 @cd959bae9), a virtual member of `server_task_result`.
     pub fn isError(self: *Result) bool {
         return self.kind == .err;
     }
 
-    /// Ports `is_stop` (server-task.h:368 @8642541b2), a virtual member of
+    /// Ports `is_stop` (server-task.h:368 @cd959bae9), a virtual member of
     /// `server_task_result`: in stream mode a final result is a stop, a
     /// partial one is not.
     pub fn isStop(self: *Result) bool {
@@ -377,7 +377,7 @@ pub const Result = struct {
         };
     }
 
-    /// Ports `update` (server-task.h:372 @8642541b2), a virtual member of
+    /// Ports `update` (server-task.h:372 @cd959bae9), a virtual member of
     /// `server_task_result`: a completion result parses the text it carries
     /// into the task's chat state.
     pub fn update(self: *Result, state: *TaskResultState) Error!void {
@@ -388,7 +388,7 @@ pub const Result = struct {
         }
     }
 
-    /// Ports `clone` (server-task.h:377 @8642541b2), a virtual member of
+    /// Ports `clone` (server-task.h:377 @cd959bae9), a virtual member of
     /// `server_task_result`: only router results copy.
     pub fn clone(self: *Result, gpa: Allocator) Error!*Result {
         switch (self.kind) {
@@ -408,7 +408,7 @@ pub const Result = struct {
         }
     }
 
-    /// Ports `to_json` (server-task.h:662 @8642541b2), a pure virtual member of
+    /// Ports `to_json` (server-task.h:662 @cd959bae9), a pure virtual member of
     /// `server_task_result`, through each subclass's.
     ///
     /// Return: owned by `a`.
@@ -436,7 +436,7 @@ pub const Result = struct {
     // -------------------------------------------------------------------------
     // server_task_result_cmpl_final
 
-    /// Ports `server_task_result_cmpl_final`'s `update` (server-task.h:451 @8642541b2).
+    /// Ports `server_task_result_cmpl_final`'s `update` (server-task.h:451 @cd959bae9).
     fn updateFinal(self: *Result, state: *TaskResultState) Error!void {
         const ar = self.alloc();
         const f = &self.kind.cmpl_final;
@@ -449,7 +449,7 @@ pub const Result = struct {
         f.oai_resp_message_id = try ar.dupe(u8, state.oai_resp_message_id);
     }
 
-    /// Ports `server_task_result_cmpl_final`'s `to_json` (server-task.cpp:312 @8642541b2).
+    /// Ports `server_task_result_cmpl_final`'s `to_json` (server-task.cpp:312 @cd959bae9).
     fn finalToJson(self: *Result, a: Allocator) Error!Value {
         const f = &self.kind.cmpl_final;
         common.ggmlAssert(f.is_updated, "server-task.cpp", 313, "is_updated && \"update() must be called before to_json()\"");
@@ -467,7 +467,7 @@ pub const Result = struct {
         };
     }
 
-    /// Ports `server_task_result_cmpl_final`'s `to_json_non_oaicompat` (server-task.cpp:332 @8642541b2).
+    /// Ports `server_task_result_cmpl_final`'s `to_json_non_oaicompat` (server-task.cpp:332 @cd959bae9).
     fn finalNonOaicompat(self: *Result, a: Allocator) Error!Value {
         const f = &self.kind.cmpl_final;
         var res = Obj.init(a);
@@ -497,7 +497,7 @@ pub const Result = struct {
         return common.jsonGetNestedValues(a, f.response_fields, &full);
     }
 
-    /// Ports `server_task_result_cmpl_final`'s `usage_json_oaicompat` (server-task.cpp:357 @8642541b2).
+    /// Ports `server_task_result_cmpl_final`'s `usage_json_oaicompat` (server-task.cpp:357 @cd959bae9).
     fn finalUsageJsonOaicompat(self: *Result, a: Allocator) Error!Value {
         const f = &self.kind.cmpl_final;
         var o = Obj.init(a);
@@ -512,7 +512,7 @@ pub const Result = struct {
         return o.done();
     }
 
-    /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat` (server-task.cpp:366 @8642541b2).
+    /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat` (server-task.cpp:366 @cd959bae9).
     fn finalOaicompat(self: *Result, a: Allocator) Error!Value {
         const f = &self.kind.cmpl_final;
         const t = time(null);
@@ -570,7 +570,7 @@ pub const Result = struct {
         return .{ .role = "assistant", .content = f.content.text.items };
     }
 
-    /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_chat` (server-task.cpp:406 @8642541b2).
+    /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_chat` (server-task.cpp:406 @cd959bae9).
     fn finalOaicompatChat(self: *Result, a: Allocator) Error!Value {
         const f = &self.kind.cmpl_final;
         var finish_reason: []const u8 = "length";
@@ -647,7 +647,7 @@ pub const Result = struct {
         return o.done();
     }
 
-    /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_chat_stream` (server-task.cpp:454 @8642541b2).
+    /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_chat_stream` (server-task.cpp:454 @cd959bae9).
     fn finalOaicompatChatStream(self: *Result, a: Allocator) Error!Value {
         const f = &self.kind.cmpl_final;
         const t = time(null);
@@ -743,7 +743,7 @@ pub const Result = struct {
         return u.done();
     }
 
-    /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_resp` (server-task.cpp:520 @8642541b2).
+    /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_resp` (server-task.cpp:520 @cd959bae9).
     fn finalOaicompatResp(self: *Result, a: Allocator) Error!Value {
         const f = &self.kind.cmpl_final;
         const msg = finalMsg(f);
@@ -815,7 +815,7 @@ pub const Result = struct {
         return event(a, "response.output_item.done", d.done());
     }
 
-    /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_resp_stream` (server-task.cpp:591 @8642541b2).
+    /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_resp_stream` (server-task.cpp:591 @cd959bae9).
     fn finalOaicompatRespStream(self: *Result, a: Allocator) Error!Value {
         const f = &self.kind.cmpl_final;
         var server_sent_events = Value.emptyArray();
@@ -919,7 +919,7 @@ pub const Result = struct {
         return server_sent_events;
     }
 
-    /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_asr` (server-task.cpp:719 @8642541b2).
+    /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_asr` (server-task.cpp:719 @cd959bae9).
     fn finalOaicompatAsr(self: *Result, a: Allocator) Error!Value {
         const f = &self.kind.cmpl_final;
         var usage = Obj.init(a);
@@ -944,7 +944,7 @@ pub const Result = struct {
         return if (stopping_word.len == 0) .null else Value.initString(a, stopping_word);
     }
 
-    /// Ports `server_task_result_cmpl_final`'s `to_json_anthropic` (server-task.cpp:734 @8642541b2).
+    /// Ports `server_task_result_cmpl_final`'s `to_json_anthropic` (server-task.cpp:734 @cd959bae9).
     fn finalAnthropic(self: *Result, a: Allocator) Error!Value {
         const f = &self.kind.cmpl_final;
         var stop_reason: []const u8 = "max_tokens";
@@ -1058,7 +1058,7 @@ pub const Result = struct {
         return o.done();
     }
 
-    /// Ports `server_task_result_cmpl_final`'s `to_json_anthropic_stream` (server-task.cpp:800 @8642541b2).
+    /// Ports `server_task_result_cmpl_final`'s `to_json_anthropic_stream` (server-task.cpp:800 @cd959bae9).
     fn finalAnthropicStream(self: *Result, a: Allocator) Error!Value {
         const f = &self.kind.cmpl_final;
         var events = Value.emptyArray();
@@ -1166,7 +1166,7 @@ pub const Result = struct {
     // -------------------------------------------------------------------------
     // server_task_result_cmpl_partial
 
-    /// Ports `server_task_result_cmpl_partial`'s `update` (server-task.cpp:991 @8642541b2): the
+    /// Ports `server_task_result_cmpl_partial`'s `update` (server-task.cpp:991 @cd959bae9): the
     /// state as it was before this chunk is copied in, then advanced for
     /// the next one.
     fn updatePartial(self: *Result, state: *TaskResultState) Error!void {
@@ -1209,7 +1209,7 @@ pub const Result = struct {
         }
     }
 
-    /// Ports `server_task_result_cmpl_partial`'s `to_json` (server-task.cpp:1029 @8642541b2).
+    /// Ports `server_task_result_cmpl_partial`'s `to_json` (server-task.cpp:1029 @cd959bae9).
     fn partialToJson(self: *Result, a: Allocator) Error!Value {
         const p = &self.kind.cmpl_partial;
         common.ggmlAssert(p.is_updated, "server-task.cpp", 1030, "is_updated && \"update() must be called before to_json()\"");
@@ -1230,7 +1230,7 @@ pub const Result = struct {
         };
     }
 
-    /// Ports `server_task_result_cmpl_partial`'s `to_json_non_oaicompat` (server-task.cpp:1052 @8642541b2).
+    /// Ports `server_task_result_cmpl_partial`'s `to_json_non_oaicompat` (server-task.cpp:1052 @cd959bae9).
     fn partialNonOaicompat(self: *Result, a: Allocator) Error!Value {
         const p = &self.kind.cmpl_partial;
         // non-OAI-compat JSON
@@ -1256,7 +1256,7 @@ pub const Result = struct {
         return res.done();
     }
 
-    /// Ports `server_task_result_cmpl_partial`'s `to_json_oaicompat` (server-task.cpp:1076 @8642541b2).
+    /// Ports `server_task_result_cmpl_partial`'s `to_json_oaicompat` (server-task.cpp:1076 @cd959bae9).
     fn partialOaicompat(self: *Result, a: Allocator) Error!Value {
         const p = &self.kind.cmpl_partial;
         const t = time(null);
@@ -1302,7 +1302,7 @@ pub const Result = struct {
         return res.done();
     }
 
-    /// Ports `server_task_result_cmpl_partial`'s `to_json_oaicompat_chat` (server-task.cpp:1114 @8642541b2).
+    /// Ports `server_task_result_cmpl_partial`'s `to_json_oaicompat_chat` (server-task.cpp:1114 @cd959bae9).
     fn partialOaicompatChat(self: *Result, a: Allocator) Error!Value {
         const p = &self.kind.cmpl_partial;
         const first = p.n_decoded == 1;
@@ -1364,7 +1364,7 @@ pub const Result = struct {
         return @as(usize, if (p.anthropic_has_reasoning) 1 else 0) +% @as(usize, if (p.text_block_started) 1 else 0) +% diff.tool_call_index;
     }
 
-    /// Ports `server_task_result_cmpl_partial`'s `to_json_oaicompat_resp` (server-task.cpp:1169 @8642541b2).
+    /// Ports `server_task_result_cmpl_partial`'s `to_json_oaicompat_resp` (server-task.cpp:1169 @cd959bae9).
     fn partialOaicompatResp(self: *Result, a: Allocator) Error!Value {
         const p = &self.kind.cmpl_partial;
         var events = Value.emptyArray();
@@ -1494,13 +1494,13 @@ pub const Result = struct {
         return events;
     }
 
-    /// Ports `server_task_result_cmpl_partial`'s `to_json_oaicompat_asr` (server-task.cpp:1329 @8642541b2).
+    /// Ports `server_task_result_cmpl_partial`'s `to_json_oaicompat_asr` (server-task.cpp:1329 @cd959bae9).
     fn partialOaicompatAsr(self: *Result, a: Allocator) Error!Value {
         const p = &self.kind.cmpl_partial;
         return pair(a, "type", "transcript.text.delta", "delta", p.content.text.items);
     }
 
-    /// Ports `server_task_result_cmpl_partial`'s `to_json_anthropic` (server-task.cpp:1337 @8642541b2).
+    /// Ports `server_task_result_cmpl_partial`'s `to_json_anthropic` (server-task.cpp:1337 @cd959bae9).
     fn partialAnthropic(self: *Result, a: Allocator) Error!Value {
         const p = &self.kind.cmpl_partial;
         var events = Value.emptyArray();
@@ -1584,26 +1584,26 @@ pub const Result = struct {
     // -------------------------------------------------------------------------
     // the others
 
-    /// Ports `server_task_result_embd`'s `to_json` (server-task.cpp:1479 @8642541b2)
+    /// Ports `server_task_result_embd`'s `to_json` (server-task.cpp:1479 @cd959bae9)
     /// and its two formatters.
     fn embdToJson(self: *Result, a: Allocator) Error!Value {
         const e = &self.kind.embd;
         var o = Obj.init(a);
         errdefer o.deinit();
         if (e.res_type == .oai_embd) {
-            // `to_json_oaicompat` (server-task.cpp:1492 @8642541b2)
+            // `to_json_oaicompat` (server-task.cpp:1492 @cd959bae9)
             try o.put("index", self.index);
             try o.put("embedding", e.embedding[0]);
             try o.put("tokens_evaluated", e.n_tokens);
         } else {
-            // `to_json_non_oaicompat` (server-task.cpp:1485 @8642541b2)
+            // `to_json_non_oaicompat` (server-task.cpp:1485 @cd959bae9)
             try o.put("index", self.index);
             try o.put("embedding", e.embedding);
         }
         return o.done();
     }
 
-    /// Ports `server_task_result_rerank`'s `to_json` (server-task.cpp:1503 @8642541b2).
+    /// Ports `server_task_result_rerank`'s `to_json` (server-task.cpp:1503 @cd959bae9).
     fn rerankToJson(self: *Result, a: Allocator) Error!Value {
         const r = &self.kind.rerank;
         var o = Obj.init(a);
@@ -1614,7 +1614,7 @@ pub const Result = struct {
         return o.done();
     }
 
-    /// Ports `server_task_result_realtime`'s `to_json` (server-task.cpp:1514 @8642541b2).
+    /// Ports `server_task_result_realtime`'s `to_json` (server-task.cpp:1514 @cd959bae9).
     fn realtimeToJson(self: *Result, a: Allocator) Error!Value {
         const r = &self.kind.realtime;
         var o = Obj.init(a);
@@ -1627,7 +1627,7 @@ pub const Result = struct {
         return o.done();
     }
 
-    /// Ports `server_task_result_tts`'s `to_json` (server-task.cpp:1524 @8642541b2).
+    /// Ports `server_task_result_tts`'s `to_json` (server-task.cpp:1524 @cd959bae9).
     fn ttsToJson(self: *Result, a: Allocator) Error!Value {
         const r = &self.kind.tts;
         var o = Obj.init(a);
@@ -1638,7 +1638,7 @@ pub const Result = struct {
         return o.done();
     }
 
-    /// Ports `server_task_result_decision`'s `to_json` (server-task.cpp:1535 @8642541b2).
+    /// Ports `server_task_result_decision`'s `to_json` (server-task.cpp:1535 @cd959bae9).
     fn decisionToJson(self: *Result, a: Allocator) Error!Value {
         const r = &self.kind.decision;
         var o = Obj.init(a);
@@ -1649,7 +1649,7 @@ pub const Result = struct {
         return o.done();
     }
 
-    /// Ports `server_task_result_error`'s `to_json` (server-task.cpp:1546 @8642541b2).
+    /// Ports `server_task_result_error`'s `to_json` (server-task.cpp:1546 @cd959bae9).
     fn errorToJson(self: *Result, a: Allocator) Error!Value {
         const e = &self.kind.err;
         var res = try common.formatErrorResponse(a, e.err_msg, e.err_type);
@@ -1661,7 +1661,7 @@ pub const Result = struct {
         return res;
     }
 
-    /// Ports `server_task_result_metrics`'s `to_metrics` (server-task.cpp:1568 @8642541b2): the
+    /// Ports `server_task_result_metrics`'s `to_metrics` (server-task.cpp:1568 @cd959bae9): the
     /// Prometheus text for `/metrics`.
     ///
     /// Return: owned by `a`.
@@ -1718,7 +1718,7 @@ pub const Result = struct {
         }
     }
 
-    /// Ports `server_task_result_slot_save_load`'s `to_json` (server-task.cpp:1667 @8642541b2).
+    /// Ports `server_task_result_slot_save_load`'s `to_json` (server-task.cpp:1667 @cd959bae9).
     fn slotSaveLoadToJson(self: *Result, a: Allocator) Error!Value {
         const s = &self.kind.slot_save_load;
         var timings = Obj.init(a);
@@ -1734,7 +1734,7 @@ pub const Result = struct {
         return o.done();
     }
 
-    /// Ports `server_task_result_slot_erase`'s `to_json` (server-task.cpp:1694 @8642541b2).
+    /// Ports `server_task_result_slot_erase`'s `to_json` (server-task.cpp:1694 @cd959bae9).
     fn slotEraseToJson(self: *Result, a: Allocator) Error!Value {
         var o = Obj.init(a);
         errdefer o.deinit();
@@ -1743,7 +1743,7 @@ pub const Result = struct {
         return o.done();
     }
 
-    /// Ports `server_task_result_control`'s `to_json` (server-task.h:662 @8642541b2).
+    /// Ports `server_task_result_control`'s `to_json` (server-task.h:662 @cd959bae9).
     fn controlToJson(self: *Result, a: Allocator) Error!Value {
         const ctl = &self.kind.control;
         var out = Obj.init(a);
@@ -1755,7 +1755,7 @@ pub const Result = struct {
         return out.done();
     }
 
-    /// Ports `server_task_result_get_lora`'s `to_json` (server-task.cpp:1705 @8642541b2).
+    /// Ports `server_task_result_get_lora`'s `to_json` (server-task.cpp:1705 @cd959bae9).
     fn getLoraToJson(self: *Result, a: Allocator) Error!Value {
         var result = Value.emptyArray();
         errdefer result.deinit(a);
@@ -1776,7 +1776,7 @@ pub const Result = struct {
         return result;
     }
 
-    /// Ports `server_task_result_apply_lora`'s `to_json` (server-task.cpp:1729 @8642541b2).
+    /// Ports `server_task_result_apply_lora`'s `to_json` (server-task.cpp:1729 @cd959bae9).
     fn applyLoraToJson(a: Allocator) Error!Value {
         var o = Obj.init(a);
         errdefer o.deinit();

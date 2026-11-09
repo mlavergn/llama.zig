@@ -36,7 +36,7 @@ fn obj(a: Allocator, members: []const [2][]const u8) Error!Value {
 }
 
 /// Ports `common_chat_params_init_translate_gemma` (parsers/translate-gemma.cpp:5
-/// @8642541b2).
+/// @cd959bae9).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

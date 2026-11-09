@@ -208,12 +208,12 @@ pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*con
         .voxtral_rt => try voxtral_rt.build(&g, params),
         .muse_spark_audio => try muse_spark_audio.build(&g, params),
         .lfm3a_gen => try lfm3a_gen.build(&g, params),
-        else => impl.abort("clip.cpp", 1250, "missing cgraph builder"),
+        else => impl.abort("clip.cpp", 1273, "missing cgraph builder"),
     };
     return .{ .gf = gf, .support_batch = supportBatch(ctx.projType()).?, .ctx0 = g.ctx0 };
 }
 
-/// Ports `c2w_state_slot` (mtmd/models/models.h:423 @8642541b2): a persisted
+/// Ports `c2w_state_slot` (mtmd/models/models.h:486 @cd959bae9): a persisted
 /// state slot of a gen-audio decoder.
 pub const StateSlot = struct {
     name: [:0]const u8,
@@ -221,7 +221,7 @@ pub const StateSlot = struct {
     ne1: i64,
 };
 
-/// Ports `list_gen_state_slots` (mtmd/clip.cpp:5082 @8642541b2): the persisted
+/// Ports `list_gen_state_slots` (mtmd/clip.cpp:5587 @cd959bae9): the persisted
 /// state slots of the gen-audio decoders. The caller
 /// frees the slice with `freeSlots`.
 pub fn genStateSlots(hparams: *const model_mod.Hparams, model: *const model_mod.Model) clip.Error![]StateSlot {

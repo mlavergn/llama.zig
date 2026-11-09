@@ -1016,11 +1016,13 @@ fn hasDefine(defines: []const []const u8, define: []const u8) bool {
 }
 
 /// Upstream's Vulkan backend: `ggml-vulkan.cpp` and, since v0.5.0, the
-/// buffer and debug code split out of it (ggml-vulkan/CMakeLists.txt:62-68
-/// @7fe450e19).
+/// buffer and debug code split out of it, and since v0.9.0 its multi-device
+/// all-reduce, `ggml-vulkan-comm.cpp` (ggml-vulkan/CMakeLists.txt:62-71
+/// @cd959bae9).
 const vulkan_sources = [_][]const u8{
     "ggml/src/ggml-vulkan/ggml-vulkan.cpp",
     "ggml/src/ggml-vulkan/ggml-vulkan-buffers.cpp",
+    "ggml/src/ggml-vulkan/ggml-vulkan-comm.cpp",
     "ggml/src/ggml-vulkan/ggml-vulkan-debug.cpp",
 };
 

@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_mimo2`'s `load_arch_hparams` (models/mimo2.cpp:3 @8642541b2).
+/// Ports `llama_model_mimo2`'s `load_arch_hparams` (models/mimo2.cpp:3 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -47,7 +47,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_mimo2`'s `load_arch_tensors` (models/mimo2.cpp:25 @8642541b2).
+/// Ports `llama_model_mimo2`'s `load_arch_tensors` (models/mimo2.cpp:25 @cd959bae9).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -106,7 +106,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports `llama_model_mimo2`'s `build_arch_graph` (models/mimo2.cpp:80 @8642541b2):
+/// Ports `llama_model_mimo2`'s `build_arch_graph` (models/mimo2.cpp:80 @cd959bae9):
 /// the MTP draft head for that graph type, the main model otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -114,7 +114,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports the constructor of `llama_model_mimo2`'s `graph`
-/// (models/mimo2.cpp:87 @8642541b2).
+/// (models/mimo2.cpp:87 @cd959bae9).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -274,7 +274,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_mimo2`'s `graph_mtp`
-/// (models/mimo2.cpp:261 @8642541b2).
+/// (models/mimo2.cpp:261 @cd959bae9).
 ///
 /// Mirrors MiMo's appended NextN block: normalize and fuse the token and
 /// hidden inputs, run the decoder block, expose its state before the head

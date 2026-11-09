@@ -94,7 +94,7 @@ const cudaCheck = common.cudaCheck;
 // -----------------------------------------------------------------------------
 // Dispatch
 
-/// Ports `ggml_cuda_compute_forward` (ggml-cuda.cu:2262 @8642541b2).
+/// Ports `ggml_cuda_compute_forward` (ggml-cuda.cu:2462 @cd959bae9).
 fn computeForward(ctx: *Context, dst: *Tensor) bool {
     switch (dst.op) {
         c.GGML_OP_REPEAT => binbcast.opRepeat(ctx, dst),
@@ -240,7 +240,7 @@ const mulMatIdNeedsSync = mulmat.mulMatIdNeedsSync;
 // -----------------------------------------------------------------------------
 // CUDA graphs
 
-/// Ports `ggml_cuda_is_view_or_noop` (ggml-cuda.cu:2753 @8642541b2).
+/// Ports `ggml_cuda_is_view_or_noop` (ggml-cuda.cu:2953 @cd959bae9).
 fn isViewOrNoop(t: *const Tensor) bool {
     return c.ggml_is_empty(t) or t.op == c.GGML_OP_RESHAPE or t.op == c.GGML_OP_TRANSPOSE or
         t.op == c.GGML_OP_VIEW or t.op == c.GGML_OP_PERMUTE or t.op == c.GGML_OP_NONE;
@@ -250,7 +250,7 @@ fn nodes(cgraph: *impl.CGraph) []*Tensor {
     return @ptrCast(cgraph.nodes[0..@intCast(cgraph.n_nodes)]);
 }
 
-/// Ports `ggml_cuda_graph_check_compability` (ggml-cuda.cu:2764 @8642541b2).
+/// Ports `ggml_cuda_graph_check_compability` (ggml-cuda.cu:2964 @cd959bae9).
 /// Its debug line was `#ifndef NDEBUG` through v0.6.0, compiled out of the
 /// release reference; v0.7.0 gates it on `GGML_CUDA_GRAPH_DEBUG` instead.
 fn graphCheckCompatibility(cgraph: *impl.CGraph) bool {
@@ -276,12 +276,12 @@ fn graphCheckCompatibility(cgraph: *impl.CGraph) bool {
     return use_cuda_graph;
 }
 
-/// Ports `ggml_cuda_graph_get_key` (ggml-cuda.cu:2797 @8642541b2).
+/// Ports `ggml_cuda_graph_get_key` (ggml-cuda.cu:2997 @cd959bae9).
 fn graphGetKey(cgraph: *impl.CGraph) ?*const anyopaque {
     return cgraph.nodes[0];
 }
 
-/// Ports `ggml_cuda_graph_update_required` (ggml-cuda.cu:2801 @8642541b2).
+/// Ports `ggml_cuda_graph_update_required` (ggml-cuda.cu:3001 @cd959bae9).
 fn graphUpdateRequired(cuda_ctx: *Context, cgraph: *impl.CGraph) bool {
     var res = false;
 
@@ -328,7 +328,7 @@ fn graphUpdateRequired(cuda_ctx: *Context, cgraph: *impl.CGraph) bool {
     return res;
 }
 
-/// Ports `ggml_cuda_graph_update_executable` (ggml-cuda.cu:2845 @8642541b2),
+/// Ports `ggml_cuda_graph_update_executable` (ggml-cuda.cu:3045 @cd959bae9),
 /// the CUDA 12 arm. Since v0.8.0 it takes one chunk's executable and
 /// captured graph. Its debug line, `#ifndef NDEBUG` through v0.6.0, is
 /// `GGML_CUDA_GRAPH_DEBUG`'s since v0.7.0.
@@ -360,7 +360,7 @@ const GraphChunk = struct {
     const once = common.Once(init);
 };
 
-/// Ports `ggml_cuda_graph_chunk_size` (ggml-cuda.cu:2872 @8642541b2): the
+/// Ports `ggml_cuda_graph_chunk_size` (ggml-cuda.cu:3072 @cd959bae9): the
 /// number of ggml nodes per CUDA graph chunk; 0 captures the whole ggml
 /// graph as one CUDA graph.
 fn graphChunkSize() c_int {
@@ -368,7 +368,7 @@ fn graphChunkSize() c_int {
     return GraphChunk.size;
 }
 
-/// Ports `ggml_cuda_graph_launch_chunk` (ggml-cuda.cu:2881 @8642541b2): end
+/// Ports `ggml_cuda_graph_launch_chunk` (ggml-cuda.cu:3081 @cd959bae9): end
 /// the capture of chunk `idx`, update or create its executable and launch it.
 fn graphLaunchChunk(cuda_ctx: *Context, graph: *common.Graph, idx: usize) void {
     var cuda_graph: cu.cudaGraph_t = null;
@@ -386,7 +386,7 @@ fn graphLaunchChunk(cuda_ctx: *Context, graph: *common.Graph, idx: usize) void {
     cudaCheck(cu.cudaGraphLaunch(graph.instances.items[idx], cuda_ctx.stream()), "cudaGraphLaunch(graph->instances[idx], cuda_ctx->stream())", @src());
 }
 
-/// Ports `ggml_cuda_graph_set_enabled` (ggml-cuda.cu:4886 @8642541b2).
+/// Ports `ggml_cuda_graph_set_enabled` (ggml-cuda.cu:5086 @cd959bae9).
 fn graphSetEnabled(cuda_ctx: *Context, graph_key: ?*const anyopaque) bool {
     const graph = cuda_ctx.cudaGraph(graph_key);
 
@@ -431,7 +431,7 @@ const Concurrency = struct {
     }
 };
 
-/// Ports `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4656 @8642541b2).
+/// Ports `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4856 @cd959bae9).
 /// Since v0.8.0 the capture ends and restarts every `graphChunkSize` nodes,
 /// each chunk launched as it ends, so the GPU runs one while the next is
 /// enqueued.
@@ -557,7 +557,7 @@ fn graphEvaluateAndCapture(cuda_ctx: *Context, cgraph: *impl.CGraph, use_cuda_gr
 }
 
 /// The C's "restore original node order within each concurrent region"
-/// block in `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4656 @8642541b2).
+/// block in `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4856 @cd959bae9).
 fn restoreOriginalOrder(cuda_ctx: *Context, cgraph: *impl.CGraph) void {
     var node_to_idx: std.AutoHashMapUnmanaged(*const Tensor, usize) = .empty;
     defer node_to_idx.deinit(allocator);
@@ -595,7 +595,7 @@ fn restoreOriginalOrder(cuda_ctx: *Context, cgraph: *impl.CGraph) void {
     }
 }
 
-/// Ports `ggml_backend_cuda_graph_compute` (ggml-cuda.cu:4902 @8642541b2).
+/// Ports `ggml_backend_cuda_graph_compute` (ggml-cuda.cu:5102 @cd959bae9).
 pub fn graphCompute(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgraph) callconv(.c) c.enum_ggml_status {
     const cuda_ctx = backend.backendCtx(backend_c);
     const cgraph: *impl.CGraph = @ptrCast(@alignCast(cgraph_c));
@@ -684,7 +684,7 @@ fn appendOps(buf: *[16]c.enum_ggml_op, n: *usize, items: []const c.enum_ggml_op)
     }
 }
 
-/// `graph_optimize`'s `add_alloc_deps` lambda (ggml-cuda.cu:4995 @8642541b2):
+/// `graph_optimize`'s `add_alloc_deps` lambda (ggml-cuda.cu:5195 @cd959bae9):
 /// keeps every node in `[start, last_node)` and each of its sources alive
 /// until `nodes[last_node]`.
 fn addAllocDeps(
@@ -715,7 +715,7 @@ const GraphOpt = struct {
     const once = common.Once(init);
 };
 
-/// Ports `ggml_backend_cuda_graph_optimize` (ggml-cuda.cu:4990 @8642541b2),
+/// Ports `ggml_backend_cuda_graph_optimize` (ggml-cuda.cu:5190 @cd959bae9),
 /// with its `add_alloc_deps` lambda.
 ///
 /// Its first pass (v0.6.0) moves a shared expert's gate/up/GLU, wherever

@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_rwkv7`'s `load_arch_hparams` (models/rwkv7.cpp:3 @8642541b2).
+/// Ports `llama_model_rwkv7`'s `load_arch_hparams` (models/rwkv7.cpp:3 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     try loadHparams(self, ml, exc);
 }
@@ -69,7 +69,7 @@ pub fn loadHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thro
     };
 }
 
-/// Ports `llama_model_rwkv7`'s `load_arch_tensors` (models/rwkv7.cpp:46 @8642541b2).
+/// Ports `llama_model_rwkv7`'s `load_arch_tensors` (models/rwkv7.cpp:46 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -162,12 +162,12 @@ pub fn createTimeMixKr(self: *Model, layer: *model_mod.Layer, i: i32, n_embd: i6
     layer.time_mix_receptance = try self.createTensor(.{ .tensor = .time_mix_receptance, .suffix = "weight", .bid = i }, &.{ attn_hidden_size, n_embd }, 0, exc);
 }
 
-/// Ports `llama_model_rwkv7`'s `build_arch_graph` (models/rwkv7.cpp:120 @8642541b2).
+/// Ports `llama_model_rwkv7`'s `build_arch_graph` (models/rwkv7.cpp:120 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
-/// Ports the constructor of `llama_model_rwkv7`'s `graph` (models/rwkv7.cpp:124 @8642541b2).
+/// Ports the constructor of `llama_model_rwkv7`'s `graph` (models/rwkv7.cpp:124 @cd959bae9).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

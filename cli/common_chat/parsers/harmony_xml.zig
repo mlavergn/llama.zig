@@ -217,7 +217,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_harmony_xml` (parsers/harmony-xml.cpp:4 @8642541b2).
+/// Ports `common_chat_params_init_harmony_xml` (parsers/harmony-xml.cpp:4 @cd959bae9).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

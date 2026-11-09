@@ -29,7 +29,7 @@ comptime {
     _ = @import("llama");
 }
 
-/// Ports `g_verbose` (export-lora.cpp:14 @8642541b2).
+/// Ports `g_verbose` (export-lora.cpp:14 @cd959bae9).
 var g_verbose = false;
 
 /// A thrown `std::exception`: `main` prints `what()` and exits 1.
@@ -40,20 +40,20 @@ fn throw(comptime fmt: []const u8, args: anytype) Throw {
     return arg.throwStr(std.fmt.bufPrint(&buf, fmt, args) catch "error");
 }
 
-/// Mirrors `tensor_transformation` (export-lora.cpp:16 @8642541b2).
+/// Mirrors `tensor_transformation` (export-lora.cpp:16 @cd959bae9).
 const TensorTransformation = struct {
     in: *c.ggml_tensor,
     out: *c.ggml_tensor,
     is_copy: bool,
 };
 
-/// Ports `get_kv_str` (export-lora.cpp:22 @8642541b2).
+/// Ports `get_kv_str` (export-lora.cpp:22 @cd959bae9).
 fn getKvStr(ctx_gguf: ?*c.gguf_context, key: [*:0]const u8) []const u8 {
     const id = c.gguf_find_key(ctx_gguf, key);
     return if (id < 0) "" else std.mem.span(c.gguf_get_val_str(ctx_gguf, id));
 }
 
-/// Ports `get_kv_f32` (export-lora.cpp:27 @8642541b2).
+/// Ports `get_kv_f32` (export-lora.cpp:27 @cd959bae9).
 fn getKvF32(ctx_gguf: ?*c.gguf_context, key: [*:0]const u8) f32 {
     const id: c_int = @truncate(c.gguf_find_key(ctx_gguf, key));
     return if (id < 0) 0.0 else c.gguf_get_val_f32(ctx_gguf, id);
@@ -74,13 +74,13 @@ fn write(f: *anyopaque, bytes: []const u8) void {
     if (bytes.len != 0) _ = fwrite(bytes.ptr, 1, bytes.len, f);
 }
 
-/// Ports `zeros` (export-lora.cpp:32 @8642541b2).
+/// Ports `zeros` (export-lora.cpp:32 @cd959bae9).
 fn zeros(f: *anyopaque, n: usize) void {
     const zero = [1]u8{0};
     for (0..n) |_| write(f, &zero);
 }
 
-/// Ports `ggml_ne_string` (export-lora.cpp:39 @8642541b2).
+/// Ports `ggml_ne_string` (export-lora.cpp:39 @cd959bae9).
 fn neString(a: std.mem.Allocator, t: *const c.ggml_tensor) ![:0]u8 {
     var s: std.ArrayList(u8) = .empty;
     for (0..c.GGML_MAX_DIMS) |i| {
@@ -96,13 +96,13 @@ fn pad(x: usize) usize {
     return (x + al - 1) & ~(al - 1);
 }
 
-/// Ports `load_gguf` (export-lora.cpp:50 @8642541b2).
+/// Ports `load_gguf` (export-lora.cpp:50 @cd959bae9).
 fn loadGguf(fname: [:0]const u8, ctx_ggml: *?*c.ggml_context) !*c.gguf_context {
     const params: c.gguf_init_params = .{ .no_alloc = true, .ctx = ctx_ggml };
     return c.gguf_init_from_file(fname.ptr, params) orelse throw("failed to load input GGUF from {s}", .{fname});
 }
 
-/// Ports `file_input` (export-lora.cpp:62 @8642541b2).
+/// Ports `file_input` (export-lora.cpp:62 @cd959bae9).
 const Input = struct {
     ctx_meta: ?*c.ggml_context = null,
     ctx_gguf: ?*c.gguf_context = null,
@@ -137,12 +137,12 @@ const Input = struct {
         return self;
     }
 
-    /// Ports `get_tensor` (export-lora.cpp:88 @8642541b2), a member of `file_input`.
+    /// Ports `get_tensor` (export-lora.cpp:88 @cd959bae9), a member of `file_input`.
     fn getTensor(self: *const Input, name: []const u8) ?*c.ggml_tensor {
         return self.tensors.get(name);
     }
 
-    /// Ports `read_tensor_data` (export-lora.cpp:95 @8642541b2), a member of `file_input`.
+    /// Ports `read_tensor_data` (export-lora.cpp:95 @cd959bae9), a member of `file_input`.
     fn readTensorData(self: *Input, a: std.mem.Allocator, name: []const u8, buf: *std.ArrayList(u8)) !void {
         const t = self.tensors.get(name) orelse return throw("cannot find tensor with name: {s}", .{name});
         const len = c.ggml_nbytes(t);
@@ -209,7 +209,7 @@ const MergeCtx = struct {
         return self;
     }
 
-    /// Ports `check_metadata_lora` (export-lora.cpp:164 @8642541b2), a member of `lora_merge_ctx`.
+    /// Ports `check_metadata_lora` (export-lora.cpp:164 @cd959bae9), a member of `lora_merge_ctx`.
     fn checkMetadataLora(self: *MergeCtx, adapter: *Input) !void {
         const general_type = getKvStr(adapter.ctx_gguf, "general.type");
         if (!std.mem.eql(u8, general_type, "adapter")) return throw("expect general.type to be 'adapter', but got: {s}", .{general_type});
@@ -227,7 +227,7 @@ const MergeCtx = struct {
         return if (t.type == c.GGML_TYPE_F32) c.GGML_TYPE_F32 else c.GGML_TYPE_F16;
     }
 
-    /// Ports `run_merge` (export-lora.cpp:190 @8642541b2), a member of `lora_merge_ctx`.
+    /// Ports `run_merge` (export-lora.cpp:192 @cd959bae9), a member of `lora_merge_ctx`.
     fn runMerge(self: *MergeCtx) !void {
         const a = self.a;
         // prepare metadata
@@ -299,7 +299,7 @@ const MergeCtx = struct {
         io.printf("%s : wrote %zu tensors to output file\n", .{ "run_merge", trans.items.len });
     }
 
-    /// Ports `copy_tensor` (export-lora.cpp:277 @8642541b2), a member of `lora_merge_ctx`.
+    /// Ports `copy_tensor` (export-lora.cpp:279 @cd959bae9), a member of `lora_merge_ctx`.
     fn copyTensor(self: *MergeCtx, base: *c.ggml_tensor) !void {
         io.printf("%s :  %s [%s]\n", .{ "copy_tensor", @as([*:0]const u8, @ptrCast(&base.name)), (try neString(self.a, base)).ptr });
         const len = c.ggml_nbytes(base);
@@ -308,7 +308,7 @@ const MergeCtx = struct {
         zeros(self.fout, pad(len) - len);
     }
 
-    /// Ports `merge_tensor` (export-lora.cpp:285 @8642541b2), a member of `lora_merge_ctx`.
+    /// Ports `merge_tensor` (export-lora.cpp:287 @cd959bae9), a member of `lora_merge_ctx`.
     fn mergeTensor(self: *MergeCtx, base: *c.ggml_tensor, out: *c.ggml_tensor) !void {
         const a = self.a;
         const func = "merge_tensor";
@@ -433,7 +433,7 @@ fn printUsage(argv: []const [:0]const u8) void {
     io.printf("\n", .{});
 }
 
-/// Ports `main` (export-lora.cpp:417 @8642541b2).
+/// Ports `main` (export-lora.cpp:418 @cd959bae9).
 fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     var params = try tc.params.Params.init(a);
 

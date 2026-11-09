@@ -16,7 +16,7 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `launch_snake` (snake.cu:28 @8642541b2). `x` is `[T, C]` with `T`
+/// Ports `launch_snake` (snake.cu:28 @cd959bae9). `x` is `[T, C]` with `T`
 /// contiguous, `a` and `inv_b` are `[1, C]`.
 fn launchSnake(ctx: *common.Context, x: *const Tensor, a: *const Tensor, inv_b: *const Tensor, dst: *Tensor) void {
     const a_d: ?*const anyopaque = a.data;
@@ -42,7 +42,7 @@ fn launchSnake(ctx: *common.Context, x: *const Tensor, a: *const Tensor, inv_b: 
     }
 }
 
-/// Ports `ggml_cuda_op_snake_fused` (snake.cu:66 @8642541b2): the fusion
+/// Ports `ggml_cuda_op_snake_fused` (snake.cu:66 @cd959bae9): the fusion
 /// entry point. The caller supplies `x`, `a` and `inv_b` explicitly.
 pub fn opSnakeFused(ctx: *common.Context, x: *const Tensor, a: *const Tensor, inv_b: *const Tensor, dst: *Tensor) void {
     launchSnake(ctx, x, a, inv_b, dst);

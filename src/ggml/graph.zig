@@ -62,7 +62,7 @@ extern fn ggml_backend_tensor_set(tensor: *Tensor, data: ?*const anyopaque, offs
 // `impl.zig`, because they are `static inline` in `ggml-impl.h` and callers
 // outside this file need them; only the lifecycle is here.
 
-/// Ports `ggml_hash_size` (ggml.c:6726 @8642541b2).
+/// Ports `ggml_hash_size` (ggml.c:6771 @cd959bae9).
 ///
 /// Rounds up to the next prime past a power of two. Primes matter because the
 /// hash is just the tensor's address shifted right by four -- allocations are
@@ -97,7 +97,7 @@ pub export fn ggml_hash_size(min_sz: usize) usize {
     return if (l < primes.len) primes[l] else min_sz | 1;
 }
 
-/// Ports `ggml_hash_set_new` (ggml.c:6708 @8642541b2).
+/// Ports `ggml_hash_set_new` (ggml.c:6753 @cd959bae9).
 ///
 /// Return: a set sized to the next prime at or above `size`, owning two heap
 /// allocations. The caller frees it with `ggml_hash_set_free`.
@@ -110,7 +110,7 @@ pub export fn ggml_hash_set_new(size: usize) HashSet {
     };
 }
 
-/// Ports `ggml_hash_set_reset` (ggml.c:6717 @8642541b2).
+/// Ports `ggml_hash_set_reset` (ggml.c:6762 @cd959bae9).
 ///
 /// Clears only the used bits. The keys are left as they are: a slot is
 /// unreadable until its bit is set again, so there is nothing to scrub.
@@ -118,7 +118,7 @@ pub export fn ggml_hash_set_reset(hash_set: *HashSet) void {
     @memset(hash_set.used[0..impl.bitsetSize(hash_set.size)], 0);
 }
 
-/// Ports `ggml_hash_set_free` (ggml.c:6721 @8642541b2).
+/// Ports `ggml_hash_set_free` (ggml.c:6766 @cd959bae9).
 pub export fn ggml_hash_set_free(hash_set: *HashSet) void {
     std.c.free(@ptrCast(hash_set.used));
     std.c.free(@ptrCast(hash_set.keys));
@@ -127,7 +127,7 @@ pub export fn ggml_hash_set_free(hash_set: *HashSet) void {
 // -----------------------------------------------------------------------------
 // Allocating a graph
 
-/// Ports `incr_ptr_aligned` (ggml.c:7539 @8642541b2).
+/// Ports `incr_ptr_aligned` (ggml.c:7584 @cd959bae9).
 ///
 /// Bump allocation over an address rather than a pointer, which lets the
 /// sizing pass and the allocation pass share one routine: the C starts the
@@ -146,7 +146,7 @@ fn incrPtrAligned(p: *usize, size: usize, alignment: usize) usize {
     return ptr;
 }
 
-/// Ports `ggml_graph_nbytes` (ggml.c:7546 @8642541b2).
+/// Ports `ggml_graph_nbytes` (ggml.c:7591 @cd959bae9).
 ///
 /// Must walk the same fields in the same order as `ggml_new_graph_custom`.
 fn graphNbytes(size: usize, grads: bool) usize {
@@ -169,17 +169,17 @@ fn graphNbytes(size: usize, grads: bool) usize {
     return p - 1024;
 }
 
-/// Ports `ggml_graph_overhead_custom` (ggml.c:7564 @8642541b2).
+/// Ports `ggml_graph_overhead_custom` (ggml.c:7609 @cd959bae9).
 pub export fn ggml_graph_overhead_custom(size: usize, grads: bool) usize {
     return types.object_size + impl.pad(graphNbytes(size, grads), c.GGML_MEM_ALIGN);
 }
 
-/// Ports `ggml_graph_overhead` (ggml.c:7568 @8642541b2).
+/// Ports `ggml_graph_overhead` (ggml.c:7613 @cd959bae9).
 pub export fn ggml_graph_overhead() usize {
     return ggml_graph_overhead_custom(c.GGML_DEFAULT_GRAPH_SIZE, false);
 }
 
-/// Ports `ggml_new_graph_custom` (ggml.c:7572 @8642541b2).
+/// Ports `ggml_new_graph_custom` (ggml.c:7617 @cd959bae9).
 ///
 /// Parameters:
 /// - `ctx`: context the graph is carved out of.
@@ -238,12 +238,12 @@ pub export fn ggml_new_graph_custom(ctx: *Context, size: usize, grads: bool) *CG
     return cgraph;
 }
 
-/// Ports `ggml_new_graph` (ggml.c:7617 @8642541b2).
+/// Ports `ggml_new_graph` (ggml.c:7662 @cd959bae9).
 pub export fn ggml_new_graph(ctx: *Context) *CGraph {
     return ggml_new_graph_custom(ctx, c.GGML_DEFAULT_GRAPH_SIZE, false);
 }
 
-/// Ports `ggml_graph_view` (ggml.c:7621 @8642541b2).
+/// Ports `ggml_graph_view` (ggml.c:7666 @cd959bae9).
 ///
 /// A window onto `cgraph0`'s nodes, returned by value and owning nothing. Its
 /// `size` is zero, which marks it as unable to accept new nodes; gradients are
@@ -265,7 +265,7 @@ pub export fn ggml_graph_view(cgraph0: *CGraph, first: c_int, last: c_int) CGrap
     };
 }
 
-/// Ports `ggml_graph_cpy` (ggml.c:7639 @8642541b2).
+/// Ports `ggml_graph_cpy` (ggml.c:7684 @cd959bae9).
 ///
 /// Copies node and leaf pointers, then rebuilds `dst`'s hash set by inserting
 /// every key `src` had in use. The slots will not line up between the two
@@ -318,14 +318,14 @@ pub export fn ggml_graph_cpy(src: *CGraph, dst: *CGraph) void {
     }
 }
 
-/// Ports `ggml_graph_dup` (ggml.c:7686 @8642541b2).
+/// Ports `ggml_graph_dup` (ggml.c:7731 @cd959bae9).
 pub export fn ggml_graph_dup(ctx: *Context, cgraph: *CGraph, force_grads: bool) *CGraph {
     const result = ggml_new_graph_custom(ctx, @intCast(cgraph.size), cgraph.grads != null or force_grads);
     ggml_graph_cpy(cgraph, result);
     return result;
 }
 
-/// Ports `ggml_graph_reset` (ggml.c:7705 @8642541b2).
+/// Ports `ggml_graph_reset` (ggml.c:7750 @cd959bae9).
 ///
 /// Zeroes the gradient accumulators for another backward pass, except a loss
 /// tensor's, which is seeded to one -- differentiating a loss with respect to
@@ -365,7 +365,7 @@ pub export fn ggml_graph_reset(cgraph: ?*CGraph) void {
     }
 }
 
-/// Ports `ggml_graph_clear` (ggml.c:7741 @8642541b2).
+/// Ports `ggml_graph_clear` (ggml.c:7786 @cd959bae9).
 pub export fn ggml_graph_clear(cgraph: *CGraph) void {
     cgraph.n_leafs = 0;
     cgraph.n_nodes = 0;
@@ -375,12 +375,12 @@ pub export fn ggml_graph_clear(cgraph: *CGraph) void {
 // -----------------------------------------------------------------------------
 // Reading a graph
 
-/// Ports `ggml_graph_size` (ggml.c:7747 @8642541b2).
+/// Ports `ggml_graph_size` (ggml.c:7792 @cd959bae9).
 pub export fn ggml_graph_size(cgraph: *CGraph) c_int {
     return cgraph.size;
 }
 
-/// Ports `ggml_graph_node` (ggml.c:7751 @8642541b2).
+/// Ports `ggml_graph_node` (ggml.c:7796 @cd959bae9).
 ///
 /// A negative `i` counts back from the end, so `-1` is the last node.
 pub export fn ggml_graph_node(cgraph: *CGraph, i: c_int) *Tensor {
@@ -393,17 +393,17 @@ pub export fn ggml_graph_node(cgraph: *CGraph, i: c_int) *Tensor {
     return cgraph.nodes[@intCast(i)].?;
 }
 
-/// Ports `ggml_graph_nodes` (ggml.c:7761 @8642541b2).
+/// Ports `ggml_graph_nodes` (ggml.c:7806 @cd959bae9).
 pub export fn ggml_graph_nodes(cgraph: *CGraph) [*c]?*Tensor {
     return cgraph.nodes;
 }
 
-/// Ports `ggml_graph_n_nodes` (ggml.c:7765 @8642541b2).
+/// Ports `ggml_graph_n_nodes` (ggml.c:7810 @cd959bae9).
 pub export fn ggml_graph_n_nodes(cgraph: *CGraph) c_int {
     return cgraph.n_nodes;
 }
 
-/// Ports `ggml_graph_add_node` (ggml.c:7769 @8642541b2).
+/// Ports `ggml_graph_add_node` (ggml.c:7814 @cd959bae9).
 ///
 /// Appends without visiting parents, so the caller is asserting the sources
 /// are already in the graph.
@@ -413,7 +413,7 @@ pub export fn ggml_graph_add_node(cgraph: *CGraph, tensor: *Tensor) void {
     cgraph.n_nodes += 1;
 }
 
-/// Ports `ggml_graph_get_tensor` (ggml.c:7775 @8642541b2).
+/// Ports `ggml_graph_get_tensor` (ggml.c:7820 @cd959bae9).
 ///
 /// Linear scan of leafs then nodes.
 ///
@@ -433,7 +433,7 @@ pub export fn ggml_graph_get_tensor(cgraph: *const CGraph, name: [*:0]const u8) 
     return null;
 }
 
-/// Ports `ggml_graph_get_grad` (ggml.c:7795 @8642541b2).
+/// Ports `ggml_graph_get_grad` (ggml.c:7840 @cd959bae9).
 ///
 /// Three conditions, all required: the key was found, its slot is in use, and
 /// the graph has gradients at all.
@@ -444,7 +444,7 @@ pub export fn ggml_graph_get_grad(cgraph: *const CGraph, node: *const Tensor) ?*
         cgraph.grads != null) cgraph.grads[igrad] else null;
 }
 
-/// Ports `ggml_graph_get_grad_acc` (ggml.c:7800 @8642541b2).
+/// Ports `ggml_graph_get_grad_acc` (ggml.c:7845 @cd959bae9).
 pub export fn ggml_graph_get_grad_acc(cgraph: *const CGraph, node: *const Tensor) ?*Tensor {
     const igrad = impl.hashFind(&cgraph.visited_hash_set, node);
     return if (igrad != impl.hashset_full and
@@ -459,7 +459,7 @@ pub export fn ggml_graph_get_grad_acc(cgraph: *const CGraph, node: *const Tensor
 // tensor once. Tensors with no op become leafs; everything else becomes a
 // node, and the topological order falls out of the post-order traversal.
 
-/// Ports `ggml_visit_parents_graph` (ggml.c:7331 @8642541b2).
+/// Ports `ggml_visit_parents_graph` (ggml.c:7376 @cd959bae9).
 ///
 /// Parameters:
 /// - `cgraph`: graph being built.
@@ -541,7 +541,7 @@ fn visitParents(cgraph: *CGraph, node: *Tensor, compute: bool) usize {
     return node_hash_pos;
 }
 
-/// Ports `ggml_build_forward_impl` (ggml.c:7399 @8642541b2).
+/// Ports `ggml_build_forward_impl` (ggml.c:7444 @cd959bae9).
 fn buildForwardImpl(cgraph: *CGraph, tensor: *Tensor, expand: bool, compute: bool) void {
     if (!expand) {
         ggml_graph_clear(cgraph);
@@ -560,7 +560,7 @@ fn buildForwardImpl(cgraph: *CGraph, tensor: *Tensor, expand: bool, compute: boo
     }
 }
 
-/// Ports `ggml_build_forward_select` (ggml.c:7418 @8642541b2).
+/// Ports `ggml_build_forward_select` (ggml.c:7463 @cd959bae9).
 ///
 /// Records every tensor in `tensors` but marks only `tensors[idx]` for
 /// computation, so alternative branches share the graph's node numbering
@@ -582,14 +582,14 @@ pub export fn ggml_build_forward_select(
     return tensors[@intCast(idx)].?;
 }
 
-/// Ports `ggml_build_forward_expand` (ggml.c:7432 @8642541b2).
+/// Ports `ggml_build_forward_expand` (ggml.c:7477 @cd959bae9).
 ///
 /// The normal entry point: add `tensor` and everything it depends on.
 pub export fn ggml_build_forward_expand(cgraph: *CGraph, tensor: *Tensor) void {
     buildForwardImpl(cgraph, tensor, true, true);
 }
 
-/// Ports `ggml_build_forward_order` (ggml.c:7436 @8642541b2).
+/// Ports `ggml_build_forward_order` (ggml.c:7481 @cd959bae9).
 ///
 /// Records the subtree without marking it for computation, fixing its place in
 /// the evaluation order for a later `ggml_build_forward_expand`.
@@ -607,7 +607,7 @@ pub export fn ggml_build_forward_order(cgraph: *CGraph, tensor: *Tensor) void {
 // `*OrSet` helpers below all take an `isrc` and all end by expanding the graph
 // to include whatever they just built.
 
-/// Ports `ggml_add_or_set` (ggml.c:6777 @8642541b2).
+/// Ports `ggml_add_or_set` (ggml.c:6822 @cd959bae9).
 fn addOrSet(ctx: *Context, cgraph: *CGraph, isrc: usize, tensor: *Tensor) void {
     const src = cgraph.visited_hash_set.keys[isrc].?;
     if (cgraph.grads[isrc]) |g| {
@@ -619,7 +619,7 @@ fn addOrSet(ctx: *Context, cgraph: *CGraph, isrc: usize, tensor: *Tensor) void {
     ggml_build_forward_expand(cgraph, cgraph.grads[isrc].?);
 }
 
-/// Ports `ggml_acc_or_set` (ggml.c:6793 @8642541b2).
+/// Ports `ggml_acc_or_set` (ggml.c:6838 @cd959bae9).
 fn accOrSet(
     ctx: *Context,
     cgraph: *CGraph,
@@ -643,7 +643,7 @@ fn accOrSet(
     ggml_build_forward_expand(cgraph, cgraph.grads[isrc].?);
 }
 
-/// Ports `ggml_add1_or_set` (ggml.c:6814 @8642541b2).
+/// Ports `ggml_add1_or_set` (ggml.c:6859 @cd959bae9).
 fn add1OrSet(ctx: *Context, cgraph: *CGraph, isrc: usize, tensor: *Tensor) void {
     const src = cgraph.visited_hash_set.keys[isrc].?;
     if (cgraph.grads[isrc]) |g| {
@@ -655,7 +655,7 @@ fn add1OrSet(ctx: *Context, cgraph: *CGraph, isrc: usize, tensor: *Tensor) void 
     ggml_build_forward_expand(cgraph, cgraph.grads[isrc].?);
 }
 
-/// Ports `ggml_sub_or_set` (ggml.c:6830 @8642541b2).
+/// Ports `ggml_sub_or_set` (ggml.c:6875 @cd959bae9).
 fn subOrSet(ctx: *Context, cgraph: *CGraph, isrc: usize, tensor: *Tensor) void {
     const src = cgraph.visited_hash_set.keys[isrc].?;
     if (cgraph.grads[isrc]) |g| {
@@ -667,7 +667,7 @@ fn subOrSet(ctx: *Context, cgraph: *CGraph, isrc: usize, tensor: *Tensor) void {
     ggml_build_forward_expand(cgraph, cgraph.grads[isrc].?);
 }
 
-/// Ports `ggml_compute_backward` (ggml.c:6846 @8642541b2).
+/// Ports `ggml_compute_backward` (ggml.c:6891 @cd959bae9).
 ///
 /// Adds the nodes computing the gradients of `cgraph.nodes[i]`'s sources.
 /// One `switch` over every differentiable op -- ggml's entire autodiff.
@@ -1086,7 +1086,7 @@ fn computeBackward(ctx: *Context, cgraph: *CGraph, i: c_int, grads_needed: [*]co
     impl.assert(!src2_needs_grads or types.ggml_are_same_shape(src2.?, cgraph.grads[isrc2].?), "ggml_are_same_shape(src2, cgraph->grads[isrc2])");
 }
 
-/// Ports `ggml_build_backward_expand` (ggml.c:7440 @8642541b2).
+/// Ports `ggml_build_backward_expand` (ggml.c:7485 @cd959bae9).
 ///
 /// Appends the backward pass to a graph that already holds the forward one.
 ///
@@ -1193,7 +1193,7 @@ pub export fn ggml_build_backward_expand(ctx: *Context, cgraph: *CGraph, grad_ac
 // answer is no if any intermediate result is needed outside the run, which is
 // what the use-count and view-source checks below establish.
 
-/// Ports `ggml_node_list_find_tensor` (ggml.c:7833 @8642541b2).
+/// Ports `ggml_node_list_find_tensor` (ggml.c:7878 @cd959bae9).
 ///
 /// Return: the position of `tensor` within `idxs`, or -1. A node index past
 /// the end of the graph also yields -1, which is how a caller's stale index
@@ -1209,7 +1209,7 @@ fn nodeListFindTensor(cgraph: *const CGraph, idxs: [*c]const c_int, count: c_int
     return -1;
 }
 
-/// Ports `ggml_is_constant` (ggml.c:7851 @8642541b2).
+/// Ports `ggml_is_constant` (ggml.c:7896 @cd959bae9).
 ///
 /// A weight: it lives in a buffer marked as weights and is not a trainable
 /// parameter, so it cannot change during this graph's execution.
@@ -1219,7 +1219,7 @@ fn isConstant(tensor: *const Tensor) bool {
         (tensor.flags & c.GGML_TENSOR_FLAG_PARAM) == 0;
 }
 
-/// Ports `ggml_can_fuse_subgraph_ext` (ggml.c:7855 @8642541b2).
+/// Ports `ggml_can_fuse_subgraph_ext` (ggml.c:7900 @cd959bae9).
 ///
 /// Parameters:
 /// - `cgraph`: the graph.
@@ -1280,7 +1280,7 @@ pub export fn ggml_can_fuse_subgraph_ext(
     return true;
 }
 
-/// Ports `ggml_node_get_use_count` (ggml-impl.h:641 @8642541b2).
+/// Ports `ggml_node_get_use_count` (ggml-impl.h:699 @cd959bae9).
 ///
 /// `static inline` in the header, so it has to be reproduced rather than
 /// called. Lives here rather than in `impl.zig` because it reads a graph.
@@ -1292,7 +1292,7 @@ pub fn nodeGetUseCount(cgraph: *const CGraph, node_idx: c_int) i32 {
     return cgraph.use_counts[hash_pos];
 }
 
-/// Ports `ggml_node_has_n_uses` (ggml-impl.h:653 @8642541b2).
+/// Ports `ggml_node_has_n_uses` (ggml-impl.h:711 @cd959bae9).
 ///
 /// Parameters:
 /// - `cgraph`: the graph.
@@ -1315,7 +1315,7 @@ pub fn nodeHasNUses(cgraph: *const CGraph, node_idx: c_int, n_uses: i32) bool {
     return true;
 }
 
-/// Ports `ggml_can_fuse_ext` (ggml-impl.h:681 @8642541b2).
+/// Ports `ggml_can_fuse_ext` (ggml-impl.h:739 @cd959bae9).
 ///
 /// Parameters:
 /// - `cgraph`: the graph.
@@ -1349,7 +1349,7 @@ pub fn canFuseExt(
     return true;
 }
 
-/// Ports `ggml_can_fuse` (ggml-impl.h:711 @8642541b2).
+/// Ports `ggml_can_fuse` (ggml-impl.h:769 @cd959bae9).
 ///
 /// The same test as `canFuseExt` for a run of consecutive nodes.
 ///
@@ -1370,9 +1370,9 @@ pub fn canFuse(cgraph: *const CGraph, node_idx: c_int, ops_wanted: []const c.enu
     return canFuseExt(cgraph, &idxs, ops_wanted, ops_wanted.len);
 }
 
-/// Ports the C++ overload of `ggml_can_fuse_subgraph` (ggml-impl.h:770
-/// @8642541b2) and the static inline `ggml_can_fuse_subgraph` it calls
-/// (ggml-impl.h:736 @8642541b2). Shared by the CUDA and Vulkan host layers.
+/// Ports the C++ overload of `ggml_can_fuse_subgraph` (ggml-impl.h:828
+/// @cd959bae9) and the static inline `ggml_can_fuse_subgraph` it calls
+/// (ggml-impl.h:794 @cd959bae9). Shared by the CUDA and Vulkan host layers.
 ///
 /// Parameters:
 /// - `cgraph`: the graph.
@@ -1391,7 +1391,7 @@ pub fn canFuseSubgraph(cgraph: *const CGraph, node_idx: c_int, ops_wanted: []con
     return ggml_can_fuse_subgraph_ext(cgraph, &idxs, @intCast(ops_wanted.len), ops_wanted.ptr, outputs.ptr, @intCast(outputs.len));
 }
 
-/// Ports `ggml_check_edges` (ggml-impl.h:778 @8642541b2): each edge is
+/// Ports `ggml_check_edges` (ggml-impl.h:836 @cd959bae9): each edge is
 /// `{dst_node, src_idx, src_node}`, relative to `start_idx`.
 ///
 /// Return: true when every edge is present.
@@ -1406,7 +1406,7 @@ pub fn checkEdges(cgraph: *const CGraph, start_idx: c_int, edges: []const [3]c_i
 // -----------------------------------------------------------------------------
 // Printing
 
-/// Ports `ggml_graph_print` (ggml.c:7805 @8642541b2).
+/// Ports `ggml_graph_print` (ggml.c:7850 @cd959bae9).
 pub export fn ggml_graph_print(cgraph: *const CGraph) void {
     impl.logInfo("=== GRAPH ===\n", .{});
 
@@ -1442,7 +1442,7 @@ pub export fn ggml_graph_print(cgraph: *const CGraph) void {
     impl.logInfo("========================================\n", .{});
 }
 
-/// Ports `ggml_graph_find` (ggml.c:7915 @8642541b2).
+/// Ports `ggml_graph_find` (ggml.c:7960 @cd959bae9).
 ///
 /// A null graph returns true, which is what makes the colour choice in
 /// `ggml_graph_dump_dot` treat "no forward graph supplied" as "everything is
@@ -1457,7 +1457,7 @@ fn graphFind(cgraph: ?*const CGraph, node: *const Tensor) bool {
     return false;
 }
 
-/// Ports `ggml_graph_get_parent` (ggml.c:7929 @8642541b2).
+/// Ports `ggml_graph_get_parent` (ggml.c:7974 @cd959bae9).
 fn graphGetParent(cgraph: *const CGraph, node: *const Tensor) ?*Tensor {
     for (0..@intCast(cgraph.n_nodes)) |i| {
         const parent = cgraph.nodes[i].?;
@@ -1467,19 +1467,19 @@ fn graphGetParent(cgraph: *const CGraph, node: *const Tensor) ?*Tensor {
     return null;
 }
 
-/// Ports `ggml_graph_dump_dot_node_edge` (ggml.c:7942 @8642541b2).
+/// Ports `ggml_graph_dump_dot_node_edge` (ggml.c:7987 @cd959bae9).
 fn dumpDotNodeEdge(fp: *std.c.FILE, gb: *const CGraph, node: *Tensor, parent: *Tensor, label: [*:0]const u8) void {
     const gparent = graphGetParent(gb, node);
     const gparent0 = graphGetParent(gb, parent);
     _ = fprintf(fp, "  \"%p\" -> \"%p\" [ arrowhead = %s; style = %s; label = \"%s\"; ]\n", if (gparent0) |g| g else parent, if (gparent) |g| g else node, if (gparent != null) @as([*:0]const u8, "empty") else "vee", if (gparent != null) @as([*:0]const u8, "dashed") else "solid", label);
 }
 
-/// Ports `ggml_graph_dump_dot_leaf_edge` (ggml.c:7953 @8642541b2).
+/// Ports `ggml_graph_dump_dot_leaf_edge` (ggml.c:7998 @cd959bae9).
 fn dumpDotLeafEdge(fp: *std.c.FILE, node: *Tensor, parent: *Tensor, label: [*:0]const u8) void {
     _ = fprintf(fp, "  \"%p\" -> \"%p\" [ label = \"%s\"; ]\n", parent, node, label);
 }
 
-/// Ports `ggml_graph_dump_dot` (ggml.c:7960 @8642541b2).
+/// Ports `ggml_graph_dump_dot` (ggml.c:8005 @cd959bae9).
 ///
 /// Writes the graph as Graphviz DOT. Nodes are coloured by role: yellow for
 /// parameters, green for tensors in the forward graph that have gradients,

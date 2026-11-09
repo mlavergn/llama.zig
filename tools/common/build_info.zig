@@ -11,16 +11,16 @@ const std = @import("std");
 const options = @import("build_info");
 const io = @import("io.zig");
 
-/// Ports `llama_build_number` (build-info.cpp.in:11 @8642541b2).
+/// Ports `llama_build_number` (build-info.cpp.in:11 @cd959bae9).
 pub const build_number: c_int = options.build_number;
-/// Ports `llama_commit` (build-info.cpp.in:15 @8642541b2).
+/// Ports `llama_commit` (build-info.cpp.in:15 @cd959bae9).
 pub const commit: [:0]const u8 = options.commit ++ "";
-/// Ports `llama_compiler` (build-info.cpp.in:19 @8642541b2).
+/// Ports `llama_compiler` (build-info.cpp.in:19 @cd959bae9).
 pub const compiler: [:0]const u8 = options.compiler ++ "";
-/// Ports `llama_build_target` (build-info.cpp.in:23 @8642541b2).
+/// Ports `llama_build_target` (build-info.cpp.in:23 @cd959bae9).
 pub const build_target: [:0]const u8 = options.build_target ++ "";
 
-/// Ports `llama_print_build_info` (build-info.cpp.in:32 @8642541b2): two lines
+/// Ports `llama_print_build_info` (build-info.cpp.in:32 @cd959bae9): two lines
 /// on `stream`, which `build-info.h` defaults to `stderr` -- every caller
 /// ported passes `io.cStderr()`.
 pub fn print(version: [*:0]const u8, stream: *anyopaque) void {

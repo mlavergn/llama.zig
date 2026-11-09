@@ -33,17 +33,17 @@ const c = impl.c;
 const f = common.f;
 const as = common.as;
 
-/// `GGML_CPU_E8M0_TO_FP32_HALF`: on x86 a lookup (simd-mappings.h:132 @8642541b2).
+/// `GGML_CPU_E8M0_TO_FP32_HALF`: on x86 a lookup (simd-mappings.h:136 @cd959bae9).
 inline fn e8m0Half(x: u8) f32 {
     return convert.ggml_table_f32_e8m0_half[x];
 }
 
-/// `GGML_CPU_UE4M3_TO_FP32`: a lookup on x86 too (simd-mappings.h:139 @8642541b2).
+/// `GGML_CPU_UE4M3_TO_FP32`: a lookup on x86 too (simd-mappings.h:143 @cd959bae9).
 inline fn ue4m3(x: u8) f32 {
     return convert.ggml_table_f32_ue4m3[x];
 }
 
-/// Ports `ggml_vec_dot_q1_0_q8_0` (arch/x86/quants.c:555 @8642541b2), the
+/// Ports `ggml_vec_dot_q1_0_q8_0` (arch/x86/quants.c:555 @cd959bae9), the
 /// `__AVX2__` arm.
 ///
 /// One sign bit per weight. Each bit is spread to a byte mask by a shuffle
@@ -110,7 +110,7 @@ pub export fn ggml_vec_dot_q1_0_q8_0(
     s[0] = common.hsum_float_8(acc);
 }
 
-/// Ports `q2_0_unpack_32_avx2` (arch/x86/quants.c:703 @8642541b2): four
+/// Ports `q2_0_unpack_32_avx2` (arch/x86/quants.c:703 @cd959bae9): four
 /// consecutive Q2_0 weights per byte. Byte `b` becomes `b & 3`, `(b >> 2) & 3`,
 /// `(b >> 4) & 3`, `(b >> 6) & 3` -- OR, never add: the overlapping copies only
 /// touch masked-off bits.
@@ -121,7 +121,7 @@ inline fn q2_0_unpack_32_avx2(qs: [*]const u8) avx.m256i {
     return avx.mm256_and_si256(v, avx.mm256_set1_epi32(0x03030303));
 }
 
-/// Ports `q2_0_dot_32_avx2` (arch/x86/quants.c:711 @8642541b2): 32 weights
+/// Ports `q2_0_dot_32_avx2` (arch/x86/quants.c:711 @cd959bae9): 32 weights
 /// against one Q8_0 block, as `sum(v * y) - sum(y)`, which is
 /// `sum((v - 1) * y)` exactly for every `int8` `y`.
 inline fn q2_0_dot_32_avx2(qs: [*]const u8, qy: [*]const i8) avx.m256 {
@@ -131,7 +131,7 @@ inline fn q2_0_dot_32_avx2(qs: [*]const u8, qy: [*]const i8) avx.m256 {
     return avx.mm256_cvtepi32_ps(avx.mm256_madd_epi16(p, avx.mm256_set1_epi16(1)));
 }
 
-/// Ports `q2_0_acc_block_avx2` (arch/x86/quants.c:718 @8642541b2), at its
+/// Ports `q2_0_acc_block_avx2` (arch/x86/quants.c:718 @cd959bae9), at its
 /// `__FMA__` arm, which x86-64-v3 compiles: one Q2_0 block over its two Q8_0
 /// blocks into `acc`.
 inline fn q2_0_acc_block_avx2(x: *const blocks.Q2_0, y: [*]const blocks.Q8_0, acc_in: avx.m256) avx.m256 {
@@ -144,7 +144,7 @@ inline fn q2_0_acc_block_avx2(x: *const blocks.Q2_0, y: [*]const blocks.Q8_0, ac
     return avx.mm256_fmadd_ps(d1, p1, acc);
 }
 
-/// Ports `ggml_vec_dot_q2_0_q8_0` (arch/x86/quants.c:734 @8642541b2), its
+/// Ports `ggml_vec_dot_q2_0_q8_0` (arch/x86/quants.c:734 @cd959bae9), its
 /// `__AVX2__` arm (#30447). Until v0.7.0 `arch-fallback.h` renamed
 /// `quants.c`'s generic body to this name on x86, and this file ported that
 /// body as x86 compiled it, fused; the generic is now dead on x86 as on ARM.
@@ -186,7 +186,7 @@ pub export fn ggml_vec_dot_q2_0_q8_0(
     s[0] = common.hsum_float_8(avx.mm256_add_ps(acc0, acc1));
 }
 
-/// Ports `ggml_vec_dot_q4_0_q8_0` (arch/x86/quants.c:765 @8642541b2), the
+/// Ports `ggml_vec_dot_q4_0_q8_0` (arch/x86/quants.c:765 @cd959bae9), the
 /// `__AVX2__` arm.
 pub export fn ggml_vec_dot_q4_0_q8_0(
     n: c_int,
@@ -233,7 +233,7 @@ pub export fn ggml_vec_dot_q4_0_q8_0(
     s[0] = common.hsum_float_8(acc);
 }
 
-/// Ports `ggml_vec_dot_q4_1_q8_1` (arch/x86/quants.c:923 @8642541b2), the
+/// Ports `ggml_vec_dot_q4_1_q8_1` (arch/x86/quants.c:923 @cd959bae9), the
 /// `__AVX2__ || __AVX__` arm with its `__AVX2__` fused accumulate.
 ///
 /// The weights are unsigned, so no sign trick: `maddubs` takes them
@@ -290,7 +290,7 @@ pub export fn ggml_vec_dot_q4_1_q8_1(
     s[0] = common.hsum_float_8(acc) + summs;
 }
 
-/// Ports `ggml_vec_dot_mxfp4_q8_0` (arch/x86/quants.c:982 @8642541b2), the
+/// Ports `ggml_vec_dot_mxfp4_q8_0` (arch/x86/quants.c:982 @cd959bae9), the
 /// `__AVX2__` arm and the scalar tail after it.
 ///
 /// Two blocks a step into two accumulators, summed only at the end; the
@@ -364,7 +364,7 @@ pub export fn ggml_vec_dot_mxfp4_q8_0(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_nvfp4_q8_0` (arch/x86/quants.c:1068 @8642541b2), the
+/// Ports `ggml_vec_dot_nvfp4_q8_0` (arch/x86/quants.c:1068 @cd959bae9), the
 /// `__AVX2__` arm.
 ///
 /// A 64-weight block with four UE4M3 sub-block scales over two `q8_0`
@@ -433,7 +433,7 @@ pub export fn ggml_vec_dot_nvfp4_q8_0(
     s[0] = common.hsum_float_8(accum);
 }
 
-/// Ports `ggml_vec_dot_q5_0_q8_0` (arch/x86/quants.c:1206 @8642541b2), the
+/// Ports `ggml_vec_dot_q5_0_q8_0` (arch/x86/quants.c:1206 @cd959bae9), the
 /// `__AVX2__` arm.
 ///
 /// The fifth bit is folded in as a sign: `andnot` leaves `0xF0` where the
@@ -483,7 +483,7 @@ pub export fn ggml_vec_dot_q5_0_q8_0(
     s[0] = common.hsum_float_8(acc);
 }
 
-/// Ports `ggml_vec_dot_q5_1_q8_1` (arch/x86/quants.c:1286 @8642541b2), the
+/// Ports `ggml_vec_dot_q5_1_q8_1` (arch/x86/quants.c:1286 @cd959bae9), the
 /// `__AVX2__` arm.
 ///
 /// Unsigned five-bit weights, so the fifth bit is OR-ed in as `0x10`.
@@ -536,7 +536,7 @@ pub export fn ggml_vec_dot_q5_1_q8_1(
     s[0] = common.hsum_float_8(acc) + summs;
 }
 
-/// Ports `ggml_vec_dot_q8_0_q8_0` (arch/x86/quants.c:1372 @8642541b2), the
+/// Ports `ggml_vec_dot_q8_0_q8_0` (arch/x86/quants.c:1372 @cd959bae9), the
 /// `__AVX2__` arm.
 pub export fn ggml_vec_dot_q8_0_q8_0(
     n: c_int,
@@ -577,7 +577,7 @@ pub export fn ggml_vec_dot_q8_0_q8_0(
     s[0] = common.hsum_float_8(acc);
 }
 
-/// Ports `ggml_vec_dot_iq4_nl_q8_0` (arch/x86/quants.c:3984 @8642541b2), the
+/// Ports `ggml_vec_dot_iq4_nl_q8_0` (arch/x86/quants.c:3984 @cd959bae9), the
 /// `__AVX2__` arm and the scalar tail after it.
 ///
 /// `mxfp4`'s shape over `kvalues_iq4nl`, with an fp16 delta in place of the

@@ -41,17 +41,17 @@ const Model = model_mod.Model;
 const Exception = impl.Exception;
 const Tensor = c.ggml_tensor;
 
-/// Mirrors `ctx_type_to_graph_type` (llama-context.cpp:112 @8642541b2),
+/// Mirrors `ctx_type_to_graph_type` (llama-context.cpp:113 @cd959bae9),
 /// which `context.zig` keeps file-private.
 fn ctxTypeToGraphType(ctx_type: c.enum_llama_context_type) graph.GraphType {
     return switch (ctx_type) {
         c.LLAMA_CONTEXT_TYPE_DEFAULT => .default,
         c.LLAMA_CONTEXT_TYPE_MTP => .decoder_mtp,
-        else => impl.throwRuntime("llama-context.cpp", 117, "Unsupported ctx type"),
+        else => impl.throwRuntime("llama-context.cpp", 118, "Unsupported ctx type"),
     };
 }
 
-/// Ports `llama_set_param` (llama-context.cpp:3758 @8642541b2).
+/// Ports `llama_set_param` (llama-context.cpp:4003 @cd959bae9).
 ///
 /// Parameters:
 /// - `tensor`: a weight, or null.
@@ -82,7 +82,7 @@ fn setLayerParams(comptime T: type, layer: *T, param_filter: c.llama_opt_param_f
     }
 }
 
-/// Ports `opt_init` (llama-context.cpp:3774 @8642541b2), a method of
+/// Ports `opt_init` (llama-context.cpp:4019 @cd959bae9), a method of
 /// `llama_context`.
 ///
 /// Parameters:
@@ -93,12 +93,12 @@ fn setLayerParams(comptime T: type, layer: *T, param_filter: c.llama_opt_param_f
 ///
 /// Return: nothing.
 pub fn optInit(self: *Context, model: *Model, lopt_params: c.struct_llama_opt_params) void {
-    impl.assert(self.opt_ctx == null, "llama-context.cpp", 3775, "!opt_ctx");
+    impl.assert(self.opt_ctx == null, "llama-context.cpp", 4020, "!opt_ctx");
     model.hparams.n_ctx_train = if (lopt_params.n_ctx_train > 0) lopt_params.n_ctx_train else self.nCtx();
     const n_batch = @min(self.nBatch(), model.hparams.n_ctx_train);
     const n_ubatch = @min(self.nUbatch(), n_batch);
-    impl.assert(model.hparams.n_ctx_train % n_batch == 0, "llama-context.cpp", 3779, "model->hparams.n_ctx_train % n_batch == 0");
-    impl.assert(n_batch % n_ubatch == 0, "llama-context.cpp", 3780, "n_batch % n_ubatch == 0");
+    impl.assert(model.hparams.n_ctx_train % n_batch == 0, "llama-context.cpp", 4024, "model->hparams.n_ctx_train % n_batch == 0");
+    impl.assert(n_batch % n_ubatch == 0, "llama-context.cpp", 4025, "n_batch % n_ubatch == 0");
 
     if (self.cparams.flash_attn) {
         impl.logInfo("%s: disabling flash attention, FLASH_ATTN_EXT has no backward pass\n", .{"opt_init"});
@@ -117,7 +117,7 @@ pub fn optInit(self: *Context, model: *Model, lopt_params: c.struct_llama_opt_pa
     // escapes `llama_opt_init`, so it terminates.
     self.sched_need_reserve = true;
     var exc: Exception = .{};
-    self.schedReserve(&exc) catch exc.terminate("llama-context.cpp", 3796);
+    self.schedReserve(&exc) catch exc.terminate("llama-context.cpp", 4041);
 
     var opt_params = c.ggml_opt_default_params(self.sched, c.GGML_OPT_LOSS_TYPE_CROSS_ENTROPY);
     opt_params.opt_period = @intCast(n_batch / n_ubatch);
@@ -148,7 +148,7 @@ pub fn optInit(self: *Context, model: *Model, lopt_params: c.struct_llama_opt_pa
     for (model.layers) |*layer| setLayerParams(model_mod.Layer, layer, param_filter, param_filter_ud);
 }
 
-/// Ports `opt_epoch_iter` (llama-context.cpp:3831 @8642541b2), a method of
+/// Ports `opt_epoch_iter` (llama-context.cpp:4076 @cd959bae9), a method of
 /// `llama_context`.
 ///
 /// Runs one datapoint — a context's worth of tokens — through the model in
@@ -183,7 +183,7 @@ fn optEpochIter(
     t_loop_start: i64,
 ) void {
     const func = "opt_epoch_iter";
-    impl.assert(self.opt_ctx != null, "llama-context.cpp", 3842, "opt_ctx");
+    impl.assert(self.opt_ctx != null, "llama-context.cpp", 4087, "opt_ctx");
     const n_ctx: u32 = self.model.hparams.n_ctx_train;
     const n_batch = @min(self.nBatch(), n_ctx);
     const n_ubatch = @min(self.nUbatch(), n_batch);
@@ -232,7 +232,7 @@ fn optEpochIter(
         // reserve output buffer
         if (self.outputReserve(@intCast(n_outputs_all)) < n_outputs_all) {
             impl.logError("%s: could not reserve space for batch with %d outputs\n", .{ func, n_outputs_all });
-            impl.abort("llama-context.cpp", 3885, "TODO: handle this error");
+            impl.abort("llama-context.cpp", 4130, "TODO: handle this error");
         }
 
         var pos_batch: u32 = 0;
@@ -274,12 +274,12 @@ fn optEpochIter(
             res.setInputs(ubatch);
             {
                 const labels: *Tensor = c.ggml_opt_labels(self.opt_ctx);
-                impl.assert(labels.ne[1] == n_ubatch, "llama-context.cpp", 3926, "labels->ne[1] == n_ubatch");
+                impl.assert(labels.ne[1] == n_ubatch, "llama-context.cpp", 4171, "labels->ne[1] == n_ubatch");
                 _ = c.ggml_set_zero(labels);
                 const onef: f32 = 1.0;
                 for (0..n_ubatch) |pos_ubatch| {
                     const ilabel = pos_ctx + pos_batch + pos_ubatch;
-                    impl.assert(labels_sparse[ilabel] < labels.ne[0], "llama-context.cpp", 3931, "labels_sparse[ilabel] < labels->ne[0]");
+                    impl.assert(labels_sparse[ilabel] < labels.ne[0], "llama-context.cpp", 4176, "labels_sparse[ilabel] < labels->ne[0]");
                     const off: usize = @intCast(@as(i64, @intCast(pos_ubatch)) * labels.ne[0] + labels_sparse[ilabel]);
                     c.ggml_backend_tensor_set(labels, &onef, off * @sizeOf(f32), @sizeOf(f32));
                 }
@@ -297,7 +297,7 @@ fn optEpochIter(
     }
 }
 
-/// Ports `opt_epoch` (llama-context.cpp:3947 @8642541b2), a method of
+/// Ports `opt_epoch` (llama-context.cpp:4192 @cd959bae9), a method of
 /// `llama_context`.
 ///
 /// Parameters:
@@ -324,8 +324,8 @@ pub fn optEpoch(
     const n_ubatch = @min(self.cparams.n_ubatch, n_batch);
     const ndata = c.ggml_opt_dataset_ndata(dataset);
 
-    impl.assert(idata_split >= 0, "llama-context.cpp", 3959, "idata_split >= 0");
-    impl.assert(idata_split <= ndata, "llama-context.cpp", 3960, "idata_split <= ndata");
+    impl.assert(idata_split >= 0, "llama-context.cpp", 4204, "idata_split >= 0");
+    impl.assert(idata_split <= ndata, "llama-context.cpp", 4205, "idata_split <= ndata");
 
     const ubatch_per_ctx: u32 = n_ctx / n_ubatch;
 

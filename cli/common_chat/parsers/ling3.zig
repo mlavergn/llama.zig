@@ -189,7 +189,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_ling3` (parsers/ling3.cpp:11 @8642541b2).
+/// Ports `common_chat_params_init_ling3` (parsers/ling3.cpp:11 @cd959bae9).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

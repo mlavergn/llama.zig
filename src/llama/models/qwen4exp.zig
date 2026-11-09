@@ -60,15 +60,15 @@ fn oom() noreturn {
     impl.abort(src, 0, "out of memory");
 }
 
-/// `LLAMA_MAX_PLE_NGRAM` (llama-hparams.h:13 @8642541b2).
+/// `LLAMA_MAX_PLE_NGRAM` (llama-hparams.h:13 @cd959bae9).
 const max_ple_ngram: u32 = 8;
-/// `LLAMA_MAX_PLE_HEADS` (llama-hparams.h:14 @8642541b2).
+/// `LLAMA_MAX_PLE_HEADS` (llama-hparams.h:14 @cd959bae9).
 const max_ple_heads: u32 = 64;
 
 /// `LLAMA_TOKEN_NULL`.
 const token_null: i32 = -1;
 
-/// Ports `qwen4exp_require_nonzero` (models/qwen4exp.cpp:10 @8642541b2):
+/// Ports `qwen4exp_require_nonzero` (models/qwen4exp.cpp:10 @cd959bae9):
 /// bad metadata must be catchable, where a `GGML_ASSERT` would abort the
 /// whole process.
 fn requireNonzero(ml: *const loader.Loader, kid: arch_mod.Kv, value: u32, exc: *Exception) Thrown!void {
@@ -78,7 +78,7 @@ fn requireNonzero(ml: *const loader.Loader, kid: arch_mod.Kv, value: u32, exc: *
     }
 }
 
-/// Ports `qwen4exp_require_arr_len` (models/qwen4exp.cpp:17 @8642541b2):
+/// Ports `qwen4exp_require_arr_len` (models/qwen4exp.cpp:17 @cd959bae9):
 /// `get_arr` copies a short array as it is, leaving a zero tail the n-gram
 /// hash would silently drop.
 fn requireArrLen(ml: *const loader.Loader, kid: arch_mod.Kv, n_min: u32, exc: *Exception) Thrown!void {
@@ -89,7 +89,7 @@ fn requireArrLen(ml: *const loader.Loader, kid: arch_mod.Kv, n_min: u32, exc: *E
     }
 }
 
-/// Ports `llama_model_qwen4exp`'s `load_arch_hparams` (models/qwen4exp.cpp:26 @8642541b2).
+/// Ports `llama_model_qwen4exp`'s `load_arch_hparams` (models/qwen4exp.cpp:26 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -250,7 +250,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_qwen4exp`'s `load_arch_tensors` (models/qwen4exp.cpp:174 @8642541b2).
+/// Ports `llama_model_qwen4exp`'s `load_arch_tensors` (models/qwen4exp.cpp:174 @cd959bae9).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -323,7 +323,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports the `create_merged` lambda (models/qwen4exp.cpp:235 @8642541b2) of
+/// Ports the `create_merged` lambda (models/qwen4exp.cpp:235 @cd959bae9) of
 /// `load_block`: for matmuls that read the same input, the merged `[a | b]`
 /// weight the converter writes, else the separate ones.
 fn createMerged(self: *Model, il: i32, flags: u32, t_merged: arch_mod.Tensor, t_a: arch_mod.Tensor, t_b: arch_mod.Tensor, n_in: i64, n_a: i64, n_b: i64, merged: *?*Tensor, a: *?*Tensor, b: *?*Tensor, exc: *Exception) Thrown!void {
@@ -341,7 +341,7 @@ fn createMerged(self: *Model, il: i32, flags: u32, t_merged: arch_mod.Tensor, t_
     }
 }
 
-/// Ports the `load_block` lambda (models/qwen4exp.cpp:220 @8642541b2) of
+/// Ports the `load_block` lambda (models/qwen4exp.cpp:220 @cd959bae9) of
 /// `load_arch_tensors`: one trunk or MTP block, every tensor created with
 /// `flags`.
 fn loadBlock(self: *Model, il: i32, flags: u32, exc: *Exception) Thrown!void {
@@ -415,7 +415,7 @@ fn loadBlock(self: *Model, il: i32, flags: u32, exc: *Exception) Thrown!void {
     layer.ffn_down_shexp = try self.createTensor(.{ .tensor = .ffn_down_shexp, .suffix = "weight", .bid = il }, &.{ n_ff_shexp, l.n_embd }, flags, exc);
 }
 
-/// Ports `llama_model_qwen4exp`'s `build_arch_graph` (models/qwen4exp.cpp:324 @8642541b2).
+/// Ports `llama_model_qwen4exp`'s `build_arch_graph` (models/qwen4exp.cpp:324 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     var g: Graph = .{ .model = model, .b = b };
     defer g.deinit();
@@ -427,7 +427,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports `llama_model_qwen4exp`'s `llm_graph_input_kpool` (models/qwen4exp.cpp:722
-/// @8642541b2): the k-pool inputs the QSA layers share -- blocks of
+/// @cd959bae9): the k-pool inputs the QSA layers share -- blocks of
 /// `compress_ratio` cells in sequence order, see `llama_memory_hybrid_idx`.
 pub const InpKpool = struct {
     /// I64 `[n_tokens]`.
@@ -459,14 +459,14 @@ pub const InpKpool = struct {
     n_sel: u32 = 0,
     n_kv: u32 = 0,
 
-    /// Ports `llm_graph_input_kpool`'s `set_input` (models/qwen4exp.cpp:727 @8642541b2).
+    /// Ports `llm_graph_input_kpool`'s `set_input` (models/qwen4exp.cpp:727 @cd959bae9).
     pub fn setInput(self: *InpKpool, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         self.mctx.getIdx().?.setInputKIdxs(self.k_idxs.?, ubatch);
         self.mctx.setInputKpool(self.pool_cells.?, self.pool_idxs.?, self.pool_mask.?, self.tail_idxs.?, null, self.new_pool_idxs.?, self.new_pool_rep.?, ubatch, self.new_pool_pos);
     }
 
-    /// Ports `llm_graph_input_kpool`'s `can_reuse` (models/qwen4exp.cpp:733 @8642541b2).
+    /// Ports `llm_graph_input_kpool`'s `can_reuse` (models/qwen4exp.cpp:733 @cd959bae9).
     pub fn canReuse(self: *InpKpool, params: *const graph.Params) bool {
         self.mctx = HybridIdxContext.fromBase(params.mctx.?.cast(HybridContext));
 
@@ -486,7 +486,7 @@ pub const InpKpool = struct {
     }
 };
 
-/// Ports `llm_graph_input_qwen4exp_ple` (models/qwen4exp.cpp:1299 @8642541b2): the
+/// Ports `llm_graph_input_qwen4exp_ple` (models/qwen4exp.cpp:1299 @cd959bae9): the
 /// PLE n-gram hash embedding's rows. Each token gathers `ple_n_heads` rows
 /// of a shared table:
 ///
@@ -511,13 +511,13 @@ pub const InpPle = struct {
         self.prev.deinit(allocator);
     }
 
-    /// Ports `llm_graph_input_qwen4exp_ple`'s `can_reuse` (models/qwen4exp.cpp:1307 @8642541b2).
+    /// Ports `llm_graph_input_qwen4exp_ple`'s `can_reuse` (models/qwen4exp.cpp:1307 @cd959bae9).
     pub fn canReuse(self: *InpPle, params: *const graph.Params) bool {
         self.mctx = HybridIdxContext.fromBase(params.mctx.?.cast(HybridContext)).getAttn();
         return self.rows.?.ne[0] == @as(i64, self.pmodel.hparams.ple_n_heads) * @as(i64, params.ubatch.n_tokens);
     }
 
-    /// Ports `llm_graph_input_qwen4exp_ple`'s `set_input` (models/qwen4exp.cpp:1323 @8642541b2).
+    /// Ports `llm_graph_input_qwen4exp_ple`'s `set_input` (models/qwen4exp.cpp:1323 @cd959bae9).
     pub fn setInput(self: *InpPle, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         const hp = &self.pmodel.hparams;
@@ -603,7 +603,7 @@ pub const InpPle = struct {
     }
 };
 
-/// Ports `hc_stream_mean` (models/qwen4exp.cpp:332 @8642541b2): DFlash
+/// Ports `hc_stream_mean` (models/qwen4exp.cpp:332 @cd959bae9): DFlash
 /// drafters read the layer inputs as `[n_embd, T]` rows, so the streams
 /// collapse.
 fn hcStreamMean(ctx: *c.ggml_context, x: *Tensor) *Tensor {
@@ -620,8 +620,8 @@ fn hcStreamMean(ctx: *c.ggml_context, x: *Tensor) *Tensor {
     return c.ggml_scale(ctx, acc, 1.0 / @as(f32, @floatFromInt(hc)));
 }
 
-/// Ports `llama_model_qwen4exp`'s `graph` (src/models/models.h:2763
-/// @8642541b2) and `graph_mtp` (src/models/models.h:2869 @8642541b2): the builder
+/// Ports `llama_model_qwen4exp`'s `graph` (src/models/models.h:2827
+/// @cd959bae9) and `graph_mtp` (src/models/models.h:2933 @cd959bae9): the builder
 /// and the map it keeps for one build.
 const Graph = struct {
     model: *const Model,
@@ -635,7 +635,7 @@ const Graph = struct {
         self.rs_rows.deinit(allocator);
     }
 
-    /// Mirrors the graph's `hc_mix` (src/models/models.h:2772 @8642541b2).
+    /// Mirrors the graph's `hc_mix` (src/models/models.h:2836 @cd959bae9).
     const HcMix = struct {
         /// The mixed `[n_embd, T]` stream.
         cur: *Tensor,
@@ -644,7 +644,7 @@ const Graph = struct {
     };
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_hc_mix` (models/qwen4exp.cpp:348
-    /// @8642541b2): hyper-connections keep `hc` parallel residual streams,
+    /// @cd959bae9): hyper-connections keep `hc` parallel residual streams,
     /// `[n_embd, hc, T]`, in place of the layer norms. Returns the mixed
     /// `[n_embd, T]` stream and the `[hc, T]` scatter weights.
     fn buildHcMix(self: *Graph, x: *Tensor, w_norm: ?*Tensor, w_down: ?*Tensor, w_up: ?*Tensor, w_inject: ?*Tensor, w_down_inject: ?*Tensor, il: c_int) HcMix {
@@ -713,7 +713,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_hc_combine`
-    /// (models/qwen4exp.cpp:417 @8642541b2): the block's output scattered
+    /// (models/qwen4exp.cpp:417 @cd959bae9): the block's output scattered
     /// back into the streams by the injection weights.
     fn buildHcCombine(self: *Graph, residual: *Tensor, block_out: *Tensor, inject: *Tensor, il: c_int) *Tensor {
         const b = self.b;
@@ -746,7 +746,7 @@ const Graph = struct {
     }
 
     /// Ports the constructor of `llama_model_qwen4exp`'s `graph`
-    /// (models/qwen4exp.cpp:447 @8642541b2).
+    /// (models/qwen4exp.cpp:447 @cd959bae9).
     fn build(self: *Graph) void {
         const b = self.b;
         const model = self.model;
@@ -875,7 +875,7 @@ const Graph = struct {
     }
 
     /// Ports the constructor of `llama_model_qwen4exp`'s `graph_mtp`
-    /// (models/qwen4exp.cpp:580 @8642541b2): the MTP draft head, one QSA
+    /// (models/qwen4exp.cpp:580 @cd959bae9): the MTP draft head, one QSA
     /// block after the trunk, fed by the trunk's hc-wide residual.
     fn buildMtp(self: *Graph) void {
         const b = self.b;
@@ -978,7 +978,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_qkvz` (models/qwen4exp.cpp:676
-    /// @8642541b2): the mixed QKV projection and the gate, z.
+    /// @cd959bae9): the mixed QKV projection and the gate, z.
     fn buildQkvz(self: *Graph, input: *Tensor, il: c_int) struct { *Tensor, *Tensor } {
         const b = self.b;
         const layer = &self.model.layers[@intCast(il)];
@@ -1016,7 +1016,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_norm_gated`
-    /// (models/qwen4exp.cpp:709 @8642541b2): the one numerical difference
+    /// (models/qwen4exp.cpp:709 @cd959bae9): the one numerical difference
     /// from Qwen3.5's delta net, a sigmoid output gate, not a SiLU.
     fn buildNormGated(self: *Graph, input: *Tensor, weights: ?*Tensor, gate: *Tensor, layer: c_int) *Tensor {
         const b = self.b;
@@ -1027,7 +1027,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_inp_kpool`
-    /// (models/qwen4exp.cpp:771 @8642541b2): the one k-pool input set the
+    /// (models/qwen4exp.cpp:771 @cd959bae9): the one k-pool input set the
     /// QSA layers share.
     fn buildInpKpool(self: *Graph, mctx_hyb: *const HybridIdxContext) *InpKpool {
         const b = self.b;
@@ -1080,7 +1080,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_qsa_sel`
-    /// (models/qwen4exp.cpp:816 @8642541b2): QSA attends to the top blocks of
+    /// (models/qwen4exp.cpp:816 @cd959bae9): QSA attends to the top blocks of
     /// `compress_ratio` cells plus the incomplete tail, like the glm5-next
     /// k-pool indexer. A block is scored by one pooled key: the mean of its
     /// raw indexer keys, normed and rotated to its first member. Returns the
@@ -1297,7 +1297,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_layer_attn`
-    /// (models/qwen4exp.cpp:1019 @8642541b2): a joint Q and gate
+    /// (models/qwen4exp.cpp:1019 @cd959bae9): a joint Q and gate
     /// projection, Q and K norms, M-RoPE, dense or QSA attention, and the
     /// sigmoid gate.
     fn buildLayerAttn(self: *Graph, inp: *graph.InpAttnKv, mctx_hyb: *const HybridIdxContext, inp_kpool: ?*InpKpool, cur_: *Tensor, inp_pos: *Tensor, sections: *[4]c_int, il: c_int) *Tensor {
@@ -1376,7 +1376,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_layer_attn_linear`
-    /// (models/qwen4exp.cpp:1106 @8642541b2): the gated delta-net layer.
+    /// (models/qwen4exp.cpp:1106 @cd959bae9): the gated delta-net layer.
     fn buildLayerAttnLinear(self: *Graph, inp: *graph.InpRs, cur_: *Tensor, il: c_int) *Tensor {
         const b = self.b;
         const ctx = b.ctx0;
@@ -1503,7 +1503,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_layer_ffn`
-    /// (models/qwen4exp.cpp:1245 @8642541b2): the routed experts and the
+    /// (models/qwen4exp.cpp:1245 @cd959bae9): the routed experts and the
     /// gated shared expert.
     fn buildLayerFfn(self: *Graph, cur_: *Tensor, il: c_int) *Tensor {
         const b = self.b;
@@ -1614,7 +1614,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_inp_ple`
-    /// (models/qwen4exp.cpp:1452 @8642541b2): the PLE rows' input and the
+    /// (models/qwen4exp.cpp:1452 @cd959bae9): the PLE rows' input and the
     /// gathered embedding, `[ple_head_dim * ple_n_heads, n_tokens]`.
     fn buildInpPle(self: *Graph, mctx_hyb: *const HybridIdxContext) *Tensor {
         const b = self.b;
@@ -1651,7 +1651,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_ple` (models/qwen4exp.cpp:1472
-    /// @8642541b2): the PLE embedding gated against the residual, through a
+    /// @cd959bae9): the PLE embedding gated against the residual, through a
     /// dilated causal convolution, added to every stream.
     fn buildPle(self: *Graph, inp: *graph.InpRs, emb: *Tensor, hidden: *Tensor, il: c_int) *Tensor {
         const b = self.b;

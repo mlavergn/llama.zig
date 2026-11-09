@@ -9,7 +9,7 @@
 //! (`8642541b2`): `llm_graph_input_pos_sensenova_u1`,
 //! `llama_model_sensenova_u1`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`. `rope_freq_base_spatial`, a member
-//! of the C++'s class (src/models/models.h:627 @8642541b2), is a field of
+//! of the C++'s class (src/models/models.h:627 @cd959bae9), is a field of
 //! `Model`.
 
 const std = @import("std");
@@ -28,13 +28,13 @@ const Ubatch = batch.Ubatch;
 const allocator = impl.allocator;
 
 /// Ports `llm_graph_input_pos_sensenova_u1` (src/models/sensenova-u1.cpp:4
-/// @8642541b2). The C++ derives from `llm_graph_input_pos`; here the base
+/// @cd959bae9). The C++ derives from `llm_graph_input_pos`; here the base
 /// is a member.
 const InpPosSensenovaU1 = struct {
     base: graph.InpPos = .{ .n_pos_per_embd = 4 },
 
     /// Ports `llm_graph_input_pos_sensenova_u1`'s `set_input`
-    /// (src/models/sensenova-u1.cpp:8 @8642541b2).
+    /// (src/models/sensenova-u1.cpp:8 @cd959bae9).
     pub fn setInput(self: *InpPosSensenovaU1, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         const pos = self.base.pos;
@@ -65,7 +65,7 @@ const InpPosSensenovaU1 = struct {
     }
 };
 
-/// Ports `llama_model_sensenova_u1`'s `load_arch_hparams` (src/models/sensenova-u1.cpp:28 @8642541b2).
+/// Ports `llama_model_sensenova_u1`'s `load_arch_hparams` (src/models/sensenova-u1.cpp:28 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -82,7 +82,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_sensenova_u1`'s `load_arch_tensors` (src/models/sensenova-u1.cpp:41 @8642541b2).
+/// Ports `llama_model_sensenova_u1`'s `load_arch_tensors` (src/models/sensenova-u1.cpp:41 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -116,7 +116,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_sensenova_u1`'s `build_arch_graph` (src/models/sensenova-u1.cpp:72 @8642541b2).
+/// Ports `llama_model_sensenova_u1`'s `build_arch_graph` (src/models/sensenova-u1.cpp:72 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
@@ -150,7 +150,7 @@ fn normalizeAndRotate(model: *const Model, b: *const graph.Builder, pos: *const 
 }
 
 /// Ports the constructor of `llama_model_sensenova_u1`'s `graph`
-/// (src/models/sensenova-u1.cpp:76 @8642541b2).
+/// (src/models/sensenova-u1.cpp:76 @cd959bae9).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

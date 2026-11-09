@@ -22,7 +22,7 @@ const graph = @import("../graph.zig");
 const model_mod = @import("../model.zig");
 const c = impl.c;
 
-/// The `add_pos` lambda (deepseek4v.cpp:30 @8642541b2): a two-section
+/// The `add_pos` lambda (deepseek4v.cpp:30 @cd959bae9): a two-section
 /// vision M-RoPE over the `positions` input, rows then columns.
 const Rope = struct {
     positions: graph.T,
@@ -36,12 +36,12 @@ const Rope = struct {
     }
 };
 
-/// `CLIP_ALIGN` (clip-impl.h:473 @8642541b2), over `int`.
+/// `CLIP_ALIGN` (clip-impl.h:485 @cd959bae9), over `int`.
 fn clipAlign(x: c_int, n: c_int) c_int {
     return @divTrunc(x + n - 1, n) * n;
 }
 
-/// Ports `build` (deepseek4v.cpp:21 @8642541b2), a member of
+/// Ports `build` (deepseek4v.cpp:21 @cd959bae9), a member of
 /// `clip_graph_deepseek4v`. DeepSeek-V4.1-Flash (deepseek41v) shares the encoder
 /// and aligner; its block is plain reading order [START] ([IMAGE]*n_llm_w
 /// [NEWLINE])*n_llm_h [END], no lead pads, no pad row, no IMAGE_PAD tensor.

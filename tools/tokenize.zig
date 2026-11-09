@@ -19,7 +19,7 @@ comptime {
     _ = @import("llama");
 }
 
-/// Ports `print_usage` (tokenize.cpp:20 @8642541b2).
+/// Ports `print_usage` (tokenize.cpp:20 @cd959bae9).
 fn printUsage(argv: []const [:0]const u8) void {
     log.out("\nexample usage:\n", .{});
     log.out("\n  %s -m your_model.gguf -p \"Hello world\"\n", .{argv[0].ptr});
@@ -36,7 +36,7 @@ const win = struct {
     extern "kernel32" fn GetLastError() callconv(.winapi) u32;
 };
 
-/// Ports `write_utf8_cstr_to_stdout` (tokenize.cpp:41 @8642541b2): `printf`,
+/// Ports `write_utf8_cstr_to_stdout` (tokenize.cpp:41 @cd959bae9): `printf`,
 /// or on a Windows console the UTF-16 it needs, with invalid UTF-8 written
 /// as its bytes in hex.
 fn writeUtf8ToStdout(a: std.mem.Allocator, str: [:0]const u8, invalid_utf8: *bool) !void {
@@ -98,7 +98,7 @@ extern fn fclose(f: *anyopaque) c_int;
 extern fn fdopen(fd: c_int, mode: [*:0]const u8) ?*anyopaque;
 extern fn _fdopen(fd: c_int, mode: [*:0]const u8) ?*anyopaque;
 
-/// Ports `main` (tokenize.cpp:95 @8642541b2).
+/// Ports `main` (tokenize.cpp:95 @cd959bae9).
 fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     var params = try tc.params.Params.init(a);
 

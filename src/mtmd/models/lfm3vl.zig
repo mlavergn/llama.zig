@@ -15,7 +15,7 @@ const model_mod = @import("../model.zig");
 const c = impl.c;
 const nb = graph.nb;
 
-/// Ports `build` (lfm3vl.cpp:3 @8642541b2), a member of `clip_graph_lfm3vl`.
+/// Ports `build` (lfm3vl.cpp:3 @cd959bae9), a member of `clip_graph_lfm3vl`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

@@ -14,7 +14,7 @@ const c = impl.c;
 const Tensor = c.ggml_tensor;
 const half = kernels.half;
 
-/// Ports `CUDA_FILL_BLOCK_SIZE` (fill.cu:4 @8642541b2).
+/// Ports `CUDA_FILL_BLOCK_SIZE` (fill.cu:4 @cd959bae9).
 const block_size = 256;
 
 /// `ggml_cuda_cast<half>(x)`: `__float2half`, round to nearest even.
@@ -22,7 +22,7 @@ fn toHalf(x: f32) half {
     return @fromBackingInt(@intCast(@as(u16, @bitCast(@as(f16, @floatCast(x))))));
 }
 
-/// Ports `ggml_cuda_op_fill` (fill.cu:15 @8642541b2), which launches with
+/// Ports `ggml_cuda_op_fill` (fill.cu:15 @cd959bae9), which launches with
 /// `<<<>>>`.
 pub fn opFill(ctx: *common.Context, dst: *Tensor) void {
     const dst_d: ?*anyopaque = dst.data;

@@ -42,7 +42,7 @@ inline fn armHas(comptime name: []const u8) bool {
 }
 
 /// Ports `struct ggml_arm_arch_features_type` and the `ggml_arm_arch_features`
-/// instance (ggml-cpu.c:92 @8642541b2).
+/// instance (ggml-cpu.c:95 @cd959bae9).
 ///
 /// Exported because it is a file-scope non-static in the C, and therefore part
 /// of the translation unit's symbol contract even though only `ggml_cpu_init`
@@ -53,7 +53,7 @@ pub const ArmArchFeatures = extern struct {
 
 pub export var ggml_arm_arch_features: ArmArchFeatures = .{ .sve_cnt = 0 };
 
-/// Ports `ggml_cpu_disable_fusion` (ggml-cpu.c:3075 @8642541b2).
+/// Ports `ggml_cpu_disable_fusion` (ggml-cpu.c:3084 @cd959bae9).
 ///
 /// Written once by `ggml_cpu_init` and read-only afterwards, so no
 /// synchronisation -- the C says the same in a comment on the same line.
@@ -78,82 +78,82 @@ inline fn x86Has(comptime name: []const u8) bool {
     );
 }
 
-/// Ports `ggml_cpu_has_avx` (ggml-cpu.c:3651 @8642541b2).
+/// Ports `ggml_cpu_has_avx` (ggml-cpu.c:3660 @cd959bae9).
 pub export fn ggml_cpu_has_avx() c_int {
     return @intFromBool(x86Has("avx"));
 }
 
-/// Ports `ggml_cpu_has_avx_vnni` (ggml-cpu.c:3659 @8642541b2).
+/// Ports `ggml_cpu_has_avx_vnni` (ggml-cpu.c:3668 @cd959bae9).
 pub export fn ggml_cpu_has_avx_vnni() c_int {
     return @intFromBool(x86Has("avxvnni"));
 }
 
-/// Ports `ggml_cpu_has_avx2` (ggml-cpu.c:3667 @8642541b2).
+/// Ports `ggml_cpu_has_avx2` (ggml-cpu.c:3676 @cd959bae9).
 pub export fn ggml_cpu_has_avx2() c_int {
     return @intFromBool(x86Has("avx2"));
 }
 
-/// Ports `ggml_cpu_has_avx512` (ggml-cpu.c:3675 @8642541b2).
+/// Ports `ggml_cpu_has_avx512` (ggml-cpu.c:3684 @cd959bae9).
 pub export fn ggml_cpu_has_avx512() c_int {
     return @intFromBool(x86Has("avx512f"));
 }
 
-/// Ports `ggml_cpu_has_avx512_vbmi` (ggml-cpu.c:3683 @8642541b2).
+/// Ports `ggml_cpu_has_avx512_vbmi` (ggml-cpu.c:3692 @cd959bae9).
 pub export fn ggml_cpu_has_avx512_vbmi() c_int {
     return @intFromBool(x86Has("avx512vbmi"));
 }
 
-/// Ports `ggml_cpu_has_avx512_vnni` (ggml-cpu.c:3691 @8642541b2).
+/// Ports `ggml_cpu_has_avx512_vnni` (ggml-cpu.c:3700 @cd959bae9).
 pub export fn ggml_cpu_has_avx512_vnni() c_int {
     return @intFromBool(x86Has("avx512vnni"));
 }
 
-/// Ports `ggml_cpu_has_avx512_bf16` (ggml-cpu.c:3699 @8642541b2).
+/// Ports `ggml_cpu_has_avx512_bf16` (ggml-cpu.c:3708 @cd959bae9).
 pub export fn ggml_cpu_has_avx512_bf16() c_int {
     return @intFromBool(x86Has("avx512bf16"));
 }
 
-/// Ports `ggml_cpu_has_amx_int8` (ggml-cpu.c:3707 @8642541b2).
+/// Ports `ggml_cpu_has_amx_int8` (ggml-cpu.c:3716 @cd959bae9).
 pub export fn ggml_cpu_has_amx_int8() c_int {
     return @intFromBool(x86Has("amx_int8"));
 }
 
-/// Ports `ggml_cpu_has_bmi2` (ggml-cpu.c:3715 @8642541b2).
+/// Ports `ggml_cpu_has_bmi2` (ggml-cpu.c:3724 @cd959bae9).
 pub export fn ggml_cpu_has_bmi2() c_int {
     return @intFromBool(x86Has("bmi2"));
 }
 
-/// Ports `ggml_cpu_has_fma` (ggml-cpu.c:3723 @8642541b2). The x86 `__FMA__`, not ARM's.
+/// Ports `ggml_cpu_has_fma` (ggml-cpu.c:3732 @cd959bae9). The x86 `__FMA__`, not ARM's.
 pub export fn ggml_cpu_has_fma() c_int {
     return @intFromBool(x86Has("fma"));
 }
 
-/// Ports `ggml_cpu_has_f16c` (ggml-cpu.c:3755 @8642541b2).
+/// Ports `ggml_cpu_has_f16c` (ggml-cpu.c:3764 @cd959bae9).
 pub export fn ggml_cpu_has_f16c() c_int {
     return @intFromBool(x86Has("f16c"));
 }
 
-/// Ports `ggml_cpu_has_sse3` (ggml-cpu.c:3787 @8642541b2).
+/// Ports `ggml_cpu_has_sse3` (ggml-cpu.c:3796 @cd959bae9).
 pub export fn ggml_cpu_has_sse3() c_int {
     return @intFromBool(x86Has("sse3"));
 }
 
-/// Ports `ggml_cpu_has_ssse3` (ggml-cpu.c:3795 @8642541b2).
+/// Ports `ggml_cpu_has_ssse3` (ggml-cpu.c:3804 @cd959bae9).
 pub export fn ggml_cpu_has_ssse3() c_int {
     return @intFromBool(x86Has("ssse3"));
 }
 
-/// Ports `ggml_cpu_has_vsx` (ggml-cpu.c:3803 @8642541b2), POWER9.
+/// Ports `ggml_cpu_has_vsx` (ggml-cpu.c:3812 @cd959bae9), POWER9.
 pub export fn ggml_cpu_has_vsx() c_int {
     return 0;
 }
 
-/// Ports `ggml_cpu_has_vxe` (ggml-cpu.c:3811 @8642541b2), s390x.
+/// Ports `ggml_cpu_has_vxe` (ggml-cpu.c:3820 @cd959bae9), s390x.
 pub export fn ggml_cpu_has_vxe() c_int {
     return 0;
 }
 
-/// Ports `ggml_cpu_has_wasm_simd` (ggml-cpu.c:3771 @8642541b2).
+/// Ports `ggml_cpu_has_wasm_simd` (ggml-cpu.c:3780 @cd959bae9).
 pub export fn ggml_cpu_has_wasm_simd() c_int {
     return 0;
 }
@@ -171,7 +171,7 @@ pub export fn ggml_cpu_get_rvv_vlen() c_int {
 // -----------------------------------------------------------------------------
 // ARM
 
-/// Ports `ggml_cpu_has_arm_fma` (ggml-cpu.c:3731 @8642541b2).
+/// Ports `ggml_cpu_has_arm_fma` (ggml-cpu.c:3740 @cd959bae9).
 ///
 /// The C tests `__ARM_FEATURE_FMA`, which clang defines whenever the ARM
 /// floating-point unit is available -- always, on AArch64.
@@ -179,34 +179,34 @@ pub export fn ggml_cpu_has_arm_fma() c_int {
     return @intFromBool(armHas("fp_armv8"));
 }
 
-/// Ports `ggml_cpu_has_fp16_va` (ggml-cpu.c:3763 @8642541b2).
+/// Ports `ggml_cpu_has_fp16_va` (ggml-cpu.c:3772 @cd959bae9).
 ///
 /// `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC`, which clang ties to FullFP16.
 pub export fn ggml_cpu_has_fp16_va() c_int {
     return @intFromBool(armHas("fullfp16"));
 }
 
-/// Ports `ggml_cpu_has_neon` (ggml-cpu.c:3819 @8642541b2).
+/// Ports `ggml_cpu_has_neon` (ggml-cpu.c:3828 @cd959bae9).
 pub export fn ggml_cpu_has_neon() c_int {
     return @intFromBool(armHas("neon"));
 }
 
-/// Ports `ggml_cpu_has_dotprod` (ggml-cpu.c:3827 @8642541b2).
+/// Ports `ggml_cpu_has_dotprod` (ggml-cpu.c:3836 @cd959bae9).
 pub export fn ggml_cpu_has_dotprod() c_int {
     return @intFromBool(armHas("dotprod"));
 }
 
-/// Ports `ggml_cpu_has_sve` (ggml-cpu.c:3835 @8642541b2).
+/// Ports `ggml_cpu_has_sve` (ggml-cpu.c:3844 @cd959bae9).
 pub export fn ggml_cpu_has_sve() c_int {
     return @intFromBool(armHas("sve"));
 }
 
-/// Ports `ggml_cpu_has_matmul_int8` (ggml-cpu.c:3843 @8642541b2).
+/// Ports `ggml_cpu_has_matmul_int8` (ggml-cpu.c:3852 @cd959bae9).
 pub export fn ggml_cpu_has_matmul_int8() c_int {
     return @intFromBool(armHas("i8mm"));
 }
 
-/// Ports `ggml_cpu_get_sve_cnt` (ggml-cpu.c:3851 @8642541b2).
+/// Ports `ggml_cpu_get_sve_cnt` (ggml-cpu.c:3860 @cd959bae9).
 ///
 /// Zero unless SVE is compiled in, in which case `ggml_cpu_init` has filled
 /// it from `svcntb()`.
@@ -215,12 +215,12 @@ pub export fn ggml_cpu_get_sve_cnt() c_int {
     return ggml_arm_arch_features.sve_cnt;
 }
 
-/// Ports `ggml_cpu_has_sme` (ggml-cpu.c:3859 @8642541b2).
+/// Ports `ggml_cpu_has_sme` (ggml-cpu.c:3868 @cd959bae9).
 pub export fn ggml_cpu_has_sme() c_int {
     return @intFromBool(armHas("sme"));
 }
 
-/// Ports `ggml_cpu_has_sme2` (ggml-cpu.c:3867 @8642541b2).
+/// Ports `ggml_cpu_has_sme2` (ggml-cpu.c:3876 @cd959bae9).
 pub export fn ggml_cpu_has_sme2() c_int {
     return @intFromBool(armHas("sme2"));
 }
@@ -228,7 +228,7 @@ pub export fn ggml_cpu_has_sme2() c_int {
 // -----------------------------------------------------------------------------
 // Build configuration
 
-/// Ports `ggml_cpu_has_llamafile` (ggml-cpu.c:3779 @8642541b2).
+/// Ports `ggml_cpu_has_llamafile` (ggml-cpu.c:3788 @cd959bae9).
 ///
 /// Not a CPU question at all: `GGML_USE_LLAMAFILE` is a build flag, and
 /// `build/llamacpp.zig` passes it. Kept true to match, and asserted against
@@ -316,7 +316,7 @@ pub export fn ggml_cpu_init() void {
     c.ggml_critical_section_end();
 }
 
-/// Ports `ggml_init_arm_arch_features` (ggml-cpu.c:732 @8642541b2).
+/// Ports `ggml_init_arm_arch_features` (ggml-cpu.c:741 @cd959bae9).
 ///
 /// Empty on this build: the C reads `svcntb()` only under
 /// `__ARM_FEATURE_SVE`, and takes the empty arm at line 735 otherwise.

@@ -89,7 +89,7 @@ inline fn deltas(p: *const [8]c.ggml_half, j: usize) f32x4 {
 // -----------------------------------------------------------------------------
 // q4_0: hand-written aarch64
 
-/// Ports `ggml_gemm_q4_0_4x8_q8_0` (arch/arm/repack.cpp:2451 @8642541b2),
+/// Ports `ggml_gemm_q4_0_4x8_q8_0` (arch/arm/repack.cpp:2570 @cd959bae9),
 /// the `__ARM_FEATURE_MATMUL_INT8` arm at line 2327.
 ///
 /// Like its 4x4 sibling in `q4_0_gemm.zig`, this is **hand-written
@@ -616,9 +616,9 @@ inline fn storeTile(s: [*]f32, bs: usize, y: usize, x: usize, acc_f32: *const [t
 /// The two formats `gemmQ45K8x8` serves.
 const Q45 = enum { q4_K, q5_K };
 
-/// Ports `ggml_gemm_q4_K_8x8_q8_K` (arch/arm/repack.cpp:3896 @8642541b2),
+/// Ports `ggml_gemm_q4_K_8x8_q8_K` (arch/arm/repack.cpp:4015 @cd959bae9),
 /// the `__ARM_FEATURE_MATMUL_INT8` arm at line 4083, and
-/// `ggml_gemm_q5_K_8x8_q8_K` (arch/arm/repack.cpp:4416 @8642541b2), the arm
+/// `ggml_gemm_q5_K_8x8_q8_K` (arch/arm/repack.cpp:4535 @cd959bae9), the arm
 /// at line 4293.
 ///
 /// One body for both because the C's two arms differ only in how a column
@@ -907,7 +907,7 @@ pub fn gemmQ6_K_8x8(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *c
 // -----------------------------------------------------------------------------
 // q8_0
 
-/// Ports `ggml_gemm_q8_0_4x8_q8_0` (arch/arm/repack.cpp:5150 @8642541b2),
+/// Ports `ggml_gemm_q8_0_4x8_q8_0` (arch/arm/repack.cpp:5456 @cd959bae9),
 /// the `__ARM_FEATURE_MATMUL_INT8` arm at line 5091.
 ///
 /// Activations go in as `smmla`'s first operand here, so each accumulator

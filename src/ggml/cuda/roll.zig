@@ -14,10 +14,10 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_ROLL_BLOCK_SIZE` (roll.cuh:3 @8642541b2).
+/// Ports `CUDA_ROLL_BLOCK_SIZE` (roll.cuh:3 @cd959bae9).
 const block_size = 256;
 
-/// Ports `ggml_cuda_op_roll` (roll.cu:49 @8642541b2), which launches with
+/// Ports `ggml_cuda_op_roll` (roll.cu:49 @cd959bae9), which launches with
 /// `<<<>>>`. Since v0.7.0 the kernel reads the source through its byte
 /// strides, so a non-contiguous view rolls as it is.
 pub fn opRoll(ctx: *common.Context, dst: *Tensor) void {

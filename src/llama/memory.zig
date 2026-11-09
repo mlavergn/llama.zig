@@ -34,7 +34,7 @@ fn oom() noreturn {
     impl.abort("llama-memory.cpp", 0, "out of memory");
 }
 
-/// Mirrors `llama_memory_params` (llama-memory.h:18 @8642541b2).
+/// Mirrors `llama_memory_params` (llama-memory.h:18 @cd959bae9).
 pub const Params = struct {
     type_k: c.enum_ggml_type,
     type_v: c.enum_ggml_type,
@@ -46,7 +46,7 @@ pub const Params = struct {
     no_alloc: bool,
 };
 
-/// Ports `llama_memory_bufs` (llama-memory.h:36 @8642541b2): the tensor
+/// Ports `llama_memory_bufs` (llama-memory.h:36 @cd959bae9): the tensor
 /// contexts and backend buffers of a memory instance. With `no_alloc`, dummy
 /// buffers are attached instead of allocating the tensor data, so the memory
 /// use can still be measured.
@@ -57,7 +57,7 @@ pub const Bufs = struct {
     no_alloc: bool,
 
     /// Ports `llama_memory_bufs`'s `alloc_buf` (llama-memory.cpp:73
-    /// @8642541b2): allocate a single context's buffer, for the memory
+    /// @cd959bae9): allocate a single context's buffer, for the memory
     /// instances that keep their own buffer layout.
     ///
     /// Parameters:
@@ -81,7 +81,7 @@ pub const Bufs = struct {
     }
 
     /// Ports `llama_memory_bufs`'s `emplace` (llama-memory.cpp:89
-    /// @8642541b2): allocate the tensors of `ctx` on `buft`, or attach a
+    /// @cd959bae9): allocate the tensors of `ctx` on `buft`, or attach a
     /// dummy buffer if `no_alloc` is set. Takes `ctx` on success; on
     /// `error.Thrown` it stays the caller's.
     ///
@@ -98,7 +98,7 @@ pub const Bufs = struct {
     }
 
     /// Ports `llama_memory_bufs`'s `memory_breakdown` (llama-memory.cpp:100
-    /// @8642541b2): the memory used by the tensors, the buffer sizes or the
+    /// @cd959bae9): the memory used by the tensors, the buffer sizes or the
     /// simulated sizes if `no_alloc` is set.
     pub fn memoryBreakdown(self: *const Bufs, out: *std.ArrayList(BuftSize)) void {
         for (self.bufs.items) |e| {
@@ -122,7 +122,7 @@ pub const Bufs = struct {
     }
 };
 
-/// Mirrors `llama_memory_status` (llama-memory.h:61 @8642541b2).
+/// Mirrors `llama_memory_status` (llama-memory.h:61 @cd959bae9).
 pub const Status = enum(c_int) {
     success = 0,
     no_update,
@@ -130,7 +130,7 @@ pub const Status = enum(c_int) {
     failed_compute,
 };
 
-/// Ports `llama_memory_status_combine` (llama-memory.cpp:11 @8642541b2): a
+/// Ports `llama_memory_status_combine` (llama-memory.cpp:11 @cd959bae9): a
 /// failure wins, else an update in either is an update.
 pub fn statusCombine(s0: Status, s1: Status) Status {
     var has_update = false;
@@ -147,7 +147,7 @@ pub fn statusCombine(s0: Status, s1: Status) Status {
     return if (has_update) .success else .no_update;
 }
 
-/// Ports `llama_memory_status_is_fail` (llama-memory.cpp:52 @8642541b2).
+/// Ports `llama_memory_status_is_fail` (llama-memory.cpp:52 @cd959bae9).
 pub fn statusIsFail(status: Status) bool {
     return switch (status) {
         .success, .no_update => false,
@@ -178,7 +178,7 @@ pub fn addBuftSize(list: *std.ArrayList(BuftSize), buft: c.ggml_backend_buffer_t
     list.insert(impl.allocator, pos, .{ .buft = buft, .size = size }) catch impl.abort("llama-memory.h", 151, "out of memory");
 }
 
-/// Mirrors `llama_memory_context_i` (llama-memory.h:82 @8642541b2): the
+/// Mirrors `llama_memory_context_i` (llama-memory.h:82 @cd959bae9): the
 /// memory's view for one batch -- its ubatches, in order, and the state
 /// each needs.
 pub const Context = struct {
@@ -228,7 +228,7 @@ pub const Context = struct {
     }
 };
 
-/// Mirrors `llama_memory_i` (llama-memory.h:104 @8642541b2).
+/// Mirrors `llama_memory_i` (llama-memory.h:104 @cd959bae9).
 pub const Memory = struct {
     ptr: *anyopaque,
     vtable: *const VTable,
@@ -336,7 +336,7 @@ pub const LayerMap = struct {
     }
 };
 
-/// Ports `llama_memory_buffers_writer` (llama-memory.cpp:116 @8642541b2): a
+/// Ports `llama_memory_buffers_writer` (llama-memory.cpp:116 @cd959bae9): a
 /// state sink that keeps no data, only the buffers of the tensors a state
 /// write visits.
 const BuffersWriter = struct {
@@ -368,7 +368,7 @@ const BuffersWriter = struct {
     const vtable: io.Writer.VTable = .{ .write = write, .writeTensor = writeTensor, .nBytes = nBytes };
 };
 
-/// Ports `llama_memory_get_buffers` (llama-memory.cpp:134 @8642541b2), from
+/// Ports `llama_memory_get_buffers` (llama-memory.cpp:134 @cd959bae9), from
 /// `llama-ext.h`: the backend buffers a state write of this memory would
 /// touch; an empty cache reports none. The null memory the C++ answers with
 /// an empty list is `api/context.zig`'s to answer, `mem` being non-null here.

@@ -146,7 +146,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_muse_glimmer` (parsers/muse-glimmer.cpp:10 @8642541b2).
+/// Ports `common_chat_params_init_muse_glimmer` (parsers/muse-glimmer.cpp:10 @cd959bae9).
 /// The generation prompt is just `<|start|>assistant`; the model emits its
 /// own ` to=...<|message|>`.
 ///

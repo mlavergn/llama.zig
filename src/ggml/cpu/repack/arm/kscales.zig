@@ -29,7 +29,7 @@ const kmask2: u32 = 0x0f0f0f0f;
 const kmask3: u32 = 0x03030303;
 const scales_size: usize = 12;
 
-/// Ports `decode_q_Kx8_6bit_scales` (arch/arm/repack.cpp:29 @8642541b2).
+/// Ports `decode_q_Kx8_6bit_scales` (arch/arm/repack.cpp:29 @cd959bae9).
 ///
 /// Parameters:
 /// - `scales_in`: the twelve packed bytes for one sub-block.

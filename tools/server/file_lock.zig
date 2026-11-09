@@ -32,7 +32,7 @@ pub const KeepWaiting = struct {
     }
 };
 
-/// Ports `common_file_lock` (file-lock.h:8 @8642541b2): `flock` on a file
+/// Ports `common_file_lock` (file-lock.h:8 @cd959bae9): `flock` on a file
 /// opened lazily, so a read-only cache works if the lock is never acquired.
 pub const FileLock = struct {
     a: Allocator,
@@ -40,14 +40,14 @@ pub const FileLock = struct {
     fd: c_int = -1,
     locked: bool = false,
 
-    /// `status` (file-lock.h:24 @8642541b2).
+    /// `status` (file-lock.h:24 @cd959bae9).
     const Status = enum {
         acquired,
         busy, // another process holds the lock
         err, // file locking is unavailable: no exclusion is possible
     };
 
-    /// Ports `common_file_lock` (file-lock.cpp:26 @8642541b2), the
+    /// Ports `common_file_lock` (file-lock.cpp:26 @cd959bae9), the
     /// constructor.
     ///
     /// Parameters:
@@ -57,12 +57,12 @@ pub const FileLock = struct {
     }
 
     /// Ports the destructor of `common_file_lock` (file-lock.cpp:177
-    /// @8642541b2).
+    /// @cd959bae9).
     pub fn deinit(self: *FileLock) void {
         self.close();
     }
 
-    /// Ports `try_lock` (file-lock.cpp:68 @8642541b2), a member of
+    /// Ports `try_lock` (file-lock.cpp:68 @cd959bae9), a member of
     /// `common_file_lock`.
     fn tryLock(self: *FileLock) Allocator.Error!Status {
         const func = "try_lock";
@@ -96,7 +96,7 @@ pub const FileLock = struct {
         return .err;
     }
 
-    /// Ports `acquire` (file-lock.cpp:124 @8642541b2), a member of
+    /// Ports `acquire` (file-lock.cpp:124 @cd959bae9), a member of
     /// `common_file_lock`: takes the lock, waiting while another process
     /// holds it; `keep_waiting` is polled before each retry, false cancels
     /// the wait.
@@ -132,7 +132,7 @@ pub const FileLock = struct {
         }
     }
 
-    /// Ports `close` (file-lock.cpp:156 @8642541b2), a member of
+    /// Ports `close` (file-lock.cpp:156 @cd959bae9), a member of
     /// `common_file_lock`. The lock file is never deleted: another process
     /// could then create a fresh file at the same path and lock that.
     pub fn close(self: *FileLock) void {

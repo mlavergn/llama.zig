@@ -25,7 +25,7 @@ const allocator = impl.allocator;
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 
-/// Ports `llama_io_write_i` (llama-io.h:9 @8642541b2): a sink for state.
+/// Ports `llama_io_write_i` (llama-io.h:9 @cd959bae9): a sink for state.
 pub const Writer = struct {
     ptr: *anyopaque,
     vtable: *const VTable,
@@ -60,7 +60,7 @@ pub const Writer = struct {
         return self.write(std.mem.asBytes(&value), exc);
     }
 
-    /// Ports `llama_io_write_i`'s `write_string` (llama-io.cpp:5 @8642541b2):
+    /// Ports `llama_io_write_i`'s `write_string` (llama-io.cpp:5 @cd959bae9):
     /// a `uint32_t` length, then the bytes.
     ///
     /// Return: nothing, or `error.Thrown`.
@@ -71,7 +71,7 @@ pub const Writer = struct {
     }
 };
 
-/// Ports `llama_io_read_i` (llama-io.h:23 @8642541b2): a source of state.
+/// Ports `llama_io_read_i` (llama-io.h:23 @cd959bae9): a source of state.
 pub const Reader = struct {
     ptr: *anyopaque,
     vtable: *const VTable,
@@ -117,7 +117,7 @@ pub const Reader = struct {
         return v;
     }
 
-    /// Ports `llama_io_read_i`'s `read_string` (llama-io.cpp:12 @8642541b2).
+    /// Ports `llama_io_read_i`'s `read_string` (llama-io.cpp:12 @cd959bae9).
     ///
     /// Parameters:
     /// - `out`: receives the string, replacing what it held.

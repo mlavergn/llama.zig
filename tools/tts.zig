@@ -27,7 +27,7 @@ extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*c.FILE;
 extern fn fwrite(p: ?*const anyopaque, size: usize, n: usize, f: ?*c.FILE) usize;
 extern fn fclose(f: ?*c.FILE) c_int;
 
-/// Ports `tts_timings` (tts.cpp:20 @8642541b2): a progress line every two
+/// Ports `tts_timings` (tts.cpp:20 @cd959bae9): a progress line every two
 /// seconds.
 const Timings = struct {
     t_start_us: i64,
@@ -38,7 +38,7 @@ const Timings = struct {
         return .{ .t_start_us = t, .t_last_us = t };
     }
 
-    /// `report` (tts.cpp:24 @8642541b2), a member of `tts_timings`.
+    /// `report` (tts.cpp:24 @cd959bae9), a member of `tts_timings`.
     fn report(self: *Timings, n_frames: c_int) void {
         const t_now_us = c.ggml_time_us();
         if (t_now_us - self.t_last_us < 2000000) return;
@@ -49,7 +49,7 @@ const Timings = struct {
     }
 };
 
-/// Ports `print_usage` (tts.cpp:36 @8642541b2).
+/// Ports `print_usage` (tts.cpp:36 @cd959bae9).
 fn printUsage(argv: []const [:0]const u8) void {
     log.out("\nexample usage:\n", .{});
     log.out("\n    %s -m backbone.gguf -mm mmproj.gguf -p \"text to speak\" -o output.wav", .{argv[0].ptr});

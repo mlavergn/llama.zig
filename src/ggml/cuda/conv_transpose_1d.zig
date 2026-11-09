@@ -18,7 +18,7 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_CONV_TRANPOSE_1D_BLOCK_SIZE` (conv-transpose-1d.cuh:3 @8642541b2).
+/// Ports `CUDA_CONV_TRANPOSE_1D_BLOCK_SIZE` (conv-transpose-1d.cuh:3 @cd959bae9).
 const block_size = 256;
 
 /// An `int64_t` into an `int` parameter.
@@ -26,7 +26,7 @@ fn int(x: i64) c_int {
     return @truncate(x);
 }
 
-/// Ports `conv_transpose_1d_f32_f32_cuda` (conv-transpose-1d.cu:42 @8642541b2).
+/// Ports `conv_transpose_1d_f32_f32_cuda` (conv-transpose-1d.cu:42 @cd959bae9).
 fn convTranspose1dF32F32Cuda(
     s0: c_int,
     p0: c_int,
@@ -64,7 +64,7 @@ fn convTranspose1dF32F32Cuda(
     });
 }
 
-/// Ports `ggml_cuda_op_conv_transpose_1d` (conv-transpose-1d.cu:59 @8642541b2).
+/// Ports `ggml_cuda_op_conv_transpose_1d` (conv-transpose-1d.cu:59 @cd959bae9).
 pub fn opConvTranspose1d(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;

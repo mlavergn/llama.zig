@@ -85,7 +85,7 @@ extern fn fmaxf(x: f32, y: f32) f32;
 /// `op_sqr`, `op_sqrt`, `op_sin`, `op_cos`, `op_log`, `op_expm1`,
 /// `op_softplus`, `op_floor`, `op_ceil`, `op_round` and `op_trunc`
 /// (unary-ops.cpp:3, 7, 11, 15, 19, 23, 27, 31, 35, 39, 43, 47, 51, 64, 68,
-/// 72, 76, 80, 84, 88, 92, 96 @8642541b2); names and numbers pair up in order.
+/// 72, 76, 80, 84, 88, 92, 96 @cd959bae9); names and numbers pair up in order.
 const Op = enum {
     abs,
     sgn,
@@ -140,7 +140,7 @@ const Op = enum {
     }
 };
 
-/// Ports `op_xielu` (unary-ops.cpp:55 @8642541b2).
+/// Ports `op_xielu` (unary-ops.cpp:55 @cd959bae9).
 ///
 /// The four parameters are the C++ lambda's captures, read from `op_params`
 /// by `ggml_compute_forward_xielu`.
@@ -179,7 +179,7 @@ const Xielu = struct {
 // provenance and the C has them in a header both include.
 
 /// Ports the `to_f32` half of `type_conversion_table`
-/// (ggml-cpu/common.h:48 @8642541b2).
+/// (ggml-cpu/common.h:56 @cd959bae9).
 inline fn toF32(comptime T: type, v: T) f32 {
     return switch (T) {
         f32 => v,
@@ -190,7 +190,7 @@ inline fn toF32(comptime T: type, v: T) f32 {
 }
 
 /// Ports the `from_f32` half of `type_conversion_table`
-/// (ggml-cpu/common.h:48 @8642541b2).
+/// (ggml-cpu/common.h:56 @cd959bae9).
 inline fn fromF32(comptime T: type, v: f32) T {
     return switch (T) {
         f32 => v,
@@ -200,7 +200,7 @@ inline fn fromF32(comptime T: type, v: f32) T {
     };
 }
 
-/// Ports `get_thread_range` (ggml-cpu/common.h:74 @8642541b2).
+/// Ports `get_thread_range` (ggml-cpu/common.h:88 @cd959bae9).
 fn threadRange(params: *const ComputeParams, src0: *const Tensor) struct { i64, i64 } {
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
@@ -222,7 +222,7 @@ fn threadRange(params: *const ComputeParams, src0: *const Tensor) struct { i64, 
 // parses `iNN` as an integer type name. Renamed digit for digit, as
 // `cpu/mulmat.zig` and `cpu/binary_ops.zig` do.
 
-/// Ports `vec_unary_op` (unary-ops.cpp:101 @8642541b2).
+/// Ports `vec_unary_op` (unary-ops.cpp:101 @cd959bae9).
 inline fn vecUnaryOp(
     comptime op: Op,
     comptime Src0: type,
@@ -237,7 +237,7 @@ inline fn vecUnaryOp(
     }
 }
 
-/// Ports `apply_unary_op` (unary-ops.cpp:111 @8642541b2).
+/// Ports `apply_unary_op` (unary-ops.cpp:111 @cd959bae9).
 ///
 /// Asserts **`ggml_is_contiguous_rows`** on both tensors; the functor variant
 /// below asserts only `ggml_is_contiguous_1`.
@@ -277,7 +277,7 @@ fn applyUnaryOp(
     }
 }
 
-/// Ports `unary_op` (unary-ops.cpp:137 @8642541b2).
+/// Ports `unary_op` (unary-ops.cpp:137 @cd959bae9).
 ///
 /// Five type pairs, in the C's order. The C prints to `stderr` with `fprintf`
 /// rather than going through `GGML_LOG_ERROR`, then aborts, and so does this:
@@ -307,7 +307,7 @@ fn unaryOp(comptime op: Op, params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `vec_unary_op_functor` (unary-ops.cpp:180 @8642541b2).
+/// Ports `vec_unary_op_functor` (unary-ops.cpp:180 @cd959bae9).
 inline fn vecUnaryOpFunctor(
     comptime Src0: type,
     comptime Dst: type,
@@ -322,7 +322,7 @@ inline fn vecUnaryOpFunctor(
     }
 }
 
-/// Ports `apply_unary_op_functor` (unary-ops.cpp:191 @8642541b2).
+/// Ports `apply_unary_op_functor` (unary-ops.cpp:191 @cd959bae9).
 ///
 /// Asserts **`ggml_is_contiguous_1`**, a weaker condition than the plain
 /// path's `ggml_is_contiguous_rows`. That difference is the C's and is kept.
@@ -362,7 +362,7 @@ fn applyUnaryOpFunctor(
     }
 }
 
-/// Ports `unary_op_functor` (unary-ops.cpp:217 @8642541b2).
+/// Ports `unary_op_functor` (unary-ops.cpp:217 @cd959bae9).
 fn unaryOpFunctor(params: *const ComputeParams, dst: *Tensor, op: anytype) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -408,7 +408,7 @@ comptime {
     }
 }
 
-/// Ports `ggml_compute_forward_xielu` (unary-ops.cpp:325 @8642541b2).
+/// Ports `ggml_compute_forward_xielu` (unary-ops.cpp:325 @cd959bae9).
 ///
 /// The only entry point that reads `op_params`, and the only one that goes
 /// through the functor family. Note the C reads indices **1 to 4**, not 0 to 3.

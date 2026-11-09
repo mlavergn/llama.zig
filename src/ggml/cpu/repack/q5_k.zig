@@ -63,7 +63,7 @@ inline fn fiveBit(bl: *const blocks.block_q5_Kx8, b_qs_offset: i32, b_qh_offset:
 }
 
 /// Ports `ggml_gemv_q5_K_NxM_q8_K_generic_impl`
-/// (ggml-cpu/repack.cpp:551 @8642541b2).
+/// (ggml-cpu/repack.cpp:551 @cd959bae9).
 fn gemv(
     comptime blocklen: i32,
     comptime ncols_interleaved: i32,
@@ -153,7 +153,7 @@ fn gemv(
 }
 
 /// Ports `ggml_gemm_q5_K_NxM_q8_K_generic_impl`
-/// (ggml-cpu/repack.cpp:647 @8642541b2).
+/// (ggml-cpu/repack.cpp:647 @cd959bae9).
 fn gemm(
     comptime blocklen: i32,
     comptime ncols_interleaved: i32,

@@ -61,8 +61,8 @@ pub const Name = struct {
     }
 };
 
-/// Ports `LLM_KV` (llama-arch.h:839 @8642541b2) and its call operator,
-/// `LLM_KV::operator()` (llama-arch.cpp:1174 @8642541b2): the key's format
+/// Ports `LLM_KV` (llama-arch.h:896 @cd959bae9) and its call operator,
+/// `LLM_KV::operator()` (llama-arch.cpp:1272 @cd959bae9): the key's format
 /// with the architecture name for its `%s`, then `.suffix` if there is one.
 ///
 /// Every `llm_arch` and every `llm_kv` is in its map, so the two `at`
@@ -93,7 +93,7 @@ pub fn kvName(arch: Arch, kv: Kv, suffix: ?[]const u8) Name {
     return out;
 }
 
-/// Ports `LLM_TN_IMPL`'s `str` (llama-arch.cpp:1188 @8642541b2): the tensor's
+/// Ports `LLM_TN_IMPL`'s `str` (llama-arch.cpp:1286 @cd959bae9): the tensor's
 /// format with `bid` for its first `%d` and `xid` for its second, then
 /// `.suffix` if there is one. A tensor with no name aborts, as the C++ does.
 ///
@@ -106,7 +106,7 @@ pub fn kvName(arch: Arch, kv: Kv, suffix: ?[]const u8) Name {
 /// Return: the tensor's name.
 pub fn tensorName(tensor: Tensor, suffix: ?[]const u8, bid: i32, xid: i32) Name {
     const f = table.tensor_names[@intCast(@backingInt(tensor))] orelse
-        impl.c.ggml_abort("llama-arch.cpp", 1190, "unknown tensor name for tensor id %d", @as(c_int, @backingInt(tensor)));
+        impl.c.ggml_abort("llama-arch.cpp", 1288, "unknown tensor name for tensor id %d", @as(c_int, @backingInt(tensor)));
     var out: Name = .{};
     const args = [2]i32{ bid, xid };
     var next: usize = 0;
@@ -130,7 +130,7 @@ pub fn tensorName(tensor: Tensor, suffix: ?[]const u8, bid: i32, xid: i32) Name 
     return out;
 }
 
-/// Ports `llm_arch_all` (llama-arch.cpp:1202 @8642541b2): every
+/// Ports `llm_arch_all` (llama-arch.cpp:1300 @cd959bae9): every
 /// architecture, in the map's key order.
 ///
 /// Return: the list, static.
@@ -138,14 +138,14 @@ pub fn archAll() []const Arch {
     return comptime std.enums.values(Arch);
 }
 
-/// Ports `llm_arch_name` (llama-arch.cpp:1211 @8642541b2).
+/// Ports `llm_arch_name` (llama-arch.cpp:1309 @cd959bae9).
 ///
 /// Return: the architecture's name, static.
 pub fn archName(arch: Arch) [:0]const u8 {
     return table.arch_names[@intCast(@backingInt(arch))] orelse "unknown";
 }
 
-/// Ports `llm_arch_from_string` (llama-arch.cpp:1219 @8642541b2): the first
+/// Ports `llm_arch_from_string` (llama-arch.cpp:1317 @cd959bae9): the first
 /// architecture in key order whose name is `name`.
 ///
 /// Return: the architecture, or `.unknown`.
@@ -156,7 +156,7 @@ pub fn archFromString(name: []const u8) Arch {
     return .unknown;
 }
 
-/// Ports `llm_tensor_info_for` (llama-arch.cpp:1229 @8642541b2).
+/// Ports `llm_tensor_info_for` (llama-arch.cpp:1327 @cd959bae9).
 ///
 /// Parameters:
 /// - `tensor`: the tensor.
@@ -169,7 +169,7 @@ pub fn tensorInfoFor(tensor: Tensor, exc: *impl.Exception) impl.Thrown!TensorInf
         exc.throw(.out_of_range, "map::at:  key not found", .{});
 }
 
-/// Ports `llm_arch_is_recurrent` (llama-arch.cpp:1233 @8642541b2).
+/// Ports `llm_arch_is_recurrent` (llama-arch.cpp:1331 @cd959bae9).
 pub fn isRecurrent(arch: Arch) bool {
     return switch (arch) {
         .mamba, .mamba2, .rwkv6, .rwkv6qwen2, .rwkv7, .arwkv7 => true,
@@ -205,7 +205,7 @@ pub fn isHybrid(arch: Arch) bool {
     };
 }
 
-/// Ports `llm_arch_is_diffusion` (llama-arch.cpp:1275 @8642541b2).
+/// Ports `llm_arch_is_diffusion` (llama-arch.cpp:1375 @cd959bae9).
 pub fn isDiffusion(arch: Arch) bool {
     return switch (arch) {
         .dream, .llada, .llada_moe, .rnd1 => true,
@@ -274,7 +274,7 @@ pub fn supportsSmTensor(arch: Arch) bool {
     };
 }
 
-/// Ports `llama_arch_supports_save` (llama-arch.cpp:1366 @8642541b2), the
+/// Ports `llama_arch_supports_save` (llama-arch.cpp:1469 @cd959bae9), the
 /// C++'s temporary function for better error messages. Clef's and
 /// vllm-decision2's head tensors are not saved.
 ///

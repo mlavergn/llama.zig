@@ -181,7 +181,7 @@ fn segment(
 
 /// Upstream's rendering of a non-string `{{ }}` value.
 ///
-/// `gather_string_parts_recursive` (common/jinja/runtime.h:716 @8642541b2)
+/// `gather_string_parts_recursive` (common/jinja/runtime.h:716 @cd959bae9)
 /// writes a boolean as `True`/`False`, a list as its items' renderings run
 /// together, and none, undefined and dicts as nothing. zigjinja follows its own
 /// conventions there, so the chat path translates. Installed as

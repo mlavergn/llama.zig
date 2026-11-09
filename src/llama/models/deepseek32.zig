@@ -25,7 +25,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_deepseek32`'s `load_arch_hparams` (models/deepseek32.cpp:6 @8642541b2).
+/// Ports `llama_model_deepseek32`'s `load_arch_hparams` (models/deepseek32.cpp:6 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -71,7 +71,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_deepseek32`'s `load_arch_tensors` (models/deepseek32.cpp:46 @8642541b2).
+/// Ports `llama_model_deepseek32`'s `load_arch_tensors` (models/deepseek32.cpp:46 @cd959bae9).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -186,7 +186,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 // The graph
 
 /// Ports `llama_model_deepseek32`'s `build_arch_graph` (models/deepseek32.cpp:149
-/// @8642541b2): the MTP draft head for that graph type, the main model
+/// @cd959bae9): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(variant, model, b);
@@ -593,7 +593,7 @@ pub fn buildMoe(b: *const graph.Builder, layer: *const model_mod.Layer, cur: *Te
 }
 
 /// Ports the constructor of `llama_model_deepseek32`'s `graph_mtp`
-/// (models/deepseek32.cpp:487 @8642541b2): the `LLM_GRAPH_TYPE_DECODER_MTP`
+/// (models/deepseek32.cpp:487 @cd959bae9): the `LLM_GRAPH_TYPE_DECODER_MTP`
 /// draft head, the DeepSeek family's NextN/MTP layer -- `enorm(embed) +
 /// hnorm(prev_hidden)`, concatenated, through `eh_proj`, then a whole
 /// decoder block of dense MLA and the sigmoid-gated MoE with its shared

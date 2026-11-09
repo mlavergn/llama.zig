@@ -45,7 +45,7 @@ const Autoparser = types.Autoparser;
 const trimWhitespace = helpers.trimWhitespace;
 
 /// Ports `peg_generator`'s `generate_parser` (chat-auto-parser-generator.cpp:23
-/// @8642541b2), the overload that analyses the template first.
+/// @cd959bae9), the overload that analyses the template first.
 pub fn generateParser(a: Allocator, tmpl: *const Template, inputs: *const GenerationParams) Error!ChatParams {
     // Run differential analysis to extract template structure
     var ap: Autoparser = .{};
@@ -54,7 +54,7 @@ pub fn generateParser(a: Allocator, tmpl: *const Template, inputs: *const Genera
 }
 
 /// Ports `peg_generator`'s `generate_parser` (chat-auto-parser-generator.cpp:31
-/// @8642541b2): the prompt, the generation prompt (rebuilt for a continued
+/// @cd959bae9): the prompt, the generation prompt (rebuilt for a continued
 /// message), the parser, and -- for tools or a response format -- the
 /// grammar and its lazy trigger.
 pub fn generateParserAnalyzed(a: Allocator, tmpl: *const Template, inputs: *const GenerationParams, ap: *const Autoparser) Error!ChatParams {
@@ -121,8 +121,8 @@ pub fn generateParserAnalyzed(a: Allocator, tmpl: *const Template, inputs: *cons
     return data;
 }
 
-/// Ports `parser_build_context` (chat-auto-parser.h:226 @8642541b2) and its
-/// constructor (chat-auto-parser-generator.cpp:18 @8642541b2), which builds
+/// Ports `parser_build_context` (chat-auto-parser.h:226 @cd959bae9) and its
+/// constructor (chat-auto-parser-generator.cpp:18 @cd959bae9), which builds
 /// the `eps` the reasoning parser starts as.
 const Ctx = struct {
     p: *ChatBuilder,
@@ -190,7 +190,7 @@ const Root = struct {
 };
 
 /// Ports `autoparser`'s `build_parser` (chat-auto-parser-generator.cpp:98
-/// @8642541b2).
+/// @cd959bae9).
 ///
 /// Return: the arena, its `gpa` `a`; release with `deinit`.
 pub fn buildParser(a: Allocator, ap: *const Autoparser, inputs: *const GenerationParams, generation_prompt: []const u8) Error!peg.Arena {
@@ -202,7 +202,7 @@ pub fn buildParser(a: Allocator, ap: *const Autoparser, inputs: *const Generatio
 }
 
 /// Ports `analyze_reasoning`'s `build_parser` (chat-auto-parser-generator.cpp:137
-/// @8642541b2).
+/// @cd959bae9).
 fn reasoningBuildParser(r: *const types.AnalyzeReasoning, ctx: *Ctx) PegError!ParserId {
     const p = ctx.p;
     const b = &p.b;
@@ -227,7 +227,7 @@ fn reasoningBuildParser(r: *const types.AnalyzeReasoning, ctx: *Ctx) PegError!Pa
 }
 
 /// Ports `analyze_content`'s `build_parser` (chat-auto-parser-generator.cpp:158
-/// @8642541b2).
+/// @cd959bae9).
 fn contentBuildParser(c: *const types.AnalyzeContent, ctx: *Ctx) PegError!ParserId {
     const p = ctx.p;
     const b = &p.b;
@@ -248,7 +248,7 @@ fn contentBuildParser(c: *const types.AnalyzeContent, ctx: *Ctx) PegError!Parser
 }
 
 /// Ports `analyze_content`'s `build_optional_wrapped` (chat-auto-parser-generator.cpp:170
-/// @8642541b2).
+/// @cd959bae9).
 fn contentBuildOptionalWrapped(c: *const types.AnalyzeContent, ctx: *Ctx) PegError!ParserId {
     const p = ctx.p;
     const b = &p.b;
@@ -260,7 +260,7 @@ fn contentBuildOptionalWrapped(c: *const types.AnalyzeContent, ctx: *Ctx) PegErr
 }
 
 /// Ports `analyze_tools`'s `build_parser` (chat-auto-parser-generator.cpp:179
-/// @8642541b2).
+/// @cd959bae9).
 fn toolsBuildParser(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!ParserId {
     switch (t.format.mode) {
         .JSON_NATIVE => return buildToolParserJsonNative(t, ctx),
@@ -276,7 +276,7 @@ fn toolsBuildParser(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!ParserId {
 }
 
 /// Ports `analyze_tools`'s `build_tool_parser_json_native` (chat-auto-parser-generator.cpp:195
-/// @8642541b2).
+/// @cd959bae9).
 fn buildToolParserJsonNative(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!ParserId {
     const p = ctx.p;
     const b = &p.b;
@@ -333,7 +333,7 @@ fn buildToolParserJsonNative(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!P
 }
 
 /// Ports `analyze_tools`'s `build_func_parser` (chat-auto-parser-generator.cpp:239
-/// @8642541b2): a function's opening with its name, the call id and the
+/// @cd959bae9): a function's opening with its name, the call id and the
 /// arguments, then its closing, atomic where a partial match would
 /// mislead.
 fn buildFuncParser(t: *const types.AnalyzeTools, p: *ChatBuilder, name: []const u8, call_id_section: ParserId, have_call_id: bool, args: ParserId, atomic_peek: ?ParserId) PegError!ParserId {
@@ -433,7 +433,7 @@ const TagJson = struct {
 };
 
 /// Ports `analyze_tools`'s `build_tool_parser_tag_json` (chat-auto-parser-generator.cpp:287
-/// @8642541b2): tagged calls with JSON arguments.
+/// @cd959bae9): tagged calls with JSON arguments.
 fn buildToolParserTagJson(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!ParserId {
     const p = ctx.p;
     const b = &p.b;
@@ -596,7 +596,7 @@ const TagTagged = struct {
 };
 
 /// Ports `analyze_tools`'s `build_tool_parser_tag_tagged` (chat-auto-parser-generator.cpp:358
-/// @8642541b2): tagged calls with tagged arguments.
+/// @cd959bae9): tagged calls with tagged arguments.
 fn buildToolParserTagTagged(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!ParserId {
     const p = ctx.p;
     const b = &p.b;

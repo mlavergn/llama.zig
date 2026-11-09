@@ -203,7 +203,7 @@ pub const table: [c.GGML_TYPE_COUNT]Traits = blk: {
     break :blk t;
 };
 
-/// Ports `ggml_get_type_traits_cpu` (ggml-cpu.c:418 @8642541b2).
+/// Ports `ggml_get_type_traits_cpu` (ggml-cpu.c:427 @cd959bae9).
 ///
 /// Parameters:
 /// - `@"type"`: the tensor type to look up.

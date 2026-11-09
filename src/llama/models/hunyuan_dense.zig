@@ -17,7 +17,7 @@ const hunyuan_vl = @import("hunyuan_vl.zig");
 const Model = model_mod.Model;
 
 /// Ports `llama_model_hunyuan_dense`'s `build_arch_graph`
-/// (models/hunyuan-dense.cpp:3 @8642541b2): Hunyuan-VL's graph.
+/// (models/hunyuan-dense.cpp:3 @cd959bae9): Hunyuan-VL's graph.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     hunyuan_vl.buildGraph(model, b);
 }

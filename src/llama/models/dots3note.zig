@@ -31,7 +31,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_dots3note`'s `load_arch_hparams` (src/models/dots3note.cpp:8 @8642541b2).
+/// Ports `llama_model_dots3note`'s `load_arch_hparams` (src/models/dots3note.cpp:8 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -76,7 +76,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_dots3note`'s `load_arch_tensors` (src/models/dots3note.cpp:48 @8642541b2).
+/// Ports `llama_model_dots3note`'s `load_arch_tensors` (src/models/dots3note.cpp:48 @cd959bae9).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     _ = ml;
     const l = self.loadLocals();
@@ -187,7 +187,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 // -----------------------------------------------------------------------------
 // The graph
 
-/// Ports `llama_model_dots3note`'s `build_arch_graph` (src/models/dots3note.cpp:148 @8642541b2).
+/// Ports `llama_model_dots3note`'s `build_arch_graph` (src/models/dots3note.cpp:148 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     _ = params;
     buildGraph(model, b);

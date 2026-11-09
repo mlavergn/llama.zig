@@ -25,7 +25,7 @@ const Tensor = c.ggml_tensor;
 const Ubatch = batch.Ubatch;
 const allocator = impl.allocator;
 
-/// Ports `llama_model_mistral3`'s `load_arch_hparams` (models/mistral3.cpp:3 @8642541b2).
+/// Ports `llama_model_mistral3`'s `load_arch_hparams` (models/mistral3.cpp:3 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -57,7 +57,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_mistral3`'s `load_arch_tensors` (models/mistral3.cpp:31 @8642541b2).
+/// Ports `llama_model_mistral3`'s `load_arch_tensors` (models/mistral3.cpp:31 @cd959bae9).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -132,14 +132,14 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// Ports `llama_model_mistral3`'s `input_t_cond` (models/mistral3.cpp:99
-/// @8642541b2): the sinusoidal embedding of the output delay, constant for
+/// @cd959bae9): the sinusoidal embedding of the output delay, constant for
 /// the whole session.
 const InputTCond = struct {
     /// F32 `[n_embd]`.
     t_cond: ?*Tensor = null,
     data: []f32,
 
-    /// `input_t_cond`'s constructor (models/mistral3.cpp:101 @8642541b2).
+    /// `input_t_cond`'s constructor (models/mistral3.cpp:101 @cd959bae9).
     fn create(n_delay: u32, n_embd: i64) *InputTCond {
         const self = allocator.create(InputTCond) catch oom();
         const data = allocator.alloc(f32, @intCast(n_embd)) catch oom();
@@ -161,12 +161,12 @@ const InputTCond = struct {
         allocator.free(self.data);
     }
 
-    /// `input_t_cond`'s `set_input` (models/mistral3.cpp:110 @8642541b2).
+    /// `input_t_cond`'s `set_input` (models/mistral3.cpp:110 @cd959bae9).
     pub fn setInput(self: *InputTCond, _: ?*const Ubatch) void {
         c.ggml_backend_tensor_set(self.t_cond, self.data.ptr, 0, c.ggml_nbytes(self.t_cond));
     }
 
-    /// `input_t_cond`'s `can_reuse` (models/mistral3.cpp:116 @8642541b2):
+    /// `input_t_cond`'s `can_reuse` (models/mistral3.cpp:116 @cd959bae9):
     /// the input does not depend on the batch.
     pub fn canReuse(_: *InputTCond, _: *const graph.Params) bool {
         return true;
@@ -198,8 +198,8 @@ fn sinCos(x: f64) Double2 {
 }
 
 /// Ports `llama_model_mistral3`'s `build_arch_graph` (models/mistral3.cpp:126
-/// @8642541b2) and the constructor of its `graph` (models/mistral3.cpp:130
-/// @8642541b2).
+/// @cd959bae9) and the constructor of its `graph` (models/mistral3.cpp:130
+/// @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

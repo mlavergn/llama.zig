@@ -46,7 +46,7 @@ const Pwp = mc.PipelineWithParams;
 /// can reach, so memory crossing the C ABI can be freed by either side.
 const allocator = std.heap.c_allocator;
 
-/// Ports `GGML_METAL_MIN_THREADGROUPS` (ggml-metal-ops.cpp:20 @8642541b2):
+/// Ports `GGML_METAL_MIN_THREADGROUPS` (ggml-metal-ops.cpp:20 @cd959bae9):
 /// the threadgroups needed to fill the GPU.
 const min_threadgroups: i64 = 128;
 
@@ -66,13 +66,13 @@ inline fn srcOpt(op: *const Tensor, i: usize) ?*const Tensor {
 
 // Where the C reads a possibly-absent source through
 // `GGML_TENSOR_LOCALS(int32_t, ne1, op->src[1], ne)`, the macro is
-// **null-guarded** -- `GGML_TENSOR_LOCALS_1` (ggml.h:298 @8642541b2)
+// **null-guarded** -- `GGML_TENSOR_LOCALS_1` (ggml.h:298 @cd959bae9)
 // expands to `(pointer) ? (pointer)->array[0] : 0`. So an absent source
 // contributes **zeros** to the `kargs`, not garbage and not a
 // dereference, which is why `encodeSoftMax` writes
 // `if (s1) |t| t.nb[1] else 0` rather than asserting it is present.
 
-/// Ports `ggml_metal_get_buffer_id` (ggml-metal-ops.cpp:22 @8642541b2).
+/// Ports `ggml_metal_get_buffer_id` (ggml-metal-ops.cpp:22 @cd959bae9).
 ///
 /// Return: the Metal buffer and offset backing `t`, or a null handle when
 /// `t` is absent. A view reads its source's buffer.
@@ -110,7 +110,7 @@ inline fn maxThreads(pipeline: Pwp) c_int {
     return mc.ggml_metal_pipeline_max_theads_per_threadgroup(pipeline);
 }
 
-/// Ports `struct ggml_metal_op` (ggml-metal-ops.cpp:34 @8642541b2).
+/// Ports `struct ggml_metal_op` (ggml-metal-ops.cpp:34 @cd959bae9).
 ///
 /// The C's one STL member is `std::vector<int> idxs`, the non-empty node
 /// indices; here it is a heap slice sized once from `gf->n_nodes`, which
@@ -139,7 +139,7 @@ pub const Op = struct {
     n_idxs: usize,
 
     /// Ports `ggml_metal_op`'s constructor (ggml-metal-ops.cpp:35
-    /// @8642541b2).
+    /// @cd959bae9).
     fn init(
         dev: *mc.Device,
         cmd_buf: mc.CmdBuf,
@@ -187,7 +187,7 @@ pub const Op = struct {
     }
 
     /// Ports `ggml_metal_op`'s destructor (ggml-metal-ops.cpp:69
-    /// @8642541b2).
+    /// @cd959bae9).
     fn deinit(self: *Op) void {
         mc.ggml_metal_encoder_end_encoding(self.enc);
         mc.ggml_metal_encoder_free(self.enc);
@@ -196,18 +196,18 @@ pub const Op = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `n_nodes` (ggml-metal-ops.cpp:75 @8642541b2).
+    /// Ports `n_nodes` (ggml-metal-ops.cpp:75 @cd959bae9).
     fn nNodes(self: *const Op) c_int {
         return @intCast(self.n_idxs);
     }
 
-    /// Ports `node` (ggml-metal-ops.cpp:79 @8642541b2).
+    /// Ports `node` (ggml-metal-ops.cpp:79 @cd959bae9).
     fn node(self: *const Op, i: c_int) *Tensor {
         impl.assert(i >= 0 and i < self.nNodes(), "i >= 0 && i < (int) idxs.size()");
         return impl.one(Tensor, c.ggml_graph_node(@ptrCast(self.gf), self.idxs[@intCast(i)]));
     }
 
-    /// Ports `can_fuse` (ggml-metal-ops.cpp:86 @8642541b2): the
+    /// Ports `can_fuse` (ggml-metal-ops.cpp:86 @cd959bae9): the
     /// fusion table's longest pattern starting at `j0`, over this
     /// encoder's non-empty nodes only, so a run never crosses into
     /// another encoder's split.
@@ -224,7 +224,7 @@ pub const Op = struct {
         return fusion.ggml_metal_fusion_next(self.gf, self.idxs.ptr, self.nNodes(), j0, mode, n_out);
     }
 
-    /// Ports `use_fusion` (ggml-metal-ops.cpp:95 @8642541b2): whether to
+    /// Ports `use_fusion` (ggml-metal-ops.cpp:95 @cd959bae9): whether to
     /// attempt fusion. The toggle lives in the device's shared fusion
     /// info, set from `GGML_METAL_FUSION_DISABLE` and overridable through
     /// `ggml_backend_fusion_set_enabled`.
@@ -232,7 +232,7 @@ pub const Op = struct {
         return fusion.ggml_metal_fusion_info_enabled(self.finfo);
     }
 
-    /// Ports `count_fusions` (ggml-metal-ops.cpp:100 @8642541b2): record
+    /// Ports `count_fusions` (ggml-metal-ops.cpp:100 @cd959bae9): record
     /// that a fusion fired, indexed by its table entry.
     fn countFusions(self: *const Op, f: *const fusion.Fusion) void {
         fusion.ggml_metal_fusion_info_count_fusion(self.finfo, f);
@@ -245,7 +245,7 @@ pub const Op = struct {
     }
 };
 
-/// Ports `ggml_metal_op_init` (ggml-metal-ops.cpp:127 @8642541b2).
+/// Ports `ggml_metal_op_init` (ggml-metal-ops.cpp:127 @cd959bae9).
 pub export fn ggml_metal_op_init(
     dev: *mc.Device,
     cmd_buf: mc.CmdBuf,
@@ -270,18 +270,18 @@ pub export fn ggml_metal_op_init(
     );
 }
 
-/// Ports `ggml_metal_op_free` (ggml-metal-ops.cpp:151 @8642541b2).
+/// Ports `ggml_metal_op_free` (ggml-metal-ops.cpp:151 @cd959bae9).
 pub export fn ggml_metal_op_free(ctx: *Op) callconv(.c) void {
     ctx.deinit();
 }
 
-/// Ports `ggml_metal_op_n_nodes` (ggml-metal-ops.cpp:155 @8642541b2).
+/// Ports `ggml_metal_op_n_nodes` (ggml-metal-ops.cpp:155 @cd959bae9).
 pub export fn ggml_metal_op_n_nodes(ctx: *Op) callconv(.c) c_int {
     return ctx.nNodes();
 }
 
 /// Ports `ggml_metal_op_concurrency_reset` (ggml-metal-ops.cpp:159
-/// @8642541b2).
+/// @cd959bae9).
 fn concurrencyReset(ctx: *Op) bool {
     const mr = ctx.mem_ranges orelse return true;
 
@@ -293,14 +293,14 @@ fn concurrencyReset(ctx: *Op) bool {
 }
 
 /// Ports `ggml_metal_op_concurrency_check` (ggml-metal-ops.cpp:171
-/// @8642541b2).
+/// @cd959bae9).
 fn concurrencyCheck(ctx: *Op, node: *const Tensor) bool {
     const mr = ctx.mem_ranges orelse return false;
 
     return common.ggml_mem_ranges_check(mr, node);
 }
 
-/// Ports `ggml_metal_op_encode` (ggml-metal-ops.cpp:546 @8642541b2).
+/// Ports `ggml_metal_op_encode` (ggml-metal-ops.cpp:546 @cd959bae9).
 ///
 /// Return: how many nodes were consumed — more than one when the encoder
 /// fused a run of them.
@@ -324,7 +324,7 @@ pub export fn ggml_metal_op_encode(ctx: *Op, idx: c_int) callconv(.c) c_int {
 }
 
 /// Ports `ggml_metal_op_concurrency_add` (ggml-metal-ops.cpp:179
-/// @8642541b2).
+/// @cd959bae9).
 fn concurrencyAdd(ctx: *Op, node: *const Tensor) bool {
     const mr = ctx.mem_ranges orelse return true;
 
@@ -332,7 +332,7 @@ fn concurrencyAdd(ctx: *Op, node: *const Tensor) bool {
 }
 
 /// Ports the dispatch switch of `ggml_metal_op_encode_impl`
-/// (ggml-metal-ops.cpp:187 @8642541b2), which begins at its line 286.
+/// (ggml-metal-ops.cpp:187 @cd959bae9), which begins at its line 286.
 ///
 /// Each arm is written as `=> encodeX(ctx, idx)` rather than the C's
 /// `n_fuse = …; break;`, so a missing arm is a compile error here where
@@ -415,7 +415,7 @@ fn dispatch(ctx: *Op, node: *const Tensor, idx: c_int) c_int {
     };
 }
 
-/// Ports `ggml_metal_op_encode_impl` (ggml-metal-ops.cpp:187 @8642541b2).
+/// Ports `ggml_metal_op_encode_impl` (ggml-metal-ops.cpp:187 @cd959bae9).
 fn encodeImpl(ctx: *Op, idx: c_int) c_int {
     const node = ctx.node(idx);
 
@@ -509,7 +509,7 @@ fn encodeImpl(ctx: *Op, idx: c_int) c_int {
 }
 
 /// The `debug_graph > 1` block of `ggml_metal_op_encode_impl`
-/// (ggml-metal-ops.cpp:187 @8642541b2), at its line 251 — lifted out so
+/// (ggml-metal-ops.cpp:187 @cd959bae9), at its line 251 — lifted out so
 /// the control flow above reads.
 ///
 /// The C expands ten `GGML_TENSOR_LOCALS` here and prints four sources
@@ -564,7 +564,7 @@ const todo = struct {
     }
 };
 
-/// Ports `ggml_metal_op_concat` (ggml-metal-ops.cpp:564 @8642541b2).
+/// Ports `ggml_metal_op_concat` (ggml-metal-ops.cpp:564 @cd959bae9).
 ///
 /// A quantized type concatenates whole blocks: its row lengths are passed
 /// in blocks, so `nb0 == type_size` is the block's size.
@@ -829,7 +829,7 @@ pub export fn ggml_metal_op_bin(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return n_fuse;
 }
 
-/// Ports `ggml_metal_op_add_id` (ggml-metal-ops.cpp:3140 @8642541b2).
+/// Ports `ggml_metal_op_add_id` (ggml-metal-ops.cpp:3144 @cd959bae9).
 ///
 /// Short, despite the 250 lines the file gives it -- the rest of that
 /// span is the `flash_attn_ext` helper group that follows it.
@@ -883,7 +883,7 @@ pub export fn ggml_metal_op_add_id(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_repeat` (ggml-metal-ops.cpp:658 @8642541b2). v0.6.0
+/// Ports `ggml_metal_op_repeat` (ggml-metal-ops.cpp:658 @cd959bae9). v0.6.0
 /// added only a TODO comment.
 pub export fn ggml_metal_op_repeat(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
@@ -934,7 +934,7 @@ pub export fn ggml_metal_op_repeat(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_acc` (ggml-metal-ops.cpp:704 @8642541b2).
+/// Ports `ggml_metal_op_acc` (ggml-metal-ops.cpp:704 @cd959bae9).
 ///
 /// Two dispatches when not in-place: a `cpy` of src0 into dst, then an
 /// `ADD` of src1 into a *window* of it — which is what the `pnb*` strides
@@ -1177,7 +1177,7 @@ pub export fn ggml_metal_op_unary(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_silu_back` (ggml-metal-ops.cpp:4347 @8642541b2).
+/// Ports `ggml_metal_op_silu_back` (ggml-metal-ops.cpp:4482 @cd959bae9).
 pub export fn ggml_metal_op_silu_back(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -1277,7 +1277,7 @@ pub export fn ggml_metal_op_glu(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_sum` (ggml-metal-ops.cpp:972 @8642541b2).
+/// Ports `ggml_metal_op_sum` (ggml-metal-ops.cpp:976 @cd959bae9).
 pub export fn ggml_metal_op_sum(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -1317,7 +1317,7 @@ pub export fn ggml_metal_op_sum(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_sum_rows` (ggml-metal-ops.cpp:1009 @8642541b2).
+/// Ports `ggml_metal_op_sum_rows` (ggml-metal-ops.cpp:1013 @cd959bae9).
 pub export fn ggml_metal_op_sum_rows(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -1391,7 +1391,7 @@ pub export fn ggml_metal_op_sum_rows(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_cumsum` (ggml-metal-ops.cpp:1074 @8642541b2).
+/// Ports `ggml_metal_op_cumsum` (ggml-metal-ops.cpp:1078 @cd959bae9).
 ///
 /// Up to three dispatches: a per-block scan, then — only when the row
 /// exceeds one threadgroup — a scan of the block totals and an add of
@@ -1567,8 +1567,8 @@ pub export fn ggml_metal_op_cumsum(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_lightning_indexer` (ggml-metal-ops.cpp:1366
-/// @8642541b2).
+/// Ports `ggml_metal_op_lightning_indexer` (ggml-metal-ops.cpp:1370
+/// @cd959bae9).
 ///
 /// v0.6.0 dropped the assertion that `q` has `OP_LIGHTNING_INDEXER_NH`
 /// heads: the head count is a function constant of the pipeline now.
@@ -1649,7 +1649,7 @@ pub export fn ggml_metal_op_lightning_indexer(ctx: *Op, idx: c_int) callconv(.c)
     return 1;
 }
 
-/// Ports `ggml_metal_op_top_k_mask` (ggml-metal-ops.cpp:1431 @8642541b2).
+/// Ports `ggml_metal_op_top_k_mask` (ggml-metal-ops.cpp:1435 @cd959bae9).
 ///
 /// `src[0]` is the mask, `src[1]` the indices kept per row, and three
 /// optional sources shape them: per-index scores (`src[2]`), block ids
@@ -1776,7 +1776,7 @@ pub export fn ggml_metal_op_top_k_mask(ctx: *Op, idx: c_int) callconv(.c) c_int 
     return 1;
 }
 
-/// Ports `ggml_metal_op_dsv4_hc` (ggml-metal-ops.cpp:1549 @8642541b2).
+/// Ports `ggml_metal_op_dsv4_hc` (ggml-metal-ops.cpp:1553 @cd959bae9).
 ///
 /// Three ops behind one entry point, each with its own `kargs` struct and
 /// its own source naming. Note the pipeline is set **before** the switch,
@@ -1936,7 +1936,7 @@ pub export fn ggml_metal_op_dsv4_hc(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_soft_max` (ggml-metal-ops.cpp:1684 @8642541b2).
+/// Ports `ggml_metal_op_soft_max` (ggml-metal-ops.cpp:1688 @cd959bae9).
 ///
 /// A `SOFT_MAX` opening the MoE routing pattern goes to
 /// `ggml_metal_op_topk_moe` instead.
@@ -2040,7 +2040,7 @@ pub export fn ggml_metal_op_soft_max(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_ssm_conv` (ggml-metal-ops.cpp:1782 @8642541b2).
+/// Ports `ggml_metal_op_ssm_conv` (ggml-metal-ops.cpp:1786 @cd959bae9).
 ///
 /// Fuses a following SILU (`SSM_CONV_SILU`): the kernel applies it and
 /// writes to the UNARY's destination. Since v0.5.0 the kernel width `nc`
@@ -2146,7 +2146,7 @@ pub export fn ggml_metal_op_ssm_conv(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return n_fuse;
 }
 
-/// Ports `ggml_metal_op_ssm_scan` (ggml-metal-ops.cpp:1874 @8642541b2).
+/// Ports `ggml_metal_op_ssm_scan` (ggml-metal-ops.cpp:1878 @cd959bae9).
 ///
 /// Seven sources, and the `ns*` fields are stride *ratios* — `nb12/nb10`
 /// and friends — element counts rather than byte counts.
@@ -2276,7 +2276,7 @@ pub export fn ggml_metal_op_ssm_scan(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_rwkv` (ggml-metal-ops.cpp:2007 @8642541b2).
+/// Ports `ggml_metal_op_rwkv` (ggml-metal-ops.cpp:2011 @cd959bae9).
 ///
 /// The one encoder with **no `kargs` struct**: it passes `B`, `T`, `C`
 /// and `H` as four separate `set_bytes` of an `int64_t` each.
@@ -2330,8 +2330,8 @@ pub export fn ggml_metal_op_rwkv(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_gated_delta_net` (ggml-metal-ops.cpp:2048
-/// @8642541b2).
+/// Ports `ggml_metal_op_gated_delta_net` (ggml-metal-ops.cpp:2052
+/// @cd959bae9).
 ///
 /// Fused with the `CPY` that follows it (`GDN_CACHE` in `fusion.zig`),
 /// the kernel writes the state snapshots straight into the recurrent
@@ -2446,7 +2446,7 @@ pub export fn ggml_metal_op_gated_delta_net(ctx: *Op, idx: c_int) callconv(.c) c
     return n_fuse;
 }
 
-/// Ports `ggml_metal_op_solve_tri` (ggml-metal-ops.cpp:2152 @8642541b2).
+/// Ports `ggml_metal_op_solve_tri` (ggml-metal-ops.cpp:2156 @cd959bae9).
 pub export fn ggml_metal_op_solve_tri(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -2510,7 +2510,7 @@ pub export fn ggml_metal_op_solve_tri(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_try_fusion` (ggml-metal-ops.cpp:2565 @8642541b2):
+/// Ports `ggml_metal_op_try_fusion` (ggml-metal-ops.cpp:2569 @cd959bae9):
 /// the number of nodes from `idx` on that the fusion table fuses as
 /// pattern `id` into one dispatch, 1 if it fuses none.
 fn tryFusion(ctx: *Op, idx: c_int, id: fusion.Id) c_int {
@@ -2538,7 +2538,7 @@ fn tryFusion(ctx: *Op, idx: c_int, id: fusion.Id) c_int {
     return n;
 }
 
-/// Ports `ggml_metal_op_mul_mat_mma` (ggml-metal-ops.cpp:2585 @8642541b2).
+/// Ports `ggml_metal_op_mul_mat_mma` (ggml-metal-ops.cpp:2589 @cd959bae9).
 ///
 /// The few-row MMA mat-mul (`mul_mv_mma.metal`), new at v0.6.0. When the
 /// fusion table fuses the `ADD` after this node (`MUL_MAT_ADD`), the
@@ -2627,7 +2627,7 @@ fn mulMatMma(ctx: *Op, idx: c_int) c_int {
     return n_fuse;
 }
 
-/// Ports `ggml_metal_op_mul_mat_mv` (ggml-metal-ops.cpp:2651 @8642541b2):
+/// Ports `ggml_metal_op_mul_mat_mv` (ggml-metal-ops.cpp:2655 @cd959bae9):
 /// the generic mat-vec kernel, `ggml_metal_op_mul_mat`'s last arm, which
 /// v0.6.0 lifted out unchanged.
 fn mulMatMv(ctx: *Op, idx: c_int) c_int {
@@ -2718,7 +2718,7 @@ fn mulMatMv(ctx: *Op, idx: c_int) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_mul_mat` (ggml-metal-ops.cpp:2716 @8642541b2).
+/// Ports `ggml_metal_op_mul_mat` (ggml-metal-ops.cpp:2720 @cd959bae9).
 ///
 /// Five kernels behind one op, chosen in order: a Hadamard hint goes to
 /// `fwht`; since v0.6.0 a few F32 `src1` rows go to the MMA kernels
@@ -2917,7 +2917,7 @@ pub export fn ggml_metal_op_mul_mat(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_mul_mat_id` (ggml-metal-ops.cpp:2937 @8642541b2).
+/// Ports `ggml_metal_op_mul_mat_id` (ggml-metal-ops.cpp:2941 @cd959bae9).
 ///
 /// Where `ggml_metal_op_mul_mat_id_use_mm` says, it builds an expert->token id map
 /// into scratch after `dst`, barriers, then runs the simdgroup-matrix
@@ -3156,7 +3156,7 @@ pub export fn ggml_metal_op_mul_mat_id(ctx: *Op, idx: c_int) callconv(.c) c_int 
     return 1;
 }
 
-/// Ports `ggml_metal_op_get_rows` (ggml-metal-ops.cpp:1217 @8642541b2).
+/// Ports `ggml_metal_op_get_rows` (ggml-metal-ops.cpp:1221 @cd959bae9).
 pub export fn ggml_metal_op_get_rows(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -3208,7 +3208,7 @@ pub export fn ggml_metal_op_get_rows(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_set_rows` (ggml-metal-ops.cpp:1262 @8642541b2).
+/// Ports `ggml_metal_op_set_rows` (ggml-metal-ops.cpp:1266 @cd959bae9).
 pub export fn ggml_metal_op_set_rows(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -3277,7 +3277,7 @@ pub export fn ggml_metal_op_set_rows(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_diag` (ggml-metal-ops.cpp:1324 @8642541b2).
+/// Ports `ggml_metal_op_diag` (ggml-metal-ops.cpp:1328 @cd959bae9).
 pub export fn ggml_metal_op_diag(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -3325,7 +3325,7 @@ pub export fn ggml_metal_op_diag(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_l2_norm` (ggml-metal-ops.cpp:4377 @8642541b2).
+/// Ports `ggml_metal_op_l2_norm` (ggml-metal-ops.cpp:4512 @cd959bae9).
 pub export fn ggml_metal_op_l2_norm(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -3400,7 +3400,7 @@ pub export fn ggml_metal_op_l2_norm(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_group_norm` (ggml-metal-ops.cpp:4445 @8642541b2).
+/// Ports `ggml_metal_op_group_norm` (ggml-metal-ops.cpp:4580 @cd959bae9).
 pub export fn ggml_metal_op_group_norm(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -3445,7 +3445,7 @@ pub export fn ggml_metal_op_group_norm(ctx: *Op, idx: c_int) callconv(.c) c_int 
     return 1;
 }
 
-/// Ports `ggml_metal_op_norm` (ggml-metal-ops.cpp:4496 @8642541b2).
+/// Ports `ggml_metal_op_norm` (ggml-metal-ops.cpp:4631 @cd959bae9).
 ///
 /// The first **fusion** encoder: it may swallow a following `MUL` and
 /// then an `ADD` into one kernel, or (since v0.5.0) a `SCALE`, whose
@@ -3598,7 +3598,7 @@ pub export fn ggml_metal_op_norm(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return n_fuse;
 }
 
-/// Ports `ggml_metal_op_rope` (ggml-metal-ops.cpp:4630 @8642541b2).
+/// Ports `ggml_metal_op_rope` (ggml-metal-ops.cpp:4765 @cd959bae9).
 pub export fn ggml_metal_op_rope(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -3704,7 +3704,7 @@ pub export fn ggml_metal_op_rope(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_im2col` (ggml-metal-ops.cpp:4733 @8642541b2).
+/// Ports `ggml_metal_op_im2col` (ggml-metal-ops.cpp:4868 @cd959bae9).
 pub export fn ggml_metal_op_im2col(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -3795,7 +3795,7 @@ pub export fn ggml_metal_op_im2col(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_conv_2d` (ggml-metal-ops.cpp:4813 @8642541b2).
+/// Ports `ggml_metal_op_conv_2d` (ggml-metal-ops.cpp:4948 @cd959bae9).
 pub export fn ggml_metal_op_conv_2d(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -3873,7 +3873,7 @@ pub export fn ggml_metal_op_conv_2d(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_conv_2d_dw` (ggml-metal-ops.cpp:4891 @8642541b2).
+/// Ports `ggml_metal_op_conv_2d_dw` (ggml-metal-ops.cpp:5026 @cd959bae9).
 ///
 /// **The C writes `/*.nb02 =*/ nb03` here** — the `nb02` field is fed the
 /// weight tensor's `nb[3]`, not its `nb[2]`. Reproduced as written. Which
@@ -3963,8 +3963,8 @@ pub export fn ggml_metal_op_conv_2d_dw(ctx: *Op, idx: c_int) callconv(.c) c_int 
     return 1;
 }
 
-/// Ports `ggml_metal_op_conv_transpose_1d` (ggml-metal-ops.cpp:5042
-/// @8642541b2).
+/// Ports `ggml_metal_op_conv_transpose_1d` (ggml-metal-ops.cpp:5177
+/// @cd959bae9).
 pub export fn ggml_metal_op_conv_transpose_1d(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -4008,8 +4008,8 @@ pub export fn ggml_metal_op_conv_transpose_1d(ctx: *Op, idx: c_int) callconv(.c)
     return 1;
 }
 
-/// Ports `ggml_metal_op_conv_transpose_2d` (ggml-metal-ops.cpp:5177
-/// @8642541b2).
+/// Ports `ggml_metal_op_conv_transpose_2d` (ggml-metal-ops.cpp:5312
+/// @cd959bae9).
 ///
 /// One threadgroup per output pixel and channel, for each of the `N`
 /// images in the batch.
@@ -4067,7 +4067,7 @@ pub export fn ggml_metal_op_conv_transpose_2d(ctx: *Op, idx: c_int) callconv(.c)
     return 1;
 }
 
-/// Ports `ggml_metal_op_col2im_1d` (ggml-metal-ops.cpp:5087 @8642541b2).
+/// Ports `ggml_metal_op_col2im_1d` (ggml-metal-ops.cpp:5222 @cd959bae9).
 pub export fn ggml_metal_op_col2im_1d(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -4111,7 +4111,7 @@ pub export fn ggml_metal_op_col2im_1d(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_conv_3d` (ggml-metal-ops.cpp:4971 @8642541b2).
+/// Ports `ggml_metal_op_conv_3d` (ggml-metal-ops.cpp:5106 @cd959bae9).
 ///
 /// The C's initialiser is positional from `s0` onwards rather than
 /// designated; the field names here come from the struct's declaration
@@ -4202,7 +4202,7 @@ pub export fn ggml_metal_op_conv_3d(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_upscale` (ggml-metal-ops.cpp:5235 @8642541b2).
+/// Ports `ggml_metal_op_upscale` (ggml-metal-ops.cpp:5370 @cd959bae9).
 pub export fn ggml_metal_op_upscale(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -4285,7 +4285,7 @@ pub export fn ggml_metal_op_upscale(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_pad` (ggml-metal-ops.cpp:5352 @8642541b2).
+/// Ports `ggml_metal_op_pad` (ggml-metal-ops.cpp:5487 @cd959bae9).
 pub export fn ggml_metal_op_pad(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -4348,8 +4348,8 @@ pub export fn ggml_metal_op_pad(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_pad_reflect_1d` (ggml-metal-ops.cpp:5402
-/// @8642541b2).
+/// Ports `ggml_metal_op_pad_reflect_1d` (ggml-metal-ops.cpp:5537
+/// @cd959bae9).
 pub export fn ggml_metal_op_pad_reflect_1d(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -4401,7 +4401,7 @@ pub export fn ggml_metal_op_pad_reflect_1d(ctx: *Op, idx: c_int) callconv(.c) c_
     return 1;
 }
 
-/// Ports `ggml_metal_op_roll` (ggml-metal-ops.cpp:5299 @8642541b2).
+/// Ports `ggml_metal_op_roll` (ggml-metal-ops.cpp:5434 @cd959bae9).
 pub export fn ggml_metal_op_roll(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -4460,7 +4460,7 @@ pub export fn ggml_metal_op_roll(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_arange` (ggml-metal-ops.cpp:5448 @8642541b2).
+/// Ports `ggml_metal_op_arange` (ggml-metal-ops.cpp:5583 @cd959bae9).
 pub export fn ggml_metal_op_arange(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -4492,8 +4492,8 @@ pub export fn ggml_metal_op_arange(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_timestep_embedding` (ggml-metal-ops.cpp:5482
-/// @8642541b2).
+/// Ports `ggml_metal_op_timestep_embedding` (ggml-metal-ops.cpp:5617
+/// @cd959bae9).
 pub export fn ggml_metal_op_timestep_embedding(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -4525,7 +4525,7 @@ pub export fn ggml_metal_op_timestep_embedding(ctx: *Op, idx: c_int) callconv(.c
     return 1;
 }
 
-/// Ports `ggml_metal_op_argsort` (ggml-metal-ops.cpp:5613 @8642541b2).
+/// Ports `ggml_metal_op_argsort` (ggml-metal-ops.cpp:5748 @cd959bae9).
 ///
 /// A bitonic sort of power-of-two blocks, then a merge ladder that
 /// ping-pongs between `dst` and the scratch immediately after it. The
@@ -4640,7 +4640,7 @@ pub export fn ggml_metal_op_argsort(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_topk_moe` (ggml-metal-ops.cpp:5881 @8642541b2).
+/// Ports `ggml_metal_op_topk_moe` (ggml-metal-ops.cpp:6016 @cd959bae9).
 ///
 /// The fused MoE routing (`TOPK_MOE` in `fusion.zig`): the softmax over
 /// the expert logits, its top-k selection and the gathered weights --
@@ -4712,7 +4712,7 @@ pub export fn ggml_metal_op_topk_moe(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return n_fuse;
 }
 
-/// Ports `ggml_metal_op_moe_reduce` (ggml-metal-ops.cpp:5943 @8642541b2).
+/// Ports `ggml_metal_op_moe_reduce` (ggml-metal-ops.cpp:6078 @cd959bae9).
 ///
 /// The fused MoE output reduction (`MOE_REDUCE` in `fusion.zig`): the
 /// experts' outputs times their routing weights, summed over the experts,
@@ -4761,7 +4761,7 @@ pub export fn ggml_metal_op_moe_reduce(ctx: *Op, idx: c_int) callconv(.c) c_int 
     return n_fuse;
 }
 
-/// Ports `ggml_metal_op_top_k` (ggml-metal-ops.cpp:5985 @8642541b2).
+/// Ports `ggml_metal_op_top_k` (ggml-metal-ops.cpp:6120 @cd959bae9).
 ///
 /// Two paths. Radix-select has a fixed one-workgroup-per-row cost that only
 /// pays off for long rows, many rows or a large `k`; otherwise the bitonic
@@ -4787,7 +4787,7 @@ pub export fn ggml_metal_op_top_k(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_top_k_radix` (ggml-metal-ops.cpp:5835 @8642541b2).
+/// Ports `ggml_metal_op_top_k_radix` (ggml-metal-ops.cpp:5970 @cd959bae9).
 ///
 /// One workgroup per row. Each float maps to an order-preserving unsigned
 /// key; four radix-8 histogram passes find the k-th largest, then the top-k
@@ -4837,7 +4837,7 @@ fn topKRadix(ctx: *Op, idx: c_int) void {
     mc.ggml_metal_encoder_dispatch_threadgroups(enc, @intCast(s0.ne[1]), @intCast(s0.ne[2]), @intCast(s0.ne[3]), nth, 1, 1);
 }
 
-/// Ports `ggml_metal_op_top_k_bitonic` (ggml-metal-ops.cpp:5722 @8642541b2).
+/// Ports `ggml_metal_op_top_k_bitonic` (ggml-metal-ops.cpp:5857 @cd959bae9).
 ///
 /// `argsort`'s structure, but each block keeps only its own top-k, so
 /// `args.ne0` is recomputed to the total kept rather than the row width,
@@ -4960,7 +4960,7 @@ fn topKBitonic(ctx: *Op, idx: c_int) void {
     }
 }
 
-/// Ports `ggml_metal_op_tri` (ggml-metal-ops.cpp:6006 @8642541b2).
+/// Ports `ggml_metal_op_tri` (ggml-metal-ops.cpp:6141 @cd959bae9).
 pub export fn ggml_metal_op_tri(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -5838,7 +5838,7 @@ pub export fn ggml_metal_op_flash_attn_ext(ctx: *Op, idx: c_int) callconv(.c) c_
     return 1;
 }
 
-/// Ports `ggml_metal_op_set` (ggml-metal-ops.cpp:2209 @8642541b2).
+/// Ports `ggml_metal_op_set` (ggml-metal-ops.cpp:2213 @cd959bae9).
 ///
 /// Two `cpy` dispatches when not in-place: src0 into dst, then src1 into
 /// a window of dst at `offs` with the `pnb*` strides. Note the second
@@ -5992,7 +5992,7 @@ pub export fn ggml_metal_op_set(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_cpy` (ggml-metal-ops.cpp:2337 @8642541b2).
+/// Ports `ggml_metal_op_cpy` (ggml-metal-ops.cpp:2341 @cd959bae9).
 pub export fn ggml_metal_op_cpy(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -6081,7 +6081,7 @@ pub export fn ggml_metal_op_cpy(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_pool_1d` (ggml-metal-ops.cpp:2410 @8642541b2).
+/// Ports `ggml_metal_op_pool_1d` (ggml-metal-ops.cpp:2414 @cd959bae9).
 ///
 /// Since v0.8.0 one threadgroup makes one output: its threads split the
 /// window, and the reduction goes through threadgroup memory, a sum and a
@@ -6135,7 +6135,7 @@ pub export fn ggml_metal_op_pool_1d(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_pool_2d` (ggml-metal-ops.cpp:2504 @8642541b2).
+/// Ports `ggml_metal_op_pool_2d` (ggml-metal-ops.cpp:2508 @cd959bae9).
 pub export fn ggml_metal_op_pool_2d(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -6195,7 +6195,7 @@ pub export fn ggml_metal_op_pool_2d(ctx: *Op, idx: c_int) callconv(.c) c_int {
 /// How many parts `ggml_metal_op_argmax` splits a row of `ne00` into: one
 /// up to `N_ARGMAX_CHUNK`, then a part per chunk, up to `N_ARGMAX_NPART_MAX`.
 /// The C writes this twice, in `ggml_metal_op_argmax_extra` and
-/// `ggml_metal_op_argmax` (ggml-metal-ops.cpp:5516, 5535 @8642541b2).
+/// `ggml_metal_op_argmax` (ggml-metal-ops.cpp:5651, 5670 @cd959bae9).
 fn argmaxNpart(ne00: i64) c_int {
     if (ne00 > fc.N_ARGMAX_CHUNK) {
         return @truncate(@min(fc.N_ARGMAX_NPART_MAX, @divTrunc(ne00 + fc.N_ARGMAX_CHUNK - 1, fc.N_ARGMAX_CHUNK)));
@@ -6204,7 +6204,7 @@ fn argmaxNpart(ne00: i64) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_argmax_extra` (ggml-metal-ops.cpp:5516 @8642541b2):
+/// Ports `ggml_metal_op_argmax_extra` (ggml-metal-ops.cpp:5651 @cd959bae9):
 /// a partial max and a partial argmax per part of every row, after `dst`,
 /// and nothing for a row short enough to take one pass. The C's `assert`
 /// on the op compiles out in the reference and is not ported.
@@ -6222,7 +6222,7 @@ pub export fn ggml_metal_op_argmax_extra(op: *const Tensor) callconv(.c) usize {
     return (@sizeOf(f32) + @sizeOf(i32)) *% @as(usize, @bitCast(@as(i64, npart))) *% @as(usize, @bitCast(ne01));
 }
 
-/// Ports `ggml_metal_op_argmax` (ggml-metal-ops.cpp:5535 @8642541b2).
+/// Ports `ggml_metal_op_argmax` (ggml-metal-ops.cpp:5670 @cd959bae9).
 ///
 /// Since v0.8.0 a row over `N_ARGMAX_CHUNK` takes two kernels: one
 /// threadgroup per part per row into the scratch `ggml_metal_op_argmax_extra`
@@ -6304,8 +6304,8 @@ pub export fn ggml_metal_op_argmax(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_opt_step_adamw` (ggml-metal-ops.cpp:6057
-/// @8642541b2).
+/// Ports `ggml_metal_op_opt_step_adamw` (ggml-metal-ops.cpp:6192
+/// @cd959bae9).
 pub export fn ggml_metal_op_opt_step_adamw(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -6340,7 +6340,7 @@ pub export fn ggml_metal_op_opt_step_adamw(ctx: *Op, idx: c_int) callconv(.c) c_
     return 1;
 }
 
-/// Ports `ggml_metal_op_opt_step_sgd` (ggml-metal-ops.cpp:6093 @8642541b2).
+/// Ports `ggml_metal_op_opt_step_sgd` (ggml-metal-ops.cpp:6228 @cd959bae9).
 pub export fn ggml_metal_op_opt_step_sgd(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const op = ctx.node(idx);
 
@@ -6376,7 +6376,7 @@ pub export fn ggml_metal_op_opt_step_sgd(ctx: *Op, idx: c_int) callconv(.c) c_in
     return 1;
 }
 
-/// Ports `ggml_metal_op_count_equal` (ggml-metal-ops.cpp:6127 @8642541b2).
+/// Ports `ggml_metal_op_count_equal` (ggml-metal-ops.cpp:6262 @cd959bae9).
 ///
 /// Two dispatches with a concurrency reset between them: the destination
 /// is zeroed first, then atomically accumulated into, so the second pass
@@ -6449,7 +6449,7 @@ pub export fn ggml_metal_op_count_equal(ctx: *Op, idx: c_int) callconv(.c) c_int
     return 1;
 }
 
-/// Ports `ggml_metal_op_fwht` (ggml-metal-ops.cpp:2462 @8642541b2).
+/// Ports `ggml_metal_op_fwht` (ggml-metal-ops.cpp:2466 @cd959bae9).
 ///
 /// Not reached from the dispatch switch: `ggml_metal_op_mul_mat` calls it
 /// at its line 2597. Since v0.6.0 widths of `GGML_METAL_FWHT_TG_MIN_N` and
@@ -6499,7 +6499,7 @@ pub export fn ggml_metal_op_fwht(ctx: *Op, idx: c_int) callconv(.c) c_int {
     return 1;
 }
 
-/// Ports `ggml_metal_op_snake_fused` (ggml-metal-ops.cpp:5130 @8642541b2).
+/// Ports `ggml_metal_op_snake_fused` (ggml-metal-ops.cpp:5265 @cd959bae9).
 ///
 /// Dispatch the fused snake kernel from the matched mul -> sin -> sqr ->
 /// mul -> add chain. `idx` points at the leading mul. The caller has
@@ -6552,8 +6552,8 @@ pub export fn ggml_metal_op_snake_fused(ctx: *Op, idx: c_int) callconv(.c) c_int
     return 5;
 }
 
-/// Ports `ggml_metal_op_mul_mat_id_max_tiles` (ggml-metal-ops.cpp:2904
-/// @8642541b2), new at v0.7.0.
+/// Ports `ggml_metal_op_mul_mat_id_max_tiles` (ggml-metal-ops.cpp:2908
+/// @cd959bae9), new at v0.7.0.
 ///
 /// The upper bound on the number of entry tiles `kernel_mul_mm_id_map0`
 /// emits: the full 32-row tiles over all `ne20*ne21` entries plus at most
@@ -6570,8 +6570,8 @@ fn mulMatIdMaxTiles(op: *const Tensor) i64 {
     return if (n_rows < tiles) n_rows else tiles;
 }
 
-/// Ports `ggml_metal_op_mul_mat_id_extra_tpe` (ggml-metal-ops.cpp:2915
-/// @8642541b2).
+/// Ports `ggml_metal_op_mul_mat_id_extra_tpe` (ggml-metal-ops.cpp:2919
+/// @cd959bae9).
 ///
 /// Scratch for the row map of `kernel_mul_mm_id`, allocated after `dst` by
 /// `backend.zig`'s `get_alloc_size`: the total tile count, then one
@@ -6585,8 +6585,8 @@ pub export fn ggml_metal_op_mul_mat_id_extra_tpe(op: *const Tensor) callconv(.c)
     return c.ggml_type_size(c.GGML_TYPE_I32) *% @as(usize, @bitCast(1 + 3 * max_tiles));
 }
 
-/// Ports `ggml_metal_op_mul_mat_id_extra_ids` (ggml-metal-ops.cpp:2925
-/// @8642541b2).
+/// Ports `ggml_metal_op_mul_mat_id_extra_ids` (ggml-metal-ops.cpp:2929
+/// @cd959bae9).
 ///
 /// One entry per (expert used, token) pair of ids plus one padding slot
 /// per expert (see `kernel_mul_mm_id_map0`). The C's `assert` on the op
@@ -6599,8 +6599,8 @@ pub export fn ggml_metal_op_mul_mat_id_extra_ids(op: *const Tensor) callconv(.c)
     return c.ggml_type_size(c.GGML_TYPE_I32) *% @as(usize, @bitCast(ne20 * ne21 + ne02));
 }
 
-/// Ports `ggml_metal_op_flash_attn_ext_use_vec` (ggml-metal-ops.cpp:3186
-/// @8642541b2).
+/// Ports `ggml_metal_op_flash_attn_ext_use_vec` (ggml-metal-ops.cpp:3190
+/// @cd959bae9).
 pub export fn ggml_metal_op_flash_attn_ext_use_vec(op: *const Tensor) callconv(.c) bool {
     impl.assert(op.op == c.GGML_OP_FLASH_ATTN_EXT, "op->op == GGML_OP_FLASH_ATTN_EXT");
 
@@ -6614,7 +6614,7 @@ pub export fn ggml_metal_op_flash_attn_ext_use_vec(op: *const Tensor) callconv(.
 }
 
 /// Ports `ggml_metal_op_flash_attn_ext_use_kv_f16`
-/// (ggml-metal-ops.cpp:3198 @8642541b2).
+/// (ggml-metal-ops.cpp:3202 @cd959bae9).
 ///
 /// ref: https://github.com/ggml-org/llama.cpp/pull/27390
 /// dequantize the quantized KV cache to F16 before running the F16 flash attention kernels
@@ -6752,7 +6752,7 @@ fn nKvMaxSparse(op: *const Tensor) c_int {
 }
 
 /// Ports `ggml_metal_op_flash_attn_ext_v_is_view_of_k`
-/// (ggml-metal-ops.cpp:3327 @8642541b2).
+/// (ggml-metal-ops.cpp:3339 @cd959bae9).
 ///
 /// in some models (e.g. MLA-based), V is a view of K (the first ne20 elements of each K row);
 /// the dequantized V is then a view of the dequantized K and does not need its own dequant or scratch
@@ -6773,7 +6773,7 @@ fn vIsViewOfK(op: *const Tensor) bool {
 }
 
 /// Ports `ggml_metal_op_flash_attn_ext_kv_f16_k_size`
-/// (ggml-metal-ops.cpp:3337 @8642541b2).
+/// (ggml-metal-ops.cpp:3349 @cd959bae9).
 ///
 /// size of the F16 dequantized K tensor; the dequantized V tensor follows it in the same scratch buffer
 fn kvF16KSize(op: *const Tensor) usize {
@@ -6785,7 +6785,7 @@ fn kvF16KSize(op: *const Tensor) usize {
 }
 
 /// Ports `ggml_metal_op_flash_attn_ext_extra_pad`
-/// (ggml-metal-ops.cpp:3345 @8642541b2).
+/// (ggml-metal-ops.cpp:3357 @cd959bae9).
 pub export fn ggml_metal_op_flash_attn_ext_extra_pad(op: *const Tensor) callconv(.c) usize {
     impl.assert(op.op == c.GGML_OP_FLASH_ATTN_EXT, "op->op == GGML_OP_FLASH_ATTN_EXT");
 
@@ -6840,7 +6840,7 @@ pub export fn ggml_metal_op_flash_attn_ext_extra_pad(op: *const Tensor) callconv
 }
 
 /// Ports `ggml_metal_op_flash_attn_ext_extra_blk`
-/// (ggml-metal-ops.cpp:3403 @8642541b2).
+/// (ggml-metal-ops.cpp:3415 @cd959bae9).
 pub export fn ggml_metal_op_flash_attn_ext_extra_blk(op: *const Tensor) callconv(.c) usize {
     impl.assert(op.op == c.GGML_OP_FLASH_ATTN_EXT, "op->op == GGML_OP_FLASH_ATTN_EXT");
 
@@ -6875,7 +6875,7 @@ pub export fn ggml_metal_op_flash_attn_ext_extra_blk(op: *const Tensor) callconv
 }
 
 /// Ports `ggml_metal_op_flash_attn_ext_extra_tmp`
-/// (ggml-metal-ops.cpp:3442 @8642541b2).
+/// (ggml-metal-ops.cpp:3454 @cd959bae9).
 pub export fn ggml_metal_op_flash_attn_ext_extra_tmp(op: *const Tensor) callconv(.c) usize {
     impl.assert(op.op == c.GGML_OP_FLASH_ATTN_EXT, "op->op == GGML_OP_FLASH_ATTN_EXT");
 
@@ -6901,7 +6901,7 @@ pub export fn ggml_metal_op_flash_attn_ext_extra_tmp(op: *const Tensor) callconv
 }
 
 /// Ports `ggml_metal_op_flash_attn_ext_extra_kv_f16`
-/// (ggml-metal-ops.cpp:3471 @8642541b2).
+/// (ggml-metal-ops.cpp:3483 @cd959bae9).
 pub export fn ggml_metal_op_flash_attn_ext_extra_kv_f16(op: *const Tensor) callconv(.c) usize {
     impl.assert(op.op == c.GGML_OP_FLASH_ATTN_EXT, "op->op == GGML_OP_FLASH_ATTN_EXT");
 
@@ -6925,7 +6925,7 @@ pub export fn ggml_metal_op_flash_attn_ext_extra_kv_f16(op: *const Tensor) callc
 }
 
 /// Ports `ggml_metal_op_flash_attn_ext_extra_idx`
-/// (ggml-metal-ops.cpp:3496 @8642541b2).
+/// (ggml-metal-ops.cpp:3508 @cd959bae9).
 ///
 /// The sparse index lists: one list of KV indices per mask row, padded with
 /// -1 to a multiple of `OP_FLASH_ATTN_EXT_VEC_NCPSG`. Zero when the op does

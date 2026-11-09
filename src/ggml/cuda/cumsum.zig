@@ -8,7 +8,7 @@
 //!
 //! # CUB
 //!
-//! `GGML_CUDA_USE_CUB` is defined for this build (common.cuh:116 @8642541b2). Long
+//! `GGML_CUDA_USE_CUB` is defined for this build (common.cuh:118 @cd959bae9). Long
 //! contiguous rows go to `cub::DeviceScan::InclusiveSum`, whose host-side
 //! dispatch is CUB's header templates; `cub_shim.cu` wraps that one call
 //! behind a C ABI (PLAN.md, Decision 47). Only `float` is instantiated:
@@ -23,7 +23,7 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_CUMSUM_BLOCK_SIZE` (cumsum.cuh:3 @8642541b2).
+/// Ports `CUDA_CUMSUM_BLOCK_SIZE` (cumsum.cuh:3 @cd959bae9).
 const block_size = 256;
 
 /// `cub_shim.cu`'s wrapper of `cumsum_cub<float>`'s `InclusiveSum`.
@@ -40,7 +40,7 @@ fn strideOf(nb: i64, ts: usize) i64 {
     return @bitCast(@as(u64, @bitCast(nb)) / ts);
 }
 
-/// Ports `cumsum_cub` (cumsum.cu:190 @8642541b2) for `T = float`. Upstream
+/// Ports `cumsum_cub` (cumsum.cu:190 @cd959bae9) for `T = float`. Upstream
 /// checks neither call's result, and neither does this.
 fn cumsumCub(pool: *common.Pool, src: [*]const f32, dst: [*]f32, ne: i64, stream: cu.cudaStream_t) void {
     var tmp_size: usize = 0;
@@ -55,7 +55,7 @@ fn cumsumCub(pool: *common.Pool, src: [*]const f32, dst: [*]f32, ne: i64, stream
     _ = ggml_cuda_cub_inclusive_sum_f32(tmp_alloc.get(), &tmp_size, src, dst, ne, stream);
 }
 
-/// Ports `cumsum_cuda` (cumsum.cu:214 @8642541b2) for `T = float`.
+/// Ports `cumsum_cuda` (cumsum.cu:214 @cd959bae9) for `T = float`.
 fn cumsumCuda(
     ctx: *common.Context,
     src: [*]const f32,
@@ -137,7 +137,7 @@ fn cumsumCuda(
     }
 }
 
-/// Ports `ggml_cuda_op_cumsum` (cumsum.cu:267 @8642541b2).
+/// Ports `ggml_cuda_op_cumsum` (cumsum.cu:267 @cd959bae9).
 pub fn opCumsum(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const stream = ctx.stream();

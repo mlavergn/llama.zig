@@ -42,7 +42,7 @@ const c = impl.c;
 const QK_K = 256;
 
 /// Ports `ggml_gemv_q2_K_8x8_q8_K_generic`
-/// (ggml-cpu/repack.cpp:1029 @8642541b2).
+/// (ggml-cpu/repack.cpp:1029 @cd959bae9).
 fn gemv(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void {
     _ = bs;
     _ = nr;
@@ -112,7 +112,7 @@ fn gemv(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaq
 }
 
 /// Ports `ggml_gemm_q2_K_8x8_q8_K_generic`
-/// (ggml-cpu/repack.cpp:2113 @8642541b2).
+/// (ggml-cpu/repack.cpp:2113 @cd959bae9).
 fn gemm(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void {
     const qk: i32 = QK_K;
     const nb: i32 = @divTrunc(n, qk);

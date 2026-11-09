@@ -14,10 +14,10 @@ const impl = @import("impl.zig");
 
 const c = impl.c;
 
-/// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @8642541b2).
+/// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @cd959bae9).
 pub const max_seq: u32 = 256;
 
-/// Ports `llama_max_parallel_sequences` (llama-cparams.cpp:3 @8642541b2).
+/// Ports `llama_max_parallel_sequences` (llama-cparams.cpp:3 @cd959bae9).
 pub fn maxParallelSequences() usize {
     return max_seq;
 }

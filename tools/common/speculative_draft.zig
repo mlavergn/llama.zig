@@ -139,7 +139,7 @@ fn freeSamplers(smpls: []*sampling.Sampler) void {
 /// keeps a whole `common_params_sampling` and reads these two.
 pub const SmplCfg = struct { temp: f32, seed: u32 };
 
-/// Ports `spec_retune` (speculative.cpp:37 @8642541b2): rebuilds
+/// Ports `spec_retune` (speculative.cpp:37 @cd959bae9): rebuilds
 /// `seq_id`'s draft sampler at the target's temperature, since rejection
 /// weighs q against p and both have to sample alike. Only temp and seed
 /// carry over; the draft keeps its own top_k.
@@ -196,7 +196,7 @@ fn embdView(data: [*]const f32, n_rows: usize, n_embd: usize) c.llama_embd {
 // draft-simple
 
 /// Ports `common_speculative_impl_draft_simple` (speculative.cpp:220
-/// @8642541b2): a standalone draft model, decoding its own guesses.
+/// @cd959bae9): a standalone draft model, decoding its own guesses.
 pub const DraftSimple = struct {
     params: params_mod.SpeculativeDraft,
     batch: common.Batch,
@@ -210,7 +210,7 @@ pub const DraftSimple = struct {
     smpls_cfg: std.ArrayList(SmplCfg) = .empty,
 
     /// Ports `common_speculative_impl_draft_simple` (speculative.cpp:233
-    /// @8642541b2), the constructor.
+    /// @cd959bae9), the constructor.
     pub fn init(base: *Base, params: *const params_mod.Speculative) S.InitError!DraftSimple {
         const func = "common_speculative_impl_draft_simple";
         const p = params.draft;
@@ -267,14 +267,14 @@ pub const DraftSimple = struct {
         self.smpls_cfg.deinit(gpa);
     }
 
-    /// Ports `begin` (speculative.cpp:301 @8642541b2): the sequence's
+    /// Ports `begin` (speculative.cpp:301 @cd959bae9): the sequence's
     /// sampler is reset here rather than per round, or two identical
     /// requests differ.
     pub fn begin(self: *DraftSimple, _: *Base, seq_id: c.llama_seq_id, _: []const c.llama_token) void {
         self.smpls[@intCast(seq_id)].reset();
     }
 
-    /// Ports `process` (speculative.cpp:306 @8642541b2): the target's batch
+    /// Ports `process` (speculative.cpp:306 @cd959bae9): the target's batch
     /// copied to one the draft context owns, only the last entry an output;
     /// an embedding entry the draft cannot read becomes a zero row.
     pub fn process(self: *DraftSimple, _: *Base, batch_in: *const common.Batch) bool {
@@ -320,7 +320,7 @@ pub const DraftSimple = struct {
         return true;
     }
 
-    /// Ports `draft` (speculative.cpp:352 @8642541b2): every drafting
+    /// Ports `draft` (speculative.cpp:352 @cd959bae9): every drafting
     /// sequence decodes `id_last`, then its own guess -- the best one, or a
     /// sample with its candidates kept when the caller verifies by
     /// rejection -- until it runs out of confidence or room.
@@ -437,7 +437,7 @@ pub const DraftSimple = struct {
         }
     }
 
-    /// Ports `accept` (speculative.cpp:476 @8642541b2): nothing to do.
+    /// Ports `accept` (speculative.cpp:476 @cd959bae9): nothing to do.
     pub fn accept(_: *DraftSimple, _: *Base, _: c.llama_seq_id, _: u16, _: bool) void {
         // noop
     }
@@ -447,7 +447,7 @@ pub const DraftSimple = struct {
 // draft-eagle3
 
 /// Ports `common_speculative_impl_draft_eagle3` (speculative.cpp:516
-/// @8642541b2). See the C++'s comment for the input convention and the
+/// @cd959bae9). See the C++'s comment for the input convention and the
 /// deferred boundary: at memory position P the decoder reads the pair
 /// (token[P+1], g[P]), so the last position of every `process` waits for the
 /// next call -- or `draft`'s seed step -- to bring its token.
@@ -483,7 +483,7 @@ pub const Eagle3 = struct {
     g_embd_buf: std.ArrayList(f32) = .empty,
 
     /// Ports `common_speculative_impl_draft_eagle3` (speculative.cpp:547
-    /// @8642541b2), the constructor.
+    /// @cd959bae9), the constructor.
     pub fn init(base: *Base, params: *const params_mod.Speculative) S.InitError!Eagle3 {
         const func = "common_speculative_impl_draft_eagle3";
         const n_seq = base.n_seq;
@@ -568,7 +568,7 @@ pub const Eagle3 = struct {
         };
     }
 
-    /// Ports the destructor of `common_speculative_impl_draft_eagle3` (speculative.cpp:624 @8642541b2).
+    /// Ports the destructor of `common_speculative_impl_draft_eagle3` (speculative.cpp:624 @cd959bae9).
     pub fn deinit(self: *Eagle3) void {
         freeBackendChains(self.params.ctx_dft, self.backend_chains);
         self.batch.deinit();
@@ -585,7 +585,7 @@ pub const Eagle3 = struct {
         self.g_embd_buf.deinit(gpa);
     }
 
-    /// Ports `begin` (speculative.cpp:638 @8642541b2): warns when the
+    /// Ports `begin` (speculative.cpp:638 @cd959bae9): warns when the
     /// draft context is missing more than the one deferred position.
     pub fn begin(self: *Eagle3, _: *Base, seq_id: c.llama_seq_id, prompt: []const c.llama_token) void {
         const n: i32 = @intCast(prompt.len);
@@ -599,7 +599,7 @@ pub const Eagle3 = struct {
         }
     }
 
-    /// Ports `process` (speculative.cpp:654 @8642541b2): the target's
+    /// Ports `process` (speculative.cpp:654 @cd959bae9): the target's
     /// features through the encoder, then the decoder over this batch's
     /// pairs, the last position deferred.
     pub fn process(self: *Eagle3, base: *Base, batch_in: *const common.Batch) bool {
@@ -743,7 +743,7 @@ pub const Eagle3 = struct {
         return true;
     }
 
-    /// Ports `draft` (speculative.cpp:799 @8642541b2): the seed step
+    /// Ports `draft` (speculative.cpp:799 @cd959bae9): the seed step
     /// completes the deferred pair with `id_last`, then each step feeds back
     /// its own pre-norm state.
     pub fn draft(self: *Eagle3, base: *Base, dparams: []DraftParams) void {
@@ -852,7 +852,7 @@ pub const Eagle3 = struct {
         }
     }
 
-    /// Ports `accept` (speculative.cpp:922 @8642541b2): the deferred
+    /// Ports `accept` (speculative.cpp:922 @cd959bae9): the deferred
     /// boundary moves to the first position the target did not accept.
     pub fn accept(self: *Eagle3, base: *Base, seq_id: c.llama_seq_id, n_accepted: u16, _: bool) void {
         if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(base.n_seq))) return;
@@ -867,14 +867,14 @@ pub const Eagle3 = struct {
         rowCopy(self.pending_g_last[s].ptr, self.verify_g[s].items.ptr + @as(usize, @intCast(i_g)) * n_embd_dec, n_embd_dec);
     }
 
-    /// Ports `need_boundary_stash` (speculative.cpp:941 @8642541b2): only a
+    /// Ports `need_boundary_stash` (speculative.cpp:941 @cd959bae9): only a
     /// recurrent or hybrid target drops the deferred row on restore.
     fn needBoundaryStash(self: *const Eagle3) bool {
         const model_tgt = c.llama_get_model(self.params.ctx_tgt);
         return c.llama_model_is_recurrent(model_tgt) or c.llama_model_is_hybrid(model_tgt);
     }
 
-    /// Ports `get_state` (speculative.cpp:946 @8642541b2): the deferred
+    /// Ports `get_state` (speculative.cpp:946 @cd959bae9): the deferred
     /// position and its row, as bytes.
     pub fn getState(self: *const Eagle3, base: *const Base, seq_id: c.llama_seq_id, data: *std.ArrayList(u8)) bool {
         if (!self.needBoundaryStash()) return false;
@@ -890,7 +890,7 @@ pub const Eagle3 = struct {
         return true;
     }
 
-    /// Ports `set_state` (speculative.cpp:963 @8642541b2).
+    /// Ports `set_state` (speculative.cpp:963 @cd959bae9).
     pub fn setState(self: *Eagle3, base: *const Base, seq_id: c.llama_seq_id, data: []const u8) void {
         if (!self.needBoundaryStash()) return;
         if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(base.n_seq))) return;
@@ -995,14 +995,14 @@ pub const DFlash = struct {
         const is_dspark = kind == .draft_dspark;
         const ctx_tgt = p.ctx_tgt;
         const ctx_dft = p.ctx_dft;
-        assertC(ctx_tgt != null and ctx_dft != null, 1038, "ctx_tgt && ctx_dft && \"DFlash requires ctx_tgt and ctx_dft to be set\"");
+        assertC(ctx_tgt != null and ctx_dft != null, 1041, "ctx_tgt && ctx_dft && \"DFlash requires ctx_tgt and ctx_dft to be set\"");
 
         const model_dft = c.llama_get_model(ctx_dft);
         const model_tgt = c.llama_get_model(ctx_tgt);
 
         const target_layer_ids = ext.modelTargetLayerIds(model_dft);
         const target_layer_ids_n = ext.modelTargetLayerIdsN(model_dft);
-        assertC(target_layer_ids_n > 0, 1045, "target_layer_ids_n > 0 && \"DFlash model has no target_layer_ids\"");
+        assertC(target_layer_ids_n > 0, 1048, "target_layer_ids_n > 0 && \"DFlash model has no target_layer_ids\"");
 
         const n_embd_tgt = c.llama_model_n_embd(model_tgt);
         const n_embd_dec = c.llama_model_n_embd(model_dft);
@@ -1122,7 +1122,7 @@ pub const DFlash = struct {
         };
     }
 
-    /// Ports the destructor of `common_speculative_impl_draft_dflash` (speculative.cpp:1149 @8642541b2).
+    /// Ports the destructor of `common_speculative_impl_draft_dflash` (speculative.cpp:1169 @cd959bae9).
     pub fn deinit(self: *DFlash) void {
         freeBackendChains(self.params.ctx_dft, self.backend_chains);
         self.batch.deinit();
@@ -1135,7 +1135,7 @@ pub const DFlash = struct {
         freeSamplers(self.smpls);
     }
 
-    /// Ports `begin` (speculative.cpp:1163 @8642541b2).
+    /// Ports `begin` (speculative.cpp:1183 @cd959bae9).
     pub fn begin(self: *DFlash, base: *Base, seq_id: c.llama_seq_id, prompt: []const c.llama_token) void {
         if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(base.n_seq))) return;
 
@@ -1216,7 +1216,7 @@ pub const DFlash = struct {
                 for (0..self.target_layer_ids_n) |k| {
                     const layer = ext.getEmbeddingsLayerInp(ctx_tgt, @intCast(self.target_layer_ids[k]));
                     if (layer == null) {
-                        _ = c.ggml_abort("speculative.cpp", 1242, "DFlash: target layer %d input not extracted.", self.target_layer_ids[k]);
+                        _ = c.ggml_abort("speculative.cpp", 1281, "DFlash: target layer %d input not extracted.", self.target_layer_ids[k]);
                     }
                     for (0..nc) |i| {
                         const dst = self.features_buf.items.ptr + i * n_embd_enc + k * n_embd_tgt;
@@ -1260,7 +1260,7 @@ pub const DFlash = struct {
         return true;
     }
 
-    /// Ports `draft` (speculative.cpp:1287 @8642541b2): one noise block per
+    /// Ports `draft` (speculative.cpp:1326 @cd959bae9): one noise block per
     /// drafting sequence, all decoded at once, then each block read out --
     /// through the candidate lattice (DFlash2, LiliCorr), the confidence
     /// head (DSpark) or the samplers.
@@ -1333,7 +1333,7 @@ pub const DFlash = struct {
             if (self.is_dflash2 or self.is_lilicorr) {
                 // Both DFlash and LiliCorr greedily walk the candidate lattice.
                 const lattice = ext.getEmbeddingsNextn(ctx_dft);
-                assertC(lattice != null, 1349, "lattice && \"DFlash2 selector produced no lattice\"");
+                assertC(lattice != null, 1388, "lattice && \"DFlash2 selector produced no lattice\"");
 
                 // DFlash2 can instead sample each step and hand q to the verifier for rejection sampling
                 const sample = self.is_dflash2 and self.params.probabilistic and dp.result_q != null;
@@ -1461,7 +1461,7 @@ pub const DFlash = struct {
         }
     }
 
-    /// Ports `accept` (speculative.cpp:1484 @8642541b2): nothing to do.
+    /// Ports `accept` (speculative.cpp:1523 @cd959bae9): nothing to do.
     pub fn accept(_: *DFlash, _: *Base, _: c.llama_seq_id, _: u16, _: bool) void {
         // noop
     }
@@ -1514,7 +1514,7 @@ pub const Mtp = struct {
         const n_seq = base.n_seq;
         const ctx_tgt = p.ctx_tgt;
         const ctx_dft = p.ctx_dft;
-        assertC(ctx_tgt != null and ctx_dft != null, 1533, "ctx_tgt && ctx_dft && \"MTP requires ctx_tgt and ctx_dft to be set\"");
+        assertC(ctx_tgt != null and ctx_dft != null, 1572, "ctx_tgt && ctx_dft && \"MTP requires ctx_tgt and ctx_dft to be set\"");
 
         const n_embd = c.llama_model_n_embd_out(c.llama_get_model(ctx_dft));
         assertC(n_embd == c.llama_model_n_embd_out(c.llama_get_model(ctx_tgt)), 1536, "n_embd == llama_model_n_embd_out(llama_get_model(ctx_tgt)) && \"MTP input row width must match the target h_nextn width\"");
@@ -1595,7 +1595,7 @@ pub const Mtp = struct {
         };
     }
 
-    /// Ports the destructor of `common_speculative_impl_draft_mtp` (speculative.cpp:1603 @8642541b2).
+    /// Ports the destructor of `common_speculative_impl_draft_mtp` (speculative.cpp:1642 @cd959bae9).
     pub fn deinit(self: *Mtp) void {
         freeBackendChains(self.params.ctx_dft, self.backend_chains);
         self.batch.deinit();
@@ -1613,7 +1613,7 @@ pub const Mtp = struct {
         gpa.free(self.chain_h);
     }
 
-    /// Ports `begin` (speculative.cpp:1617 @8642541b2): the sequence's
+    /// Ports `begin` (speculative.cpp:1656 @cd959bae9): the sequence's
     /// sampler is reset here rather than per round, or two identical
     /// requests differ.
     pub fn begin(self: *Mtp, _: *Base, seq_id: c.llama_seq_id, prompt: []const c.llama_token) void {
@@ -1738,7 +1738,7 @@ pub const Mtp = struct {
         return true;
     }
 
-    /// Ports `draft` (speculative.cpp:1751 @8642541b2): the best guess of
+    /// Ports `draft` (speculative.cpp:1802 @cd959bae9): the best guess of
     /// each head, or a sample with its candidates kept when the caller
     /// verifies by rejection.
     pub fn draft(self: *Mtp, base: *Base, dparams: []DraftParams) void {

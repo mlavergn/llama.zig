@@ -24,16 +24,16 @@ pub const vk = @import("vulkan_c");
 /// in ggml.
 pub const allocator = std.heap.c_allocator;
 
-/// Ports `GGML_VK_NAME` (ggml-vulkan.h:10 @8642541b2).
+/// Ports `GGML_VK_NAME` (ggml-vulkan.h:10 @cd959bae9).
 pub const name = "Vulkan";
 
-/// Ports `GGML_VK_MAX_DEVICES` (ggml-vulkan.h:11 @8642541b2).
+/// Ports `GGML_VK_MAX_DEVICES` (ggml-vulkan.h:11 @cd959bae9).
 pub const max_devices = 16;
 
 /// The PCI vendor ids the C++ defines for itself. Ports `VK_VENDOR_ID_AMD`,
 /// `VK_VENDOR_ID_APPLE`, `VK_VENDOR_ID_INTEL`, `VK_VENDOR_ID_NVIDIA`,
 /// `VK_VENDOR_ID_QUALCOMM` and `VK_VENDOR_ID_SAMSUNG`
-/// (ggml-vulkan-types.h:181, 183, 185, 187, 189, 191 @8642541b2).
+/// (ggml-vulkan-types.h:181, 183, 185, 187, 189, 191 @cd959bae9).
 pub const vendor_id = struct {
     pub const amd = 0x1002;
     pub const apple = 0x106b;
@@ -43,7 +43,7 @@ pub const vendor_id = struct {
     pub const samsung = 0x144d;
 };
 
-/// Ports `ggml_vk_external_memory_host_usable` (ggml-vulkan.cpp:4005 @8642541b2).
+/// Ports `ggml_vk_external_memory_host_usable` (ggml-vulkan.cpp:4012 @cd959bae9).
 pub fn externalMemoryHostUsable(driver_id: vk.VkDriverId) bool {
     // Disable external_memory_host until
     // https://github.com/KhronosGroup/MoltenVK/pull/2622 is available in the
@@ -51,7 +51,7 @@ pub fn externalMemoryHostUsable(driver_id: vk.VkDriverId) bool {
     return driver_id != vk.VK_DRIVER_ID_MOLTENVK;
 }
 
-/// Ports `ggml_vk_host_buffer_import_usable` (ggml-vulkan.cpp:4011 @8642541b2).
+/// Ports `ggml_vk_host_buffer_import_usable` (ggml-vulkan.cpp:4018 @cd959bae9).
 pub fn hostBufferImportUsable(vendor: u32) bool {
     // amdgpu re-faults all pages of every imported host allocation on each submission
     return vendor != vendor_id.amd;
@@ -76,7 +76,7 @@ const global_commands = [_][:0]const u8{
 };
 
 /// Ports `vulkan.hpp`'s `DispatchLoaderDynamic`, the C++'s
-/// `ggml_vk_default_dispatcher_instance` (ggml-vulkan.cpp:5202 @8642541b2):
+/// `ggml_vk_default_dispatcher_instance` (ggml-vulkan.cpp:5214 @cd959bae9):
 /// one function pointer per command the host layer calls, each field named
 /// after its command and typed by its `PFN_`.
 ///

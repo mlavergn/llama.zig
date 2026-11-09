@@ -15,10 +15,10 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_ARANGE_BLOCK_SIZE` (arange.cuh:3 @8642541b2).
+/// Ports `CUDA_ARANGE_BLOCK_SIZE` (arange.cuh:3 @cd959bae9).
 const block_size = 256;
 
-/// Ports `arange_f32_cuda` (arange.cu:12 @8642541b2), which launches with
+/// Ports `arange_f32_cuda` (arange.cu:12 @cd959bae9), which launches with
 /// `<<<>>>`.
 fn arangeF32Cuda(dst: ?*anyopaque, ne0: c_int, start: f32, step: f32, stream: cu.cudaStream_t) void {
     const num_blocks: c_int = @divTrunc(ne0 + block_size - 1, block_size);
@@ -29,7 +29,7 @@ fn arangeF32Cuda(dst: ?*anyopaque, ne0: c_int, start: f32, step: f32, stream: cu
     }, .{ dst, ne0, start, step });
 }
 
-/// Ports `ggml_cuda_op_arange` (arange.cu:17 @8642541b2).
+/// Ports `ggml_cuda_op_arange` (arange.cu:17 @cd959bae9).
 pub fn opArange(ctx: *common.Context, dst: *Tensor) void {
     const dst_d: ?*anyopaque = dst.data;
     const stream = ctx.stream();

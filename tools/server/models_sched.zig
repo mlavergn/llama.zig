@@ -32,7 +32,7 @@ const srv = common.srv;
 const gpa = context.gpa;
 const MemoryBreakdownRow = @import("cli_fit").MemoryBreakdownRow;
 
-/// Ports `MEASURE_TIMEOUT` (server-models-sched.cpp:9 @8642541b2): seconds,
+/// Ports `MEASURE_TIMEOUT` (server-models-sched.cpp:9 @cd959bae9): seconds,
 /// then the measure child is killed.
 const measure_timeout = 300;
 
@@ -45,7 +45,7 @@ const mib: usize = 1024 * 1024;
 // -----------------------------------------------------------------------------
 // server_model_memory
 
-/// Ports `device_t` (server-models-sched.h:20 @8642541b2), a member of
+/// Ports `device_t` (server-models-sched.h:20 @cd959bae9), a member of
 /// `server_model_memory`.
 pub const Device = struct {
     kind: []const u8 = "", // "device", "host" or "buffer_type"
@@ -56,25 +56,25 @@ pub const Device = struct {
     context: usize = 0,
     compute: usize = 0,
 
-    /// Ports `is_device` (server-models-sched.h:29 @8642541b2).
+    /// Ports `is_device` (server-models-sched.h:29 @cd959bae9).
     pub fn isDevice(self: *const Device) bool {
         return std.mem.eql(u8, self.kind, "device");
     }
 
-    /// Ports `self` (server-models-sched.h:30 @8642541b2).
+    /// Ports `self` (server-models-sched.h:30 @cd959bae9).
     pub fn selfBytes(self: *const Device) usize {
         return self.model +% self.context +% self.compute;
     }
 };
 
-/// Ports `server_model_memory` (server-models-sched.h:19 @8642541b2): the
+/// Ports `server_model_memory` (server-models-sched.h:19 @cd959bae9): the
 /// memory of a model instance per device, in bytes; from a measure child or
 /// from the running instance.
 pub const ServerModelMemory = struct {
     n_ctx: u32 = 0, // context size this was measured at
     devices: []const Device = &.{},
 
-    /// Ports `server_model_memory` (server-models-sched.cpp:15 @8642541b2),
+    /// Ports `server_model_memory` (server-models-sched.cpp:15 @cd959bae9),
     /// the constructor over breakdown rows.
     pub fn fromRows(a: Allocator, n_ctx: u32, rows: []const MemoryBreakdownRow) Allocator.Error!ServerModelMemory {
         const devices = try a.alloc(Device, rows.len);
@@ -96,7 +96,7 @@ pub const ServerModelMemory = struct {
         return .{ .n_ctx = n_ctx, .devices = devices };
     }
 
-    /// Ports `to_json` (server-models-sched.cpp:33 @8642541b2), a member of
+    /// Ports `to_json` (server-models-sched.cpp:33 @cd959bae9), a member of
     /// `server_model_memory`.
     pub fn toJson(self: *const ServerModelMemory, a: Allocator) common.Error!Value {
         var devs = Value.emptyArray();
@@ -119,7 +119,7 @@ pub const ServerModelMemory = struct {
         return o.done();
     }
 
-    /// Ports `from_json` (server-models-sched.cpp:55 @8642541b2), a member of
+    /// Ports `from_json` (server-models-sched.cpp:55 @cd959bae9), a member of
     /// `server_model_memory`: throws on a malformed input.
     pub fn fromJson(a: Allocator, j: *const Value) common.Error!ServerModelMemory {
         var mem: ServerModelMemory = .{};
@@ -159,7 +159,7 @@ pub const ServerModelMemory = struct {
     }
 };
 
-/// Ports `server_model_memory_status` (server-models-sched.h:44 @8642541b2):
+/// Ports `server_model_memory_status` (server-models-sched.h:44 @cd959bae9):
 /// the memory measurement state of a model.
 pub const MemoryStatus = enum {
     unmeasured, // queued for a measure child
@@ -169,7 +169,7 @@ pub const MemoryStatus = enum {
 };
 
 /// Ports `server_model_memory_status_to_string` (server-models-sched.h:51
-/// @8642541b2).
+/// @cd959bae9).
 fn memoryStatusToString(status: MemoryStatus) []const u8 {
     return switch (status) {
         .unmeasured => "unmeasured",
@@ -179,7 +179,7 @@ fn memoryStatusToString(status: MemoryStatus) []const u8 {
     };
 }
 
-/// Ports `server_model_memory_info` (server-models-sched.h:61 @8642541b2).
+/// Ports `server_model_memory_info` (server-models-sched.h:61 @cd959bae9).
 pub const MemoryInfo = struct {
     status: MemoryStatus = .unmeasured,
     n_attempts: c_int = 0, // to limit the retries
@@ -187,12 +187,12 @@ pub const MemoryInfo = struct {
     max: ?ServerModelMemory = null, // at the largest context --fit picks, a snapshot
     effective: ?ServerModelMemory = null, // what the running instance allocated, reset when it exits
 
-    /// Ports `is_settled` (server-models-sched.h:68 @8642541b2).
+    /// Ports `is_settled` (server-models-sched.h:68 @cd959bae9).
     pub fn isSettled(self: *const MemoryInfo) bool {
         return self.status == .measured or self.status == .failed;
     }
 
-    /// Ports `to_json` (server-models-sched.cpp:72 @8642541b2), a member of
+    /// Ports `to_json` (server-models-sched.cpp:72 @cd959bae9), a member of
     /// `server_model_memory_info`.
     pub fn toJson(self: *const MemoryInfo, a: Allocator) common.Error!Value {
         var o = common.Obj.init(a);
@@ -216,20 +216,20 @@ pub const MemoryInfo = struct {
 // -----------------------------------------------------------------------------
 // server_models_sched
 
-/// Ports `server_models_sched` (server-models-sched.h:76 @8642541b2): the
+/// Ports `server_models_sched` (server-models-sched.h:76 @cd959bae9): the
 /// router's request queue (`--models-max`) and memory accounting
 /// (`--models-memory-margin`). The router never touches a GPU: it tracks what
 /// each instance holds, and child reports only calibrate the rest, which works
 /// for per-process (Metal) and system-wide (CUDA) free memory.
 pub const Sched = struct {
-    /// Ports `entry_t` (server-models-sched.h:143 @8642541b2).
+    /// Ports `entry_t` (server-models-sched.h:143 @cd959bae9).
     const Entry = struct {
         model_id: []const u8,
         n_waiters: c_int, // requests waiting for this model
         loading: bool, // one of the waiters is doing the load right now
     };
 
-    /// Ports `device_memory_t` (server-models-sched.h:149 @8642541b2).
+    /// Ports `device_memory_t` (server-models-sched.h:149 @cd959bae9).
     const DeviceMemory = struct {
         total: i64 = 0, // bytes
         external: i64 = 0, // bytes not tracked by the router: other processes, backend contexts
@@ -256,14 +256,14 @@ pub const Sched = struct {
     // request queue
     //
 
-    /// Ports `has_capacity` (server-models-sched.cpp:85 @8642541b2), a member
+    /// Ports `has_capacity` (server-models-sched.cpp:85 @cd959bae9), a member
     /// of `server_models_sched`.
     pub fn hasCapacity(self: *Sched) bool {
         return self.models.base_params.models_max <= 0 or
             self.countRunning() < @as(usize, @intCast(self.models.base_params.models_max));
     }
 
-    /// Ports `pick_victim` (server-models-sched.cpp:91 @8642541b2), a member
+    /// Ports `pick_victim` (server-models-sched.cpp:91 @cd959bae9), a member
     /// of `server_models_sched`.
     ///
     /// Return: "" if no model can be given up; borrowed from the mapping.
@@ -287,7 +287,7 @@ pub const Sched = struct {
         return victim;
     }
 
-    /// Ports `join` (server-models-sched.cpp:112 @8642541b2), a member of
+    /// Ports `join` (server-models-sched.cpp:112 @cd959bae9), a member of
     /// `server_models_sched`: requests wanting the same model share one
     /// entry, so they all need only one slot and all get unblocked by the
     /// single load that entry performs.
@@ -303,7 +303,7 @@ pub const Sched = struct {
         srv(.inf, "join", "request for name=%s queued at position %zu\n", .{ z, self.queue.items.len });
     }
 
-    /// Ports `leave` (server-models-sched.cpp:124 @8642541b2), a member of
+    /// Ports `leave` (server-models-sched.cpp:124 @cd959bae9), a member of
     /// `server_models_sched`.
     pub fn leave(self: *Sched, model_id: []const u8) void {
         for (self.queue.items, 0..) |*e, i| {
@@ -318,13 +318,13 @@ pub const Sched = struct {
         }
     }
 
-    /// Ports `queue_empty` (server-models-sched.cpp:136 @8642541b2), a member
+    /// Ports `queue_empty` (server-models-sched.cpp:136 @cd959bae9), a member
     /// of `server_models_sched`.
     pub fn queueEmpty(self: *Sched) bool {
         return self.queue.items.len == 0;
     }
 
-    /// Ports `try_claim` (server-models-sched.cpp:141 @8642541b2), a member
+    /// Ports `try_claim` (server-models-sched.cpp:141 @cd959bae9), a member
     /// of `server_models_sched`: true if it is this model's turn to load, and
     /// nobody is loading it yet.
     pub fn tryClaim(self: *Sched, model_id: []const u8) bool {
@@ -342,7 +342,7 @@ pub const Sched = struct {
         return true;
     }
 
-    /// Ports `claim_done` (server-models-sched.cpp:157 @8642541b2), a member
+    /// Ports `claim_done` (server-models-sched.cpp:157 @cd959bae9), a member
     /// of `server_models_sched`: on failure the entry is back in line; on
     /// success it stays until its waiters leave, so the model coming up is
     /// never picked as a victim before they use it.
@@ -358,7 +358,7 @@ pub const Sched = struct {
         }
     }
 
-    /// Ports `tick` (server-models-sched.cpp:170 @8642541b2), a member of
+    /// Ports `tick` (server-models-sched.cpp:170 @cd959bae9), a member of
     /// `server_models_sched`: evict idle models while queued requests
     /// outnumber the slots that are free or being freed. Never blocks, so it
     /// is safe from any thread.
@@ -402,7 +402,7 @@ pub const Sched = struct {
         }
     }
 
-    /// Ports `find` (server-models-sched.cpp:209 @8642541b2), a member of
+    /// Ports `find` (server-models-sched.cpp:209 @cd959bae9), a member of
     /// `server_models_sched`.
     fn find(self: *Sched, model_id: []const u8) ?*Entry {
         for (self.queue.items) |*e| {
@@ -411,7 +411,7 @@ pub const Sched = struct {
         return null;
     }
 
-    /// Ports `count_running` (server-models-sched.cpp:222 @8642541b2), a
+    /// Ports `count_running` (server-models-sched.cpp:222 @cd959bae9), a
     /// member of `server_models_sched`.
     fn countRunning(self: *Sched) usize {
         var count: usize = 0;
@@ -425,7 +425,7 @@ pub const Sched = struct {
     // loading a model
     //
 
-    /// Ports `limits_exceeded` (server-models-sched.cpp:236 @8642541b2), a
+    /// Ports `limits_exceeded` (server-models-sched.cpp:236 @cd959bae9), a
     /// member of `server_models_sched`: true if loading `name` now exceeds
     /// `models_max` or the memory margin.
     pub fn limitsExceeded(self: *Sched, name: []const u8, verbose: bool) bool {
@@ -472,7 +472,7 @@ pub const Sched = struct {
         return it.meta.memory.isSettled();
     }
 
-    /// Ports `make_room` (server-models-sched.cpp:269 @8642541b2), a member
+    /// Ports `make_room` (server-models-sched.cpp:269 @cd959bae9), a member
     /// of `server_models_sched`: wait for the measure of `name`, then unload
     /// idle LRU models until it fits. Called without `models.mutex`.
     pub fn makeRoom(self: *Sched, name: []const u8) !void {
@@ -524,13 +524,13 @@ pub const Sched = struct {
     // memory accounting
     //
 
-    /// Ports `memory_enabled` (server-models-sched.cpp:312 @8642541b2), a
+    /// Ports `memory_enabled` (server-models-sched.cpp:312 @cd959bae9), a
     /// member of `server_models_sched`.
     pub fn memoryEnabled(self: *const Sched) bool {
         return self.models.base_params.models_memory_margin > 0;
     }
 
-    /// Ports `measure_unmeasured` (server-models-sched.cpp:316 @8642541b2), a
+    /// Ports `measure_unmeasured` (server-models-sched.cpp:316 @cd959bae9), a
     /// member of `server_models_sched`: queue a measure child for every model
     /// not measured yet.
     pub fn measureUnmeasured(self: *Sched) !void {
@@ -539,14 +539,14 @@ pub const Sched = struct {
         }
     }
 
-    /// Ports `on_spawned` (server-models-sched.cpp:323 @8642541b2), a member
+    /// Ports `on_spawned` (server-models-sched.cpp:323 @cd959bae9), a member
     /// of `server_models_sched`: count a new instance at its min until it
     /// reports.
     pub fn onSpawned(self: *Sched, name: []const u8) !void {
         try self.reserve(name);
     }
 
-    /// Ports `on_ready` (server-models-sched.cpp:328 @8642541b2), a member of
+    /// Ports `on_ready` (server-models-sched.cpp:328 @cd959bae9), a member of
     /// `server_models_sched`: `memory` is what the instance allocated, null
     /// on wake up from sleep.
     pub fn onReady(self: *Sched, name: []const u8, memory: ?*const ServerModelMemory) !void {
@@ -571,14 +571,14 @@ pub const Sched = struct {
         }
     }
 
-    /// Ports `on_sleeping` (server-models-sched.cpp:354 @8642541b2), a member
+    /// Ports `on_sleeping` (server-models-sched.cpp:354 @cd959bae9), a member
     /// of `server_models_sched`: a sleeping instance frees its model and
     /// context.
     pub fn onSleeping(self: *Sched, name: []const u8) void {
         self.release(name);
     }
 
-    /// Ports `on_unloaded` (server-models-sched.cpp:359 @8642541b2), a member
+    /// Ports `on_unloaded` (server-models-sched.cpp:359 @cd959bae9), a member
     /// of `server_models_sched`.
     pub fn onUnloaded(self: *Sched, name: []const u8) void {
         self.release(name);
@@ -587,7 +587,7 @@ pub const Sched = struct {
         }
     }
 
-    /// Ports `cancel_measurements` (server-models-sched.cpp:368 @8642541b2),
+    /// Ports `cancel_measurements` (server-models-sched.cpp:368 @cd959bae9),
     /// a member of `server_models_sched`: stop the measure child and drop the
     /// queue, for shutdown.
     pub fn cancelMeasurements(self: *Sched) void {
@@ -601,13 +601,13 @@ pub const Sched = struct {
         }
     }
 
-    /// Ports `is_measuring` (server-models-sched.cpp:378 @8642541b2), a
+    /// Ports `is_measuring` (server-models-sched.cpp:378 @cd959bae9), a
     /// member of `server_models_sched`.
     pub fn isMeasuring(self: *const Sched) bool {
         return self.measuring.len != 0;
     }
 
-    /// Ports `enqueue_measure` (server-models-sched.cpp:383 @8642541b2), a
+    /// Ports `enqueue_measure` (server-models-sched.cpp:383 @cd959bae9), a
     /// member of `server_models_sched`.
     fn enqueueMeasure(self: *Sched, name: []const u8, front: bool) !void {
         if (!self.memoryEnabled()) {
@@ -636,7 +636,7 @@ pub const Sched = struct {
         try self.measureNext();
     }
 
-    /// Ports `measure_next` (server-models-sched.cpp:406 @8642541b2), a
+    /// Ports `measure_next` (server-models-sched.cpp:406 @cd959bae9), a
     /// member of `server_models_sched`.
     fn measureNext(self: *Sched) !void {
         const models = self.models;
@@ -684,7 +684,7 @@ pub const Sched = struct {
         }
     }
 
-    /// Ports `on_measure_exit` (server-models-sched.cpp:442 @8642541b2), a
+    /// Ports `on_measure_exit` (server-models-sched.cpp:442 @cd959bae9), a
     /// member of `server_models_sched`: called from the monitor thread.
     pub fn onMeasureExit(self: *Sched, name: []const u8, proc: *SharedProc, exit_code: c_int) void {
         const models = self.models;
@@ -720,7 +720,7 @@ pub const Sched = struct {
         self.models.notifySse("model_memory", name, &v);
     }
 
-    /// Ports `handle_measured` (server-models-sched.cpp:461 @8642541b2), a
+    /// Ports `handle_measured` (server-models-sched.cpp:461 @cd959bae9), a
     /// member of `server_models_sched`: called from the monitor thread.
     pub fn handleMeasured(self: *Sched, name: []const u8, payload: *const Value) void {
         const func = "handle_measured";
@@ -781,7 +781,7 @@ pub const Sched = struct {
         info.max = try ServerModelMemory.fromJson(a, try payload.at("max"));
     }
 
-    /// Ports `calibrate` (server-models-sched.cpp:508 @8642541b2), a member
+    /// Ports `calibrate` (server-models-sched.cpp:508 @cd959bae9), a member
     /// of `server_models_sched`: update `device_memory` from a child report;
     /// `reporter` is the instance that sent it, empty for a measure child.
     fn calibrate(self: *Sched, mem: *const ServerModelMemory, reporter: []const u8) !void {
@@ -823,7 +823,7 @@ pub const Sched = struct {
         }
     }
 
-    /// Ports `reserve` (server-models-sched.cpp:534 @8642541b2), a member of
+    /// Ports `reserve` (server-models-sched.cpp:534 @cd959bae9), a member of
     /// `server_models_sched`: count the instance's memory, effective, else
     /// min.
     fn reserve(self: *Sched, name: []const u8) !void {
@@ -850,7 +850,7 @@ pub const Sched = struct {
         try self.held.put(gpa, try gpa.dupe(u8, name), devs);
     }
 
-    /// Ports `release` (server-models-sched.cpp:553 @8642541b2), a member of
+    /// Ports `release` (server-models-sched.cpp:553 @cd959bae9), a member of
     /// `server_models_sched`.
     fn release(self: *Sched, name: []const u8) void {
         const kv = self.held.fetchRemove(name) orelse return;
@@ -860,7 +860,7 @@ pub const Sched = struct {
         devs.deinit(gpa);
     }
 
-    /// Ports `available` (server-models-sched.cpp:557 @8642541b2), a member
+    /// Ports `available` (server-models-sched.cpp:557 @cd959bae9), a member
     /// of `server_models_sched`: total - external - what the instances hold.
     fn available(self: *const Sched, dev: []const u8) i64 {
         const dm = self.device_memory.get(dev) orelse {
@@ -878,7 +878,7 @@ pub const Sched = struct {
         return dm.total - dm.external - n_held;
     }
 
-    /// Ports `deficit` (server-models-sched.cpp:572 @8642541b2), a member of
+    /// Ports `deficit` (server-models-sched.cpp:572 @cd959bae9), a member of
     /// `server_models_sched`: the bytes missing per device to load `name` at
     /// its min, in device name order, empty if it fits.
     fn deficit(self: *const Sched, name: []const u8, res: *std.ArrayList(Bytes)) Allocator.Error!void {

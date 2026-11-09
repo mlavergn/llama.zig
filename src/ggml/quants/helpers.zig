@@ -62,7 +62,7 @@ const std = @import("std");
 const impl = @import("../impl.zig");
 const c = impl.c;
 
-/// Ports the `GROUP_MAX_EPS` family (ggml-quants.c:20 @8642541b2).
+/// Ports the `GROUP_MAX_EPS` family (ggml-quants.c:20 @cd959bae9).
 ///
 /// The four members are consecutive: the plain one plus the `IQ3_XXS`,
 /// `IQ2_S` and `IQ1_M` variants.
@@ -81,7 +81,7 @@ pub const group_max_eps_iq2_s: f32 = 1e-8;
 pub const group_max_eps_iq1_m: f32 = 1e-7;
 pub const group_max_eps_iq1_s: f32 = 1e-12;
 
-/// Ports `nearest_int` (ggml-quants.c:621 @8642541b2).
+/// Ports `nearest_int` (ggml-quants.c:630 @cd959bae9).
 ///
 /// Round half to even, via the classic add-and-mask trick: adding
 /// `12582912.0` (1.5 * 2^23) forces the value's mantissa into a fixed position,
@@ -214,7 +214,7 @@ inline fn weightFor(xi: f32, rmse_type: i32, qw: ?[*]const f32, i: usize) f32 {
     };
 }
 
-/// Ports `make_q3_quants` (ggml-quants.c:697 @8642541b2).
+/// Ports `make_q3_quants` (ggml-quants.c:706 @cd959bae9).
 ///
 /// `q3_K`'s fit. Where `make_qx_quants` searches over scales, this holds the
 /// scale and iterates the *levels*: five passes over the block, each trying to
@@ -511,7 +511,7 @@ pub fn makeQkx3Quants(
     return scale;
 }
 
-/// Ports `make_qp_quants` (ggml-quants.c:1077 @8642541b2).
+/// Ports `make_qp_quants` (ggml-quants.c:1086 @cd959bae9).
 ///
 /// Fits a scale for values that are all **non-negative** -- the sub-block
 /// scales and mins the K-quants have already produced. Hence `qp`: no sign to
@@ -612,7 +612,7 @@ pub fn makeQpQuants(n: usize, nmax: i32, x: [*]const f32, l_out: [*]u8, quant_we
     return if (suml2 > 0.0) sumlx / suml2 else 0.0;
 }
 
-/// Ports `get_scale_min_k4` (ggml-quants.c:880 @8642541b2).
+/// Ports `get_scale_min_k4` (ggml-quants.c:889 @cd959bae9).
 ///
 /// Unpacks one sub-block's 6-bit scale and 6-bit min from `q4_K`/`q5_K`'s
 /// 12-byte `scales` array. The first four sub-blocks are stored plainly in the

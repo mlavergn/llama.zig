@@ -11,7 +11,7 @@ const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
 const c = impl.c;
 
-/// Ports `build` (siglip.cpp:3 @8642541b2), a member of `clip_graph_siglip`.
+/// Ports `build` (siglip.cpp:3 @cd959bae9), a member of `clip_graph_siglip`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

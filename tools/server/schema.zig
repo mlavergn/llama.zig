@@ -51,7 +51,7 @@ const TaskParams = task.TaskParams;
 const SamplerType = task.SamplerType;
 const GrammarTrigger = common.GrammarTrigger;
 
-/// Ports `field_eval_context` (server-schema.h:18 @8642541b2), with what the
+/// Ports `field_eval_context` (server-schema.h:18 @cd959bae9), with what the
 /// handlers' lambdas capture.
 pub const EvalContext = struct {
     /// the task's arena: everything a handler sets is allocated here
@@ -62,10 +62,10 @@ pub const EvalContext = struct {
     logit_bias_eog: ?[]const c.llama_logit_bias = null,
 };
 
-/// Ports `field_handler` (server-schema.h:25 @8642541b2).
+/// Ports `field_handler` (server-schema.h:25 @cd959bae9).
 pub const Handler = *const fn (ctx: *EvalContext, data: *const Value) Error!void;
 
-/// Ports `field_num` (server-schema.h:48 @8642541b2): a number, clamped to
+/// Ports `field_num` (server-schema.h:48 @cd959bae9): a number, clamped to
 /// `[min, max]`, or refused outside it when the limits are hard.
 pub fn Num(comptime T: type) type {
     return struct {
@@ -88,7 +88,7 @@ pub const Kind = union(enum) {
     nested: []const Field,
 };
 
-/// Ports `field` (server-schema.h:27 @8642541b2): a request member, its
+/// Ports `field` (server-schema.h:27 @cd959bae9): a request member, its
 /// aliases in the order they are tried, and how it is read.
 pub const Field = struct {
     name: []const []const u8,
@@ -115,7 +115,7 @@ extern fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
 // -----------------------------------------------------------------------------
 // eval() implementations
 
-/// Ports `handle_with_catch` (server-schema.cpp:589 @8642541b2): any
+/// Ports `handle_with_catch` (server-schema.cpp:589 @cd959bae9): any
 /// exception a field throws becomes `std::invalid_argument("Field '<name>':
 /// <what>")`.
 fn handleWithCatch(name: []const u8, r: Error!void) Error!void {
@@ -132,7 +132,7 @@ fn handleWithCatch(name: []const u8, r: Error!void) Error!void {
     };
 }
 
-/// Ports `has_value` (server-schema.cpp:598 @8642541b2): a null value is
+/// Ports `has_value` (server-schema.cpp:598 @cd959bae9): a null value is
 /// absent, so a client can send null for the server's default.
 fn hasValue(data: *const Value, n: []const u8) bool {
     return data.contains(n) and !(data.at(n) catch |err| switch (err) {
@@ -146,7 +146,7 @@ fn clamp(comptime T: type, min: T, max: T, v: T) T {
     return if (min < lo) lo else min;
 }
 
-/// Ports `field_num`'s `eval` (server-schema.cpp:603 @8642541b2), the template's.
+/// Ports `field_num`'s `eval` (server-schema.cpp:603 @cd959bae9), the template's.
 fn evalNum(comptime T: type, f: *const Field, num: Num(T), ctx: *EvalContext, data: *const Value) Error!void {
     for (f.name) |n| {
         if (hasValue(data, n)) {
@@ -178,8 +178,8 @@ fn evalNum(comptime T: type, f: *const Field, num: Num(T), ctx: *EvalContext, da
     }
 }
 
-/// Ports `field_str`'s `eval` (server-schema.cpp:624 @8642541b2) and
-/// `field_json`'s `eval` (server-schema.cpp:651 @8642541b2), which are the same.
+/// Ports `field_str`'s `eval` (server-schema.cpp:624 @cd959bae9) and
+/// `field_json`'s `eval` (server-schema.cpp:651 @cd959bae9), which are the same.
 fn evalHandled(f: *const Field, ctx: *EvalContext, data: *const Value, comptime line: c_int) Error!void {
     common.ggmlAssert(f.custom_handler != null, "server-schema.cpp", line, "custom_handler");
     for (f.name) |n| {
@@ -190,7 +190,7 @@ fn evalHandled(f: *const Field, ctx: *EvalContext, data: *const Value, comptime 
     }
 }
 
-/// Ports `field_bool`'s `eval` (server-schema.cpp:636 @8642541b2).
+/// Ports `field_bool`'s `eval` (server-schema.cpp:636 @cd959bae9).
 fn evalBool(f: *const Field, val: *bool, ctx: *EvalContext, data: *const Value) Error!void {
     for (f.name) |n| {
         if (hasValue(data, n)) {
@@ -209,7 +209,7 @@ fn evalBool(f: *const Field, val: *bool, ctx: *EvalContext, data: *const Value) 
     }
 }
 
-/// Ports `field_nested`'s `eval` (server-schema.cpp:663 @8642541b2): the
+/// Ports `field_nested`'s `eval` (server-schema.cpp:663 @cd959bae9): the
 /// subfields, evaluated on the member's object.
 fn evalNested(f: *const Field, subfields: []const Field, ctx: *EvalContext, data: *const Value) Error!void {
     for (f.name) |n| {
@@ -368,7 +368,7 @@ fn hEcho(_: *EvalContext, data: *const Value) Error!void {
 
 fn hPreservedTokens(ctx: *EvalContext, data: *const Value) Error!void {
     const tokens = try (try data.at("preserved_tokens")).getSlice(ctx.a, []const u8);
-    // `common_sampling_add_preserved_tokens` (sampling.cpp:1055 @8642541b2)
+    // `common_sampling_add_preserved_tokens` (sampling.cpp:1055 @cd959bae9)
     common.ggmlAssert(ctx.vocab != null, "sampling.cpp", 1056, "vocab != nullptr");
     try chat.session.addPreservedTokens(ctx.a, &ctx.params.sampling.preserved_tokens, ctx.vocab.?, tokens);
 }
@@ -384,7 +384,7 @@ fn hGrammarTriggers(ctx: *EvalContext, data: *const Value) Error!void {
 }
 
 /// Ports `common_sampling_add_grammar_triggers` (sampling.cpp:1065
-/// @8642541b2) over `tools_common`'s sampling parameters, whose trigger
+/// @cd959bae9) over `tools_common`'s sampling parameters, whose trigger
 /// type, unlike `common_chat`'s, holds any integer a request sends:
 /// `cli/common_chat/session.zig`'s `addGrammarTriggers` is the same
 /// function over that module's types.
@@ -560,7 +560,7 @@ fn dupeStrings(a: Allocator, xs: []const []const u8) Error![]const []const u8 {
     return out;
 }
 
-/// Ports `common_sampler_types_from_names` (sampling.cpp:963 @8642541b2): each
+/// Ports `common_sampler_types_from_names` (sampling.cpp:963 @cd959bae9): each
 /// name, lower-cased, by its canonical spelling or an alias; an unknown
 /// one is warned about and skipped.
 pub fn samplerTypesFromNames(a: Allocator, names: []const []const u8) Error!std.ArrayList(SamplerType) {
@@ -601,7 +601,7 @@ pub fn samplerTypesFromNames(a: Allocator, names: []const []const u8) Error!std.
     return samplers;
 }
 
-/// Ports `common_sampler_types_from_chars` (sampling.cpp:1025 @8642541b2).
+/// Ports `common_sampler_types_from_chars` (sampling.cpp:1025 @cd959bae9).
 pub fn samplerTypesFromChars(a: Allocator, chars: []const u8) Error!std.ArrayList(SamplerType) {
     const all = [_]SamplerType{ .dry, .top_k, .typical_p, .top_p, .top_n_sigma, .min_p, .temperature, .xtc, .infill, .penalties, .adaptive_p };
     var samplers: std.ArrayList(SamplerType) = .empty;
@@ -622,7 +622,7 @@ pub fn samplerTypesFromChars(a: Allocator, chars: []const u8) Error!std.ArrayLis
 // -----------------------------------------------------------------------------
 // the table
 
-/// Ports `make_llama_cmpl_schema` (server-schema.cpp:13 @8642541b2): the
+/// Ports `make_llama_cmpl_schema` (server-schema.cpp:13 @cd959bae9): the
 /// llama.cpp-specific completion schema, every field pointing into
 /// `params`.
 ///
@@ -721,7 +721,7 @@ pub fn makeLlamaCmplSchema(a: Allocator, params_base: *const tools.params.Params
     return a.dupe(Field, &fields);
 }
 
-/// Ports `eval_llama_cmpl_schema` (server-schema.cpp:486 @8642541b2): a
+/// Ports `eval_llama_cmpl_schema` (server-schema.cpp:486 @cd959bae9): a
 /// request's parameters -- the command line's defaults, every field the
 /// request carries applied over them in the table's order, then the
 /// derived ones.
@@ -785,7 +785,7 @@ pub fn evalLlamaCmplSchema(
 // -----------------------------------------------------------------------------
 // TTS schema
 
-/// Ports `make_tts_schema` (server-schema.cpp:537 @8642541b2): the `/tts`
+/// Ports `make_tts_schema` (server-schema.cpp:537 @cd959bae9): the `/tts`
 /// request's fields, pointing into `t`.
 ///
 /// Return: owned by `a`.
@@ -802,7 +802,7 @@ pub fn makeTtsSchema(a: Allocator, t: *task.Task) Error![]const Field {
     return a.dupe(Field, &fields);
 }
 
-/// Ports `eval_tts_schema` (server-schema.cpp:568 @8642541b2): evaluates the
+/// Ports `eval_tts_schema` (server-schema.cpp:568 @cd959bae9): evaluates the
 /// /tts request params into `t.params` and `t.tts_inp.data`.
 ///
 /// Parameters:

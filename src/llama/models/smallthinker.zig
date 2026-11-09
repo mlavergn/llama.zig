@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_smallthinker`'s `load_arch_hparams` (models/smallthinker.cpp:3 @8642541b2).
+/// Ports `llama_model_smallthinker`'s `load_arch_hparams` (models/smallthinker.cpp:3 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -57,7 +57,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_smallthinker`'s `load_arch_tensors` (models/smallthinker.cpp:30 @8642541b2).
+/// Ports `llama_model_smallthinker`'s `load_arch_tensors` (models/smallthinker.cpp:30 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -97,7 +97,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_smallthinker`'s `build_arch_graph` (models/smallthinker.cpp:66 @8642541b2).
+/// Ports `llama_model_smallthinker`'s `build_arch_graph` (models/smallthinker.cpp:66 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     if (@as(hparams_mod.SwaType, @fromBackingInt(@intCast(model.hparams.swa_type))) == .standard) {
         buildGraph(true, model, b);
@@ -107,7 +107,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_smallthinker`'s `graph<iswa>`
-/// (models/smallthinker.cpp:75 @8642541b2).
+/// (models/smallthinker.cpp:75 @cd959bae9).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

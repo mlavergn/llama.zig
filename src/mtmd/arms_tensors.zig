@@ -328,7 +328,7 @@ pub fn load(tl: *TensorLoader) Error!void {
         .yasa2 => {
             // reuse tensors already loaded by the common section
             // (TN_PATCH_EMBD and TN_PATCH_BIAS have the same tensor names)
-            impl.ggmlAssert(model.patch_embeddings_0 != null, "clip.cpp", 2984, "model.patch_embeddings_0 && \"yasa2 requires v.patch_embd.weight\"");
+            impl.ggmlAssert(model.patch_embeddings_0 != null, "clip.cpp", 3044, "model.patch_embeddings_0 && \"yasa2 requires v.patch_embd.weight\"");
             model.yasa_patch_w = model.patch_embeddings_0;
             model.yasa_patch_b = model.patch_bias;
             model.yasa_patch_ln_w = try tl.getTensor(names.TN_YASA_PATCH_LN_W, false);
@@ -1394,7 +1394,7 @@ pub fn load(tl: *TensorLoader) Error!void {
                 try loadQfLayer(tl, &b.qf_proj_layers.items[0], prefix, bid);
             }
         },
-        else => impl.ggmlAssert(false, "clip.cpp", 4193, "false && \"unknown projector type\""),
+        else => impl.ggmlAssert(false, "clip.cpp", 4678, "false && \"unknown projector type\""),
     }
 }
 
@@ -1482,7 +1482,7 @@ pub fn nMmprojEmbd(ctx: *const clip.Ctx) c_int {
         .pockettts_spkenc => neI(m.spk_proj_w, 1),
         .pockettts_gen => neI(m.gen_input_lin_w, 1),
         .parakeet => neI(m.mm_1_w, 1),
-        else => impl.abort("clip.cpp", 7074, "Unknown projector type"),
+        else => impl.abort("clip.cpp", 7943, "Unknown projector type"),
     };
 }
 

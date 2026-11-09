@@ -27,7 +27,7 @@ fn dtDim(n_embd: u32) i64 {
     return @max(64, @as(c_int, @bitCast(n_embd / 16)));
 }
 
-/// Ports `llama_model_plamo2`'s `load_arch_hparams` (models/plamo2.cpp:4 @8642541b2).
+/// Ports `llama_model_plamo2`'s `load_arch_hparams` (models/plamo2.cpp:4 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -62,7 +62,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     }
 }
 
-/// Ports `llama_model_plamo2`'s `load_arch_tensors` (models/plamo2.cpp:35 @8642541b2).
+/// Ports `llama_model_plamo2`'s `load_arch_tensors` (models/plamo2.cpp:35 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -136,12 +136,12 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_plamo2`'s `build_arch_graph` (models/plamo2.cpp:106 @8642541b2).
+/// Ports `llama_model_plamo2`'s `build_arch_graph` (models/plamo2.cpp:106 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
-/// Ports the constructor of `llama_model_plamo2`'s `graph` (models/plamo2.cpp:110 @8642541b2).
+/// Ports the constructor of `llama_model_plamo2`'s `graph` (models/plamo2.cpp:110 @cd959bae9).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -227,7 +227,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_plamo2::graph`'s `build_plamo2_attn_layer`
-/// (models/plamo2.cpp:201 @8642541b2).
+/// (models/plamo2.cpp:201 @cd959bae9).
 fn buildPlamo2AttnLayer(b: *const graph.Builder, inp: *graph.InpAttnKv, inp_pos: *Tensor, cur_: *Tensor, model: *const Model, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -279,7 +279,7 @@ fn buildPlamo2AttnLayer(b: *const graph.Builder, inp: *graph.InpAttnKv, inp_pos:
 }
 
 /// Ports `llama_model_plamo2::graph`'s `build_plamo2_mamba_layer`
-/// (models/plamo2.cpp:256 @8642541b2).
+/// (models/plamo2.cpp:256 @cd959bae9).
 fn buildPlamo2MambaLayer(b: *const graph.Builder, inp: *const graph.InpRs, cur_: *Tensor, model: *const Model, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;

@@ -31,7 +31,7 @@ const c = impl.c;
 const Tensor = common.Tensor;
 const ComputeParams = common.ComputeParams;
 
-/// Ports `ggml_compute_forward_win_part_f32` (ops.cpp:10217 @8642541b2).
+/// Ports `ggml_compute_forward_win_part_f32` (ops.cpp:10253 @cd959bae9).
 fn winPartF32(params: *const ComputeParams, dst: *Tensor) void {
     _ = params;
 
@@ -80,7 +80,7 @@ fn winPartF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_win_part` (ops.cpp:10260 @8642541b2).
+/// Ports `ggml_compute_forward_win_part` (ops.cpp:10296 @cd959bae9).
 pub export fn ggml_compute_forward_win_part(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -90,7 +90,7 @@ pub export fn ggml_compute_forward_win_part(params: *const ComputeParams, dst: *
     }
 }
 
-/// Ports `ggml_compute_forward_win_unpart_f32` (ops.cpp:10280 @8642541b2).
+/// Ports `ggml_compute_forward_win_unpart_f32` (ops.cpp:10316 @cd959bae9).
 fn winUnpartF32(params: *const ComputeParams, dst: *Tensor) void {
     _ = params;
 
@@ -135,7 +135,7 @@ fn winUnpartF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_win_unpart` (ops.cpp:10321 @8642541b2).
+/// Ports `ggml_compute_forward_win_unpart` (ops.cpp:10357 @cd959bae9).
 pub export fn ggml_compute_forward_win_unpart(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -145,7 +145,7 @@ pub export fn ggml_compute_forward_win_unpart(params: *const ComputeParams, dst:
     }
 }
 
-/// Ports `ggml_compute_forward_get_rel_pos_f16` (ops.cpp:10489 @8642541b2).
+/// Ports `ggml_compute_forward_get_rel_pos_f16` (ops.cpp:10525 @cd959bae9).
 ///
 /// A pure copy of 16-bit elements, which is why the dispatcher sends `BF16`
 /// here too: the bits move unchanged whatever they encode.
@@ -176,7 +176,7 @@ fn getRelPosF16(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_get_rel_pos` (ops.cpp:10515 @8642541b2).
+/// Ports `ggml_compute_forward_get_rel_pos` (ops.cpp:10551 @cd959bae9).
 pub export fn ggml_compute_forward_get_rel_pos(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -186,7 +186,7 @@ pub export fn ggml_compute_forward_get_rel_pos(params: *const ComputeParams, dst
     }
 }
 
-/// Ports `ggml_compute_forward_add_rel_pos_f32` (ops.cpp:10536 @8642541b2).
+/// Ports `ggml_compute_forward_add_rel_pos_f32` (ops.cpp:10572 @cd959bae9).
 fn addRelPosF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -253,7 +253,7 @@ fn addRelPosF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_add_rel_pos` (ops.cpp:10597 @8642541b2).
+/// Ports `ggml_compute_forward_add_rel_pos` (ops.cpp:10633 @cd959bae9).
 pub export fn ggml_compute_forward_add_rel_pos(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 

@@ -85,7 +85,7 @@ inline fn colScales(b: *const blocks.block_q1_0x4) [4]f32 {
     };
 }
 
-/// Ports `ggml_gemv_q1_0_4x4_q8_0_generic` (ggml-cpu/repack.cpp:1368 @8642541b2).
+/// Ports `ggml_gemv_q1_0_4x4_q8_0_generic` (ggml-cpu/repack.cpp:1368 @cd959bae9).
 pub export fn ggml_gemv_q1_0_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     _ = bs;
     _ = nr;
@@ -131,7 +131,7 @@ pub export fn ggml_gemv_q1_0_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx
     }
 }
 
-/// Ports `ggml_gemv_q1_0_4x8_q8_0_generic` (ggml-cpu/repack.cpp:1431 @8642541b2).
+/// Ports `ggml_gemv_q1_0_4x8_q8_0_generic` (ggml-cpu/repack.cpp:1431 @cd959bae9).
 pub export fn ggml_gemv_q1_0_4x8_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     _ = bs;
     _ = nr;
@@ -178,7 +178,7 @@ pub export fn ggml_gemv_q1_0_4x8_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx
     }
 }
 
-/// Ports `ggml_gemm_q1_0_4x4_q8_0_generic` (ggml-cpu/repack.cpp:2513 @8642541b2).
+/// Ports `ggml_gemm_q1_0_4x4_q8_0_generic` (ggml-cpu/repack.cpp:2513 @cd959bae9).
 pub export fn ggml_gemm_q1_0_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     const qk: c_int = QK1_0;
     const nb: usize = @intCast(@divTrunc(n, qk));
@@ -244,7 +244,7 @@ pub export fn ggml_gemm_q1_0_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx
     }
 }
 
-/// Ports `ggml_gemm_q1_0_4x8_q8_0_generic` (ggml-cpu/repack.cpp:2598 @8642541b2).
+/// Ports `ggml_gemm_q1_0_4x8_q8_0_generic` (ggml-cpu/repack.cpp:2598 @cd959bae9).
 pub export fn ggml_gemm_q1_0_4x8_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     const qk: c_int = QK1_0;
     const nb: usize = @intCast(@divTrunc(n, qk));

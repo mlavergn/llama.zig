@@ -20,10 +20,10 @@ const prompt_mod = @import("prompt.zig");
 
 const Allocator = std.mem.Allocator;
 
-/// Ports `common_grammar_trigger_type` (common/common.h:148 @8642541b2).
+/// Ports `common_grammar_trigger_type` (common/common.h:148 @cd959bae9).
 pub const TriggerType = enum(c_int) { token, word, pattern, pattern_full };
 
-/// Ports `common_grammar_trigger` (common/common.h:155 @8642541b2).
+/// Ports `common_grammar_trigger` (common/common.h:155 @cd959bae9).
 pub const GrammarTrigger = struct {
     type: TriggerType,
     value: []const u8,
@@ -31,7 +31,7 @@ pub const GrammarTrigger = struct {
     token: i32 = -1,
 };
 
-/// Ports `common_chat_params` (chat.h:304 @8642541b2).
+/// Ports `common_chat_params` (chat.h:304 @cd959bae9).
 pub const ChatParams = struct {
     format: msg_mod.Format = .content_only,
     prompt: prompt_mod.Prompt = .{},

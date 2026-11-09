@@ -16,21 +16,21 @@
 
 const std = @import("std");
 
-/// Ports `diyfp` (json.hpp:17687 @8642541b2): `f * 2^e`.
+/// Ports `diyfp` (json.hpp:17687 @cd959bae9): `f * 2^e`.
 const DiyFp = struct {
     f: u64,
     e: i32,
 
     const precision = 64;
 
-    /// Ports `diyfp`'s `sub` (json.hpp:17700 @8642541b2): `x - y`, same exponent.
+    /// Ports `diyfp`'s `sub` (json.hpp:17700 @cd959bae9): `x - y`, same exponent.
     fn sub(x: DiyFp, y: DiyFp) DiyFp {
         std.debug.assert(x.e == y.e);
         std.debug.assert(x.f >= y.f);
         return .{ .f = x.f - y.f, .e = x.e };
     }
 
-    /// Ports `diyfp`'s `mul` (json.hpp:17712 @8642541b2): the upper 64 bits of
+    /// Ports `diyfp`'s `mul` (json.hpp:17712 @cd959bae9): the upper 64 bits of
     /// the 128-bit product, rounded half up.
     fn mul(x: DiyFp, y: DiyFp) DiyFp {
         const u_lo = x.f & 0xFFFFFFFF;
@@ -56,7 +56,7 @@ const DiyFp = struct {
         return .{ .f = h, .e = x.e + y.e + 64 };
     }
 
-    /// Ports `diyfp`'s `normalize` (json.hpp:17777 @8642541b2).
+    /// Ports `diyfp`'s `normalize` (json.hpp:17777 @cd959bae9).
     fn normalize(x: DiyFp) DiyFp {
         std.debug.assert(x.f != 0);
         var r = x;
@@ -67,7 +67,7 @@ const DiyFp = struct {
         return r;
     }
 
-    /// Ports `diyfp`'s `normalize_to` (json.hpp:17794 @8642541b2).
+    /// Ports `diyfp`'s `normalize_to` (json.hpp:17794 @cd959bae9).
     fn normalizeTo(x: DiyFp, target_exponent: i32) DiyFp {
         const delta: u6 = @intCast(x.e - target_exponent);
         return .{ .f = x.f << delta, .e = target_exponent };
@@ -81,7 +81,7 @@ const Boundaries = struct {
     plus: DiyFp,
 };
 
-/// Ports `compute_boundaries` (json.hpp:17819 @8642541b2) for `double`.
+/// Ports `compute_boundaries` (json.hpp:17819 @cd959bae9) for `double`.
 fn computeBoundaries(value: f64) Boundaries {
     std.debug.assert(std.math.isFinite(value) and value > 0);
 
@@ -206,7 +206,7 @@ const cached_powers = [79]CachedPower{
     .{ .f = 0x9E19DB92B4E31BA9, .e = 1013, .k = 324 },
 };
 
-/// Ports `get_cached_power_for_binary_exponent` (json.hpp:17958 @8642541b2).
+/// Ports `get_cached_power_for_binary_exponent` (json.hpp:17958 @cd959bae9).
 fn cachedPowerForBinaryExponent(e: i32) CachedPower {
     const k_cached_powers_min_dec_exp = -300;
     const k_cached_powers_dec_step = 8;
@@ -220,7 +220,7 @@ fn cachedPowerForBinaryExponent(e: i32) CachedPower {
     return cached_powers[@intCast(index)];
 }
 
-/// Ports `find_largest_pow10` (json.hpp:18122 @8642541b2): `k` such that
+/// Ports `find_largest_pow10` (json.hpp:18122 @cd959bae9): `k` such that
 /// `10^(k-1) <= n < 10^k`, and `10^(k-1)` in `pow10`.
 fn findLargestPow10(n: u32, pow10: *u32) i32 {
     const steps = [_]u32{ 1000000000, 100000000, 10000000, 1000000, 100000, 10000, 1000, 100, 10 };
@@ -234,7 +234,7 @@ fn findLargestPow10(n: u32, pow10: *u32) i32 {
     return 1;
 }
 
-/// Ports `grisu2_round` (json.hpp:18176 @8642541b2).
+/// Ports `grisu2_round` (json.hpp:18176 @cd959bae9).
 fn grisu2Round(buf: []u8, len: usize, dist: u64, delta: u64, rest_in: u64, ten_k: u64) void {
     var rest = rest_in;
     while (rest < dist and delta - rest >= ten_k and
@@ -246,7 +246,7 @@ fn grisu2Round(buf: []u8, len: usize, dist: u64, delta: u64, rest_in: u64, ten_k
     }
 }
 
-/// Ports `grisu2_digit_gen` (json.hpp:18217 @8642541b2): the digits of
+/// Ports `grisu2_digit_gen` (json.hpp:18217 @cd959bae9): the digits of
 /// `M+`, cut where they fall inside `[M-, M+]`.
 fn grisu2DigitGen(buffer: []u8, length: *usize, decimal_exponent: *i32, m_minus: DiyFp, w: DiyFp, m_plus: DiyFp) void {
     std.debug.assert(m_plus.e >= k_alpha and m_plus.e <= k_gamma);
@@ -308,8 +308,8 @@ fn grisu2DigitGen(buffer: []u8, length: *usize, decimal_exponent: *i32, m_minus:
     grisu2Round(buffer, length.*, dist, delta, p2, ten_m);
 }
 
-/// Ports `grisu2` (json.hpp:18458 @8642541b2) and its `FloatType` overload
-/// (json.hpp:18518 @8642541b2) for `double`.
+/// Ports `grisu2` (json.hpp:18458 @cd959bae9) and its `FloatType` overload
+/// (json.hpp:18518 @cd959bae9) for `double`.
 fn grisu2(buf: []u8, len: *usize, decimal_exponent: *i32, value: f64) void {
     const b = computeBoundaries(value);
 
@@ -328,7 +328,7 @@ fn grisu2(buf: []u8, len: *usize, decimal_exponent: *i32, value: f64) void {
     grisu2DigitGen(buf, len, decimal_exponent, m_minus, w, m_plus);
 }
 
-/// Ports `append_exponent` (json.hpp:18558 @8642541b2): `e+NN`, at least two
+/// Ports `append_exponent` (json.hpp:18558 @cd959bae9): `e+NN`, at least two
 /// digits, always signed.
 fn appendExponent(buf: []u8, pos: usize, e_in: i32) usize {
     std.debug.assert(e_in > -1000 and e_in < 1000);
@@ -363,7 +363,7 @@ fn appendExponent(buf: []u8, pos: usize, e_in: i32) usize {
     return p;
 }
 
-/// Ports `format_buffer` (json.hpp:18610 @8642541b2): fixed notation for
+/// Ports `format_buffer` (json.hpp:18610 @cd959bae9): fixed notation for
 /// `10^min_exp <= v < 10^max_exp`, exponential otherwise.
 fn formatBuffer(buf: []u8, len: usize, decimal_exponent: i32, min_exp: i32, max_exp: i32) usize {
     const k: i32 = @intCast(len);
@@ -416,7 +416,7 @@ fn formatBuffer(buf: []u8, len: usize, decimal_exponent: i32, min_exp: i32, max_
 /// with room for `format_buffer`'s shuffles.
 pub const max_len = 32;
 
-/// Ports `to_chars` (json.hpp:18695 @8642541b2) for `double`: `value` as
+/// Ports `to_chars` (json.hpp:18695 @cd959bae9) for `double`: `value` as
 /// `dump` writes a finite number.
 ///
 /// Parameters:

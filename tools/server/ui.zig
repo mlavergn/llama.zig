@@ -19,15 +19,15 @@
 const std = @import("std");
 const generated = @import("ui_assets");
 
-/// Ports `llama_ui_asset` (ui.h.in:11 @8642541b2): one embedded file. `data`
+/// Ports `llama_ui_asset` (ui.h.in:11 @cd959bae9): one embedded file. `data`
 /// carries `size`.
 pub const Asset = generated.Asset;
 
-/// `LLAMA_UI_HAS_ASSETS` (ui.h.in:9 @8642541b2): defined only when assets
+/// `LLAMA_UI_HAS_ASSETS` (ui.h.in:9 @cd959bae9): defined only when assets
 /// were embedded.
 pub const has_assets = generated.assets.len > 0;
 
-/// Ports `llama_ui_find_asset` (ui.cpp.in:12 @8642541b2): the asset named
+/// Ports `llama_ui_find_asset` (ui.cpp.in:12 @cd959bae9): the asset named
 /// `name`, by a linear search as the C's.
 ///
 /// Parameters:
@@ -42,14 +42,14 @@ pub fn findAsset(name: []const u8) ?*const Asset {
     return null;
 }
 
-/// Ports `llama_ui_get_assets` (ui.cpp.in:25 @8642541b2).
+/// Ports `llama_ui_get_assets` (ui.cpp.in:25 @cd959bae9).
 ///
 /// Return: the whole table, static; empty without a UI.
 pub fn getAssets() []const Asset {
     return &generated.assets;
 }
 
-/// Ports `llama_ui_use_gzip` (ui.cpp.in:34 @8642541b2): whether every
+/// Ports `llama_ui_use_gzip` (ui.cpp.in:34 @cd959bae9): whether every
 /// asset is stored gzip-compressed and served with `Content-Encoding: gzip`.
 pub fn useGzip() bool {
     return generated.use_gzip;

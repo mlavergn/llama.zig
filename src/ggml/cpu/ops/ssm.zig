@@ -46,7 +46,7 @@ extern fn logf(x: f32) f32;
 /// Byte offset `i*nb`; see `common.byteOff`.
 const off = common.byteOff;
 
-/// Ports `ggml_compute_softplus_f32` (ggml-impl.h:107 @8642541b2) through
+/// Ports `ggml_compute_softplus_f32` (ggml-impl.h:107 @cd959bae9) through
 /// libm.
 ///
 /// `impl.softplus` is the same expression on Zig's `@log` and `@exp`, which
@@ -59,7 +59,7 @@ inline fn softplus(input: f32) f32 {
 // -----------------------------------------------------------------------------
 // ssm_conv
 
-/// Ports `ggml_compute_forward_ssm_conv_f32` (ops.cpp:9907 @8642541b2).
+/// Ports `ggml_compute_forward_ssm_conv_f32` (ops.cpp:9943 @cd959bae9).
 ///
 /// `sumf += s[...] * c[...]` is one expression, but the loop is a
 /// contiguous reduction and the reference compiler vectorizes it: products in
@@ -120,7 +120,7 @@ fn ssmConvF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_ssm_conv` (ops.cpp:9960 @8642541b2).
+/// Ports `ggml_compute_forward_ssm_conv` (ops.cpp:9996 @cd959bae9).
 pub export fn ggml_compute_forward_ssm_conv(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     switch (impl.one(Tensor, dst.src[0]).type) {
         c.GGML_TYPE_F32 => ssmConvF32(params, dst),
@@ -347,7 +347,7 @@ fn ssmScanF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_ssm_scan` (ops.cpp:10200 @8642541b2).
+/// Ports `ggml_compute_forward_ssm_scan` (ops.cpp:10236 @cd959bae9).
 pub export fn ggml_compute_forward_ssm_scan(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     switch (impl.one(Tensor, dst.src[0]).type) {
         c.GGML_TYPE_F32 => ssmScanF32(params, dst),

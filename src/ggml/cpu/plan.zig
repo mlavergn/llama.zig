@@ -35,20 +35,20 @@ const CGraph = defs.CGraph;
 /// op, in which case its answer replaces the whole switch below.
 extern fn ggml_cpu_extra_work_size(n_threads: c_int, op: *const Tensor, size: *usize) bool;
 
-/// Ports `GGML_IM2COL_WORK_SIZE` (ops.h:23 @8642541b2).
+/// Ports `GGML_IM2COL_WORK_SIZE` (ops.h:23 @cd959bae9).
 const im2col_work_size: usize = 16 * 1024 * 1024;
 
-/// Ports `GGML_FA_TILE_Q` and `GGML_FA_TILE_KV` (ggml-cpu/common.h:10 @8642541b2).
+/// Ports `GGML_FA_TILE_Q` and `GGML_FA_TILE_KV` (ggml-cpu/common.h:10 @cd959bae9).
 const fa_tile_q: i64 = 64;
 const fa_tile_kv: i64 = 64;
 
-/// Ports `GGML_SOFT_MAX_UNROLL` (vec.h:48 @8642541b2).
+/// Ports `GGML_SOFT_MAX_UNROLL` (vec.h:48 @cd959bae9).
 const soft_max_unroll: i64 = 4;
 
-/// Ports `GGML_N_TASKS_MAX` (ggml.h:2774 @8642541b2).
+/// Ports `GGML_N_TASKS_MAX` (ggml.h:2796 @cd959bae9).
 const n_tasks_max: c_int = -1;
 
-/// Ports `ggml_up` (ggml-impl.h:68 @8642541b2).
+/// Ports `ggml_up` (ggml-impl.h:68 @cd959bae9).
 inline fn up(n: i64, m: i64) i64 {
     impl.assert(m & (m - 1) == 0, "(m & (m - 1)) == 0");
     return (n + m - 1) & ~(m - 1);
@@ -58,7 +58,7 @@ inline fn min(a: i64, b: i64) i64 {
     return if (a < b) a else b;
 }
 
-/// Ports `ggml_get_n_tasks` (ggml-cpu.c:2258 @8642541b2).
+/// Ports `ggml_get_n_tasks` (ggml-cpu.c:2267 @cd959bae9).
 ///
 /// Parameters:
 /// - `node`: the graph node to plan for.

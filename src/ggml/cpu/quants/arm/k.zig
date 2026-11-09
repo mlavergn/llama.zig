@@ -67,7 +67,7 @@ inline fn dotv(a: i8x16, b: i8x16) i32 {
 }
 
 /// The widening product of eight `i16` pairs, summed into four `i32` lanes,
-/// as `vmull_s16` is used throughout the NEON arm (arch/arm/quants.c:1971 @8642541b2).
+/// as `vmull_s16` is used throughout the NEON arm (arch/arm/quants.c:1971 @cd959bae9).
 ///
 /// `vmull_s16` on each half and `vaddq_s32` between them. The widening is what
 /// keeps a `mins * bsums` product from overflowing sixteen bits.
@@ -78,7 +78,7 @@ inline fn mullSum(a: i16x8, b: i16x8) i32x4 {
     );
 }
 
-/// Ports `ggml_vec_dot_q2_K_q8_K` (arch/arm/quants.c:1688 @8642541b2).
+/// Ports `ggml_vec_dot_q2_K_q8_K` (arch/arm/quants.c:1688 @cd959bae9).
 ///
 /// Two-bit weights with a four-bit scale and four-bit minimum per group of
 /// sixteen, both packed into the same byte -- `scales & 0xF` and
@@ -162,7 +162,7 @@ pub export fn ggml_vec_dot_q2_K_q8_K(
     s[0] = sum;
 }
 
-/// Ports `ggml_vec_dot_q3_K_q8_K` (arch/arm/quants.c:2021 @8642541b2).
+/// Ports `ggml_vec_dot_q3_K_q8_K` (arch/arm/quants.c:2021 @cd959bae9).
 ///
 /// Three-bit weights: two bits in `qs` and an **inverted** high bit in
 /// `hmask`. The inversion is why the kernel uses `vbicq_u8(mask, qhbits)` --
@@ -314,7 +314,7 @@ inline fn unpackQ5K(packed_scales: *const [12]u8) [4]u32 {
     return utmp;
 }
 
-/// Ports `ggml_vec_dot_q4_K_q8_K` (arch/arm/quants.c:2337 @8642541b2), the `__ARM_NEON`
+/// Ports `ggml_vec_dot_q4_K_q8_K` (arch/arm/quants.c:2337 @cd959bae9), the `__ARM_NEON`
 /// arm.
 ///
 /// Note `sumf -= dmin * mins` **before** the weight loop and `sumf += d * ...`
@@ -422,7 +422,7 @@ pub export fn ggml_vec_dot_q4_K_q8_K(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_q5_K_q8_K` (arch/arm/quants.c:2869 @8642541b2).
+/// Ports `ggml_vec_dot_q5_K_q8_K` (arch/arm/quants.c:2869 @cd959bae9).
 ///
 /// Five-bit weights: four in `qs` and the fifth taken from `qh` two bits at a
 /// time, the mask vectors being shifted down by two after each group.
@@ -522,7 +522,7 @@ pub export fn ggml_vec_dot_q5_K_q8_K(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_q6_K_q8_K` (arch/arm/quants.c:2969 @8642541b2), the `__ARM_NEON`
+/// Ports `ggml_vec_dot_q6_K_q8_K` (arch/arm/quants.c:2969 @cd959bae9), the `__ARM_NEON`
 /// arm.
 ///
 /// Six-bit weights, four in `ql` and two in `qh`, with signed scales that need

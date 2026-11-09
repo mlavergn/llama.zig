@@ -25,7 +25,7 @@ const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
 /// Ports `llama_model_gemma4_assistant`'s `load_arch_hparams`
-/// (models/gemma4-assistant.cpp:3 @8642541b2).
+/// (models/gemma4-assistant.cpp:3 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -48,7 +48,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_gemma4_assistant`'s `load_arch_tensors`
-/// (models/gemma4-assistant.cpp:21 @8642541b2).
+/// (models/gemma4-assistant.cpp:21 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -113,13 +113,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_gemma4_assistant`'s `build_arch_graph`
-/// (models/gemma4-assistant.cpp:80 @8642541b2).
+/// (models/gemma4-assistant.cpp:80 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_gemma4_assistant`'s `graph`
-/// (models/gemma4-assistant.cpp:84 @8642541b2).
+/// (models/gemma4-assistant.cpp:84 @cd959bae9).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

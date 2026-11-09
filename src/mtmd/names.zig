@@ -4,743 +4,743 @@
 
 const std = @import("std");
 
-/// `KEY_FTYPE` (clip-impl.h:32 @8642541b2).
+/// `KEY_FTYPE` (clip-impl.h:32 @cd959bae9).
 pub const KEY_FTYPE = "general.file_type";
-/// `KEY_NAME` (clip-impl.h:33 @8642541b2).
+/// `KEY_NAME` (clip-impl.h:33 @cd959bae9).
 pub const KEY_NAME = "general.name";
-/// `KEY_DESCRIPTION` (clip-impl.h:34 @8642541b2).
+/// `KEY_DESCRIPTION` (clip-impl.h:34 @cd959bae9).
 pub const KEY_DESCRIPTION = "general.description";
-/// `KEY_PROJ_TYPE` (clip-impl.h:35 @8642541b2).
+/// `KEY_PROJ_TYPE` (clip-impl.h:35 @cd959bae9).
 pub const KEY_PROJ_TYPE = "clip.projector_type";
-/// `KEY_HAS_AUDIO_ENC` (clip-impl.h:36 @8642541b2).
+/// `KEY_HAS_AUDIO_ENC` (clip-impl.h:36 @cd959bae9).
 pub const KEY_HAS_AUDIO_ENC = "clip.has_audio_encoder";
-/// `KEY_HAS_VISION_ENC` (clip-impl.h:37 @8642541b2).
+/// `KEY_HAS_VISION_ENC` (clip-impl.h:37 @cd959bae9).
 pub const KEY_HAS_VISION_ENC = "clip.has_vision_encoder";
-/// `KEY_HAS_GEN_AUDIO_ENC` (clip-impl.h:38 @8642541b2).
+/// `KEY_HAS_GEN_AUDIO_ENC` (clip-impl.h:38 @cd959bae9).
 pub const KEY_HAS_GEN_AUDIO_ENC = "clip.has_gen_audio_encoder";
-/// `KEY_USE_GELU` (clip-impl.h:39 @8642541b2).
+/// `KEY_USE_GELU` (clip-impl.h:39 @cd959bae9).
 pub const KEY_USE_GELU = "clip.use_gelu";
-/// `KEY_USE_SILU` (clip-impl.h:40 @8642541b2).
+/// `KEY_USE_SILU` (clip-impl.h:40 @cd959bae9).
 pub const KEY_USE_SILU = "clip.use_silu";
-/// `KEY_N_EMBD` (clip-impl.h:42 @8642541b2).
+/// `KEY_N_EMBD` (clip-impl.h:42 @cd959bae9).
 pub const KEY_N_EMBD = "clip.%s.embedding_length";
-/// `KEY_N_FF` (clip-impl.h:43 @8642541b2).
+/// `KEY_N_FF` (clip-impl.h:43 @cd959bae9).
 pub const KEY_N_FF = "clip.%s.feed_forward_length";
-/// `KEY_N_BLOCK` (clip-impl.h:44 @8642541b2).
+/// `KEY_N_BLOCK` (clip-impl.h:44 @cd959bae9).
 pub const KEY_N_BLOCK = "clip.%s.block_count";
-/// `KEY_PROJ_DIM` (clip-impl.h:45 @8642541b2).
+/// `KEY_PROJ_DIM` (clip-impl.h:45 @cd959bae9).
 pub const KEY_PROJ_DIM = "clip.%s.projection_dim";
-/// `KEY_N_HEAD` (clip-impl.h:46 @8642541b2).
+/// `KEY_N_HEAD` (clip-impl.h:46 @cd959bae9).
 pub const KEY_N_HEAD = "clip.%s.attention.head_count";
-/// `KEY_N_HEAD_KV` (clip-impl.h:47 @8642541b2).
+/// `KEY_N_HEAD_KV` (clip-impl.h:47 @cd959bae9).
 pub const KEY_N_HEAD_KV = "clip.%s.attention.head_count_kv";
-/// `KEY_N_EMBD_HEAD` (clip-impl.h:48 @8642541b2).
+/// `KEY_N_EMBD_HEAD` (clip-impl.h:48 @cd959bae9).
 pub const KEY_N_EMBD_HEAD = "clip.%s.attention.head_dim";
-/// `KEY_LAYER_NORM_EPS` (clip-impl.h:49 @8642541b2).
+/// `KEY_LAYER_NORM_EPS` (clip-impl.h:49 @cd959bae9).
 pub const KEY_LAYER_NORM_EPS = "clip.%s.attention.layer_norm_epsilon";
-/// `KEY_FEATURE_LAYERS` (clip-impl.h:50 @8642541b2).
+/// `KEY_FEATURE_LAYERS` (clip-impl.h:50 @cd959bae9).
 pub const KEY_FEATURE_LAYERS = "clip.%s.feature_layer";
-/// `KEY_VISION_PROJ_TYPE` (clip-impl.h:53 @8642541b2).
+/// `KEY_VISION_PROJ_TYPE` (clip-impl.h:53 @cd959bae9).
 pub const KEY_VISION_PROJ_TYPE = "clip.vision.projector_type";
-/// `KEY_IMAGE_SIZE` (clip-impl.h:54 @8642541b2).
+/// `KEY_IMAGE_SIZE` (clip-impl.h:54 @cd959bae9).
 pub const KEY_IMAGE_SIZE = "clip.vision.image_size";
-/// `KEY_IMAGE_MIN_PIXELS` (clip-impl.h:55 @8642541b2).
+/// `KEY_IMAGE_MIN_PIXELS` (clip-impl.h:55 @cd959bae9).
 pub const KEY_IMAGE_MIN_PIXELS = "clip.vision.image_min_pixels";
-/// `KEY_IMAGE_MAX_PIXELS` (clip-impl.h:56 @8642541b2).
+/// `KEY_IMAGE_MAX_PIXELS` (clip-impl.h:56 @cd959bae9).
 pub const KEY_IMAGE_MAX_PIXELS = "clip.vision.image_max_pixels";
-/// `KEY_PREPROC_MIN_TILES` (clip-impl.h:57 @8642541b2).
+/// `KEY_PREPROC_MIN_TILES` (clip-impl.h:57 @cd959bae9).
 pub const KEY_PREPROC_MIN_TILES = "clip.vision.preproc_min_tiles";
-/// `KEY_PREPROC_MAX_TILES` (clip-impl.h:58 @8642541b2).
+/// `KEY_PREPROC_MAX_TILES` (clip-impl.h:58 @cd959bae9).
 pub const KEY_PREPROC_MAX_TILES = "clip.vision.preproc_max_tiles";
-/// `KEY_PREPROC_IMAGE_SIZE` (clip-impl.h:59 @8642541b2).
+/// `KEY_PREPROC_IMAGE_SIZE` (clip-impl.h:59 @cd959bae9).
 pub const KEY_PREPROC_IMAGE_SIZE = "clip.vision.preproc_image_size";
-/// `KEY_PREPROC_TILE_SIZE` (clip-impl.h:60 @8642541b2).
+/// `KEY_PREPROC_TILE_SIZE` (clip-impl.h:60 @cd959bae9).
 pub const KEY_PREPROC_TILE_SIZE = "clip.vision.preproc_tile_size";
-/// `KEY_PREPROC_MAX_PIXELS_TOLERANCE` (clip-impl.h:61 @8642541b2).
+/// `KEY_PREPROC_MAX_PIXELS_TOLERANCE` (clip-impl.h:61 @cd959bae9).
 pub const KEY_PREPROC_MAX_PIXELS_TOLERANCE = "clip.vision.preproc_max_pixels_tolerance";
-/// `KEY_PATCH_SIZE` (clip-impl.h:62 @8642541b2).
+/// `KEY_PATCH_SIZE` (clip-impl.h:62 @cd959bae9).
 pub const KEY_PATCH_SIZE = "clip.vision.patch_size";
-/// `KEY_IMAGE_MEAN` (clip-impl.h:63 @8642541b2).
+/// `KEY_IMAGE_MEAN` (clip-impl.h:63 @cd959bae9).
 pub const KEY_IMAGE_MEAN = "clip.vision.image_mean";
-/// `KEY_IMAGE_STD` (clip-impl.h:64 @8642541b2).
+/// `KEY_IMAGE_STD` (clip-impl.h:64 @cd959bae9).
 pub const KEY_IMAGE_STD = "clip.vision.image_std";
-/// `KEY_IMAGE_RESIZE_ALGO` (clip-impl.h:65 @8642541b2).
+/// `KEY_IMAGE_RESIZE_ALGO` (clip-impl.h:65 @cd959bae9).
 pub const KEY_IMAGE_RESIZE_ALGO = "clip.vision.image_resize_algo";
-/// `KEY_PROJ_SCALE_FACTOR` (clip-impl.h:66 @8642541b2).
+/// `KEY_PROJ_SCALE_FACTOR` (clip-impl.h:66 @cd959bae9).
 pub const KEY_PROJ_SCALE_FACTOR = "clip.vision.projector.scale_factor";
-/// `KEY_PROJ_SAMPLE_QUERY_SIDE` (clip-impl.h:67 @8642541b2).
+/// `KEY_PROJ_SAMPLE_QUERY_SIDE` (clip-impl.h:67 @cd959bae9).
 pub const KEY_PROJ_SAMPLE_QUERY_SIDE = "clip.vision.projector.query_side";
-/// `KEY_PROJ_SAMPLE_WINDOW_SIDE` (clip-impl.h:68 @8642541b2).
+/// `KEY_PROJ_SAMPLE_WINDOW_SIDE` (clip-impl.h:68 @cd959bae9).
 pub const KEY_PROJ_SAMPLE_WINDOW_SIDE = "clip.vision.projector.window_side";
-/// `KEY_PROJ_SPATIAL_OFFSETS` (clip-impl.h:69 @8642541b2).
+/// `KEY_PROJ_SPATIAL_OFFSETS` (clip-impl.h:69 @cd959bae9).
 pub const KEY_PROJ_SPATIAL_OFFSETS = "clip.vision.projector.spatial_offsets";
-/// `KEY_SPATIAL_MERGE_SIZE` (clip-impl.h:70 @8642541b2).
+/// `KEY_SPATIAL_MERGE_SIZE` (clip-impl.h:70 @cd959bae9).
 pub const KEY_SPATIAL_MERGE_SIZE = "clip.vision.spatial_merge_size";
-/// `KEY_SWIGLU_CLAMP` (clip-impl.h:71 @8642541b2).
+/// `KEY_SWIGLU_CLAMP` (clip-impl.h:71 @cd959bae9).
 pub const KEY_SWIGLU_CLAMP = "clip.vision.swiglu_clamp";
-/// `KEY_MM_PATCH_MERGE_TYPE` (clip-impl.h:73 @8642541b2).
+/// `KEY_MM_PATCH_MERGE_TYPE` (clip-impl.h:73 @cd959bae9).
 pub const KEY_MM_PATCH_MERGE_TYPE = "clip.vision.mm_patch_merge_type";
-/// `KEY_IMAGE_GRID_PINPOINTS` (clip-impl.h:74 @8642541b2).
+/// `KEY_IMAGE_GRID_PINPOINTS` (clip-impl.h:74 @cd959bae9).
 pub const KEY_IMAGE_GRID_PINPOINTS = "clip.vision.image_grid_pinpoints";
-/// `KEY_MAX_SLICE_NUMS` (clip-impl.h:75 @8642541b2).
+/// `KEY_MAX_SLICE_NUMS` (clip-impl.h:75 @cd959bae9).
 pub const KEY_MAX_SLICE_NUMS = "clip.vision.max_slice_nums";
-/// `KEY_WIN_ATTN_PATTERN` (clip-impl.h:76 @8642541b2).
+/// `KEY_WIN_ATTN_PATTERN` (clip-impl.h:76 @cd959bae9).
 pub const KEY_WIN_ATTN_PATTERN = "clip.vision.n_wa_pattern";
-/// `KEY_WIN_ATTN_LAYER_INDEXES` (clip-impl.h:77 @8642541b2).
+/// `KEY_WIN_ATTN_LAYER_INDEXES` (clip-impl.h:77 @cd959bae9).
 pub const KEY_WIN_ATTN_LAYER_INDEXES = "clip.vision.wa_layer_indexes";
-/// `KEY_WA_PATTERN_MODE` (clip-impl.h:78 @8642541b2).
+/// `KEY_WA_PATTERN_MODE` (clip-impl.h:78 @cd959bae9).
 pub const KEY_WA_PATTERN_MODE = "clip.vision.wa_pattern_mode";
-/// `KEY_ATTN_WINDOW_SIZE` (clip-impl.h:79 @8642541b2).
+/// `KEY_ATTN_WINDOW_SIZE` (clip-impl.h:79 @cd959bae9).
 pub const KEY_ATTN_WINDOW_SIZE = "clip.vision.window_size";
-/// `KEY_MINICPMV_VERSION` (clip-impl.h:80 @8642541b2).
+/// `KEY_MINICPMV_VERSION` (clip-impl.h:80 @cd959bae9).
 pub const KEY_MINICPMV_VERSION = "clip.minicpmv_version";
-/// `KEY_MINICPMV_QUERY_NUM` (clip-impl.h:81 @8642541b2).
+/// `KEY_MINICPMV_QUERY_NUM` (clip-impl.h:81 @cd959bae9).
 pub const KEY_MINICPMV_QUERY_NUM = "clip.minicpmv_query_num";
-/// `KEY_SAM_N_HEAD` (clip-impl.h:82 @8642541b2).
+/// `KEY_SAM_N_HEAD` (clip-impl.h:82 @cd959bae9).
 pub const KEY_SAM_N_HEAD = "clip.vision.sam.head_count";
-/// `KEY_SAM_N_BLOCK` (clip-impl.h:83 @8642541b2).
+/// `KEY_SAM_N_BLOCK` (clip-impl.h:83 @cd959bae9).
 pub const KEY_SAM_N_BLOCK = "clip.vision.sam.block_count";
-/// `KEY_SAM_N_EMBD` (clip-impl.h:84 @8642541b2).
+/// `KEY_SAM_N_EMBD` (clip-impl.h:84 @cd959bae9).
 pub const KEY_SAM_N_EMBD = "clip.vision.sam.embedding_length";
-/// `KEY_VISION_N_EXPERT_USED` (clip-impl.h:85 @8642541b2).
+/// `KEY_VISION_N_EXPERT_USED` (clip-impl.h:85 @cd959bae9).
 pub const KEY_VISION_N_EXPERT_USED = "clip.vision.expert_used_count";
-/// `KEY_AUDIO_PROJ_TYPE` (clip-impl.h:87 @8642541b2).
+/// `KEY_AUDIO_PROJ_TYPE` (clip-impl.h:87 @cd959bae9).
 pub const KEY_AUDIO_PROJ_TYPE = "clip.audio.projector_type";
-/// `KEY_A_NUM_MEL_BINS` (clip-impl.h:88 @8642541b2).
+/// `KEY_A_NUM_MEL_BINS` (clip-impl.h:88 @cd959bae9).
 pub const KEY_A_NUM_MEL_BINS = "clip.audio.num_mel_bins";
-/// `KEY_A_PROJ_STACK_FACTOR` (clip-impl.h:89 @8642541b2).
+/// `KEY_A_PROJ_STACK_FACTOR` (clip-impl.h:89 @cd959bae9).
 pub const KEY_A_PROJ_STACK_FACTOR = "clip.audio.projector.stack_factor";
-/// `KEY_A_CHUNK_SIZE` (clip-impl.h:90 @8642541b2).
+/// `KEY_A_CHUNK_SIZE` (clip-impl.h:90 @cd959bae9).
 pub const KEY_A_CHUNK_SIZE = "clip.audio.chunk_size";
-/// `KEY_A_CONV_KERNEL_SIZE` (clip-impl.h:91 @8642541b2).
+/// `KEY_A_CONV_KERNEL_SIZE` (clip-impl.h:91 @cd959bae9).
 pub const KEY_A_CONV_KERNEL_SIZE = "clip.audio.conv_kernel_size";
-/// `KEY_A_HIDDEN_SIZES` (clip-impl.h:92 @8642541b2).
+/// `KEY_A_HIDDEN_SIZES` (clip-impl.h:92 @cd959bae9).
 pub const KEY_A_HIDDEN_SIZES = "clip.audio.hidden_sizes";
-/// `KEY_A_PATCH_SIZES` (clip-impl.h:93 @8642541b2).
+/// `KEY_A_PATCH_SIZES` (clip-impl.h:93 @cd959bae9).
 pub const KEY_A_PATCH_SIZES = "clip.audio.patch_sizes";
-/// `KEY_A_DEPTHS` (clip-impl.h:94 @8642541b2).
+/// `KEY_A_DEPTHS` (clip-impl.h:94 @cd959bae9).
 pub const KEY_A_DEPTHS = "clip.audio.depths";
-/// `KEY_A_MAX_POS_EMB` (clip-impl.h:95 @8642541b2).
+/// `KEY_A_MAX_POS_EMB` (clip-impl.h:95 @cd959bae9).
 pub const KEY_A_MAX_POS_EMB = "clip.audio.max_pos_emb";
-/// `KEY_A_PROJ_WINDOW_SIZE` (clip-impl.h:96 @8642541b2).
+/// `KEY_A_PROJ_WINDOW_SIZE` (clip-impl.h:96 @cd959bae9).
 pub const KEY_A_PROJ_WINDOW_SIZE = "clip.audio.projector.window_size";
-/// `KEY_A_PROJ_DOWNSAMPLE_RATE` (clip-impl.h:97 @8642541b2).
+/// `KEY_A_PROJ_DOWNSAMPLE_RATE` (clip-impl.h:97 @cd959bae9).
 pub const KEY_A_PROJ_DOWNSAMPLE_RATE = "clip.audio.projector.downsample_rate";
-/// `KEY_A_PROJ_HEAD_COUNT` (clip-impl.h:98 @8642541b2).
+/// `KEY_A_PROJ_HEAD_COUNT` (clip-impl.h:98 @cd959bae9).
 pub const KEY_A_PROJ_HEAD_COUNT = "clip.audio.projector.head_count";
-/// `KEY_A_RVQ_NUM_QUANTIZERS` (clip-impl.h:99 @8642541b2).
+/// `KEY_A_RVQ_NUM_QUANTIZERS` (clip-impl.h:99 @cd959bae9).
 pub const KEY_A_RVQ_NUM_QUANTIZERS = "clip.audio.rvq.num_quantizers";
-/// `KEY_A_RVQ_CODEBOOK_SIZE` (clip-impl.h:100 @8642541b2).
+/// `KEY_A_RVQ_CODEBOOK_SIZE` (clip-impl.h:100 @cd959bae9).
 pub const KEY_A_RVQ_CODEBOOK_SIZE = "clip.audio.rvq.codebook_size";
-/// `KEY_A_WA_PATTERN_MODE` (clip-impl.h:101 @8642541b2).
+/// `KEY_A_WA_PATTERN_MODE` (clip-impl.h:101 @cd959bae9).
 pub const KEY_A_WA_PATTERN_MODE = "clip.audio.wa_pattern_mode";
-/// `KEY_A_ATTN_WINDOW_SIZE` (clip-impl.h:102 @8642541b2).
+/// `KEY_A_ATTN_WINDOW_SIZE` (clip-impl.h:102 @cd959bae9).
 pub const KEY_A_ATTN_WINDOW_SIZE = "clip.audio.window_size";
-/// `KEY_A_LOCAL_BLOCK_COUNT` (clip-impl.h:103 @8642541b2).
+/// `KEY_A_LOCAL_BLOCK_COUNT` (clip-impl.h:103 @cd959bae9).
 pub const KEY_A_LOCAL_BLOCK_COUNT = "clip.audio.local_block_count";
-/// `KEY_A_LOCAL_GROUP_SIZE` (clip-impl.h:104 @8642541b2).
+/// `KEY_A_LOCAL_GROUP_SIZE` (clip-impl.h:104 @cd959bae9).
 pub const KEY_A_LOCAL_GROUP_SIZE = "clip.audio.local_group_size";
-/// `KEY_GEN_AUDIO_PROJ_TYPE` (clip-impl.h:106 @8642541b2).
+/// `KEY_GEN_AUDIO_PROJ_TYPE` (clip-impl.h:106 @cd959bae9).
 pub const KEY_GEN_AUDIO_PROJ_TYPE = "clip.gen.audio.projector_type";
-/// `KEY_GEN_AUDIO_VARIANT` (clip-impl.h:108 @8642541b2).
+/// `KEY_GEN_AUDIO_VARIANT` (clip-impl.h:108 @cd959bae9).
 pub const KEY_GEN_AUDIO_VARIANT = "clip.gen.audio.model_variant";
-/// `KEY_GEN_AUDIO_TEMP` (clip-impl.h:110 @8642541b2).
+/// `KEY_GEN_AUDIO_TEMP` (clip-impl.h:110 @cd959bae9).
 pub const KEY_GEN_AUDIO_TEMP = "clip.gen.audio.sampling.temp";
-/// `KEY_GEN_AUDIO_TOP_K` (clip-impl.h:111 @8642541b2).
+/// `KEY_GEN_AUDIO_TOP_K` (clip-impl.h:111 @cd959bae9).
 pub const KEY_GEN_AUDIO_TOP_K = "clip.gen.audio.sampling.top_k";
-/// `KEY_GEN_AUDIO_PENALTY_REPEAT` (clip-impl.h:112 @8642541b2).
+/// `KEY_GEN_AUDIO_PENALTY_REPEAT` (clip-impl.h:112 @cd959bae9).
 pub const KEY_GEN_AUDIO_PENALTY_REPEAT = "clip.gen.audio.sampling.penalty_repeat";
-/// `KEY_GEN_AUDIO_PENALTY_LAST_N` (clip-impl.h:113 @8642541b2).
+/// `KEY_GEN_AUDIO_PENALTY_LAST_N` (clip-impl.h:113 @cd959bae9).
 pub const KEY_GEN_AUDIO_PENALTY_LAST_N = "clip.gen.audio.sampling.penalty_last_n";
-/// `KEY_AUDIO_SUBSMPL_FACTOR` (clip-impl.h:114 @8642541b2).
+/// `KEY_AUDIO_SUBSMPL_FACTOR` (clip-impl.h:114 @cd959bae9).
 pub const KEY_AUDIO_SUBSMPL_FACTOR = "clip.audio.subsampling_factor";
-/// `TN_POS_EMBD` (clip-impl.h:120 @8642541b2).
+/// `TN_POS_EMBD` (clip-impl.h:125 @cd959bae9).
 pub const TN_POS_EMBD = "%s.position_embd.weight";
-/// `TN_CLASS_EMBD` (clip-impl.h:121 @8642541b2).
+/// `TN_CLASS_EMBD` (clip-impl.h:126 @cd959bae9).
 pub const TN_CLASS_EMBD = "v.class_embd";
-/// `TN_PATCH_EMBD` (clip-impl.h:122 @8642541b2).
+/// `TN_PATCH_EMBD` (clip-impl.h:127 @cd959bae9).
 pub const TN_PATCH_EMBD = "v.patch_embd.weight";
-/// `TN_PATCH_EMBD_1` (clip-impl.h:123 @8642541b2).
+/// `TN_PATCH_EMBD_1` (clip-impl.h:128 @cd959bae9).
 pub const TN_PATCH_EMBD_1 = "v.patch_embd.weight.1";
-/// `TN_PATCH_BIAS` (clip-impl.h:124 @8642541b2).
+/// `TN_PATCH_BIAS` (clip-impl.h:129 @cd959bae9).
 pub const TN_PATCH_BIAS = "v.patch_embd.bias";
-/// `TN_NORM_EMBD` (clip-impl.h:125 @8642541b2).
+/// `TN_NORM_EMBD` (clip-impl.h:130 @cd959bae9).
 pub const TN_NORM_EMBD = "v.norm_embd.%s";
-/// `TN_PATCH_NORM` (clip-impl.h:126 @8642541b2).
+/// `TN_PATCH_NORM` (clip-impl.h:131 @cd959bae9).
 pub const TN_PATCH_NORM = "v.patch_norm.%d.%s";
-/// `TN_ATTN_QKV` (clip-impl.h:127 @8642541b2).
+/// `TN_ATTN_QKV` (clip-impl.h:132 @cd959bae9).
 pub const TN_ATTN_QKV = "%s.blk.%d.attn_qkv.%s";
-/// `TN_ATTN_K` (clip-impl.h:128 @8642541b2).
+/// `TN_ATTN_K` (clip-impl.h:133 @cd959bae9).
 pub const TN_ATTN_K = "%s.blk.%d.attn_k.%s";
-/// `TN_ATTN_Q` (clip-impl.h:129 @8642541b2).
+/// `TN_ATTN_Q` (clip-impl.h:134 @cd959bae9).
 pub const TN_ATTN_Q = "%s.blk.%d.attn_q.%s";
-/// `TN_ATTN_V` (clip-impl.h:130 @8642541b2).
+/// `TN_ATTN_V` (clip-impl.h:135 @cd959bae9).
 pub const TN_ATTN_V = "%s.blk.%d.attn_v.%s";
-/// `TN_ATTN_OUTPUT` (clip-impl.h:131 @8642541b2).
+/// `TN_ATTN_OUTPUT` (clip-impl.h:136 @cd959bae9).
 pub const TN_ATTN_OUTPUT = "%s.blk.%d.attn_out.%s";
-/// `TN_ATTN_SINKS` (clip-impl.h:132 @8642541b2).
+/// `TN_ATTN_SINKS` (clip-impl.h:137 @cd959bae9).
 pub const TN_ATTN_SINKS = "%s.blk.%d.attn_sinks";
-/// `TN_ATTN_K_NORM` (clip-impl.h:133 @8642541b2).
+/// `TN_ATTN_K_NORM` (clip-impl.h:138 @cd959bae9).
 pub const TN_ATTN_K_NORM = "%s.blk.%d.attn_k_norm.%s";
-/// `TN_ATTN_Q_NORM` (clip-impl.h:134 @8642541b2).
+/// `TN_ATTN_Q_NORM` (clip-impl.h:139 @cd959bae9).
 pub const TN_ATTN_Q_NORM = "%s.blk.%d.attn_q_norm.%s";
-/// `TN_FFN_DOWN` (clip-impl.h:135 @8642541b2).
+/// `TN_FFN_DOWN` (clip-impl.h:140 @cd959bae9).
 pub const TN_FFN_DOWN = "%s.blk.%d.ffn_down.%s";
-/// `TN_FFN_GATE` (clip-impl.h:136 @8642541b2).
+/// `TN_FFN_GATE` (clip-impl.h:141 @cd959bae9).
 pub const TN_FFN_GATE = "%s.blk.%d.ffn_gate.%s";
-/// `TN_FFN_UP` (clip-impl.h:137 @8642541b2).
+/// `TN_FFN_UP` (clip-impl.h:142 @cd959bae9).
 pub const TN_FFN_UP = "%s.blk.%d.ffn_up.%s";
-/// `TN_FFN_GATE_INP` (clip-impl.h:138 @8642541b2).
+/// `TN_FFN_GATE_INP` (clip-impl.h:143 @cd959bae9).
 pub const TN_FFN_GATE_INP = "%s.blk.%d.ffn_gate_inp.%s";
-/// `TN_FFN_GATE_EXPS` (clip-impl.h:139 @8642541b2).
+/// `TN_FFN_GATE_EXPS` (clip-impl.h:144 @cd959bae9).
 pub const TN_FFN_GATE_EXPS = "%s.blk.%d.ffn_gate_exps.%s";
-/// `TN_FFN_UP_EXPS` (clip-impl.h:140 @8642541b2).
+/// `TN_FFN_UP_EXPS` (clip-impl.h:145 @cd959bae9).
 pub const TN_FFN_UP_EXPS = "%s.blk.%d.ffn_up_exps.%s";
-/// `TN_FFN_DOWN_EXPS` (clip-impl.h:141 @8642541b2).
+/// `TN_FFN_DOWN_EXPS` (clip-impl.h:146 @cd959bae9).
 pub const TN_FFN_DOWN_EXPS = "%s.blk.%d.ffn_down_exps.%s";
-/// `TN_FFN_EXP_PROBS_B` (clip-impl.h:142 @8642541b2).
+/// `TN_FFN_EXP_PROBS_B` (clip-impl.h:147 @cd959bae9).
 pub const TN_FFN_EXP_PROBS_B = "%s.blk.%d.exp_probs_b.%s";
-/// `TN_LN_1` (clip-impl.h:143 @8642541b2).
+/// `TN_LN_1` (clip-impl.h:148 @cd959bae9).
 pub const TN_LN_1 = "%s.blk.%d.ln1.%s";
-/// `TN_LN_2` (clip-impl.h:144 @8642541b2).
+/// `TN_LN_2` (clip-impl.h:149 @cd959bae9).
 pub const TN_LN_2 = "%s.blk.%d.ln2.%s";
-/// `TN_LS_1` (clip-impl.h:145 @8642541b2).
+/// `TN_LS_1` (clip-impl.h:150 @cd959bae9).
 pub const TN_LS_1 = "%s.blk.%d.ls1.%s";
-/// `TN_LS_2` (clip-impl.h:146 @8642541b2).
+/// `TN_LS_2` (clip-impl.h:151 @cd959bae9).
 pub const TN_LS_2 = "%s.blk.%d.ls2.%s";
-/// `TN_LS_OUT` (clip-impl.h:147 @8642541b2).
+/// `TN_LS_OUT` (clip-impl.h:152 @cd959bae9).
 pub const TN_LS_OUT = "%s.blk.%d.out_scale.%s";
-/// `TN_ATTN_POST_NORM` (clip-impl.h:148 @8642541b2).
+/// `TN_ATTN_POST_NORM` (clip-impl.h:153 @cd959bae9).
 pub const TN_ATTN_POST_NORM = "%s.blk.%d.attn_post_norm.%s";
-/// `TN_FFN_POST_NORM` (clip-impl.h:149 @8642541b2).
+/// `TN_FFN_POST_NORM` (clip-impl.h:154 @cd959bae9).
 pub const TN_FFN_POST_NORM = "%s.blk.%d.ffn_post_norm.%s";
-/// `TN_LN_PRE` (clip-impl.h:150 @8642541b2).
+/// `TN_LN_PRE` (clip-impl.h:155 @cd959bae9).
 pub const TN_LN_PRE = "%s.pre_ln.%s";
-/// `TN_LN_POST` (clip-impl.h:151 @8642541b2).
+/// `TN_LN_POST` (clip-impl.h:156 @cd959bae9).
 pub const TN_LN_POST = "%s.post_ln.%s";
-/// `TN_LLAVA_PROJ` (clip-impl.h:152 @8642541b2).
+/// `TN_LLAVA_PROJ` (clip-impl.h:157 @cd959bae9).
 pub const TN_LLAVA_PROJ = "mm.%d.%s";
-/// `TN_MM_UP` (clip-impl.h:153 @8642541b2).
+/// `TN_MM_UP` (clip-impl.h:158 @cd959bae9).
 pub const TN_MM_UP = "mm.up.%s";
-/// `TN_MM_GATE` (clip-impl.h:154 @8642541b2).
+/// `TN_MM_GATE` (clip-impl.h:159 @cd959bae9).
 pub const TN_MM_GATE = "mm.gate.%s";
-/// `TN_MM_DOWN` (clip-impl.h:155 @8642541b2).
+/// `TN_MM_DOWN` (clip-impl.h:160 @cd959bae9).
 pub const TN_MM_DOWN = "mm.down.%s";
-/// `TN_MM_POST_NORM` (clip-impl.h:156 @8642541b2).
+/// `TN_MM_POST_NORM` (clip-impl.h:161 @cd959bae9).
 pub const TN_MM_POST_NORM = "mm.post_norm.%s";
-/// `TN_MVLM_PROJ_MLP` (clip-impl.h:157 @8642541b2).
+/// `TN_MVLM_PROJ_MLP` (clip-impl.h:162 @cd959bae9).
 pub const TN_MVLM_PROJ_MLP = "mm.model.mlp.%d.%s";
-/// `TN_MVLM_PROJ_BLOCK` (clip-impl.h:158 @8642541b2).
+/// `TN_MVLM_PROJ_BLOCK` (clip-impl.h:163 @cd959bae9).
 pub const TN_MVLM_PROJ_BLOCK = "mm.model.mb_block.%d.block.%d.%s";
-/// `TN_MVLM_PROJ_PEG` (clip-impl.h:159 @8642541b2).
+/// `TN_MVLM_PROJ_PEG` (clip-impl.h:164 @cd959bae9).
 pub const TN_MVLM_PROJ_PEG = "mm.model.peg.%d.%s";
-/// `TN_IMAGE_NEWLINE` (clip-impl.h:160 @8642541b2).
+/// `TN_IMAGE_NEWLINE` (clip-impl.h:165 @cd959bae9).
 pub const TN_IMAGE_NEWLINE = "v.image_newline";
-/// `TN_IMAGE_SEPERATOR` (clip-impl.h:161 @8642541b2).
+/// `TN_IMAGE_SEPERATOR` (clip-impl.h:166 @cd959bae9).
 pub const TN_IMAGE_SEPERATOR = "v.view_seperator";
-/// `TN_TOK_EMBD_SEP` (clip-impl.h:162 @8642541b2).
+/// `TN_TOK_EMBD_SEP` (clip-impl.h:167 @cd959bae9).
 pub const TN_TOK_EMBD_SEP = "v.tok_embd_sep";
-/// `TN_MM_INP_NORM` (clip-impl.h:163 @8642541b2).
+/// `TN_MM_INP_NORM` (clip-impl.h:168 @cd959bae9).
 pub const TN_MM_INP_NORM = "mm.input_norm.weight";
-/// `TN_MM_INP_NORM_B` (clip-impl.h:164 @8642541b2).
+/// `TN_MM_INP_NORM_B` (clip-impl.h:169 @cd959bae9).
 pub const TN_MM_INP_NORM_B = "mm.input_norm.bias";
-/// `TN_MM_INP_PROJ` (clip-impl.h:165 @8642541b2).
+/// `TN_MM_INP_PROJ` (clip-impl.h:170 @cd959bae9).
 pub const TN_MM_INP_PROJ = "mm.input_projection.weight";
-/// `TN_MM_SOFT_EMB_N` (clip-impl.h:166 @8642541b2).
+/// `TN_MM_SOFT_EMB_N` (clip-impl.h:171 @cd959bae9).
 pub const TN_MM_SOFT_EMB_N = "mm.soft_emb_norm.weight";
-/// `TN_MM_PROJECTOR` (clip-impl.h:167 @8642541b2).
+/// `TN_MM_PROJECTOR` (clip-impl.h:172 @cd959bae9).
 pub const TN_MM_PROJECTOR = "mm.model.fc.%s";
-/// `TN_MM_PATCH_MERGER` (clip-impl.h:168 @8642541b2).
+/// `TN_MM_PATCH_MERGER` (clip-impl.h:173 @cd959bae9).
 pub const TN_MM_PATCH_MERGER = "mm.patch_merger.%s";
-/// `TN_MM_MERGER_FC1` (clip-impl.h:169 @8642541b2).
+/// `TN_MM_MERGER_FC1` (clip-impl.h:174 @cd959bae9).
 pub const TN_MM_MERGER_FC1 = "mm.merger.fc1.%s";
-/// `TN_MM_MERGER_FC2` (clip-impl.h:170 @8642541b2).
+/// `TN_MM_MERGER_FC2` (clip-impl.h:175 @cd959bae9).
 pub const TN_MM_MERGER_FC2 = "mm.merger.fc2.%s";
-/// `TN_TOK_IMG_BREAK` (clip-impl.h:171 @8642541b2).
+/// `TN_TOK_IMG_BREAK` (clip-impl.h:176 @cd959bae9).
 pub const TN_TOK_IMG_BREAK = "v.token_embd.img_break";
-/// `TN_TOK_IMG_START` (clip-impl.h:172 @8642541b2).
+/// `TN_TOK_IMG_START` (clip-impl.h:177 @cd959bae9).
 pub const TN_TOK_IMG_START = "v.token_embd.img_start";
-/// `TN_TOK_IMG_END` (clip-impl.h:173 @8642541b2).
+/// `TN_TOK_IMG_END` (clip-impl.h:178 @cd959bae9).
 pub const TN_TOK_IMG_END = "v.token_embd.img_end";
-/// `TN_TOK_IMG_PAD` (clip-impl.h:174 @8642541b2).
+/// `TN_TOK_IMG_PAD` (clip-impl.h:179 @cd959bae9).
 pub const TN_TOK_IMG_PAD = "v.token_embd.img_pad";
-/// `TN_TOK_GLM_BOI` (clip-impl.h:175 @8642541b2).
+/// `TN_TOK_GLM_BOI` (clip-impl.h:180 @cd959bae9).
 pub const TN_TOK_GLM_BOI = "adapter.boi";
-/// `TN_TOK_GLM_EOI` (clip-impl.h:176 @8642541b2).
+/// `TN_TOK_GLM_EOI` (clip-impl.h:181 @cd959bae9).
 pub const TN_TOK_GLM_EOI = "adapter.eoi";
-/// `TN_DEEPSTACK_NORM` (clip-impl.h:177 @8642541b2).
+/// `TN_DEEPSTACK_NORM` (clip-impl.h:182 @cd959bae9).
 pub const TN_DEEPSTACK_NORM = "v.deepstack.%d.norm.%s";
-/// `TN_DEEPSTACK_FC1` (clip-impl.h:178 @8642541b2).
+/// `TN_DEEPSTACK_FC1` (clip-impl.h:183 @cd959bae9).
 pub const TN_DEEPSTACK_FC1 = "v.deepstack.%d.fc1.%s";
-/// `TN_DEEPSTACK_FC2` (clip-impl.h:179 @8642541b2).
+/// `TN_DEEPSTACK_FC2` (clip-impl.h:184 @cd959bae9).
 pub const TN_DEEPSTACK_FC2 = "v.deepstack.%d.fc2.%s";
-/// `TN_LFM3VL_EMBEDDING_NORM` (clip-impl.h:182 @8642541b2).
+/// `TN_LFM3VL_EMBEDDING_NORM` (clip-impl.h:187 @cd959bae9).
 pub const TN_LFM3VL_EMBEDDING_NORM = "%s.embedding_norm.%s";
-/// `TN_LFM3VL_CONV2D_IN_PROJ` (clip-impl.h:183 @8642541b2).
+/// `TN_LFM3VL_CONV2D_IN_PROJ` (clip-impl.h:188 @cd959bae9).
 pub const TN_LFM3VL_CONV2D_IN_PROJ = "%s.blk.%d.conv2d_in_proj.%s";
-/// `TN_LFM3VL_CONV2D_SPATIAL` (clip-impl.h:184 @8642541b2).
+/// `TN_LFM3VL_CONV2D_SPATIAL` (clip-impl.h:189 @cd959bae9).
 pub const TN_LFM3VL_CONV2D_SPATIAL = "%s.blk.%d.conv2d_spatial.%s";
-/// `TN_LFM3VL_CONV2D_OUT_PROJ` (clip-impl.h:185 @8642541b2).
+/// `TN_LFM3VL_CONV2D_OUT_PROJ` (clip-impl.h:190 @cd959bae9).
 pub const TN_LFM3VL_CONV2D_OUT_PROJ = "%s.blk.%d.conv2d_out_proj.%s";
-/// `TN_MINICPMV_POS_EMBD_K` (clip-impl.h:188 @8642541b2).
+/// `TN_MINICPMV_POS_EMBD_K` (clip-impl.h:193 @cd959bae9).
 pub const TN_MINICPMV_POS_EMBD_K = "resampler.pos_embed_k";
-/// `TN_MINICPMV_QUERY` (clip-impl.h:189 @8642541b2).
+/// `TN_MINICPMV_QUERY` (clip-impl.h:194 @cd959bae9).
 pub const TN_MINICPMV_QUERY = "resampler.query";
-/// `TN_MINICPMV_PROJ` (clip-impl.h:190 @8642541b2).
+/// `TN_MINICPMV_PROJ` (clip-impl.h:195 @cd959bae9).
 pub const TN_MINICPMV_PROJ = "resampler.proj.weight";
-/// `TN_MINICPMV_KV_PROJ` (clip-impl.h:191 @8642541b2).
+/// `TN_MINICPMV_KV_PROJ` (clip-impl.h:196 @cd959bae9).
 pub const TN_MINICPMV_KV_PROJ = "resampler.kv.weight";
-/// `TN_MINICPMV_ATTN` (clip-impl.h:192 @8642541b2).
+/// `TN_MINICPMV_ATTN` (clip-impl.h:197 @cd959bae9).
 pub const TN_MINICPMV_ATTN = "resampler.attn.%s.%s";
-/// `TN_MINICPMV_LN` (clip-impl.h:193 @8642541b2).
+/// `TN_MINICPMV_LN` (clip-impl.h:198 @cd959bae9).
 pub const TN_MINICPMV_LN = "resampler.ln_%s.%s";
-/// `TN_VIT_MERGER_LN1` (clip-impl.h:197 @8642541b2).
+/// `TN_VIT_MERGER_LN1` (clip-impl.h:202 @cd959bae9).
 pub const TN_VIT_MERGER_LN1 = "v.vit_merger.ln1.%s";
-/// `TN_VIT_MERGER_ATTN_Q` (clip-impl.h:198 @8642541b2).
+/// `TN_VIT_MERGER_ATTN_Q` (clip-impl.h:203 @cd959bae9).
 pub const TN_VIT_MERGER_ATTN_Q = "v.vit_merger.attn_q.%s";
-/// `TN_VIT_MERGER_ATTN_K` (clip-impl.h:199 @8642541b2).
+/// `TN_VIT_MERGER_ATTN_K` (clip-impl.h:204 @cd959bae9).
 pub const TN_VIT_MERGER_ATTN_K = "v.vit_merger.attn_k.%s";
-/// `TN_VIT_MERGER_ATTN_V` (clip-impl.h:200 @8642541b2).
+/// `TN_VIT_MERGER_ATTN_V` (clip-impl.h:205 @cd959bae9).
 pub const TN_VIT_MERGER_ATTN_V = "v.vit_merger.attn_v.%s";
-/// `TN_VIT_MERGER_ATTN_O` (clip-impl.h:201 @8642541b2).
+/// `TN_VIT_MERGER_ATTN_O` (clip-impl.h:206 @cd959bae9).
 pub const TN_VIT_MERGER_ATTN_O = "v.vit_merger.attn_out.%s";
-/// `TN_VIT_MERGER_DS_LN` (clip-impl.h:202 @8642541b2).
+/// `TN_VIT_MERGER_DS_LN` (clip-impl.h:207 @cd959bae9).
 pub const TN_VIT_MERGER_DS_LN = "v.vit_merger.ds_ln.%s";
-/// `TN_VIT_MERGER_DS_UP` (clip-impl.h:203 @8642541b2).
+/// `TN_VIT_MERGER_DS_UP` (clip-impl.h:208 @cd959bae9).
 pub const TN_VIT_MERGER_DS_UP = "v.vit_merger.ds_ffn_up.%s";
-/// `TN_VIT_MERGER_DS_DOWN` (clip-impl.h:204 @8642541b2).
+/// `TN_VIT_MERGER_DS_DOWN` (clip-impl.h:209 @cd959bae9).
 pub const TN_VIT_MERGER_DS_DOWN = "v.vit_merger.ds_ffn_down.%s";
-/// `TN_GLM_ADAPER_CONV` (clip-impl.h:206 @8642541b2).
+/// `TN_GLM_ADAPER_CONV` (clip-impl.h:211 @cd959bae9).
 pub const TN_GLM_ADAPER_CONV = "adapter.conv.%s";
-/// `TN_GLM_ADAPTER_LINEAR` (clip-impl.h:207 @8642541b2).
+/// `TN_GLM_ADAPTER_LINEAR` (clip-impl.h:212 @cd959bae9).
 pub const TN_GLM_ADAPTER_LINEAR = "adapter.linear.linear.%s";
-/// `TN_GLM_ADAPTER_NORM_1` (clip-impl.h:208 @8642541b2).
+/// `TN_GLM_ADAPTER_NORM_1` (clip-impl.h:213 @cd959bae9).
 pub const TN_GLM_ADAPTER_NORM_1 = "adapter.linear.norm1.%s";
-/// `TN_GLM_ADAPTER_D_H_2_4H` (clip-impl.h:209 @8642541b2).
+/// `TN_GLM_ADAPTER_D_H_2_4H` (clip-impl.h:214 @cd959bae9).
 pub const TN_GLM_ADAPTER_D_H_2_4H = "adapter.linear.dense_h_to_4h.%s";
-/// `TN_GLM_ADAPTER_GATE` (clip-impl.h:210 @8642541b2).
+/// `TN_GLM_ADAPTER_GATE` (clip-impl.h:215 @cd959bae9).
 pub const TN_GLM_ADAPTER_GATE = "adapter.linear.gate.%s";
-/// `TN_GLM_ADAPTER_D_4H_2_H` (clip-impl.h:211 @8642541b2).
+/// `TN_GLM_ADAPTER_D_4H_2_H` (clip-impl.h:216 @cd959bae9).
 pub const TN_GLM_ADAPTER_D_4H_2_H = "adapter.linear.dense_4h_to_h.%s";
-/// `TN_CONV1D` (clip-impl.h:214 @8642541b2).
+/// `TN_CONV1D` (clip-impl.h:219 @cd959bae9).
 pub const TN_CONV1D = "a.conv1d.%d.%s";
-/// `TN_CONV2D` (clip-impl.h:215 @8642541b2).
+/// `TN_CONV2D` (clip-impl.h:220 @cd959bae9).
 pub const TN_CONV2D = "a.conv2d.%d.%s";
-/// `TN_CONV_OUT` (clip-impl.h:216 @8642541b2).
+/// `TN_CONV_OUT` (clip-impl.h:221 @cd959bae9).
 pub const TN_CONV_OUT = "a.conv_out.%s";
-/// `TN_MM_AUDIO_MLP` (clip-impl.h:217 @8642541b2).
+/// `TN_MM_AUDIO_MLP` (clip-impl.h:222 @cd959bae9).
 pub const TN_MM_AUDIO_MLP = "mm.a.mlp.%d.%s";
-/// `TN_MM_AUDIO_FC` (clip-impl.h:218 @8642541b2).
+/// `TN_MM_AUDIO_FC` (clip-impl.h:223 @cd959bae9).
 pub const TN_MM_AUDIO_FC = "mm.a.fc.%s";
-/// `TN_MM_NORM_PRE` (clip-impl.h:219 @8642541b2).
+/// `TN_MM_NORM_PRE` (clip-impl.h:224 @cd959bae9).
 pub const TN_MM_NORM_PRE = "mm.a.norm_pre.%s";
-/// `TN_MM_NORM_MID` (clip-impl.h:220 @8642541b2).
+/// `TN_MM_NORM_MID` (clip-impl.h:225 @cd959bae9).
 pub const TN_MM_NORM_MID = "mm.a.norm_mid.%s";
-/// `TN_A_DOWNSAMPLE_CONV` (clip-impl.h:223 @8642541b2).
+/// `TN_A_DOWNSAMPLE_CONV` (clip-impl.h:228 @cd959bae9).
 pub const TN_A_DOWNSAMPLE_CONV = "a.downsample.conv.%s";
-/// `TN_A_DOWNSAMPLE_NORM` (clip-impl.h:224 @8642541b2).
+/// `TN_A_DOWNSAMPLE_NORM` (clip-impl.h:229 @cd959bae9).
 pub const TN_A_DOWNSAMPLE_NORM = "a.downsample.norm.%s";
-/// `TN_A_RVQ_CODEBOOK` (clip-impl.h:225 @8642541b2).
+/// `TN_A_RVQ_CODEBOOK` (clip-impl.h:230 @cd959bae9).
 pub const TN_A_RVQ_CODEBOOK = "a.rvq.codebook.%s";
-/// `TN_MM_A_CODE_EMBD` (clip-impl.h:227 @8642541b2).
+/// `TN_MM_A_CODE_EMBD` (clip-impl.h:232 @cd959bae9).
 pub const TN_MM_A_CODE_EMBD = "mm.a.code_embd.%s";
-/// `TN_MM_A_LOCAL_ATTN_Q` (clip-impl.h:229 @8642541b2).
+/// `TN_MM_A_LOCAL_ATTN_Q` (clip-impl.h:234 @cd959bae9).
 pub const TN_MM_A_LOCAL_ATTN_Q = "mm.a.local_blk.%d.attn_q.%s";
-/// `TN_MM_A_LOCAL_ATTN_K` (clip-impl.h:230 @8642541b2).
+/// `TN_MM_A_LOCAL_ATTN_K` (clip-impl.h:235 @cd959bae9).
 pub const TN_MM_A_LOCAL_ATTN_K = "mm.a.local_blk.%d.attn_k.%s";
-/// `TN_MM_A_LOCAL_ATTN_V` (clip-impl.h:231 @8642541b2).
+/// `TN_MM_A_LOCAL_ATTN_V` (clip-impl.h:236 @cd959bae9).
 pub const TN_MM_A_LOCAL_ATTN_V = "mm.a.local_blk.%d.attn_v.%s";
-/// `TN_MM_A_LOCAL_ATTN_OUT` (clip-impl.h:232 @8642541b2).
+/// `TN_MM_A_LOCAL_ATTN_OUT` (clip-impl.h:237 @cd959bae9).
 pub const TN_MM_A_LOCAL_ATTN_OUT = "mm.a.local_blk.%d.attn_out.%s";
-/// `TN_MM_A_LOCAL_FFN_GATE` (clip-impl.h:233 @8642541b2).
+/// `TN_MM_A_LOCAL_FFN_GATE` (clip-impl.h:238 @cd959bae9).
 pub const TN_MM_A_LOCAL_FFN_GATE = "mm.a.local_blk.%d.ffn_gate.%s";
-/// `TN_MM_A_LOCAL_FFN_UP` (clip-impl.h:234 @8642541b2).
+/// `TN_MM_A_LOCAL_FFN_UP` (clip-impl.h:239 @cd959bae9).
 pub const TN_MM_A_LOCAL_FFN_UP = "mm.a.local_blk.%d.ffn_up.%s";
-/// `TN_MM_A_LOCAL_FFN_DOWN` (clip-impl.h:235 @8642541b2).
+/// `TN_MM_A_LOCAL_FFN_DOWN` (clip-impl.h:240 @cd959bae9).
 pub const TN_MM_A_LOCAL_FFN_DOWN = "mm.a.local_blk.%d.ffn_down.%s";
-/// `TN_MM_A_LOCAL_LN1` (clip-impl.h:236 @8642541b2).
+/// `TN_MM_A_LOCAL_LN1` (clip-impl.h:241 @cd959bae9).
 pub const TN_MM_A_LOCAL_LN1 = "mm.a.local_blk.%d.ln1.%s";
-/// `TN_MM_A_LOCAL_LN2` (clip-impl.h:237 @8642541b2).
+/// `TN_MM_A_LOCAL_LN2` (clip-impl.h:242 @cd959bae9).
 pub const TN_MM_A_LOCAL_LN2 = "mm.a.local_blk.%d.ln2.%s";
-/// `TN_MM_A_LOCAL_NORM` (clip-impl.h:238 @8642541b2).
+/// `TN_MM_A_LOCAL_NORM` (clip-impl.h:243 @cd959bae9).
 pub const TN_MM_A_LOCAL_NORM = "mm.a.local_norm.%s";
-/// `TN_A_SE_CONV1` (clip-impl.h:241 @8642541b2).
+/// `TN_A_SE_CONV1` (clip-impl.h:246 @cd959bae9).
 pub const TN_A_SE_CONV1 = "a.blk.%d.se_conv1.%s";
-/// `TN_A_SE_CONV2` (clip-impl.h:242 @8642541b2).
+/// `TN_A_SE_CONV2` (clip-impl.h:247 @cd959bae9).
 pub const TN_A_SE_CONV2 = "a.blk.%d.se_conv2.%s";
-/// `TN_A_CONV_RES2` (clip-impl.h:243 @8642541b2).
+/// `TN_A_CONV_RES2` (clip-impl.h:248 @cd959bae9).
 pub const TN_A_CONV_RES2 = "a.blk.%d.res2.%d.%s";
-/// `TN_A_ASP_ATTN` (clip-impl.h:244 @8642541b2).
+/// `TN_A_ASP_ATTN` (clip-impl.h:249 @cd959bae9).
 pub const TN_A_ASP_ATTN = "a.asp_attn.%s";
-/// `TN_A_ASP_TDNN` (clip-impl.h:245 @8642541b2).
+/// `TN_A_ASP_TDNN` (clip-impl.h:250 @cd959bae9).
 pub const TN_A_ASP_TDNN = "a.asp_tdnn.%s";
-/// `TN_A_GEN_CODE_PROJ_IN` (clip-impl.h:248 @8642541b2).
+/// `TN_A_GEN_CODE_PROJ_IN` (clip-impl.h:253 @cd959bae9).
 pub const TN_A_GEN_CODE_PROJ_IN = "a.gen.code.proj_in.%s";
-/// `TN_A_GEN_CODE_EMBD` (clip-impl.h:249 @8642541b2).
+/// `TN_A_GEN_CODE_EMBD` (clip-impl.h:254 @cd959bae9).
 pub const TN_A_GEN_CODE_EMBD = "a.gen.code.embd.%s";
-/// `TN_A_GEN_CODE_HEAD` (clip-impl.h:250 @8642541b2).
+/// `TN_A_GEN_CODE_HEAD` (clip-impl.h:255 @cd959bae9).
 pub const TN_A_GEN_CODE_HEAD = "a.gen.code.head.%s";
-/// `TN_A_GEN_CODE_OUT_EMBD` (clip-impl.h:251 @8642541b2).
+/// `TN_A_GEN_CODE_OUT_EMBD` (clip-impl.h:256 @cd959bae9).
 pub const TN_A_GEN_CODE_OUT_EMBD = "a.gen.code.out_embd.%s";
-/// `TN_A_GEN_CODE_NORM` (clip-impl.h:252 @8642541b2).
+/// `TN_A_GEN_CODE_NORM` (clip-impl.h:257 @cd959bae9).
 pub const TN_A_GEN_CODE_NORM = "a.gen.code.output_norm.%s";
-/// `TN_A_GEN_CODE_HEAD_NORM` (clip-impl.h:255 @8642541b2).
+/// `TN_A_GEN_CODE_HEAD_NORM` (clip-impl.h:260 @cd959bae9).
 pub const TN_A_GEN_CODE_HEAD_NORM = "a.gen.code.head_norm.%s";
-/// `TN_A_GEN_CODE_MASK_EMBD` (clip-impl.h:256 @8642541b2).
+/// `TN_A_GEN_CODE_MASK_EMBD` (clip-impl.h:261 @cd959bae9).
 pub const TN_A_GEN_CODE_MASK_EMBD = "a.gen.code.mask_embd";
-/// `TN_ATTN_GATE` (clip-impl.h:257 @8642541b2).
+/// `TN_ATTN_GATE` (clip-impl.h:262 @cd959bae9).
 pub const TN_ATTN_GATE = "%s.blk.%d.attn_gate.%s";
-/// `TN_A_GEN_WAV_QUANT_FIRST_IN` (clip-impl.h:261 @8642541b2).
+/// `TN_A_GEN_WAV_QUANT_FIRST_IN` (clip-impl.h:266 @cd959bae9).
 pub const TN_A_GEN_WAV_QUANT_FIRST_IN = "a.gen.wav.quant.first.in_proj.%s";
-/// `TN_A_GEN_WAV_QUANT_FIRST_OUT` (clip-impl.h:262 @8642541b2).
+/// `TN_A_GEN_WAV_QUANT_FIRST_OUT` (clip-impl.h:267 @cd959bae9).
 pub const TN_A_GEN_WAV_QUANT_FIRST_OUT = "a.gen.wav.quant.first.out_proj.%s";
-/// `TN_A_GEN_WAV_QUANT_FIRST_CB` (clip-impl.h:263 @8642541b2).
+/// `TN_A_GEN_WAV_QUANT_FIRST_CB` (clip-impl.h:268 @cd959bae9).
 pub const TN_A_GEN_WAV_QUANT_FIRST_CB = "a.gen.wav.quant.first.codebook.%s";
-/// `TN_A_GEN_WAV_QUANT_REST_IN` (clip-impl.h:264 @8642541b2).
+/// `TN_A_GEN_WAV_QUANT_REST_IN` (clip-impl.h:269 @cd959bae9).
 pub const TN_A_GEN_WAV_QUANT_REST_IN = "a.gen.wav.quant.rest.in_proj.%s";
-/// `TN_A_GEN_WAV_QUANT_REST_OUT` (clip-impl.h:265 @8642541b2).
+/// `TN_A_GEN_WAV_QUANT_REST_OUT` (clip-impl.h:270 @cd959bae9).
 pub const TN_A_GEN_WAV_QUANT_REST_OUT = "a.gen.wav.quant.rest.out_proj.%s";
-/// `TN_A_GEN_WAV_QUANT_REST_CB` (clip-impl.h:266 @8642541b2).
+/// `TN_A_GEN_WAV_QUANT_REST_CB` (clip-impl.h:271 @cd959bae9).
 pub const TN_A_GEN_WAV_QUANT_REST_CB = "a.gen.wav.quant.rest.codebook.%s";
-/// `TN_A_GEN_WAV_PRE_CONV` (clip-impl.h:267 @8642541b2).
+/// `TN_A_GEN_WAV_PRE_CONV` (clip-impl.h:272 @cd959bae9).
 pub const TN_A_GEN_WAV_PRE_CONV = "a.gen.wav.pre_conv.%s";
-/// `TN_A_GEN_WAV_TFM_IN_PROJ` (clip-impl.h:268 @8642541b2).
+/// `TN_A_GEN_WAV_TFM_IN_PROJ` (clip-impl.h:273 @cd959bae9).
 pub const TN_A_GEN_WAV_TFM_IN_PROJ = "a.gen.wav.tfm.in_proj.%s";
-/// `TN_A_GEN_WAV_TFM_OUT_PROJ` (clip-impl.h:269 @8642541b2).
+/// `TN_A_GEN_WAV_TFM_OUT_PROJ` (clip-impl.h:274 @cd959bae9).
 pub const TN_A_GEN_WAV_TFM_OUT_PROJ = "a.gen.wav.tfm.out_proj.%s";
-/// `TN_A_GEN_WAV_TFM_OUT_NORM` (clip-impl.h:270 @8642541b2).
+/// `TN_A_GEN_WAV_TFM_OUT_NORM` (clip-impl.h:275 @cd959bae9).
 pub const TN_A_GEN_WAV_TFM_OUT_NORM = "a.gen.wav.tfm.output_norm.%s";
-/// `TN_A_GEN_WAV_UP_CONV` (clip-impl.h:271 @8642541b2).
+/// `TN_A_GEN_WAV_UP_CONV` (clip-impl.h:276 @cd959bae9).
 pub const TN_A_GEN_WAV_UP_CONV = "a.gen.wav.up.blk.%d.conv.%s";
-/// `TN_A_GEN_WAV_UP_DWCONV` (clip-impl.h:272 @8642541b2).
+/// `TN_A_GEN_WAV_UP_DWCONV` (clip-impl.h:277 @cd959bae9).
 pub const TN_A_GEN_WAV_UP_DWCONV = "a.gen.wav.up.blk.%d.dwconv.%s";
-/// `TN_A_GEN_WAV_UP_NORM` (clip-impl.h:273 @8642541b2).
+/// `TN_A_GEN_WAV_UP_NORM` (clip-impl.h:278 @cd959bae9).
 pub const TN_A_GEN_WAV_UP_NORM = "a.gen.wav.up.blk.%d.norm.%s";
-/// `TN_A_GEN_WAV_UP_PW1` (clip-impl.h:274 @8642541b2).
+/// `TN_A_GEN_WAV_UP_PW1` (clip-impl.h:279 @cd959bae9).
 pub const TN_A_GEN_WAV_UP_PW1 = "a.gen.wav.up.blk.%d.pw1.%s";
-/// `TN_A_GEN_WAV_UP_PW2` (clip-impl.h:275 @8642541b2).
+/// `TN_A_GEN_WAV_UP_PW2` (clip-impl.h:280 @cd959bae9).
 pub const TN_A_GEN_WAV_UP_PW2 = "a.gen.wav.up.blk.%d.pw2.%s";
-/// `TN_A_GEN_WAV_UP_GAMMA` (clip-impl.h:276 @8642541b2).
+/// `TN_A_GEN_WAV_UP_GAMMA` (clip-impl.h:281 @cd959bae9).
 pub const TN_A_GEN_WAV_UP_GAMMA = "a.gen.wav.up.blk.%d.gamma";
-/// `TN_A_GEN_WAV_DAC_ENTRY` (clip-impl.h:277 @8642541b2).
+/// `TN_A_GEN_WAV_DAC_ENTRY` (clip-impl.h:282 @cd959bae9).
 pub const TN_A_GEN_WAV_DAC_ENTRY = "a.gen.wav.dac.entry.%s";
-/// `TN_A_GEN_WAV_DAC_SNAKE` (clip-impl.h:278 @8642541b2).
+/// `TN_A_GEN_WAV_DAC_SNAKE` (clip-impl.h:283 @cd959bae9).
 pub const TN_A_GEN_WAV_DAC_SNAKE = "a.gen.wav.dac.blk.%d.snake.%s";
-/// `TN_A_GEN_WAV_DAC_CONV` (clip-impl.h:279 @8642541b2).
+/// `TN_A_GEN_WAV_DAC_CONV` (clip-impl.h:284 @cd959bae9).
 pub const TN_A_GEN_WAV_DAC_CONV = "a.gen.wav.dac.blk.%d.conv.%s";
-/// `TN_A_GEN_WAV_DAC_RES_ACT1` (clip-impl.h:280 @8642541b2).
+/// `TN_A_GEN_WAV_DAC_RES_ACT1` (clip-impl.h:285 @cd959bae9).
 pub const TN_A_GEN_WAV_DAC_RES_ACT1 = "a.gen.wav.dac.blk.%d.res.%d.act1.%s";
-/// `TN_A_GEN_WAV_DAC_RES_CONV1` (clip-impl.h:281 @8642541b2).
+/// `TN_A_GEN_WAV_DAC_RES_CONV1` (clip-impl.h:286 @cd959bae9).
 pub const TN_A_GEN_WAV_DAC_RES_CONV1 = "a.gen.wav.dac.blk.%d.res.%d.conv1.%s";
-/// `TN_A_GEN_WAV_DAC_RES_ACT2` (clip-impl.h:282 @8642541b2).
+/// `TN_A_GEN_WAV_DAC_RES_ACT2` (clip-impl.h:287 @cd959bae9).
 pub const TN_A_GEN_WAV_DAC_RES_ACT2 = "a.gen.wav.dac.blk.%d.res.%d.act2.%s";
-/// `TN_A_GEN_WAV_DAC_RES_CONV2` (clip-impl.h:283 @8642541b2).
+/// `TN_A_GEN_WAV_DAC_RES_CONV2` (clip-impl.h:288 @cd959bae9).
 pub const TN_A_GEN_WAV_DAC_RES_CONV2 = "a.gen.wav.dac.blk.%d.res.%d.conv2.%s";
-/// `TN_A_GEN_WAV_DAC_POST_SNAKE` (clip-impl.h:284 @8642541b2).
+/// `TN_A_GEN_WAV_DAC_POST_SNAKE` (clip-impl.h:289 @cd959bae9).
 pub const TN_A_GEN_WAV_DAC_POST_SNAKE = "a.gen.wav.dac.post_snake.%s";
-/// `TN_A_GEN_WAV_DAC_POST_CONV` (clip-impl.h:285 @8642541b2).
+/// `TN_A_GEN_WAV_DAC_POST_CONV` (clip-impl.h:290 @cd959bae9).
 pub const TN_A_GEN_WAV_DAC_POST_CONV = "a.gen.wav.dac.post_conv.%s";
-/// `TN_A_SEANET_CONV_IN` (clip-impl.h:288 @8642541b2).
+/// `TN_A_SEANET_CONV_IN` (clip-impl.h:293 @cd959bae9).
 pub const TN_A_SEANET_CONV_IN = "a.seanet.conv_in.%s";
-/// `TN_A_SEANET_CONV_OUT` (clip-impl.h:289 @8642541b2).
+/// `TN_A_SEANET_CONV_OUT` (clip-impl.h:294 @cd959bae9).
 pub const TN_A_SEANET_CONV_OUT = "a.seanet.conv_out.%s";
-/// `TN_A_SEANET_RES_CONV1` (clip-impl.h:290 @8642541b2).
+/// `TN_A_SEANET_RES_CONV1` (clip-impl.h:295 @cd959bae9).
 pub const TN_A_SEANET_RES_CONV1 = "a.seanet.blk.%d.res_conv1.%s";
-/// `TN_A_SEANET_RES_CONV2` (clip-impl.h:291 @8642541b2).
+/// `TN_A_SEANET_RES_CONV2` (clip-impl.h:296 @cd959bae9).
 pub const TN_A_SEANET_RES_CONV2 = "a.seanet.blk.%d.res_conv2.%s";
-/// `TN_A_SEANET_SCALE_CONV` (clip-impl.h:292 @8642541b2).
+/// `TN_A_SEANET_SCALE_CONV` (clip-impl.h:297 @cd959bae9).
 pub const TN_A_SEANET_SCALE_CONV = "a.seanet.blk.%d.scale_conv.%s";
-/// `TN_A_SPEAKER_PROJ` (clip-impl.h:293 @8642541b2).
+/// `TN_A_SPEAKER_PROJ` (clip-impl.h:298 @cd959bae9).
 pub const TN_A_SPEAKER_PROJ = "a.speaker_proj.%s";
-/// `TN_A_GEN_FLOW_INPUT_PROJ` (clip-impl.h:295 @8642541b2).
+/// `TN_A_GEN_FLOW_INPUT_PROJ` (clip-impl.h:300 @cd959bae9).
 pub const TN_A_GEN_FLOW_INPUT_PROJ = "a.gen.flow.input_proj.%s";
-/// `TN_A_GEN_FLOW_COND_EMBD` (clip-impl.h:296 @8642541b2).
+/// `TN_A_GEN_FLOW_COND_EMBD` (clip-impl.h:301 @cd959bae9).
 pub const TN_A_GEN_FLOW_COND_EMBD = "a.gen.flow.cond_embd.%s";
-/// `TN_A_GEN_FLOW_TIME_FREQS` (clip-impl.h:297 @8642541b2).
+/// `TN_A_GEN_FLOW_TIME_FREQS` (clip-impl.h:302 @cd959bae9).
 pub const TN_A_GEN_FLOW_TIME_FREQS = "a.gen.flow.time.%d.freqs";
-/// `TN_A_GEN_FLOW_TIME_UP` (clip-impl.h:298 @8642541b2).
+/// `TN_A_GEN_FLOW_TIME_UP` (clip-impl.h:303 @cd959bae9).
 pub const TN_A_GEN_FLOW_TIME_UP = "a.gen.flow.time.%d.up.%s";
-/// `TN_A_GEN_FLOW_TIME_DOWN` (clip-impl.h:299 @8642541b2).
+/// `TN_A_GEN_FLOW_TIME_DOWN` (clip-impl.h:304 @cd959bae9).
 pub const TN_A_GEN_FLOW_TIME_DOWN = "a.gen.flow.time.%d.down.%s";
-/// `TN_A_GEN_FLOW_TIME_NORM` (clip-impl.h:300 @8642541b2).
+/// `TN_A_GEN_FLOW_TIME_NORM` (clip-impl.h:305 @cd959bae9).
 pub const TN_A_GEN_FLOW_TIME_NORM = "a.gen.flow.time.%d.norm";
-/// `TN_A_GEN_FLOW_BLK_NORM` (clip-impl.h:301 @8642541b2).
+/// `TN_A_GEN_FLOW_BLK_NORM` (clip-impl.h:306 @cd959bae9).
 pub const TN_A_GEN_FLOW_BLK_NORM = "a.gen.flow.blk.%d.norm.%s";
-/// `TN_A_GEN_FLOW_BLK_UP` (clip-impl.h:302 @8642541b2).
+/// `TN_A_GEN_FLOW_BLK_UP` (clip-impl.h:307 @cd959bae9).
 pub const TN_A_GEN_FLOW_BLK_UP = "a.gen.flow.blk.%d.up.%s";
-/// `TN_A_GEN_FLOW_BLK_DOWN` (clip-impl.h:303 @8642541b2).
+/// `TN_A_GEN_FLOW_BLK_DOWN` (clip-impl.h:308 @cd959bae9).
 pub const TN_A_GEN_FLOW_BLK_DOWN = "a.gen.flow.blk.%d.down.%s";
-/// `TN_A_GEN_FLOW_BLK_ADA` (clip-impl.h:304 @8642541b2).
+/// `TN_A_GEN_FLOW_BLK_ADA` (clip-impl.h:309 @cd959bae9).
 pub const TN_A_GEN_FLOW_BLK_ADA = "a.gen.flow.blk.%d.ada.%s";
-/// `TN_A_GEN_FLOW_FINAL_ADA` (clip-impl.h:305 @8642541b2).
+/// `TN_A_GEN_FLOW_FINAL_ADA` (clip-impl.h:310 @cd959bae9).
 pub const TN_A_GEN_FLOW_FINAL_ADA = "a.gen.flow.final.ada.%s";
-/// `TN_A_GEN_FLOW_FINAL_PROJ` (clip-impl.h:306 @8642541b2).
+/// `TN_A_GEN_FLOW_FINAL_PROJ` (clip-impl.h:311 @cd959bae9).
 pub const TN_A_GEN_FLOW_FINAL_PROJ = "a.gen.flow.final.proj.%s";
-/// `TN_A_GEN_OUT_EOS` (clip-impl.h:307 @8642541b2).
+/// `TN_A_GEN_OUT_EOS` (clip-impl.h:312 @cd959bae9).
 pub const TN_A_GEN_OUT_EOS = "a.gen.out_eos.%s";
-/// `TN_A_GEN_INPUT_LINEAR` (clip-impl.h:308 @8642541b2).
+/// `TN_A_GEN_INPUT_LINEAR` (clip-impl.h:313 @cd959bae9).
 pub const TN_A_GEN_INPUT_LINEAR = "a.gen.input_linear.%s";
-/// `TN_A_GEN_EMB_MEAN` (clip-impl.h:309 @8642541b2).
+/// `TN_A_GEN_EMB_MEAN` (clip-impl.h:314 @cd959bae9).
 pub const TN_A_GEN_EMB_MEAN = "a.gen.emb_mean";
-/// `TN_A_GEN_EMB_STD` (clip-impl.h:310 @8642541b2).
+/// `TN_A_GEN_EMB_STD` (clip-impl.h:315 @cd959bae9).
 pub const TN_A_GEN_EMB_STD = "a.gen.emb_std";
-/// `TN_A_GEN_WAV_QUANT_OUT` (clip-impl.h:311 @8642541b2).
+/// `TN_A_GEN_WAV_QUANT_OUT` (clip-impl.h:316 @cd959bae9).
 pub const TN_A_GEN_WAV_QUANT_OUT = "a.gen.wav.quant_out.%s";
-/// `TN_A_GEN_WAV_UPSAMPLE` (clip-impl.h:312 @8642541b2).
+/// `TN_A_GEN_WAV_UPSAMPLE` (clip-impl.h:317 @cd959bae9).
 pub const TN_A_GEN_WAV_UPSAMPLE = "a.gen.wav.upsample.%s";
-/// `TN_A_GEN_WAV_SEANET_CONV_IN` (clip-impl.h:313 @8642541b2).
+/// `TN_A_GEN_WAV_SEANET_CONV_IN` (clip-impl.h:318 @cd959bae9).
 pub const TN_A_GEN_WAV_SEANET_CONV_IN = "a.gen.wav.seanet.conv_in.%s";
-/// `TN_A_GEN_WAV_SEANET_CONV_OUT` (clip-impl.h:314 @8642541b2).
+/// `TN_A_GEN_WAV_SEANET_CONV_OUT` (clip-impl.h:319 @cd959bae9).
 pub const TN_A_GEN_WAV_SEANET_CONV_OUT = "a.gen.wav.seanet.conv_out.%s";
-/// `TN_A_GEN_WAV_SEANET_RES_CONV1` (clip-impl.h:315 @8642541b2).
+/// `TN_A_GEN_WAV_SEANET_RES_CONV1` (clip-impl.h:320 @cd959bae9).
 pub const TN_A_GEN_WAV_SEANET_RES_CONV1 = "a.gen.wav.seanet.blk.%d.res_conv1.%s";
-/// `TN_A_GEN_WAV_SEANET_RES_CONV2` (clip-impl.h:316 @8642541b2).
+/// `TN_A_GEN_WAV_SEANET_RES_CONV2` (clip-impl.h:321 @cd959bae9).
 pub const TN_A_GEN_WAV_SEANET_RES_CONV2 = "a.gen.wav.seanet.blk.%d.res_conv2.%s";
-/// `TN_A_GEN_WAV_SEANET_SCALE_CONV` (clip-impl.h:317 @8642541b2).
+/// `TN_A_GEN_WAV_SEANET_SCALE_CONV` (clip-impl.h:322 @cd959bae9).
 pub const TN_A_GEN_WAV_SEANET_SCALE_CONV = "a.gen.wav.seanet.blk.%d.scale_conv.%s";
-/// `TN_A_GEN_WAV_INPUT` (clip-impl.h:320 @8642541b2).
+/// `TN_A_GEN_WAV_INPUT` (clip-impl.h:325 @cd959bae9).
 pub const TN_A_GEN_WAV_INPUT = "a.gen.wav.input.%s";
-/// `TN_A_GEN_WAV_NORM` (clip-impl.h:321 @8642541b2).
+/// `TN_A_GEN_WAV_NORM` (clip-impl.h:326 @cd959bae9).
 pub const TN_A_GEN_WAV_NORM = "a.gen.wav.norm.%s";
-/// `TN_A_GEN_WAV_OUTPUT_NORM` (clip-impl.h:322 @8642541b2).
+/// `TN_A_GEN_WAV_OUTPUT_NORM` (clip-impl.h:327 @cd959bae9).
 pub const TN_A_GEN_WAV_OUTPUT_NORM = "a.gen.wav.output_norm.%s";
-/// `TN_A_GEN_WAV_OUTPUT` (clip-impl.h:323 @8642541b2).
+/// `TN_A_GEN_WAV_OUTPUT` (clip-impl.h:328 @cd959bae9).
 pub const TN_A_GEN_WAV_OUTPUT = "a.gen.wav.output.%s";
-/// `TN_MM_POST_FC_NORM` (clip-impl.h:326 @8642541b2).
+/// `TN_MM_POST_FC_NORM` (clip-impl.h:331 @cd959bae9).
 pub const TN_MM_POST_FC_NORM = "mm.post_fc_norm.%s";
-/// `TN_MM_H_TO_4H` (clip-impl.h:327 @8642541b2).
+/// `TN_MM_H_TO_4H` (clip-impl.h:332 @cd959bae9).
 pub const TN_MM_H_TO_4H = "mm.up.%s";
-/// `TN_MM_4H_TO_H` (clip-impl.h:329 @8642541b2).
+/// `TN_MM_4H_TO_H` (clip-impl.h:334 @cd959bae9).
 pub const TN_MM_4H_TO_H = "mm.down.%s";
-/// `TN_TOK_BOI` (clip-impl.h:330 @8642541b2).
+/// `TN_TOK_BOI` (clip-impl.h:335 @cd959bae9).
 pub const TN_TOK_BOI = "v.boi";
-/// `TN_TOK_EOI` (clip-impl.h:331 @8642541b2).
+/// `TN_TOK_EOI` (clip-impl.h:336 @cd959bae9).
 pub const TN_TOK_EOI = "v.eoi";
-/// `TN_MM_PRE_NORM` (clip-impl.h:334 @8642541b2).
+/// `TN_MM_PRE_NORM` (clip-impl.h:339 @cd959bae9).
 pub const TN_MM_PRE_NORM = "mm.pre_norm.%s";
-/// `TN_MM_IMG_BEGIN` (clip-impl.h:335 @8642541b2).
+/// `TN_MM_IMG_BEGIN` (clip-impl.h:340 @cd959bae9).
 pub const TN_MM_IMG_BEGIN = "mm.image_begin";
-/// `TN_MM_IMG_END` (clip-impl.h:336 @8642541b2).
+/// `TN_MM_IMG_END` (clip-impl.h:341 @cd959bae9).
 pub const TN_MM_IMG_END = "mm.image_end";
-/// `TN_SAM_POS_EMBD` (clip-impl.h:339 @8642541b2).
+/// `TN_SAM_POS_EMBD` (clip-impl.h:344 @cd959bae9).
 pub const TN_SAM_POS_EMBD = "v.sam.pos_embd.%s";
-/// `TN_SAM_PATCH_EMBD` (clip-impl.h:340 @8642541b2).
+/// `TN_SAM_PATCH_EMBD` (clip-impl.h:345 @cd959bae9).
 pub const TN_SAM_PATCH_EMBD = "v.sam.patch_embd.%s";
-/// `TN_SAM_PRE_NORM` (clip-impl.h:341 @8642541b2).
+/// `TN_SAM_PRE_NORM` (clip-impl.h:346 @cd959bae9).
 pub const TN_SAM_PRE_NORM = "v.sam.blk.%d.pre_ln.%s";
-/// `TN_SAM_POST_NORM` (clip-impl.h:342 @8642541b2).
+/// `TN_SAM_POST_NORM` (clip-impl.h:347 @cd959bae9).
 pub const TN_SAM_POST_NORM = "v.sam.blk.%d.post_ln.%s";
-/// `TN_SAM_ATTN_POS_H` (clip-impl.h:343 @8642541b2).
+/// `TN_SAM_ATTN_POS_H` (clip-impl.h:348 @cd959bae9).
 pub const TN_SAM_ATTN_POS_H = "v.sam.blk.%d.attn.pos_h.%s";
-/// `TN_SAM_ATTN_POS_W` (clip-impl.h:344 @8642541b2).
+/// `TN_SAM_ATTN_POS_W` (clip-impl.h:349 @cd959bae9).
 pub const TN_SAM_ATTN_POS_W = "v.sam.blk.%d.attn.pos_w.%s";
-/// `TN_SAM_ATTN_QKV` (clip-impl.h:345 @8642541b2).
+/// `TN_SAM_ATTN_QKV` (clip-impl.h:350 @cd959bae9).
 pub const TN_SAM_ATTN_QKV = "v.sam.blk.%d.attn.qkv.%s";
-/// `TN_SAM_ATTN_OUT` (clip-impl.h:346 @8642541b2).
+/// `TN_SAM_ATTN_OUT` (clip-impl.h:351 @cd959bae9).
 pub const TN_SAM_ATTN_OUT = "v.sam.blk.%d.attn.out.%s";
-/// `TN_SAM_FFN_UP` (clip-impl.h:347 @8642541b2).
+/// `TN_SAM_FFN_UP` (clip-impl.h:352 @cd959bae9).
 pub const TN_SAM_FFN_UP = "v.sam.blk.%d.mlp.lin1.%s";
-/// `TN_SAM_FFN_DOWN` (clip-impl.h:348 @8642541b2).
+/// `TN_SAM_FFN_DOWN` (clip-impl.h:353 @cd959bae9).
 pub const TN_SAM_FFN_DOWN = "v.sam.blk.%d.mlp.lin2.%s";
-/// `TN_SAM_NECK` (clip-impl.h:349 @8642541b2).
+/// `TN_SAM_NECK` (clip-impl.h:354 @cd959bae9).
 pub const TN_SAM_NECK = "v.sam.neck.%d.%s";
-/// `TN_SAM_NET` (clip-impl.h:350 @8642541b2).
+/// `TN_SAM_NET` (clip-impl.h:355 @cd959bae9).
 pub const TN_SAM_NET = "v.sam.net_%d.%s";
-/// `TN_RESMPL_QUERY` (clip-impl.h:352 @8642541b2).
+/// `TN_RESMPL_QUERY` (clip-impl.h:357 @cd959bae9).
 pub const TN_RESMPL_QUERY = "v.resample_query_%d.%s";
-/// `TN_PRE_ENCODE_OUT` (clip-impl.h:354 @8642541b2).
+/// `TN_PRE_ENCODE_OUT` (clip-impl.h:359 @cd959bae9).
 pub const TN_PRE_ENCODE_OUT = "a.pre_encode.out.%s";
-/// `TN_FFN_NORM` (clip-impl.h:355 @8642541b2).
+/// `TN_FFN_NORM` (clip-impl.h:360 @cd959bae9).
 pub const TN_FFN_NORM = "%s.blk.%d.ffn_norm.%s";
-/// `TN_FFN_NORM_1` (clip-impl.h:356 @8642541b2).
+/// `TN_FFN_NORM_1` (clip-impl.h:361 @cd959bae9).
 pub const TN_FFN_NORM_1 = "%s.blk.%d.ffn_norm_1.%s";
-/// `TN_FFN_UP_1` (clip-impl.h:357 @8642541b2).
+/// `TN_FFN_UP_1` (clip-impl.h:362 @cd959bae9).
 pub const TN_FFN_UP_1 = "%s.blk.%d.ffn_up_1.%s";
-/// `TN_FFN_DOWN_1` (clip-impl.h:358 @8642541b2).
+/// `TN_FFN_DOWN_1` (clip-impl.h:363 @cd959bae9).
 pub const TN_FFN_DOWN_1 = "%s.blk.%d.ffn_down_1.%s";
-/// `TN_POS_BIAS_U` (clip-impl.h:359 @8642541b2).
+/// `TN_POS_BIAS_U` (clip-impl.h:364 @cd959bae9).
 pub const TN_POS_BIAS_U = "%s.blk.%d.pos_bias_u";
-/// `TN_POS_BIAS_V` (clip-impl.h:360 @8642541b2).
+/// `TN_POS_BIAS_V` (clip-impl.h:365 @cd959bae9).
 pub const TN_POS_BIAS_V = "%s.blk.%d.pos_bias_v";
-/// `TN_NORM_CONV` (clip-impl.h:361 @8642541b2).
+/// `TN_NORM_CONV` (clip-impl.h:366 @cd959bae9).
 pub const TN_NORM_CONV = "%s.blk.%d.norm_conv.%s";
-/// `TN_LINEAR_POS` (clip-impl.h:362 @8642541b2).
+/// `TN_LINEAR_POS` (clip-impl.h:367 @cd959bae9).
 pub const TN_LINEAR_POS = "%s.blk.%d.linear_pos.%s";
-/// `TN_CONV_DW` (clip-impl.h:363 @8642541b2).
+/// `TN_CONV_DW` (clip-impl.h:368 @cd959bae9).
 pub const TN_CONV_DW = "%s.blk.%d.conv_dw.%s";
-/// `TN_CONV_NORM` (clip-impl.h:364 @8642541b2).
+/// `TN_CONV_NORM` (clip-impl.h:369 @cd959bae9).
 pub const TN_CONV_NORM = "%s.blk.%d.conv_norm.%s";
-/// `TN_CONV_PW1` (clip-impl.h:365 @8642541b2).
+/// `TN_CONV_PW1` (clip-impl.h:370 @cd959bae9).
 pub const TN_CONV_PW1 = "%s.blk.%d.conv_pw1.%s";
-/// `TN_CONV_PW2` (clip-impl.h:366 @8642541b2).
+/// `TN_CONV_PW2` (clip-impl.h:371 @cd959bae9).
 pub const TN_CONV_PW2 = "%s.blk.%d.conv_pw2.%s";
-/// `TN_INP_PROJ` (clip-impl.h:367 @8642541b2).
+/// `TN_INP_PROJ` (clip-impl.h:372 @cd959bae9).
 pub const TN_INP_PROJ = "a.input_projection.%s";
-/// `TN_CTC_OUT` (clip-impl.h:368 @8642541b2).
+/// `TN_CTC_OUT` (clip-impl.h:373 @cd959bae9).
 pub const TN_CTC_OUT = "a.enc_ctc_out.%s";
-/// `TN_CTC_OUT_MID` (clip-impl.h:369 @8642541b2).
+/// `TN_CTC_OUT_MID` (clip-impl.h:374 @cd959bae9).
 pub const TN_CTC_OUT_MID = "a.enc_ctc_out_mid.%s";
-/// `TN_ATTN_REL_POS_EMB` (clip-impl.h:370 @8642541b2).
+/// `TN_ATTN_REL_POS_EMB` (clip-impl.h:375 @cd959bae9).
 pub const TN_ATTN_REL_POS_EMB = "%s.blk.%d.attn_rel_pos_emb";
-/// `TN_QF_PROJ_QUERY` (clip-impl.h:372 @8642541b2).
+/// `TN_QF_PROJ_QUERY` (clip-impl.h:377 @cd959bae9).
 pub const TN_QF_PROJ_QUERY = "%s.proj_query";
-/// `TN_QF_PROJ_NORM` (clip-impl.h:373 @8642541b2).
+/// `TN_QF_PROJ_NORM` (clip-impl.h:378 @cd959bae9).
 pub const TN_QF_PROJ_NORM = "%s.proj_norm.%s";
-/// `TN_QF_PROJ_LINEAR` (clip-impl.h:374 @8642541b2).
+/// `TN_QF_PROJ_LINEAR` (clip-impl.h:379 @cd959bae9).
 pub const TN_QF_PROJ_LINEAR = "%s.proj_linear.%s";
-/// `TN_QF_SELF_ATTN_Q` (clip-impl.h:375 @8642541b2).
+/// `TN_QF_SELF_ATTN_Q` (clip-impl.h:380 @cd959bae9).
 pub const TN_QF_SELF_ATTN_Q = "%s.proj_blk.%d.self_attn_q.%s";
-/// `TN_QF_SELF_ATTN_K` (clip-impl.h:376 @8642541b2).
+/// `TN_QF_SELF_ATTN_K` (clip-impl.h:381 @cd959bae9).
 pub const TN_QF_SELF_ATTN_K = "%s.proj_blk.%d.self_attn_k.%s";
-/// `TN_QF_SELF_ATTN_V` (clip-impl.h:377 @8642541b2).
+/// `TN_QF_SELF_ATTN_V` (clip-impl.h:382 @cd959bae9).
 pub const TN_QF_SELF_ATTN_V = "%s.proj_blk.%d.self_attn_v.%s";
-/// `TN_QF_SELF_ATTN_O` (clip-impl.h:378 @8642541b2).
+/// `TN_QF_SELF_ATTN_O` (clip-impl.h:383 @cd959bae9).
 pub const TN_QF_SELF_ATTN_O = "%s.proj_blk.%d.self_attn_out.%s";
-/// `TN_QF_SELF_ATTN_N` (clip-impl.h:379 @8642541b2).
+/// `TN_QF_SELF_ATTN_N` (clip-impl.h:384 @cd959bae9).
 pub const TN_QF_SELF_ATTN_N = "%s.proj_blk.%d.self_attn_norm.%s";
-/// `TN_QF_CROSS_ATTN_Q` (clip-impl.h:380 @8642541b2).
+/// `TN_QF_CROSS_ATTN_Q` (clip-impl.h:385 @cd959bae9).
 pub const TN_QF_CROSS_ATTN_Q = "%s.proj_blk.%d.cross_attn_q.%s";
-/// `TN_QF_CROSS_ATTN_K` (clip-impl.h:381 @8642541b2).
+/// `TN_QF_CROSS_ATTN_K` (clip-impl.h:386 @cd959bae9).
 pub const TN_QF_CROSS_ATTN_K = "%s.proj_blk.%d.cross_attn_k.%s";
-/// `TN_QF_CROSS_ATTN_V` (clip-impl.h:382 @8642541b2).
+/// `TN_QF_CROSS_ATTN_V` (clip-impl.h:387 @cd959bae9).
 pub const TN_QF_CROSS_ATTN_V = "%s.proj_blk.%d.cross_attn_v.%s";
-/// `TN_QF_CROSS_ATTN_O` (clip-impl.h:383 @8642541b2).
+/// `TN_QF_CROSS_ATTN_O` (clip-impl.h:388 @cd959bae9).
 pub const TN_QF_CROSS_ATTN_O = "%s.proj_blk.%d.cross_attn_out.%s";
-/// `TN_QF_CROSS_ATTN_N` (clip-impl.h:384 @8642541b2).
+/// `TN_QF_CROSS_ATTN_N` (clip-impl.h:389 @cd959bae9).
 pub const TN_QF_CROSS_ATTN_N = "%s.proj_blk.%d.cross_attn_norm.%s";
-/// `TN_QF_FFN_UP` (clip-impl.h:385 @8642541b2).
+/// `TN_QF_FFN_UP` (clip-impl.h:390 @cd959bae9).
 pub const TN_QF_FFN_UP = "%s.proj_blk.%d.ffn_up.%s";
-/// `TN_QF_FFN_DOWN` (clip-impl.h:386 @8642541b2).
+/// `TN_QF_FFN_DOWN` (clip-impl.h:391 @cd959bae9).
 pub const TN_QF_FFN_DOWN = "%s.proj_blk.%d.ffn_down.%s";
-/// `TN_QF_FFN_NORM` (clip-impl.h:387 @8642541b2).
+/// `TN_QF_FFN_NORM` (clip-impl.h:392 @cd959bae9).
 pub const TN_QF_FFN_NORM = "%s.proj_blk.%d.ffn_norm.%s";
-/// `TN_MULTI_PROJ_IMG_POS` (clip-impl.h:389 @8642541b2).
+/// `TN_MULTI_PROJ_IMG_POS` (clip-impl.h:394 @cd959bae9).
 pub const TN_MULTI_PROJ_IMG_POS = "v.proj_blk.%d.img_pos";
-/// `TN_MULTI_PROJ_QUERY` (clip-impl.h:390 @8642541b2).
+/// `TN_MULTI_PROJ_QUERY` (clip-impl.h:395 @cd959bae9).
 pub const TN_MULTI_PROJ_QUERY = "%s.proj_blk.%d.query";
-/// `TN_MULTI_PROJ_LINEAR` (clip-impl.h:391 @8642541b2).
+/// `TN_MULTI_PROJ_LINEAR` (clip-impl.h:396 @cd959bae9).
 pub const TN_MULTI_PROJ_LINEAR = "%s.proj_blk.%d.linear.%s";
-/// `TN_MULTI_PROJ_NORM` (clip-impl.h:392 @8642541b2).
+/// `TN_MULTI_PROJ_NORM` (clip-impl.h:397 @cd959bae9).
 pub const TN_MULTI_PROJ_NORM = "%s.proj_blk.%d.norm.%s";
-/// `TN_MULTI_PROJ_POST_NORM` (clip-impl.h:393 @8642541b2).
+/// `TN_MULTI_PROJ_POST_NORM` (clip-impl.h:398 @cd959bae9).
 pub const TN_MULTI_PROJ_POST_NORM = "%s.proj_blk.%d.post_norm.%s";
-/// `TN_A_MM_INP_PROJ` (clip-impl.h:396 @8642541b2).
+/// `TN_A_MM_INP_PROJ` (clip-impl.h:401 @cd959bae9).
 pub const TN_A_MM_INP_PROJ = "mm.a.input_projection.%s";
-/// `TN_A_MM_SOFT_EMB_N` (clip-impl.h:397 @8642541b2).
+/// `TN_A_MM_SOFT_EMB_N` (clip-impl.h:402 @cd959bae9).
 pub const TN_A_MM_SOFT_EMB_N = "mm.a.soft_emb_norm.%s";
-/// `TN_A_INP_PROJ` (clip-impl.h:398 @8642541b2).
+/// `TN_A_INP_PROJ` (clip-impl.h:403 @cd959bae9).
 pub const TN_A_INP_PROJ = "a.input_projection.%s";
-/// `TN_A_CONV1D` (clip-impl.h:399 @8642541b2).
+/// `TN_A_CONV1D` (clip-impl.h:404 @cd959bae9).
 pub const TN_A_CONV1D = "a.conv1d.%d.%s";
-/// `TN_A_CONV1D_NORM` (clip-impl.h:400 @8642541b2).
+/// `TN_A_CONV1D_NORM` (clip-impl.h:405 @cd959bae9).
 pub const TN_A_CONV1D_NORM = "a.conv1d.%d.norm.%s";
-/// `TN_A_PATCH` (clip-impl.h:401 @8642541b2).
+/// `TN_A_PATCH` (clip-impl.h:406 @cd959bae9).
 pub const TN_A_PATCH = "a.patch.%d.%s";
-/// `TN_A_PATCH_NORM` (clip-impl.h:402 @8642541b2).
+/// `TN_A_PATCH_NORM` (clip-impl.h:407 @cd959bae9).
 pub const TN_A_PATCH_NORM = "a.patch.%d.norm.%s";
-/// `TN_A_OUT_PROJ` (clip-impl.h:403 @8642541b2).
+/// `TN_A_OUT_PROJ` (clip-impl.h:408 @cd959bae9).
 pub const TN_A_OUT_PROJ = "a.pre_encode.out.%s";
-/// `TN_A_ATTN_PRE_NORM` (clip-impl.h:404 @8642541b2).
+/// `TN_A_ATTN_PRE_NORM` (clip-impl.h:409 @cd959bae9).
 pub const TN_A_ATTN_PRE_NORM = "%s.blk.%d.attn_pre_norm.%s";
-/// `TN_A_ATTN_POST_NORM` (clip-impl.h:405 @8642541b2).
+/// `TN_A_ATTN_POST_NORM` (clip-impl.h:410 @cd959bae9).
 pub const TN_A_ATTN_POST_NORM = "%s.blk.%d.attn_post_norm.%s";
-/// `TN_A_ATTN_K_REL` (clip-impl.h:406 @8642541b2).
+/// `TN_A_ATTN_K_REL` (clip-impl.h:411 @cd959bae9).
 pub const TN_A_ATTN_K_REL = "%s.blk.%d.attn_k_rel.%s";
-/// `TN_A_PER_DIM_SCALE` (clip-impl.h:407 @8642541b2).
+/// `TN_A_PER_DIM_SCALE` (clip-impl.h:412 @cd959bae9).
 pub const TN_A_PER_DIM_SCALE = "%s.blk.%d.per_dim_scale.%s";
-/// `TN_A_PER_DIM_K_SCALE` (clip-impl.h:408 @8642541b2).
+/// `TN_A_PER_DIM_K_SCALE` (clip-impl.h:413 @cd959bae9).
 pub const TN_A_PER_DIM_K_SCALE = "%s.blk.%d.per_dim_k_scale.%s";
-/// `TN_A_FFN_POST_NORM` (clip-impl.h:409 @8642541b2).
+/// `TN_A_FFN_POST_NORM` (clip-impl.h:414 @cd959bae9).
 pub const TN_A_FFN_POST_NORM = "%s.blk.%d.ffn_post_norm.%s";
-/// `TN_A_FFN_POST_NORM_1` (clip-impl.h:410 @8642541b2).
+/// `TN_A_FFN_POST_NORM_1` (clip-impl.h:415 @cd959bae9).
 pub const TN_A_FFN_POST_NORM_1 = "%s.blk.%d.ffn_post_norm_1.%s";
-/// `TN_MNV5_STEM_CONV` (clip-impl.h:413 @8642541b2).
+/// `TN_MNV5_STEM_CONV` (clip-impl.h:418 @cd959bae9).
 pub const TN_MNV5_STEM_CONV = "v.conv_stem.conv.weight";
-/// `TN_MNV5_STEM_BIAS` (clip-impl.h:414 @8642541b2).
+/// `TN_MNV5_STEM_BIAS` (clip-impl.h:419 @cd959bae9).
 pub const TN_MNV5_STEM_BIAS = "v.conv_stem.conv.bias";
-/// `TN_MNV5_STEM_BN` (clip-impl.h:415 @8642541b2).
+/// `TN_MNV5_STEM_BN` (clip-impl.h:420 @cd959bae9).
 pub const TN_MNV5_STEM_BN = "v.conv_stem.bn.weight";
-/// `TN_MNV5_BLK_S0_EXP_W` (clip-impl.h:418 @8642541b2).
+/// `TN_MNV5_BLK_S0_EXP_W` (clip-impl.h:423 @cd959bae9).
 pub const TN_MNV5_BLK_S0_EXP_W = "v.blk.%d.%d.conv_exp.weight";
-/// `TN_MNV5_BLK_S0_BN1_W` (clip-impl.h:419 @8642541b2).
+/// `TN_MNV5_BLK_S0_BN1_W` (clip-impl.h:424 @cd959bae9).
 pub const TN_MNV5_BLK_S0_BN1_W = "v.blk.%d.%d.bn1.weight";
-/// `TN_MNV5_BLK_S0_PWL_W` (clip-impl.h:420 @8642541b2).
+/// `TN_MNV5_BLK_S0_PWL_W` (clip-impl.h:425 @cd959bae9).
 pub const TN_MNV5_BLK_S0_PWL_W = "v.blk.%d.%d.conv_pwl.weight";
-/// `TN_MNV5_BLK_S0_BN2_W` (clip-impl.h:421 @8642541b2).
+/// `TN_MNV5_BLK_S0_BN2_W` (clip-impl.h:426 @cd959bae9).
 pub const TN_MNV5_BLK_S0_BN2_W = "v.blk.%d.%d.bn2.weight";
-/// `TN_MNV5_BLK_DW_START_W` (clip-impl.h:424 @8642541b2).
+/// `TN_MNV5_BLK_DW_START_W` (clip-impl.h:429 @cd959bae9).
 pub const TN_MNV5_BLK_DW_START_W = "v.blk.%d.%d.dw_start.conv.weight";
-/// `TN_MNV5_BLK_DW_START_BN` (clip-impl.h:425 @8642541b2).
+/// `TN_MNV5_BLK_DW_START_BN` (clip-impl.h:430 @cd959bae9).
 pub const TN_MNV5_BLK_DW_START_BN = "v.blk.%d.%d.dw_start.bn.weight";
-/// `TN_MNV5_BLK_DW_MID_W` (clip-impl.h:426 @8642541b2).
+/// `TN_MNV5_BLK_DW_MID_W` (clip-impl.h:431 @cd959bae9).
 pub const TN_MNV5_BLK_DW_MID_W = "v.blk.%d.%d.dw_mid.conv.weight";
-/// `TN_MNV5_BLK_DW_MID_BN` (clip-impl.h:427 @8642541b2).
+/// `TN_MNV5_BLK_DW_MID_BN` (clip-impl.h:432 @cd959bae9).
 pub const TN_MNV5_BLK_DW_MID_BN = "v.blk.%d.%d.dw_mid.bn.weight";
-/// `TN_MNV5_BLK_PW_EXP_W` (clip-impl.h:428 @8642541b2).
+/// `TN_MNV5_BLK_PW_EXP_W` (clip-impl.h:433 @cd959bae9).
 pub const TN_MNV5_BLK_PW_EXP_W = "v.blk.%d.%d.pw_exp.conv.weight";
-/// `TN_MNV5_BLK_PW_EXP_BN` (clip-impl.h:429 @8642541b2).
+/// `TN_MNV5_BLK_PW_EXP_BN` (clip-impl.h:434 @cd959bae9).
 pub const TN_MNV5_BLK_PW_EXP_BN = "v.blk.%d.%d.pw_exp.bn.weight";
-/// `TN_MNV5_BLK_PW_PROJ_W` (clip-impl.h:430 @8642541b2).
+/// `TN_MNV5_BLK_PW_PROJ_W` (clip-impl.h:435 @cd959bae9).
 pub const TN_MNV5_BLK_PW_PROJ_W = "v.blk.%d.%d.pw_proj.conv.weight";
-/// `TN_MNV5_BLK_PW_PROJ_BN` (clip-impl.h:431 @8642541b2).
+/// `TN_MNV5_BLK_PW_PROJ_BN` (clip-impl.h:436 @cd959bae9).
 pub const TN_MNV5_BLK_PW_PROJ_BN = "v.blk.%d.%d.pw_proj.bn.weight";
-/// `TN_MNV5_BLK_LAYER_SCALE` (clip-impl.h:432 @8642541b2).
+/// `TN_MNV5_BLK_LAYER_SCALE` (clip-impl.h:437 @cd959bae9).
 pub const TN_MNV5_BLK_LAYER_SCALE = "v.blk.%d.%d.layer_scale.gamma";
-/// `TN_MNV5_ATTN_Q_W` (clip-impl.h:435 @8642541b2).
+/// `TN_MNV5_ATTN_Q_W` (clip-impl.h:440 @cd959bae9).
 pub const TN_MNV5_ATTN_Q_W = "v.blk.%d.%d.attn.query.proj.weight";
-/// `TN_MNV5_ATTN_K_W` (clip-impl.h:436 @8642541b2).
+/// `TN_MNV5_ATTN_K_W` (clip-impl.h:441 @cd959bae9).
 pub const TN_MNV5_ATTN_K_W = "v.blk.%d.%d.attn.key.proj.weight";
-/// `TN_MNV5_ATTN_V_W` (clip-impl.h:437 @8642541b2).
+/// `TN_MNV5_ATTN_V_W` (clip-impl.h:442 @cd959bae9).
 pub const TN_MNV5_ATTN_V_W = "v.blk.%d.%d.attn.value.proj.weight";
-/// `TN_MNV5_ATTN_O_W` (clip-impl.h:438 @8642541b2).
+/// `TN_MNV5_ATTN_O_W` (clip-impl.h:443 @cd959bae9).
 pub const TN_MNV5_ATTN_O_W = "v.blk.%d.%d.attn.output.proj.weight";
-/// `TN_MNV5_ATTN_K_DW` (clip-impl.h:439 @8642541b2).
+/// `TN_MNV5_ATTN_K_DW` (clip-impl.h:444 @cd959bae9).
 pub const TN_MNV5_ATTN_K_DW = "v.blk.%d.%d.attn.key.down_conv.weight";
-/// `TN_MNV5_ATTN_K_NORM` (clip-impl.h:440 @8642541b2).
+/// `TN_MNV5_ATTN_K_NORM` (clip-impl.h:445 @cd959bae9).
 pub const TN_MNV5_ATTN_K_NORM = "v.blk.%d.%d.attn.key.norm.weight";
-/// `TN_MNV5_ATTN_V_DW` (clip-impl.h:441 @8642541b2).
+/// `TN_MNV5_ATTN_V_DW` (clip-impl.h:446 @cd959bae9).
 pub const TN_MNV5_ATTN_V_DW = "v.blk.%d.%d.attn.value.down_conv.weight";
-/// `TN_MNV5_ATTN_V_NORM` (clip-impl.h:442 @8642541b2).
+/// `TN_MNV5_ATTN_V_NORM` (clip-impl.h:447 @cd959bae9).
 pub const TN_MNV5_ATTN_V_NORM = "v.blk.%d.%d.attn.value.norm.weight";
-/// `TN_MNV5_ATTN_NORM` (clip-impl.h:443 @8642541b2).
+/// `TN_MNV5_ATTN_NORM` (clip-impl.h:448 @cd959bae9).
 pub const TN_MNV5_ATTN_NORM = "v.blk.%d.%d.norm.weight";
-/// `TN_MNV5_MSFA_FFN_EXP_W` (clip-impl.h:446 @8642541b2).
+/// `TN_MNV5_MSFA_FFN_EXP_W` (clip-impl.h:451 @cd959bae9).
 pub const TN_MNV5_MSFA_FFN_EXP_W = "v.msfa.ffn.pw_exp.conv.weight";
-/// `TN_MNV5_MSFA_FFN_EXP_BN` (clip-impl.h:447 @8642541b2).
+/// `TN_MNV5_MSFA_FFN_EXP_BN` (clip-impl.h:452 @cd959bae9).
 pub const TN_MNV5_MSFA_FFN_EXP_BN = "v.msfa.ffn.pw_exp.bn.weight";
-/// `TN_MNV5_MSFA_FFN_PROJ_W` (clip-impl.h:448 @8642541b2).
+/// `TN_MNV5_MSFA_FFN_PROJ_W` (clip-impl.h:453 @cd959bae9).
 pub const TN_MNV5_MSFA_FFN_PROJ_W = "v.msfa.ffn.pw_proj.conv.weight";
-/// `TN_MNV5_MSFA_FFN_PROJ_BN` (clip-impl.h:449 @8642541b2).
+/// `TN_MNV5_MSFA_FFN_PROJ_BN` (clip-impl.h:454 @cd959bae9).
 pub const TN_MNV5_MSFA_FFN_PROJ_BN = "v.msfa.ffn.pw_proj.bn.weight";
-/// `TN_MNV5_MSFA_NORM` (clip-impl.h:450 @8642541b2).
+/// `TN_MNV5_MSFA_NORM` (clip-impl.h:455 @cd959bae9).
 pub const TN_MNV5_MSFA_NORM = "v.msfa.norm.weight";
-/// `TN_STD_BIAS` (clip-impl.h:453 @8642541b2).
+/// `TN_STD_BIAS` (clip-impl.h:458 @cd959bae9).
 pub const TN_STD_BIAS = "v.std_bias";
-/// `TN_STD_SCALE` (clip-impl.h:454 @8642541b2).
+/// `TN_STD_SCALE` (clip-impl.h:459 @cd959bae9).
 pub const TN_STD_SCALE = "v.std_scale";
-/// `TN_YASA_PATCH_LN_W` (clip-impl.h:457 @8642541b2).
+/// `TN_YASA_PATCH_LN_W` (clip-impl.h:462 @cd959bae9).
 pub const TN_YASA_PATCH_LN_W = "v.patch_ln.weight";
-/// `TN_YASA_PATCH_LN_B` (clip-impl.h:458 @8642541b2).
+/// `TN_YASA_PATCH_LN_B` (clip-impl.h:463 @cd959bae9).
 pub const TN_YASA_PATCH_LN_B = "v.patch_ln.bias";
-/// `TN_YASA_BACKBONE_LN_W` (clip-impl.h:459 @8642541b2).
+/// `TN_YASA_BACKBONE_LN_W` (clip-impl.h:464 @cd959bae9).
 pub const TN_YASA_BACKBONE_LN_W = "v.backbone_ln.weight";
-/// `TN_YASA_BACKBONE_LN_B` (clip-impl.h:460 @8642541b2).
+/// `TN_YASA_BACKBONE_LN_B` (clip-impl.h:465 @cd959bae9).
 pub const TN_YASA_BACKBONE_LN_B = "v.backbone_ln.bias";
-/// `TN_YASA_POS_EMBD` (clip-impl.h:461 @8642541b2).
+/// `TN_YASA_POS_EMBD` (clip-impl.h:466 @cd959bae9).
 pub const TN_YASA_POS_EMBD = "v.vision_pos_embed";
-/// `TN_YASA_STAGE_DOWN_LN` (clip-impl.h:462 @8642541b2).
+/// `TN_YASA_STAGE_DOWN_LN` (clip-impl.h:467 @cd959bae9).
 pub const TN_YASA_STAGE_DOWN_LN = "v.stage.%d.down.ln.%s";
-/// `TN_YASA_STAGE_DOWN_CONV` (clip-impl.h:463 @8642541b2).
+/// `TN_YASA_STAGE_DOWN_CONV` (clip-impl.h:468 @cd959bae9).
 pub const TN_YASA_STAGE_DOWN_CONV = "v.stage.%d.down.conv.%s";
-/// `TN_YASA_STAGE_BLK` (clip-impl.h:464 @8642541b2).
+/// `TN_YASA_STAGE_BLK` (clip-impl.h:469 @cd959bae9).
 pub const TN_YASA_STAGE_BLK = "v.stage.%d.blk.%d.%s.%s";
-/// `TN_MEL_FILTERS` (clip-impl.h:467 @8642541b2).
+/// `TN_MEL_FILTERS` (clip-impl.h:472 @cd959bae9).
 pub const TN_MEL_FILTERS = "a.mel_filters";
-/// `TN_WINDOW` (clip-impl.h:468 @8642541b2).
+/// `TN_WINDOW` (clip-impl.h:473 @cd959bae9).
 pub const TN_WINDOW = "a.window";
-/// `TN_CONV_NORM_MEAN` (clip-impl.h:469 @8642541b2).
+/// `TN_CONV_NORM_MEAN` (clip-impl.h:474 @cd959bae9).
 pub const TN_CONV_NORM_MEAN = "%s.blk.%d.conv_norm_mean";
-/// `TN_CONV_NORM_VAR` (clip-impl.h:470 @8642541b2).
+/// `TN_CONV_NORM_VAR` (clip-impl.h:475 @cd959bae9).
 pub const TN_CONV_NORM_VAR = "%s.blk.%d.conv_norm_var";
 
 /// Ports `projector_type` (clip-impl.h:505 @8642541b2), in the C's order.
@@ -910,7 +910,7 @@ pub const projector_type_names = [_]?[:0]const u8{
     null,
 };
 
-/// Ports `clip_projector_type_from_string` (clip-impl.h:667 @8642541b2): the
+/// Ports `clip_projector_type_from_string` (clip-impl.h:690 @cd959bae9): the
 /// first type, in enum order, whose name is `s`.
 pub fn projectorTypeFromString(s: []const u8) ProjectorType {
     for (projector_type_names, 0..) |n, i| {

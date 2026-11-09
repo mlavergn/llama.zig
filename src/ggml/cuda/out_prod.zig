@@ -36,7 +36,7 @@ fn u(x: i64) u64 {
     return @bitCast(x);
 }
 
-/// Ports `ggml_cuda_out_prod` (out-prod.cu:27 @8642541b2).
+/// Ports `ggml_cuda_out_prod` (out-prod.cu:27 @cd959bae9).
 pub fn outProd(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);

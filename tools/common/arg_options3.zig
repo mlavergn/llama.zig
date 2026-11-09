@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports that stretch of `common_params_parser_init` (arg.cpp:1405 @8642541b2)
+//! Ports that stretch of `common_params_parser_init` (arg.cpp:1344 @cd959bae9)
 //! from `llama.cpp/common/arg.cpp` (v0.8.0, `8642541b2`), as
 //! `arg_options.zig` describes, with the helpers its handlers call:
 //! `common_reasoning_format_from_name` from `llama.cpp/common/chat.cpp`,
@@ -52,7 +52,7 @@ fn jsonThrow(e: json.Error) anyerror {
     };
 }
 
-/// Ports `common_reasoning_format_from_name` (chat.cpp:1026 @8642541b2).
+/// Ports `common_reasoning_format_from_name` (chat.cpp:1026 @cd959bae9).
 fn reasoningFormatFromName(format: []const u8) !params_mod.ReasoningFormat {
     if (std.mem.eql(u8, format, "none")) return .none;
     if (std.mem.eql(u8, format, "auto")) return .auto;
@@ -74,7 +74,7 @@ fn statOf(path: [:0]const u8, err: *c_int) Status {
     return .unknown;
 }
 
-/// Ports `fs_is_directory` (common/common.cpp:953 @8642541b2).
+/// Ports `fs_is_directory` (common/common.cpp:964 @cd959bae9).
 fn fsIsDirectory(p: *Params, path: []const u8) !bool {
     var e: c_int = 0;
     return statOf(try p.arena.dupeSentinel(u8, path, 0), &e) == .directory;

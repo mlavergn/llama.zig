@@ -63,7 +63,7 @@ fn binKernel(comptime unravel: bool, comptime op: Op, comptime S0: type, comptim
 
 const u32_max = std.math.maxInt(u32);
 
-/// Ports `launch_bin_bcast_pack` (binbcast.cu:169 @8642541b2).
+/// Ports `launch_bin_bcast_pack` (binbcast.cu:169 @cd959bae9).
 fn launchBinBcastPack(
     comptime op: Op,
     comptime S0: type,
@@ -282,8 +282,8 @@ fn launchBinBcastPack(
     }
 }
 
-/// Ports `ggml_cuda_op_bin_bcast` (binbcast.cu:413 @8642541b2) with the
-/// functor `bin_bcast_cuda` (binbcast.cu:390 @8642541b2) it is instantiated
+/// Ports `ggml_cuda_op_bin_bcast` (binbcast.cu:413 @cd959bae9) with the
+/// functor `bin_bcast_cuda` (binbcast.cu:390 @cd959bae9) it is instantiated
 /// with, as `bin_bcast_cuda<op, n_fuse>`.
 fn opBinBcast(comptime op: Op, comptime n_fuse: usize, src0: *const Tensor, src1: *const Tensor, dst: *const Tensor, src0_dd: ?*const anyopaque, src1_dd: ?*const anyopaque, dst_dd: ?*anyopaque, stream: cu.cudaStream_t) void {
     impl.assert(src1.type == c.GGML_TYPE_F32 or src1.type == c.GGML_TYPE_F16 or src1.type == c.GGML_TYPE_BF16, "src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_F16 || src1->type == GGML_TYPE_BF16");
@@ -314,7 +314,7 @@ fn srcOf(dst: *const Tensor, i: usize) *const Tensor {
     return impl.one(Tensor, dst.src[i]);
 }
 
-/// Ports `ggml_cuda_op_repeat` (binbcast.cu:438 @8642541b2): `src0` is `dst`
+/// Ports `ggml_cuda_op_repeat` (binbcast.cu:438 @cd959bae9): `src0` is `dst`
 /// itself, read through a null pointer, so the kernel starts every element
 /// from zero.
 pub fn opRepeat(ctx: *common.Context, dst: *Tensor) void {
@@ -322,14 +322,14 @@ pub fn opRepeat(ctx: *common.Context, dst: *Tensor) void {
 }
 
 /// Ports `ggml_cuda_op_add`, `ggml_cuda_op_sub`, `ggml_cuda_op_mul` and
-/// `ggml_cuda_op_div` (binbcast.cu:442, 446, 450, 454 @8642541b2).
+/// `ggml_cuda_op_div` (binbcast.cu:442, 446, 450, 454 @cd959bae9).
 pub fn opBinary(comptime op: Op, ctx: *common.Context, dst: *Tensor) void {
     const s0 = srcOf(dst, 0);
     const s1 = srcOf(dst, 1);
     opBinBcast(op, 1, s0, s1, dst, s0.data, s1.data, dst.data, ctx.stream());
 }
 
-/// Ports `ggml_cuda_op_fused_binbcast_impl` (binbcast.cu:459 @8642541b2).
+/// Ports `ggml_cuda_op_fused_binbcast_impl` (binbcast.cu:459 @cd959bae9).
 fn fusedBinBcastImpl(comptime op: Op, comptime n_fuse: usize, ctx: *common.Context, dst: *Tensor) void {
     const stream = ctx.stream();
     const src0 = srcOf(dst, 0);
@@ -358,7 +358,7 @@ fn fusedBinBcastImpl(comptime op: Op, comptime n_fuse: usize, ctx: *common.Conte
 }
 
 /// Ports `ggml_cuda_op_fused_add` and `ggml_cuda_op_fused_mul`
-/// (binbcast.cu:498, 528 @8642541b2).
+/// (binbcast.cu:498, 528 @cd959bae9).
 pub fn opFused(comptime op: Op, ctx: *common.Context, dst: *Tensor, n_fuse: c_int) void {
     impl.assert(2 <= n_fuse and n_fuse <= 8, "2 <= n_fuse && n_fuse <= 8");
     switch (n_fuse) {
@@ -367,8 +367,8 @@ pub fn opFused(comptime op: Op, ctx: *common.Context, dst: *Tensor, n_fuse: c_in
     }
 }
 
-/// Ports `ggml_cuda_op_repeat_back` (binbcast.cu:558 @8642541b2) with
-/// `repeat_back_cuda` (binbcast.cu:401 @8642541b2), which launches with
+/// Ports `ggml_cuda_op_repeat_back` (binbcast.cu:558 @cd959bae9) with
+/// `repeat_back_cuda` (binbcast.cu:401 @cd959bae9), which launches with
 /// `<<<>>>`, not PDL.
 pub fn opRepeatBack(ctx: *common.Context, dst: *Tensor) void {
     const src0 = srcOf(dst, 0);

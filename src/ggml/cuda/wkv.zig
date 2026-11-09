@@ -16,7 +16,7 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_WKV_BLOCK_SIZE` (wkv.cuh:3 @8642541b2).
+/// Ports `CUDA_WKV_BLOCK_SIZE` (wkv.cuh:3 @cd959bae9).
 const block_size = 64;
 
 /// An `int64_t` into a `dim3` member, which is `unsigned int`.
@@ -33,7 +33,7 @@ fn srcData(dst: *const Tensor, i: usize) ?*const anyopaque {
     return impl.one(Tensor, dst.src[i]).data;
 }
 
-/// Ports `ggml_cuda_op_rwkv_wkv6` (wkv.cu:193 @8642541b2).
+/// Ports `ggml_cuda_op_rwkv_wkv6` (wkv.cu:193 @cd959bae9).
 pub fn opRwkvWkv6(ctx: *common.Context, dst: *Tensor) void {
     const k_d = srcData(dst, 0);
     const v_d = srcData(dst, 1);
@@ -64,7 +64,7 @@ pub fn opRwkvWkv6(ctx: *common.Context, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_cuda_op_rwkv_wkv7` (wkv.cu:221 @8642541b2).
+/// Ports `ggml_cuda_op_rwkv_wkv7` (wkv.cu:221 @cd959bae9).
 pub fn opRwkvWkv7(ctx: *common.Context, dst: *Tensor) void {
     const r_d = srcData(dst, 0);
     const w_d = srcData(dst, 1);

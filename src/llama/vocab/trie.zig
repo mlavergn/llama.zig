@@ -18,7 +18,7 @@ fn oom() noreturn {
     impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
-/// Ports `naive_trie` (llama-vocab.cpp:29 @8642541b2). Walking iteratively is
+/// Ports `naive_trie` (llama-vocab.cpp:29 @cd959bae9). Walking iteratively is
 /// what upstream's `insert` and `get_longest_prefix` do too since v0.8.0.
 pub const Trie = struct {
     pub const Node = struct {

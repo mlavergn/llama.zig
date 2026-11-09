@@ -22,14 +22,14 @@ comptime {
 
 extern fn rand() c_int;
 
-/// Ports `print_usage` (batched-bench.cpp:12 @8642541b2).
+/// Ports `print_usage` (batched-bench.cpp:12 @cd959bae9).
 fn printUsage(argv: []const [:0]const u8) void {
     log.out("\nexample usage:\n", .{});
     log.out("\n    %s -m model.gguf -c 2048 -b 2048 -ub 512 -npp 128,256,512 -ntg 128,256 -npl 1,2,4,8,16,32 [-pps]\n", .{argv[0].ptr});
     log.out("\n", .{});
 }
 
-/// The `decode_helper` lambda (batched-bench.cpp:82 @8642541b2): `batch` in
+/// The `decode_helper` lambda (batched-bench.cpp:82 @cd959bae9): `batch` in
 /// sub-batches of `n_batch` tokens.
 fn decodeHelper(ctx: ?*c.llama_context, batch: *tc.common.Batch, n_batch: i32, synchronize: bool) bool {
     var i: i32 = 0;
@@ -47,7 +47,7 @@ fn decodeHelper(ctx: ?*c.llama_context, batch: *tc.common.Batch, n_batch: i32, s
     return true;
 }
 
-/// Ports `llama_batched_bench` (batched-bench.cpp:21 @8642541b2).
+/// Ports `llama_batched_bench` (batched-bench.cpp:21 @cd959bae9).
 fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     const func = "llama_batched_bench";
     var params = try tc.params.Params.init(a);
@@ -245,7 +245,7 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     return 0;
 }
 
-/// Ports `main` (tools/batched-bench/main.cpp:3 @8642541b2).
+/// Ports `main` (tools/batched-bench/main.cpp:3 @cd959bae9).
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);

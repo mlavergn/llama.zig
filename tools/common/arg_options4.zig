@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports that stretch of `common_params_parser_init` (arg.cpp:1405 @8642541b2)
+//! Ports that stretch of `common_params_parser_init` (arg.cpp:1344 @cd959bae9)
 //! from `llama.cpp/common/arg.cpp` (v0.8.0, `8642541b2`), as
 //! `arg_options.zig` describes, with `arg_removed` from the same file and
 //! the speculative type names from `llama.cpp/common/speculative.cpp`:
@@ -42,12 +42,12 @@ fn tf(b: bool) [*:0]const u8 {
     return if (b) "true" else "false";
 }
 
-/// Ports `arg_removed` (arg.cpp:343 @8642541b2).
+/// Ports `arg_removed` (arg.cpp:319 @cd959bae9).
 fn argRemoved(comptime msg: []const u8) error{Throw} {
     return throwStr("the argument has been removed. " ++ msg);
 }
 
-/// Ports `common_speculative_type_from_name_map` (speculative.cpp:74 @8642541b2),
+/// Ports `common_speculative_type_from_name_map` (speculative.cpp:74 @cd959bae9),
 /// in the `std::map`'s key order.
 const type_from_name_map = [_]struct { []const u8, SpeculativeType }{
     .{ "draft-dflash", .draft_dflash }, .{ "draft-dspark", .draft_dspark },
@@ -58,7 +58,7 @@ const type_from_name_map = [_]struct { []const u8, SpeculativeType }{
     .{ "none", .none },
 };
 
-/// Ports `common_speculative_type_name_str` (speculative.cpp:2387 @8642541b2).
+/// Ports `common_speculative_type_name_str` (speculative.cpp:2461 @cd959bae9).
 fn typeNameStr(a: std.mem.Allocator, types: []const SpeculativeType) ![:0]const u8 {
     var result: std.ArrayList(u8) = .empty;
     for (types, 0..) |t, i| {
@@ -68,14 +68,14 @@ fn typeNameStr(a: std.mem.Allocator, types: []const SpeculativeType) ![:0]const 
     return result.toOwnedSliceSentinel(a, 0);
 }
 
-/// Ports `common_speculative_all_types_str` (speculative.cpp:2399 @8642541b2).
+/// Ports `common_speculative_all_types_str` (speculative.cpp:2473 @cd959bae9).
 fn allTypesStr(a: std.mem.Allocator) ![:0]const u8 {
     var types: [@backingInt(SpeculativeType.count)]SpeculativeType = undefined;
     for (&types, 0..) |*t, i| t.* = @fromBackingInt(@intCast(i));
     return typeNameStr(a, &types);
 }
 
-/// Ports `common_speculative_types_from_names` (speculative.cpp:2428 @8642541b2).
+/// Ports `common_speculative_types_from_names` (speculative.cpp:2502 @cd959bae9).
 fn typesFromNames(a: std.mem.Allocator, names: []const []const u8) !std.ArrayList(SpeculativeType) {
     var types: std.ArrayList(SpeculativeType) = .empty;
     for (names) |name| {
@@ -245,7 +245,7 @@ pub fn add(ctx: *Context) !void {
         .handler = .{
             .void_ = struct {
                 fn f(q: *Params) !void {
-                    // `llm_ffn_exps_cpu_override` (common/common.h:1267 @8642541b2)
+                    // `llm_ffn_exps_cpu_override` (common/common.h:1270 @cd959bae9)
                     try q.speculative.draft.tensor_buft_overrides.append(q.arena, .{ .pattern = options2.llm_ffn_exps_regex, .buft = c.ggml_backend_cpu_buffer_type() });
                 }
             }.f,

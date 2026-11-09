@@ -14,7 +14,7 @@
 const std = @import("std");
 const chat = @import("../chat.zig");
 
-/// Ports `llama_chat_builtin_templates` (llama-chat.cpp:950 @8642541b2).
+/// Ports `llama_chat_builtin_templates` (llama-chat.cpp:950 @cd959bae9).
 pub fn llama_chat_builtin_templates(output: [*c][*c]const u8, len: usize) callconv(.c) i32 {
     return chat.builtinTemplates(@ptrCast(output), len);
 }

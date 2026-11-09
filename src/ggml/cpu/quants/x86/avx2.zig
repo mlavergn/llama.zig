@@ -439,7 +439,7 @@ pub inline fn mm256_castsi256_si128(a: m256i) m128i {
     return .{ a[0], a[1] };
 }
 
-/// `MM256_SET_M128I` (arch/x86/quants.c:26 @8642541b2) and
+/// `MM256_SET_M128I` (arch/x86/quants.c:26 @cd959bae9) and
 /// `_mm256_set_m128i`: the first operand high, the second low.
 pub inline fn mm256_set_m128i(hi: m128i, lo: m128i) m256i {
     return .{ lo[0], lo[1], hi[0], hi[1] };

@@ -83,7 +83,7 @@ inline fn lut(signextendlut: m256i, raw: m256i, comptime hi: bool) m256i {
     return avx.mm256_shuffle_epi8(signextendlut, avx.mm256_and_si256(v, m4b));
 }
 
-/// Ports `gemv_q4_b32_8x8_q8_0_lut_avx` (arch/x86/repack.cpp:522 @8642541b2).
+/// Ports `gemv_q4_b32_8x8_q8_0_lut_avx` (arch/x86/repack.cpp:522 @cd959bae9).
 fn gemvLut(comptime B: type, n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int, signextendlut: m256i) void {
     const qk = QK8_0;
     const nb: usize = @intCast(@divTrunc(n, qk));
@@ -265,7 +265,7 @@ fn dot4(comptime L: type, lhs: [4]L.I, rhs: [4]L.I) L.I {
 }
 
 /// The per-block body of `gemm_q4_b32_8x8_q8_0_lut_avx` (arch/x86/repack.cpp:641
-/// @8642541b2), either arm: one interleaved block of four activation rows
+/// @cd959bae9), either arm: one interleaved block of four activation rows
 /// against one prepared block row, into four row accumulators.
 fn accumulate4(comptime L: type, acc: *[4]L.F, rhs: *const Rhs(L), col_scale_f32: L.F, a: *const blocks.block_q8_0x4) void {
     const qs: [*]const i8 = &a.qs;
@@ -373,7 +373,7 @@ fn rowLoops(comptime L: type, comptime B: type, y: *usize, x_begin: usize, x_end
     }
 }
 
-/// Ports `gemm_q4_b32_8x8_q8_0_lut_avx` (arch/x86/repack.cpp:641 @8642541b2).
+/// Ports `gemm_q4_b32_8x8_q8_0_lut_avx` (arch/x86/repack.cpp:641 @cd959bae9).
 ///
 /// With `__AVX512BW__ && __AVX512DQ__` the C first runs its 512-bit arm,
 /// from line 663, over the columns up to the last
@@ -405,7 +405,7 @@ fn gemmLut(comptime B: type, n: c_int, s: [*]f32, bs: usize, vx: *const anyopaqu
 }
 
 /// The table `ggml_gemv_q4_0_8x8_q8_0` builds (arch/x86/repack.cpp:1448
-/// @8642541b2): signed nibbles to signed bytes, 0..7 then -8..-1.
+/// @cd959bae9): signed nibbles to signed bytes, 0..7 then -8..-1.
 inline fn q4_0Lut() m256i {
     return common.repeat128(avx.mm_set_epi8(.{ -1, -2, -3, -4, -5, -6, -7, -8, 7, 6, 5, 4, 3, 2, 1, 0 }));
 }
@@ -415,32 +415,32 @@ inline fn tableLut(table: *const [16]i8) m256i {
     return common.repeat128(avx.mm_loadu_si128(table));
 }
 
-/// Ports `ggml_gemv_q4_0_8x8_q8_0` (arch/x86/repack.cpp:1448 @8642541b2).
+/// Ports `ggml_gemv_q4_0_8x8_q8_0` (arch/x86/repack.cpp:1448 @cd959bae9).
 pub export fn ggml_gemv_q4_0_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     gemvLut(blocks.block_q4_0x8, n, s, bs, vx, vy, nr, nc, q4_0Lut());
 }
 
-/// Ports `ggml_gemv_iq4_nl_8x8_q8_0` (arch/x86/repack.cpp:1687 @8642541b2).
+/// Ports `ggml_gemv_iq4_nl_8x8_q8_0` (arch/x86/repack.cpp:1687 @cd959bae9).
 pub export fn ggml_gemv_iq4_nl_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     gemvLut(blocks.block_iq4_nlx8, n, s, bs, vx, vy, nr, nc, tableLut(&c.kvalues_iq4nl));
 }
 
-/// Ports `ggml_gemv_mxfp4_8x8_q8_0` (arch/x86/repack.cpp:1700 @8642541b2).
+/// Ports `ggml_gemv_mxfp4_8x8_q8_0` (arch/x86/repack.cpp:1700 @cd959bae9).
 pub export fn ggml_gemv_mxfp4_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     gemvLut(blocks.block_mxfp4x8, n, s, bs, vx, vy, nr, nc, tableLut(&c.kvalues_mxfp4));
 }
 
-/// Ports `ggml_gemm_q4_0_8x8_q8_0` (arch/x86/repack.cpp:2026 @8642541b2).
+/// Ports `ggml_gemm_q4_0_8x8_q8_0` (arch/x86/repack.cpp:2026 @cd959bae9).
 pub export fn ggml_gemm_q4_0_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     gemmLut(blocks.block_q4_0x8, n, s, bs, vx, vy, nr, nc, q4_0Lut());
 }
 
-/// Ports `ggml_gemm_iq4_nl_8x8_q8_0` (arch/x86/repack.cpp:3496 @8642541b2).
+/// Ports `ggml_gemm_iq4_nl_8x8_q8_0` (arch/x86/repack.cpp:3496 @cd959bae9).
 pub export fn ggml_gemm_iq4_nl_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     gemmLut(blocks.block_iq4_nlx8, n, s, bs, vx, vy, nr, nc, tableLut(&c.kvalues_iq4nl));
 }
 
-/// Ports `ggml_gemm_mxfp4_8x8_q8_0` (arch/x86/repack.cpp:3511 @8642541b2).
+/// Ports `ggml_gemm_mxfp4_8x8_q8_0` (arch/x86/repack.cpp:3511 @cd959bae9).
 pub export fn ggml_gemm_mxfp4_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     gemmLut(blocks.block_mxfp4x8, n, s, bs, vx, vy, nr, nc, tableLut(&c.kvalues_mxfp4));
 }

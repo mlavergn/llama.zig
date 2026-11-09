@@ -534,7 +534,7 @@ pub inline fn dotq_s32_portable(acc: i32x4, a: i8x16, b: i8x16) i32x4 {
     return acc +% g0 +% g1 +% g2 +% g3;
 }
 
-/// Ports `ggml_vdotq_s32`, `ggml_vdotq_s32` (ggml-cpu-impl.h:310, 319 @8642541b2): `vdotq_s32`
+/// Ports `ggml_vdotq_s32`, `ggml_vdotq_s32` (ggml-cpu-impl.h:310, 319 @cd959bae9): `vdotq_s32`
 /// with `__ARM_FEATURE_DOTPROD`, and without it the C's own fallback.
 ///
 /// The fallback has the same total and a **different lane grouping** —

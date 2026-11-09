@@ -19,7 +19,7 @@ const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 
-/// Ports `llama_model_lfm2moe`'s `load_arch_hparams` (models/lfm2moe.cpp:5 @8642541b2).
+/// Ports `llama_model_lfm2moe`'s `load_arch_hparams` (models/lfm2moe.cpp:5 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -42,13 +42,13 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_lfm2moe`'s `load_arch_tensors` (models/lfm2moe.cpp:23
-/// @8642541b2): LFM2's body.
+/// @cd959bae9): LFM2's body.
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     try lfm2.loadTensors(self, "models/lfm2moe.cpp", 43, 61, exc);
 }
 
 /// Ports `llama_model_lfm2moe`'s `build_arch_graph` (models/lfm2moe.cpp:78
-/// @8642541b2): LFM2's graph, with or without the sliding window.
+/// @cd959bae9): LFM2's graph, with or without the sliding window.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     lfm2.buildArchGraph(model, b, params);
 }

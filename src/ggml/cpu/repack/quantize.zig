@@ -35,7 +35,7 @@ const QK_K = 256;
 
 /// Ports `ggml_quantize_mat_q8_0_4x4_generic` and
 /// `ggml_quantize_mat_q8_0_4x8_generic`
-/// (ggml-cpu/repack.cpp:135, 173 @8642541b2).
+/// (ggml-cpu/repack.cpp:135, 173 @cd959bae9).
 fn quantizeMatQ80(comptime blck_size_interleave: i32, x: [*]const f32, vy: *anyopaque, k: i64) void {
     impl.assert(QK8_0 == 32, "QK8_0 == 32");
     impl.assert(@rem(k, QK8_0) == 0, "k % QK8_0 == 0");
@@ -79,7 +79,7 @@ extern fn roundf(x: f32) f32;
 
 /// Ports `ggml_quantize_mat_q8_K_4x4_generic` and
 /// `ggml_quantize_mat_q8_K_4x8_generic`
-/// (ggml-cpu/repack.cpp:211, 262 @8642541b2).
+/// (ggml-cpu/repack.cpp:211, 262 @cd959bae9).
 ///
 /// Note the max search keeps the **signed** value at the greatest magnitude,
 /// not the magnitude, and the scale is `-127/max`. A sign slip there flips

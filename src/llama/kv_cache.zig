@@ -51,12 +51,12 @@ fn swaType(hp: *const Hparams) hparams_mod.SwaType {
     return @fromBackingInt(@intCast(hp.swa_type));
 }
 
-/// Ports `ggml_is_power_of_2` (llama-kv-cache.cpp:17 @8642541b2).
+/// Ports `ggml_is_power_of_2` (llama-kv-cache.cpp:17 @cd959bae9).
 fn isPowerOf2(n: c_int) bool {
     return (n & (n - 1)) == 0;
 }
 
-/// Ports `ggml_gen_hadamard` (llama-kv-cache.cpp:23 @8642541b2): the
+/// Ports `ggml_gen_hadamard` (llama-kv-cache.cpp:23 @cd959bae9): the
 /// orthonormal Walsh-Hadamard rotation of size `n`, whose square is the
 /// identity. The C++ handles a non-F32 tensor that it never creates; the
 /// matrix is always F32 here.
@@ -77,13 +77,13 @@ fn genHadamard(data: []f32, n: usize) void {
 }
 
 /// `LLAMA_NON_CAUSAL_TYPE_SWA_ONLY` and `LLAMA_NON_CAUSAL_TYPE_SWA_FULL`,
-/// of `llama_non_causal_type` (llama-hparams.h:33 @8642541b2): with a
+/// of `llama_non_causal_type` (llama-hparams.h:33 @cd959bae9): with a
 /// non-causal context, whether only the SWA layers drop causality, and
 /// whether SWA still applies within the current ubatch.
 const non_causal_type_swa_only: c_int = 1;
 const non_causal_type_swa_full: c_int = 2;
 
-/// Mirrors `llama_kv_cache`'s `stream_copy_info` (llama-kv-cache.h:22 @8642541b2):
+/// Mirrors `llama_kv_cache`'s `stream_copy_info` (llama-kv-cache.h:22 @cd959bae9):
 /// stream copies queued for the next update.
 pub const StreamCopyInfo = struct {
     ssrc: std.ArrayList(u32) = .empty,
@@ -100,7 +100,7 @@ pub const StreamCopyInfo = struct {
     }
 };
 
-/// Mirrors `llama_kv_cache`'s `slot_info` (llama-kv-cache.h:34 @8642541b2):
+/// Mirrors `llama_kv_cache`'s `slot_info` (llama-kv-cache.h:34 @cd959bae9):
 /// where a ubatch's tokens go, per stream.
 pub const SlotInfo = struct {
     s0: u32 = 0,
@@ -128,14 +128,14 @@ pub const SlotInfo = struct {
         return out;
     }
 
-    /// Ports `slot_info`'s `head` (llama-kv-cache.h:45 @8642541b2).
+    /// Ports `slot_info`'s `head` (llama-kv-cache.h:45 @cd959bae9).
     pub fn head(self: *const SlotInfo) u32 {
         impl.assert(self.idxs.items.len == 1, "llama-kv-cache.h", 46, "idxs.size() == 1");
         impl.assert(self.idxs.items[0].items.len != 0, "llama-kv-cache.h", 47, "!idxs[0].empty()");
         return self.idxs.items[0].items[0];
     }
 
-    /// Ports `slot_info`'s `resize` (llama-kv-cache.h:54 @8642541b2).
+    /// Ports `slot_info`'s `resize` (llama-kv-cache.h:54 @cd959bae9).
     pub fn resize(self: *SlotInfo, n: usize) void {
         self.strm.resize(allocator, n) catch oom();
         while (self.idxs.items.len > n) {
@@ -145,30 +145,30 @@ pub const SlotInfo = struct {
         while (self.idxs.items.len < n) self.idxs.append(allocator, .empty) catch oom();
     }
 
-    /// Ports `slot_info`'s `size` (llama-kv-cache.h:57 @8642541b2).
+    /// Ports `slot_info`'s `size` (llama-kv-cache.h:57 @cd959bae9).
     pub fn size(self: *const SlotInfo) usize {
         impl.assert(self.idxs.items.len == self.strm.items.len, "llama-kv-cache.h", 58, "idxs.size() == strm.size()");
         impl.assert(self.idxs.items.len != 0, "llama-kv-cache.h", 59, "!idxs.empty()");
         return self.idxs.items[0].items.len;
     }
 
-    /// Ports `slot_info`'s `n_stream` (llama-kv-cache.h:64 @8642541b2).
+    /// Ports `slot_info`'s `n_stream` (llama-kv-cache.h:64 @cd959bae9).
     pub fn nStream(self: *const SlotInfo) usize {
         return self.strm.items.len;
     }
 
-    /// Ports `slot_info`'s `empty` (llama-kv-cache.h:68 @8642541b2).
+    /// Ports `slot_info`'s `empty` (llama-kv-cache.h:68 @cd959bae9).
     pub fn isEmpty(self: *const SlotInfo) bool {
         return self.idxs.items.len == 0;
     }
 
-    /// Ports `slot_info`'s `clear` (llama-kv-cache.h:72 @8642541b2).
+    /// Ports `slot_info`'s `clear` (llama-kv-cache.h:72 @cd959bae9).
     pub fn clear(self: *SlotInfo) void {
         for (self.idxs.items) |*v| v.deinit(allocator);
         self.idxs.clearRetainingCapacity();
     }
 
-    /// Ports `slot_info`'s `is_contiguous` (llama-kv-cache.h:77 @8642541b2).
+    /// Ports `slot_info`'s `is_contiguous` (llama-kv-cache.h:77 @cd959bae9).
     pub fn isContiguous(self: *const SlotInfo) bool {
         if (self.idxs.items.len == 0 or self.idxs.items[0].items.len == 0) return true;
         if (self.idxs.items.len > 1) return false;
@@ -592,7 +592,7 @@ pub const KvCache = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `llama_kv_cache`'s `clear` (llama-kv-cache.cpp:376 @8642541b2).
+    /// Ports `llama_kv_cache`'s `clear` (llama-kv-cache.cpp:426 @cd959bae9).
     pub fn clear(self: *KvCache, data: bool) void {
         for (0..self.n_stream) |s| {
             self.cells()[s].reset();
@@ -603,12 +603,12 @@ pub const KvCache = struct {
         }
     }
 
-    /// Ports `llama_kv_cache`'s `seq_rm` (llama-kv-cache.cpp:389 @8642541b2).
+    /// Ports `llama_kv_cache`'s `seq_rm` (llama-kv-cache.cpp:439 @cd959bae9).
     pub fn seqRm(self: *KvCache, seq_id: i32, p0_: i32, p1_: i32) bool {
         // [TAG_KV_CACHE_SHARE_CELLS]
         if (self.other != null) return true;
 
-        impl.assert(seq_id == -1 or (seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len), "llama-kv-cache.cpp", 396, "seq_id == -1 || (seq_id >= 0 && (size_t) seq_id < seq_to_stream.size())");
+        impl.assert(seq_id == -1 or (seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len), "llama-kv-cache.cpp", 446, "seq_id == -1 || (seq_id >= 0 && (size_t) seq_id < seq_to_stream.size())");
 
         const p0 = if (p0_ < 0) 0 else p0_;
         const p1 = if (p1_ < 0) std.math.maxInt(i32) else p1_;
@@ -645,12 +645,12 @@ pub const KvCache = struct {
         return true;
     }
 
-    /// Ports `llama_kv_cache`'s `seq_cp` (llama-kv-cache.cpp:458 @8642541b2).
+    /// Ports `llama_kv_cache`'s `seq_cp` (llama-kv-cache.cpp:508 @cd959bae9).
     pub fn seqCp(self: *KvCache, seq_id_src: i32, seq_id_dst: i32, p0_: i32, p1_: i32) void {
         if (self.other != null) return;
 
-        impl.assert(seq_id_src >= 0 and @as(usize, @intCast(seq_id_src)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 464, "seq_id_src >= 0 && (size_t) seq_id_src < seq_to_stream.size()");
-        impl.assert(seq_id_dst >= 0 and @as(usize, @intCast(seq_id_dst)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 465, "seq_id_dst >= 0 && (size_t) seq_id_dst < seq_to_stream.size()");
+        impl.assert(seq_id_src >= 0 and @as(usize, @intCast(seq_id_src)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 514, "seq_id_src >= 0 && (size_t) seq_id_src < seq_to_stream.size()");
+        impl.assert(seq_id_dst >= 0 and @as(usize, @intCast(seq_id_dst)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 515, "seq_id_dst >= 0 && (size_t) seq_id_dst < seq_to_stream.size()");
 
         const s0 = self.seq_to_stream.items[@intCast(seq_id_src)];
         const s1 = self.seq_to_stream.items[@intCast(seq_id_dst)];
@@ -674,7 +674,7 @@ pub const KvCache = struct {
         const size: i32 = @intCast(self.getSize());
         if (p0_ > 0 and p0_ + 1 < size) is_full = false;
         if (p1_ > 0 and p1_ + 1 < size) is_full = false;
-        impl.assert(is_full, "llama-kv-cache.cpp", 513, "is_full && \"seq_cp() is only supported for full KV buffers\"");
+        impl.assert(is_full, "llama-kv-cache.cpp", 563, "is_full && \"seq_cp() is only supported for full KV buffers\"");
 
         // The buffer copy happens on the next update.
         self.sc_info.ssrc.append(allocator, s0) catch oom();
@@ -702,10 +702,10 @@ pub const KvCache = struct {
         self.v_heads.items[s1] = self.v_heads.items[s0];
     }
 
-    /// Ports `llama_kv_cache`'s `seq_keep` (llama-kv-cache.cpp:550 @8642541b2).
+    /// Ports `llama_kv_cache`'s `seq_keep` (llama-kv-cache.cpp:600 @cd959bae9).
     pub fn seqKeep(self: *KvCache, seq_id: i32) void {
         if (self.other != null) return;
-        impl.assert(seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 556, "seq_id >= 0 && (size_t) seq_id < seq_to_stream.size()");
+        impl.assert(seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 606, "seq_id >= 0 && (size_t) seq_id < seq_to_stream.size()");
         const strm = self.seq_to_stream.items[@intCast(seq_id)];
         const cl = &self.cells()[strm];
         const head = &self.v_heads.items[strm];
@@ -719,11 +719,11 @@ pub const KvCache = struct {
         if (new_head != cl.size() and new_head < head.*) head.* = new_head;
     }
 
-    /// Ports `llama_kv_cache`'s `seq_add` (llama-kv-cache.cpp:577 @8642541b2).
+    /// Ports `llama_kv_cache`'s `seq_add` (llama-kv-cache.cpp:627 @cd959bae9).
     pub fn seqAdd(self: *KvCache, seq_id: i32, p0_: i32, p1_: i32, shift: i32) void {
         if (self.other != null) return;
-        impl.assert(seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 583, "seq_id >= 0 && (size_t) seq_id < seq_to_stream.size()");
-        impl.assert(self.hparams.nPosPerEmbd() == 1, "llama-kv-cache.cpp", 584, "hparams.n_pos_per_embd() == 1 && \"seq_add() is only supported for n_pos_per_embd() == 1\"");
+        impl.assert(seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 633, "seq_id >= 0 && (size_t) seq_id < seq_to_stream.size()");
+        impl.assert(self.hparams.nPosPerEmbd() == 1, "llama-kv-cache.cpp", 634, "hparams.n_pos_per_embd() == 1 && \"seq_add() is only supported for n_pos_per_embd() == 1\"");
 
         const strm = self.seq_to_stream.items[@intCast(seq_id)];
         const cl = &self.cells()[strm];
@@ -751,11 +751,11 @@ pub const KvCache = struct {
         head.* = if (new_head != cl.size()) new_head else 0;
     }
 
-    /// Ports `llama_kv_cache`'s `seq_div` (llama-kv-cache.cpp:627 @8642541b2).
+    /// Ports `llama_kv_cache`'s `seq_div` (llama-kv-cache.cpp:677 @cd959bae9).
     pub fn seqDiv(self: *KvCache, seq_id: i32, p0_: i32, p1_: i32, d: c_int) void {
         if (self.other != null) return;
-        impl.assert(seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 633, "seq_id >= 0 && (size_t) seq_id < seq_to_stream.size()");
-        impl.assert(self.hparams.nPosPerEmbd() == 1, "llama-kv-cache.cpp", 634, "hparams.n_pos_per_embd() == 1 && \"seq_div() is only supported for n_pos_per_embd() == 1\"");
+        impl.assert(seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 683, "seq_id >= 0 && (size_t) seq_id < seq_to_stream.size()");
+        impl.assert(self.hparams.nPosPerEmbd() == 1, "llama-kv-cache.cpp", 684, "hparams.n_pos_per_embd() == 1 && \"seq_div() is only supported for n_pos_per_embd() == 1\"");
 
         const cl = &self.cells()[self.seq_to_stream.items[@intCast(seq_id)]];
         if (d == 1) return;
@@ -769,17 +769,17 @@ pub const KvCache = struct {
         }
     }
 
-    /// Ports `llama_kv_cache`'s `seq_pos_min` (llama-kv-cache.cpp:666 @8642541b2).
+    /// Ports `llama_kv_cache`'s `seq_pos_min` (llama-kv-cache.cpp:716 @cd959bae9).
     pub fn seqPosMin(self: *const KvCache, seq_id: i32) i32 {
         if (self.other) |o| return o.seqPosMin(seq_id);
-        impl.assert(seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 672, "seq_id >= 0 && (size_t) seq_id < seq_to_stream.size()");
+        impl.assert(seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 722, "seq_id >= 0 && (size_t) seq_id < seq_to_stream.size()");
         return self.cells()[self.seq_to_stream.items[@intCast(seq_id)]].seqPosMin(seq_id);
     }
 
-    /// Ports `llama_kv_cache`'s `seq_pos_max` (llama-kv-cache.cpp:679 @8642541b2).
+    /// Ports `llama_kv_cache`'s `seq_pos_max` (llama-kv-cache.cpp:729 @cd959bae9).
     pub fn seqPosMax(self: *const KvCache, seq_id: i32) i32 {
         if (self.other) |o| return o.seqPosMax(seq_id);
-        impl.assert(seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 685, "seq_id >= 0 && (size_t) seq_id < seq_to_stream.size()");
+        impl.assert(seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 735, "seq_id >= 0 && (size_t) seq_id < seq_to_stream.size()");
         return self.cells()[self.seq_to_stream.items[@intCast(seq_id)]].seqPosMax(seq_id);
     }
 
@@ -788,7 +788,7 @@ pub const KvCache = struct {
         self.ctxs_bufs.memoryBreakdown(out);
     }
 
-    /// Ports `llama_kv_cache`'s `init_batch` (llama-kv-cache.cpp:696 @8642541b2):
+    /// Ports `llama_kv_cache`'s `init_batch` (llama-kv-cache.cpp:752 @cd959bae9):
     /// split the batch and find a slot for every ubatch. With several
     /// streams and `embd_all` (every token an output, or non-causal
     /// attention), each sequence stays whole in one ubatch.
@@ -815,12 +815,12 @@ pub const KvCache = struct {
         return KvCacheContext.createStatus(.failed_prepare);
     }
 
-    /// Ports `llama_kv_cache`'s `init_full` (llama-kv-cache.cpp:731 @8642541b2).
+    /// Ports `llama_kv_cache`'s `init_full` (llama-kv-cache.cpp:787 @cd959bae9).
     pub fn initFull(self: *KvCache) *KvCacheContext {
         return KvCacheContext.createFull(self);
     }
 
-    /// Ports `llama_kv_cache`'s `init_update` (llama-kv-cache.cpp:735 @8642541b2).
+    /// Ports `llama_kv_cache`'s `init_update` (llama-kv-cache.cpp:791 @cd959bae9).
     pub fn initUpdate(self: *KvCache, lctx: *anyopaque, optimize: bool) *KvCacheContext {
         _ = optimize;
         const do_shift = self.getHasShift();
@@ -829,7 +829,7 @@ pub const KvCache = struct {
         return KvCacheContext.createUpdate(self, lctx, do_shift, sc);
     }
 
-    /// Ports `llama_kv_cache`'s `prepare` (llama-kv-cache.cpp:743 @8642541b2):
+    /// Ports `llama_kv_cache`'s `prepare` (llama-kv-cache.cpp:799 @cd959bae9):
     /// place every ubatch in turn to find their slots, then put the cells
     /// back as they were.
     ///
@@ -877,7 +877,7 @@ pub const KvCache = struct {
             self.applyUbatch(&sinfo_new, ubatch);
         }
 
-        impl.assert(states.items.len != 0 or !success, "llama-kv-cache.cpp", 787, "!states.empty() || !success");
+        impl.assert(states.items.len != 0 or !success, "llama-kv-cache.cpp", 843, "!states.empty() || !success");
 
         // Restore the cells, most recent first.
         var i = states.items.len;
@@ -899,7 +899,7 @@ pub const KvCache = struct {
         return res;
     }
 
-    /// Ports `llama_kv_cache`'s `update` (llama-kv-cache.cpp:809 @8642541b2):
+    /// Ports `llama_kv_cache`'s `update` (llama-kv-cache.cpp:865 @cd959bae9):
     /// pending stream copies, then a K-shift if positions moved.
     ///
     /// Return: whether a graph was computed.
@@ -923,7 +923,7 @@ pub const KvCache = struct {
         }
 
         if (do_shift) {
-            if (!self.getCanShift()) impl.abort("llama-kv-cache.cpp", 851, "The current KV cache / model configuration does not support K-shift");
+            if (!self.getCanShift()) impl.abort("llama-kv-cache.cpp", 907, "The current KV cache / model configuration does not support K-shift");
             impl.logDebug("%s: applying K-shift\n", .{"update"});
 
             const has_rope = for (self.layers.items) |*layer| {
@@ -950,7 +950,7 @@ pub const KvCache = struct {
         return updated;
     }
 
-    /// Ports `llama_kv_cache`'s `find_slot` (llama-kv-cache.cpp:893 @8642541b2).
+    /// Ports `llama_kv_cache`'s `find_slot` (llama-kv-cache.cpp:949 @cd959bae9).
     ///
     /// Return: the slot; empty when the ubatch does not fit.
     pub fn findSlot(self: *const KvCache, ubatch: *const Ubatch, cont: bool) SlotInfo {
@@ -959,7 +959,7 @@ pub const KvCache = struct {
         var n_tokens: u32 = ubatch.n_tokens;
         var n_seqs: u32 = 1;
         if (self.n_stream > 1) {
-            impl.assert(n_tokens % ubatch.n_seqs_unq == 0, "llama-kv-cache.cpp", 965, "n_tokens % ubatch.n_seqs_unq == 0");
+            impl.assert(n_tokens % ubatch.n_seqs_unq == 0, "llama-kv-cache.cpp", 1021, "n_tokens % ubatch.n_seqs_unq == 0");
             n_seqs = ubatch.n_seqs_unq;
             n_tokens = n_tokens / n_seqs;
         }
@@ -970,8 +970,8 @@ pub const KvCache = struct {
         for (0..n_seqs) |s| {
             const seq_id = ubatch.seq_id_unq[s];
             if (self.n_stream > 1) {
-                impl.assert(ubatch.n_seq_id[s * n_tokens] == 1, "llama-kv-cache.cpp", 984, "ubatch.n_seq_id[s*n_tokens]    == 1");
-                impl.assert(ubatch.seq_id[s * n_tokens][0] == seq_id, "llama-kv-cache.cpp", 985, "ubatch.seq_id  [s*n_tokens][0] == seq_id");
+                impl.assert(ubatch.n_seq_id[s * n_tokens] == 1, "llama-kv-cache.cpp", 1040, "ubatch.n_seq_id[s*n_tokens]    == 1");
+                impl.assert(ubatch.seq_id[s * n_tokens][0] == seq_id, "llama-kv-cache.cpp", 1041, "ubatch.seq_id  [s*n_tokens][0] == seq_id");
             }
             const strm = self.seq_to_stream.items[@intCast(seq_id)];
             res.s0 = @min(res.s0, strm);
@@ -1094,7 +1094,7 @@ pub const KvCache = struct {
         }
     }
 
-    /// Ports `llama_kv_cache`'s `apply_ubatch` (llama-kv-cache.cpp:1092 @8642541b2).
+    /// Ports `llama_kv_cache`'s `apply_ubatch` (llama-kv-cache.cpp:1148 @cd959bae9).
     pub fn applyUbatch(self: *KvCache, sinfo: *const SlotInfo, ubatch: *const Ubatch) void {
         if (self.other != null) return;
 
@@ -1146,7 +1146,7 @@ pub const KvCache = struct {
         // purge positions below the ones overwritten.
         for (0..max_seq) |s| {
             if (seq_pos_max_rm[s] == -1) continue;
-            impl.assert(s < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 1163, "s < seq_to_stream.size()");
+            impl.assert(s < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 1219, "s < seq_to_stream.size()");
             const cl = &self.cells()[self.seq_to_stream.items[s]];
             if (cl.seqPosMin(@intCast(s)) <= seq_pos_max_rm[s]) {
                 impl.logDebug("%s: purging positions [%d, %d] of sequence %d from KV cache\n", .{ "apply_ubatch", cl.seqPosMin(@intCast(s)), seq_pos_max_rm[s], @as(c_int, @intCast(s)) });
@@ -1161,7 +1161,7 @@ pub const KvCache = struct {
         }
     }
 
-    /// Ports `llama_kv_cache`'s `get_can_shift` (llama-kv-cache.cpp:1183 @8642541b2).
+    /// Ports `llama_kv_cache`'s `get_can_shift` (llama-kv-cache.cpp:1239 @cd959bae9).
     pub fn getCanShift(self: *const KvCache) bool {
         // Step35's per-layer RoPE dims break the single global n_rot.
         if (self.model.arch == .step35) return false;
@@ -1169,40 +1169,40 @@ pub const KvCache = struct {
         return true;
     }
 
-    /// Ports `llama_kv_cache`'s `get_size` (llama-kv-cache.cpp:1194 @8642541b2).
+    /// Ports `llama_kv_cache`'s `get_size` (llama-kv-cache.cpp:1250 @cd959bae9).
     pub fn getSize(self: *const KvCache) u32 {
         return self.cells()[self.seq_to_stream.items[0]].size();
     }
 
-    /// Ports `llama_kv_cache`'s `get_n_seq_max` (llama-kv-cache.cpp:1200 @8642541b2).
+    /// Ports `llama_kv_cache`'s `get_n_seq_max` (llama-kv-cache.cpp:1256 @cd959bae9).
     pub fn getNSeqMax(self: *const KvCache) u32 {
         return self.n_seq_max;
     }
 
-    /// Ports `llama_kv_cache`'s `get_n_stream` (llama-kv-cache.cpp:1204 @8642541b2).
+    /// Ports `llama_kv_cache`'s `get_n_stream` (llama-kv-cache.cpp:1260 @cd959bae9).
     pub fn getNStream(self: *const KvCache) u32 {
         return self.n_stream;
     }
 
-    /// Ports `llama_kv_cache`'s `get_has_shift` (llama-kv-cache.cpp:1208 @8642541b2).
+    /// Ports `llama_kv_cache`'s `get_has_shift` (llama-kv-cache.cpp:1264 @cd959bae9).
     pub fn getHasShift(self: *const KvCache) bool {
         var result = false;
         for (self.cells()[0..self.n_stream]) |*cl| result = result or cl.getHasShift();
         return result;
     }
 
-    /// Ports `llama_kv_cache`'s `type_k` (llama-kv-cache.cpp:1218 @8642541b2).
+    /// Ports `llama_kv_cache`'s `type_k` (llama-kv-cache.cpp:1274 @cd959bae9).
     pub fn typeK(self: *const KvCache) c.enum_ggml_type {
         return self.layers.items[0].k.type;
     }
 
-    /// Ports `llama_kv_cache`'s `type_v` (llama-kv-cache.cpp:1222 @8642541b2).
+    /// Ports `llama_kv_cache`'s `type_v` (llama-kv-cache.cpp:1278 @cd959bae9).
     pub fn typeV(self: *const KvCache) c.enum_ggml_type {
         return self.layers.items[0].v.?.type;
     }
 
-    /// Ports `llama_kv_cache`'s `get_layer_ids` (llama-kv-cache.cpp:1226
-    /// @8642541b2): the model layers the cache holds, in its order.
+    /// Ports `llama_kv_cache`'s `get_layer_ids` (llama-kv-cache.cpp:1282
+    /// @cd959bae9): the model layers the cache holds, in its order.
     ///
     /// Return: the ids, the caller's to free.
     pub fn getLayerIds(self: *const KvCache) std.ArrayList(u32) {
@@ -1212,26 +1212,26 @@ pub const KvCache = struct {
         return res;
     }
 
-    /// Ports `llama_kv_cache`'s `get_k_storage` (llama-kv-cache.cpp:1237 @8642541b2).
+    /// Ports `llama_kv_cache`'s `get_k_storage` (llama-kv-cache.cpp:1293 @cd959bae9).
     pub fn getKStorage(self: *const KvCache, il: i32) *Tensor {
         return self.layers.items[@intCast(self.map_layer_ids.get(il).?)].k;
     }
 
-    /// Ports `llama_kv_cache`'s `get_cells` (llama-kv-cache.cpp:1243 @8642541b2).
+    /// Ports `llama_kv_cache`'s `get_cells` (llama-kv-cache.cpp:1299 @cd959bae9).
     pub fn getCells(self: *const KvCache, seq_id: i32) *const KvCells {
-        impl.assert(seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 1244, "seq_id >= 0 && (size_t) seq_id < seq_to_stream.size()");
+        impl.assert(seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 1300, "seq_id >= 0 && (size_t) seq_id < seq_to_stream.size()");
         return &self.cells()[self.seq_to_stream.items[@intCast(seq_id)]];
     }
 
-    /// Ports `llama_kv_cache`'s `get_stream` (llama-kv-cache.cpp:1249 @8642541b2).
+    /// Ports `llama_kv_cache`'s `get_stream` (llama-kv-cache.cpp:1305 @cd959bae9).
     ///
     /// Return: the stream holding `seq_id`'s cells.
     pub fn getStream(self: *const KvCache, seq_id: i32) u32 {
-        impl.assert(seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 1250, "seq_id >= 0 && (size_t) seq_id < seq_to_stream.size()");
+        impl.assert(seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 1306, "seq_id >= 0 && (size_t) seq_id < seq_to_stream.size()");
         return self.seq_to_stream.items[@intCast(seq_id)];
     }
 
-    /// Ports `llama_kv_cache`'s `get_n_kv` (llama-kv-cache.cpp:1255 @8642541b2):
+    /// Ports `llama_kv_cache`'s `get_n_kv` (llama-kv-cache.cpp:1311 @cd959bae9):
     /// the cells to attend over, padded so the graph stays constant.
     pub fn getNKv(self: *const KvCache, sinfo: *const SlotInfo) u32 {
         var result: u32 = 0;
@@ -1245,11 +1245,11 @@ pub const KvCache = struct {
     }
 
     fn layerAt(self: *const KvCache, il: i32) *const KvLayer {
-        const ikv = self.map_layer_ids.get(il) orelse impl.abort("llama-kv-cache.cpp", 1272, "map::at:  key not found");
+        const ikv = self.map_layer_ids.get(il) orelse impl.abort("llama-kv-cache.cpp", 1421, "map::at:  key not found");
         return &self.layers.items[@intCast(ikv)];
     }
 
-    /// Ports `llama_kv_cache`'s `get_k` (llama-kv-cache.cpp:1271 @8642541b2).
+    /// Ports `llama_kv_cache`'s `get_k` (llama-kv-cache.cpp:1420 @cd959bae9).
     pub fn getK(self: *const KvCache, ctx: *c.ggml_context, il: i32, n_kv: u32, sinfo: *const SlotInfo) *Tensor {
         const k = self.layerAt(il).k;
         const kv_size: u64 = self.getSize();
@@ -1259,7 +1259,7 @@ pub const KvCache = struct {
         return c.ggml_view_4d(ctx, k, self.hparams.nEmbdHeadK(ilu), self.hparams.nHeadKv(ilu), n_kv, ns, c.ggml_row_size(k.type, self.hparams.nEmbdHeadK(ilu)), c.ggml_row_size(k.type, @intCast(n_embd_k_gqa)), c.ggml_row_size(k.type, @intCast(n_embd_k_gqa * kv_size)), c.ggml_row_size(k.type, @intCast(n_embd_k_gqa * kv_size)) * sinfo.s0);
     }
 
-    /// Ports `llama_kv_cache`'s `get_v` (llama-kv-cache.cpp:1291 @8642541b2).
+    /// Ports `llama_kv_cache`'s `get_v` (llama-kv-cache.cpp:1440 @cd959bae9).
     pub fn getV(self: *const KvCache, ctx: *c.ggml_context, il: i32, n_kv: u32, sinfo: *const SlotInfo) *Tensor {
         const v = self.layerAt(il).v.?;
         const kv_size: u64 = self.getSize();
@@ -1275,7 +1275,7 @@ pub const KvCache = struct {
         return c.ggml_view_4d(ctx, v, n_kv, self.hparams.nHeadKv(ilu), hv, ns, c.ggml_row_size(v.type, @intCast(kv_size * hv)), c.ggml_row_size(v.type, @intCast(kv_size)), c.ggml_row_size(v.type, @intCast(kv_size * n_embd_v_gqa)), c.ggml_row_size(v.type, @intCast(kv_size * n_embd_v_gqa)) * sinfo.s0);
     }
 
-    /// Ports `llama_kv_cache`'s `cpy_k` (llama-kv-cache.cpp:1323 @8642541b2):
+    /// Ports `llama_kv_cache`'s `cpy_k` (llama-kv-cache.cpp:1472 @cd959bae9):
     /// store the current K values into the cache.
     pub fn cpyK(self: *const KvCache, ctx: *c.ggml_context, k_cur_: *Tensor, k_idxs: *Tensor, il: i32, sinfo: *const SlotInfo) *Tensor {
         _ = sinfo;
@@ -1286,7 +1286,7 @@ pub const KvCache = struct {
         const n_embd_gqa = n_embd_head * n_head;
 
         // Dims 0 and 1 merge.
-        impl.assert(c.ggml_row_size(k_cur_.type, n_embd_head) == k_cur_.nb[1], "llama-kv-cache.cpp", 1338, "ggml_row_size(k_cur->type, n_embd_head) == k_cur->nb[1]");
+        impl.assert(c.ggml_row_size(k_cur_.type, n_embd_head) == k_cur_.nb[1], "llama-kv-cache.cpp", 1487, "ggml_row_size(k_cur->type, n_embd_head) == k_cur->nb[1]");
         const k_cur = c.ggml_view_2d(ctx, k_cur_, n_embd_gqa, n_tokens, k_cur_.nb[2], 0);
 
         const n_stream = k.ne[2];
@@ -1298,7 +1298,7 @@ pub const KvCache = struct {
         return c.ggml_set_rows(ctx, k, k_cur, k_idxs);
     }
 
-    /// Ports `llama_kv_cache`'s `cpy_v` (llama-kv-cache.cpp:1358 @8642541b2).
+    /// Ports `llama_kv_cache`'s `cpy_v` (llama-kv-cache.cpp:1507 @cd959bae9).
     pub fn cpyV(self: *const KvCache, ctx: *c.ggml_context, v_cur_: *Tensor, v_idxs: *Tensor, il: i32, sinfo: *const SlotInfo) *Tensor {
         _ = sinfo;
         var v = self.layerAt(il).v.?;
@@ -1308,7 +1308,7 @@ pub const KvCache = struct {
         const n_tokens = v_cur.ne[2];
         const n_embd_gqa = n_embd_head * n_head;
 
-        impl.assert(c.ggml_row_size(v_cur.type, n_embd_head) == v_cur.nb[1], "llama-kv-cache.cpp", 1372, "ggml_row_size(v_cur->type, n_embd_head) == v_cur->nb[1]");
+        impl.assert(c.ggml_row_size(v_cur.type, n_embd_head) == v_cur.nb[1], "llama-kv-cache.cpp", 1521, "ggml_row_size(v_cur->type, n_embd_head) == v_cur->nb[1]");
 
         const n_stream = v.ne[2];
 
@@ -1338,7 +1338,7 @@ pub const KvCache = struct {
         return c.ggml_set_rows(ctx, v_view, v_cur, v_idxs);
     }
 
-    /// Ports `llama_kv_cache`'s `build_input_k_idxs` (llama-kv-cache.cpp:1414 @8642541b2).
+    /// Ports `llama_kv_cache`'s `build_input_k_idxs` (llama-kv-cache.cpp:1563 @cd959bae9).
     pub fn buildInputKIdxs(self: *const KvCache, ctx: *c.ggml_context, ubatch: *const Ubatch) *Tensor {
         _ = self;
         const k_idxs = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I64, ubatch.n_tokens);
@@ -1347,7 +1347,7 @@ pub const KvCache = struct {
         return k_idxs;
     }
 
-    /// Ports `llama_kv_cache`'s `build_input_v_idxs` (llama-kv-cache.cpp:1425 @8642541b2).
+    /// Ports `llama_kv_cache`'s `build_input_v_idxs` (llama-kv-cache.cpp:1574 @cd959bae9).
     pub fn buildInputVIdxs(self: *const KvCache, ctx: *c.ggml_context, ubatch: *const Ubatch) *Tensor {
         const n_tokens: i64 = ubatch.n_tokens;
         const v_idxs = if (!self.v_trans)
@@ -1378,10 +1378,10 @@ pub const KvCache = struct {
         return res;
     }
 
-    /// Ports `llama_kv_cache`'s `set_input_k_idxs` (llama-kv-cache.cpp:1466 @8642541b2).
+    /// Ports `llama_kv_cache`'s `set_input_k_idxs` (llama-kv-cache.cpp:1607 @cd959bae9).
     pub fn setInputKIdxs(self: *const KvCache, dst: *Tensor, ubatch: *const Ubatch, sinfo: *const SlotInfo) void {
-        impl.assert(ubatch.n_tokens == sinfo.size() * sinfo.nStream(), "llama-kv-cache.cpp", 1468, "n_tokens == (int64_t) sinfo.size()*sinfo.n_stream()");
-        impl.assert(c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 1470, "ggml_backend_buffer_is_host(dst->buffer)");
+        impl.assert(ubatch.n_tokens == sinfo.size() * sinfo.nStream(), "llama-kv-cache.cpp", 1609, "n_tokens == (int64_t) sinfo.size()*sinfo.n_stream()");
+        impl.assert(c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 1611, "ggml_backend_buffer_is_host(dst->buffer)");
         const data: [*]i64 = @ptrCast(@alignCast(dst.data));
         for (0..sinfo.nStream()) |s| {
             const offs: i64 = @as(i64, sinfo.strm.items[s]) * self.getSize();
@@ -1389,10 +1389,10 @@ pub const KvCache = struct {
         }
     }
 
-    /// Ports `llama_kv_cache`'s `set_input_v_idxs` (llama-kv-cache.cpp:1482 @8642541b2).
+    /// Ports `llama_kv_cache`'s `set_input_v_idxs` (llama-kv-cache.cpp:1623 @cd959bae9).
     pub fn setInputVIdxs(self: *const KvCache, dst: *Tensor, ubatch: *const Ubatch, sinfo: *const SlotInfo) void {
-        impl.assert(ubatch.n_tokens == sinfo.size() * sinfo.nStream(), "llama-kv-cache.cpp", 1484, "n_tokens == (int64_t) sinfo.size()*sinfo.n_stream()");
-        impl.assert(c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 1486, "ggml_backend_buffer_is_host(dst->buffer)");
+        impl.assert(ubatch.n_tokens == sinfo.size() * sinfo.nStream(), "llama-kv-cache.cpp", 1625, "n_tokens == (int64_t) sinfo.size()*sinfo.n_stream()");
+        impl.assert(c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 1627, "ggml_backend_buffer_is_host(dst->buffer)");
         const data: [*]i64 = @ptrCast(@alignCast(dst.data));
         if (!self.v_trans) {
             for (0..sinfo.nStream()) |s| {
@@ -1414,9 +1414,9 @@ pub const KvCache = struct {
         }
     }
 
-    /// Ports `llama_kv_cache`'s `set_input_k_shift` (llama-kv-cache.cpp:1515 @8642541b2).
+    /// Ports `llama_kv_cache`'s `set_input_k_shift` (llama-kv-cache.cpp:1656 @cd959bae9).
     pub fn setInputKShift(self: *const KvCache, dst: *Tensor) void {
-        impl.assert(c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 1516, "ggml_backend_buffer_is_host(dst->buffer)");
+        impl.assert(c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 1657, "ggml_backend_buffer_is_host(dst->buffer)");
         const data: [*]i32 = @ptrCast(@alignCast(dst.data));
         for (0..self.n_stream) |s| {
             const cl = &self.cells()[s];
@@ -1469,13 +1469,13 @@ pub const KvCache = struct {
         }
     }
 
-    /// Ports `llama_kv_cache`'s `set_input_pos_bucket` (llama-kv-cache.cpp:1781 @8642541b2).
+    /// Ports `llama_kv_cache`'s `set_input_pos_bucket` (llama-kv-cache.cpp:1970 @cd959bae9).
     pub fn setInputPosBucket(self: *const KvCache, dst: *Tensor, ubatch: *const Ubatch) void {
         const n_tokens: usize = ubatch.n_tokens;
-        impl.assert(self.n_stream == 1, "llama-kv-cache.cpp", 1784, "n_stream == 1 && \"TODO: support multiple streams\"");
+        impl.assert(self.n_stream == 1, "llama-kv-cache.cpp", 1973, "n_stream == 1 && \"TODO: support multiple streams\"");
         const cl = &self.cells()[0];
-        impl.assert(c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 1787, "ggml_backend_buffer_is_host(dst->buffer)");
-        impl.assert(!ubatch.equalSeqs(), "llama-kv-cache.cpp", 1788, "!ubatch->equal_seqs()");
+        impl.assert(c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 1976, "ggml_backend_buffer_is_host(dst->buffer)");
+        impl.assert(!ubatch.equalSeqs(), "llama-kv-cache.cpp", 1977, "!ubatch->equal_seqs()");
         const data: [*]i32 = @ptrCast(@alignCast(dst.data));
         const n_kv: usize = @intCast(dst.ne[0]);
         for (0..n_tokens) |i| {
@@ -1503,16 +1503,16 @@ pub const KvCache = struct {
         @memcpy(@as([*]u8, @ptrCast(dst.data))[0..c.ggml_nbytes(dst)], std.mem.sliceAsBytes(m)[0..c.ggml_nbytes(dst)]);
     }
 
-    /// Ports `llama_kv_cache`'s `has_cell_ext` (llama-kv-cache.cpp:1824
-    /// @8642541b2): whether `llama_kv_cell_ext` holds what a state save and
+    /// Ports `llama_kv_cache`'s `has_cell_ext` (llama-kv-cache.cpp:1995
+    /// @cd959bae9): whether `llama_kv_cell_ext` holds what a state save and
     /// restore must keep -- M-RoPE's 2D position, or the token the PLE and
     /// Engram n-gram hashes need.
     pub fn hasCellExt(self: *const KvCache) bool {
         return self.hparams.nPosPerEmbd() > 1 or self.hparams.ple_n_heads > 0;
     }
 
-    /// Ports `llama_kv_cache`'s `get_prev_tokens` (llama-kv-cache.cpp:1829
-    /// @8642541b2): for every token of the ubatch, the ids of the `n`
+    /// Ports `llama_kv_cache`'s `get_prev_tokens` (llama-kv-cache.cpp:2000
+    /// @cd959bae9): for every token of the ubatch, the ids of the `n`
     /// tokens before it in its sequence, `LLAMA_TOKEN_NULL` where there are
     /// none. `apply_ubatch` has already stored this ubatch, so the cells
     /// cover its own tokens too; the nearest cell at or before a position
@@ -1577,28 +1577,28 @@ pub const KvCache = struct {
         }
     }
 
-    /// Ports `llama_kv_cache`'s `total_size` (llama-kv-cache.cpp:1888 @8642541b2).
+    /// Ports `llama_kv_cache`'s `total_size` (llama-kv-cache.cpp:2059 @cd959bae9).
     pub fn totalSize(self: *const KvCache) usize {
         var size: usize = 0;
         for (self.ctxs_bufs.bufs.items) |e| size += c.ggml_backend_buffer_get_size(e.buf);
         return size;
     }
 
-    /// Ports `llama_kv_cache`'s `size_k_bytes` (llama-kv-cache.cpp:1898 @8642541b2).
+    /// Ports `llama_kv_cache`'s `size_k_bytes` (llama-kv-cache.cpp:2069 @cd959bae9).
     fn sizeKBytes(self: *const KvCache) usize {
         var size: usize = 0;
         for (self.layers.items) |l| size += c.ggml_nbytes(l.k);
         return size;
     }
 
-    /// Ports `llama_kv_cache`'s `size_v_bytes` (llama-kv-cache.cpp:1908 @8642541b2).
+    /// Ports `llama_kv_cache`'s `size_v_bytes` (llama-kv-cache.cpp:2079 @cd959bae9).
     fn sizeVBytes(self: *const KvCache) usize {
         var size: usize = 0;
         for (self.layers.items) |l| size += if (l.v) |v| c.ggml_nbytes(v) else 0;
         return size;
     }
 
-    /// Ports `llama_kv_cache`'s `build_rope_shift` (llama-kv-cache.cpp:1918 @8642541b2).
+    /// Ports `llama_kv_cache`'s `build_rope_shift` (llama-kv-cache.cpp:2089 @cd959bae9).
     fn buildRopeShift(self: *const KvCache, cparams: *const Cparams, ctx: *c.ggml_context, cur: *Tensor, shift: *Tensor, rot: ?*Tensor, factors: ?*Tensor, freq_base: f32, freq_scale: f32, il: u32) *Tensor {
         const n_ctx_orig: c_int = @bitCast(cparams.n_ctx_orig_yarn);
         const n_rot: c_int = @intCast(self.hparams.nRot(il));
@@ -1618,7 +1618,7 @@ pub const KvCache = struct {
 
     /// Ports `llama_kv_cache`'s `build_graph_shift` (llama-kv-cache.cpp:1997 @8642541b2).
     fn buildGraphShift(self: *const KvCache, res: *graph.Result, lctx: *context_mod.Context) *c.ggml_cgraph {
-        impl.assert(self.other == null, "llama-kv-cache.cpp", 1999, "!other");
+        impl.assert(self.other == null, "llama-kv-cache.cpp", 2163, "!other");
         const ctx = res.getCtx();
         const gf = res.getGf();
 
@@ -1650,7 +1650,7 @@ pub const KvCache = struct {
         return gf;
     }
 
-    /// Ports `llama_kv_cache`'s `state_write` (llama-kv-cache.cpp:2049 @8642541b2).
+    /// Ports `llama_kv_cache`'s `state_write` (llama-kv-cache.cpp:2211 @cd959bae9).
     /// A partial state holds only the SWA caches, so a cache without SWA
     /// writes nothing under `LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY`.
     pub fn stateWrite(self: *const KvCache, w: io.Writer, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
@@ -1687,7 +1687,7 @@ pub const KvCache = struct {
 
             var check: u32 = 0;
             for (cr.data.items) |r| check += r[1] - r[0];
-            impl.assert(cell_count == check, "llama-kv-cache.cpp", 2107, "cell_count == cell_count_check");
+            impl.assert(cell_count == check, "llama-kv-cache.cpp", 2269, "cell_count == cell_count_check");
 
             try w.writeValue(cell_count, exc);
             if (cell_count == 0) continue;
@@ -1702,13 +1702,13 @@ pub const KvCache = struct {
         data: std.ArrayList([2]u32) = .empty,
     };
 
-    /// Ports `llama_kv_cache`'s `state_read` (llama-kv-cache.cpp:2121 @8642541b2).
+    /// Ports `llama_kv_cache`'s `state_read` (llama-kv-cache.cpp:2283 @cd959bae9).
     pub fn stateRead(self: *KvCache, r: io.Reader, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
         return self.stateReadSinfo(r, seq_id, flags, null, null, exc);
     }
 
-    /// Ports `llama_kv_cache`'s `state_read_sinfo` (llama-kv-cache.cpp:2125
-    /// @8642541b2): `state_read`, plus the cells the restored tokens went
+    /// Ports `llama_kv_cache`'s `state_read_sinfo` (llama-kv-cache.cpp:2287
+    /// @cd959bae9): `state_read`, plus the cells the restored tokens went
     /// to. A cache mirroring another (the qwen4exp indexer) must not search
     /// for cells of its own: two searches agree only by luck.
     ///
@@ -1726,7 +1726,7 @@ pub const KvCache = struct {
         if ((flags & c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) != 0 and self.swa_type == .none) {
             return;
         }
-        impl.assert(seq_id == -1 or (seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len), "llama-kv-cache.cpp", 2141, "seq_id == -1 || (seq_id >= 0 && (size_t) seq_id < seq_to_stream.size())");
+        impl.assert(seq_id == -1 or (seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len), "llama-kv-cache.cpp", 2303, "seq_id == -1 || (seq_id >= 0 && (size_t) seq_id < seq_to_stream.size())");
 
         if (sinfos_out) |out| {
             for (out.items) |*si| si.deinit();
@@ -1778,8 +1778,8 @@ pub const KvCache = struct {
         }
     }
 
-    /// Ports `llama_kv_cache`'s `state_clear` (llama-kv-cache.cpp:2681
-    /// @8642541b2): undo a `state_read` of `seq_id`, -1 for the whole cache,
+    /// Ports `llama_kv_cache`'s `state_clear` (llama-kv-cache.cpp:2843
+    /// @cd959bae9): undo a `state_read` of `seq_id`, -1 for the whole cache,
     /// that another memory module failed to complete. A cell another
     /// sequence still uses keeps its data.
     ///
@@ -1790,7 +1790,7 @@ pub const KvCache = struct {
             return;
         }
 
-        impl.assert(seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 2687, "seq_id >= 0 && (size_t) seq_id < seq_to_stream.size()");
+        impl.assert(seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len, "llama-kv-cache.cpp", 2849, "seq_id >= 0 && (size_t) seq_id < seq_to_stream.size()");
 
         const strm = self.seq_to_stream.items[@intCast(seq_id)];
         const cl = &self.cells()[strm];
@@ -1811,7 +1811,7 @@ pub const KvCache = struct {
     }
 
     /// Ports `llama_kv_cache`'s `state_clear` over a slot info
-    /// (llama-kv-cache.cpp:2710 @8642541b2): forget the sequence, and zero
+    /// (llama-kv-cache.cpp:2872 @cd959bae9): forget the sequence, and zero
     /// the K and V of the cells a failed restore wrote -- attention can
     /// still read the data of free cells. The ranges cleared mirror
     /// `stateReadData`'s writes.
@@ -1871,7 +1871,7 @@ pub const KvCache = struct {
         }
     }
 
-    /// Ports `llama_kv_cache`'s `state_write_meta` (llama-kv-cache.cpp:2199 @8642541b2).
+    /// Ports `llama_kv_cache`'s `state_write_meta` (llama-kv-cache.cpp:2361 @cd959bae9).
     fn stateWriteMeta(self: *const KvCache, w: io.Writer, cr: *const CellRanges, seq_id: i32, exc: *Exception) Thrown!void {
         const cl = &self.cells()[cr.strm];
         var seq_ids: std.ArrayList(i32) = .empty;
@@ -1896,8 +1896,8 @@ pub const KvCache = struct {
         }
     }
 
-    /// Ports `llama_kv_cache`'s `state_write_data` (llama-kv-cache.cpp:2232
-    /// @8642541b2). Since v0.6.0 the rotation sizes follow the layer count.
+    /// Ports `llama_kv_cache`'s `state_write_data` (llama-kv-cache.cpp:2394
+    /// @cd959bae9). Since v0.6.0 the rotation sizes follow the layer count.
     fn stateWriteData(self: *const KvCache, w: io.Writer, cr: *const CellRanges, exc: *Exception) Thrown!void {
         const cl = &self.cells()[cr.strm];
         const v_trans: u32 = @intFromBool(self.v_trans);
@@ -1956,8 +1956,8 @@ pub const KvCache = struct {
         }
     }
 
-    /// Ports `llama_kv_cache`'s `state_read_meta` (llama-kv-cache.cpp:2333
-    /// @8642541b2). `sinfo_in`, when set, replaces the `find_slot`: the
+    /// Ports `llama_kv_cache`'s `state_read_meta` (llama-kv-cache.cpp:2495
+    /// @cd959bae9). `sinfo_in`, when set, replaces the `find_slot`: the
     /// caller gives the cells.
     ///
     /// Return: false on an inconsistency, which the C++ logs; `error.Thrown`
@@ -2060,12 +2060,12 @@ pub const KvCache = struct {
             impl.logDebug("%s: cell_count = %d, dest_seq_id = %d\n", .{ func, cell_count, dest_seq_id });
 
             // Every cell was allocated with the right sequence and position.
-            impl.assert(sinfo.nStream() == 1, "llama-kv-cache.cpp", 2445, "sinfo.n_stream() == 1");
-            impl.assert(sinfo.idxs.items[0].items.len == cell_count, "llama-kv-cache.cpp", 2446, "sinfo.idxs[0].size() == cell_count");
+            impl.assert(sinfo.nStream() == 1, "llama-kv-cache.cpp", 2607, "sinfo.n_stream() == 1");
+            impl.assert(sinfo.idxs.items[0].items.len == cell_count, "llama-kv-cache.cpp", 2608, "sinfo.idxs[0].size() == cell_count");
             for (0..cell_count) |i| {
                 const idx = sinfo.idxs.items[0].items[i];
-                impl.assert(cl.posGet(idx) == ubatch.pos[i], "llama-kv-cache.cpp", 2449, "cells.pos_get(idx) == ubatch.pos[i]");
-                impl.assert(cl.seqHas(idx, dest_seq_id), "llama-kv-cache.cpp", 2450, "cells.seq_has(idx, dest_seq_id)");
+                impl.assert(cl.posGet(idx) == ubatch.pos[i], "llama-kv-cache.cpp", 2611, "cells.pos_get(idx) == ubatch.pos[i]");
+                impl.assert(cl.seqHas(idx, dest_seq_id), "llama-kv-cache.cpp", 2612, "cells.seq_has(idx, dest_seq_id)");
             }
         } else {
             // The whole cache.
@@ -2110,8 +2110,8 @@ pub const KvCache = struct {
         return true;
     }
 
-    /// Ports `llama_kv_cache`'s `state_read_data` (llama-kv-cache.cpp:2511
-    /// @8642541b2): the scatter reads are batched per contiguous run of
+    /// Ports `llama_kv_cache`'s `state_read_data` (llama-kv-cache.cpp:2673
+    /// @cd959bae9): the scatter reads are batched per contiguous run of
     /// destination cells, `[from, to)` as the cell ranges are.
     fn stateReadData(self: *KvCache, r: io.Reader, strm: u32, cell_count: u32, sinfo: *const SlotInfo, exc: *Exception) Thrown!bool {
         const func = "state_read_data";
@@ -2487,7 +2487,7 @@ pub const KvCacheContext = struct {
     n_kv: u32 = 0,
 
     /// Ports the status constructor of `llama_kv_cache_context`
-    /// (llama-kv-cache.cpp:2791 @8642541b2).
+    /// (llama-kv-cache.cpp:2953 @cd959bae9).
     pub fn createStatus(status: memory.Status) *KvCacheContext {
         const self = allocator.create(KvCacheContext) catch oom();
         self.* = .{ .status = status };
@@ -2514,7 +2514,7 @@ pub const KvCacheContext = struct {
     }
 
     /// Ports the update constructor of `llama_kv_cache_context`
-    /// (llama-kv-cache.cpp:2810 @8642541b2).
+    /// (llama-kv-cache.cpp:2975 @cd959bae9).
     pub fn createUpdate(kv: *KvCache, lctx: *anyopaque, do_shift: bool, sc_info: StreamCopyInfo) *KvCacheContext {
         const self = allocator.create(KvCacheContext) catch oom();
         self.* = .{ .status = .success, .kv = kv, .lctx = lctx, .do_shift = do_shift, .sc_info = sc_info };
@@ -2523,7 +2523,7 @@ pub const KvCacheContext = struct {
     }
 
     /// Ports the batch constructor of `llama_kv_cache_context`
-    /// (llama-kv-cache.cpp:2820 @8642541b2): takes both lists.
+    /// (llama-kv-cache.cpp:2985 @cd959bae9): takes both lists.
     pub fn createBatch(kv: *KvCache, sinfos: std.ArrayList(SlotInfo), ubatches: std.ArrayList(Ubatch)) *KvCacheContext {
         const self = allocator.create(KvCacheContext) catch oom();
         self.* = .{ .status = .success, .kv = kv, .sinfos = sinfos, .ubatches = ubatches };
@@ -2539,7 +2539,7 @@ pub const KvCacheContext = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `llama_kv_cache_context`'s `next` (llama-kv-cache.cpp:2828 @8642541b2).
+    /// Ports `llama_kv_cache_context`'s `next` (llama-kv-cache.cpp:2993 @cd959bae9).
     pub fn next(self: *KvCacheContext) bool {
         std.debug.assert(self.status == .success);
         self.i_cur += 1;
@@ -2559,18 +2559,18 @@ pub const KvCacheContext = struct {
         return true;
     }
 
-    /// Ports `llama_kv_cache_context`'s `get_status` (llama-kv-cache.cpp:2854 @8642541b2).
+    /// Ports `llama_kv_cache_context`'s `get_status` (llama-kv-cache.cpp:3020 @cd959bae9).
     pub fn getStatus(self: *const KvCacheContext) memory.Status {
         return self.status;
     }
 
-    /// Ports `llama_kv_cache_context`'s `get_ubatch` (llama-kv-cache.cpp:2858 @8642541b2).
+    /// Ports `llama_kv_cache_context`'s `get_ubatch` (llama-kv-cache.cpp:3024 @cd959bae9).
     pub fn getUbatch(self: *const KvCacheContext) *const Ubatch {
         std.debug.assert(self.status == .success);
         return &self.ubatches.items[self.i_cur];
     }
 
-    /// Ports `llama_kv_cache_context`'s `get_n_kv` (llama-kv-cache.cpp:2864 @8642541b2).
+    /// Ports `llama_kv_cache_context`'s `get_n_kv` (llama-kv-cache.cpp:3030 @cd959bae9).
     pub fn getNKv(self: *const KvCacheContext) u32 {
         return self.n_kv;
     }
@@ -2633,7 +2633,7 @@ pub const KvCacheContext = struct {
     }
 
     /// Ports `llama_kv_cache_context`'s `get_prev_tokens`
-    /// (llama-kv-cache.cpp:2936 @8642541b2); see `KvCache.getPrevTokens`.
+    /// (llama-kv-cache.cpp:3098 @cd959bae9); see `KvCache.getPrevTokens`.
     pub fn getPrevTokens(self: *const KvCacheContext, ubatch: *const Ubatch, n: u32, res: *std.ArrayList(i32)) void {
         self.kv.?.getPrevTokens(ubatch, n, res);
     }

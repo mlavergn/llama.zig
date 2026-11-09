@@ -24,7 +24,7 @@ fn int(x: i64) c_int {
     return @truncate(x);
 }
 
-/// Ports `ggml_cuda_op_gated_linear_attn` (gla.cu:64 @8642541b2).
+/// Ports `ggml_cuda_op_gated_linear_attn` (gla.cu:64 @cd959bae9).
 pub fn opGatedLinearAttn(ctx: *common.Context, dst: *Tensor) void {
     const k_d: ?*const anyopaque = dst.src[0].*.data;
     const v_d: ?*const anyopaque = dst.src[1].*.data;

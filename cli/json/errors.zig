@@ -47,7 +47,7 @@ pub fn what() []const u8 {
     return what_buf.items;
 }
 
-/// Ports `exception`'s `name` (json.hpp:4535 @8642541b2) and the
+/// Ports `exception`'s `name` (json.hpp:4535 @cd959bae9) and the
 /// `type_error::create` family: sets `what()` to
 /// `[json.exception.<kind>.<id>] <message>`, cut at its first NUL byte as
 /// `std::runtime_error(const char *)` cuts it.
@@ -94,8 +94,8 @@ pub const Position = struct {
     lines_read: usize = 0,
 };
 
-/// Ports `parse_error`'s `create` (json.hpp:4648 @8642541b2) and
-/// `position_string` (json.hpp:4679 @8642541b2): a `parse_error` with its
+/// Ports `parse_error`'s `create` (json.hpp:4648 @cd959bae9) and
+/// `position_string` (json.hpp:4679 @cd959bae9): a `parse_error` with its
 /// line and column.
 ///
 /// Parameters:

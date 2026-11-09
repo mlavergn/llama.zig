@@ -26,7 +26,7 @@ const c = impl.c;
 const f = common.f;
 const as = common.as;
 
-/// Ports `ggml_vec_dot_q2_K_q8_K` (arch/x86/quants.c:1638 @8642541b2), the
+/// Ports `ggml_vec_dot_q2_K_q8_K` (arch/x86/quants.c:1638 @cd959bae9), the
 /// `__AVX2__` arm.
 ///
 /// The mins go straight into the float accumulator, eight lanes fused with
@@ -118,7 +118,7 @@ pub export fn ggml_vec_dot_q2_K_q8_K(
     s[0] = common.hsum_float_8(acc);
 }
 
-/// Ports `ggml_vec_dot_q3_K_q8_K` (arch/x86/quants.c:1830 @8642541b2), the
+/// Ports `ggml_vec_dot_q3_K_q8_K` (arch/x86/quants.c:1830 @cd959bae9), the
 /// `__AVX2__` arm.
 ///
 /// Two low bits from `qs` and the third from `hmask`, inverted: the high
@@ -253,7 +253,7 @@ pub export fn ggml_vec_dot_q3_K_q8_K(
     s[0] = common.hsum_float_8(acc);
 }
 
-/// Ports `ggml_vec_dot_q4_K_q8_K` (arch/x86/quants.c:2102 @8642541b2), the
+/// Ports `ggml_vec_dot_q4_K_q8_K` (arch/x86/quants.c:2102 @cd959bae9), the
 /// `__AVX2__` arm.
 ///
 /// `q5_K` without the fifth bit, and with the mins kept as four lanes,
@@ -342,7 +342,7 @@ pub export fn ggml_vec_dot_q4_K_q8_K(
     s[0] = common.hsum_float_8(acc) + avx.mm_cvtss_f32(acc_m);
 }
 
-/// Ports `ggml_vec_dot_q5_K_q8_K` (arch/x86/quants.c:2280 @8642541b2), the
+/// Ports `ggml_vec_dot_q5_K_q8_K` (arch/x86/quants.c:2280 @cd959bae9), the
 /// `__AVX2__` arm.
 ///
 /// The mins are applied first, against `q8_K`'s `bsums`, through two
@@ -451,7 +451,7 @@ pub export fn ggml_vec_dot_q5_K_q8_K(
     s[0] = common.hsum_float_8(acc) + summs;
 }
 
-/// Ports `ggml_vec_dot_q6_K_q8_K` (arch/x86/quants.c:2490 @8642541b2), the
+/// Ports `ggml_vec_dot_q6_K_q8_K` (arch/x86/quants.c:2490 @cd959bae9), the
 /// `__AVX2__` arm.
 ///
 /// Six-bit weights, four in `ql` and two in `qh`, with signed `int8`

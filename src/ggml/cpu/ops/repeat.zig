@@ -33,8 +33,8 @@ const ComputeParams = common.ComputeParams;
 /// Byte offset `i*nb`; see `common.byteOff`.
 const at = common.byteOff;
 
-/// Ports `ggml_compute_forward_repeat_f32` (ops.cpp:1716 @8642541b2) and
-/// `ggml_compute_forward_repeat_f16` (ops.cpp:1760 @8642541b2).
+/// Ports `ggml_compute_forward_repeat_f32` (ops.cpp:1728 @cd959bae9) and
+/// `ggml_compute_forward_repeat_f16` (ops.cpp:1772 @cd959bae9).
 ///
 /// The two are the same loop nest over a different element width; the `f16`
 /// one inlines the row copy where the `f32` one calls `ggml_vec_cpy_f32`. Both
@@ -94,7 +94,7 @@ fn repeatT(comptime T: type, params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_repeat` (ops.cpp:1807 @8642541b2).
+/// Ports `ggml_compute_forward_repeat` (ops.cpp:1819 @cd959bae9).
 pub export fn ggml_compute_forward_repeat(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -105,7 +105,7 @@ pub export fn ggml_compute_forward_repeat(params: *const ComputeParams, dst: *Te
     }
 }
 
-/// Ports `ggml_compute_forward_repeat_back_f32` (ops.cpp:1840 @8642541b2).
+/// Ports `ggml_compute_forward_repeat_back_f32` (ops.cpp:1852 @cd959bae9).
 fn repeatBackF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -172,7 +172,7 @@ fn repeatBackF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_repeat_back` (ops.cpp:1898 @8642541b2).
+/// Ports `ggml_compute_forward_repeat_back` (ops.cpp:1910 @cd959bae9).
 pub export fn ggml_compute_forward_repeat_back(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -182,11 +182,11 @@ pub export fn ggml_compute_forward_repeat_back(params: *const ComputeParams, dst
     }
 }
 
-/// Ports `GGML_CONCAT_TILE` (ops.cpp:1919 @8642541b2): rows of `dst` copied
+/// Ports `GGML_CONCAT_TILE` (ops.cpp:1931 @cd959bae9): rows of `dst` copied
 /// together, so that a strided source is read along neighboring rows.
 const concat_tile: i64 = 32;
 
-/// Ports `ggml_concat_copy_strided` (ops.cpp:1923 @8642541b2): `n_rows` rows
+/// Ports `ggml_concat_copy_strided` (ops.cpp:1935 @cd959bae9): `n_rows` rows
 /// of `n` elements of `es` bytes from a source with element stride `nb0`,
 /// element by element.
 fn concatCopyStrided(comptime es: usize, y: [*]u8, nby: usize, x: [*]const u8, nbx: usize, nb0: usize, n: i64, n_rows: i64) void {
@@ -201,7 +201,7 @@ fn concatCopyStrided(comptime es: usize, y: [*]u8, nby: usize, x: [*]const u8, n
     }
 }
 
-/// Ports `ggml_concat_copy_rows` (ops.cpp:1932 @8642541b2): `n_rows` rows of
+/// Ports `ggml_concat_copy_rows` (ops.cpp:1944 @cd959bae9): `n_rows` rows of
 /// `n` elements of `src` into `dst`, rows `nbx` bytes apart in `src` and
 /// `nby` bytes apart in `dst`.
 fn concatCopyRows(y: [*]u8, nby: usize, src: *const Tensor, x: [*]const u8, nbx: usize, n: i64, n_rows: i64) void {
@@ -227,7 +227,7 @@ fn concatCopyRows(y: [*]u8, nby: usize, src: *const Tensor, x: [*]const u8, nbx:
     }
 }
 
-/// Ports `ggml_compute_forward_concat` (ops.cpp:1953 @8642541b2).
+/// Ports `ggml_compute_forward_concat` (ops.cpp:1965 @cd959bae9).
 ///
 /// Each `dst` row comes from `src0` or `src1`, or for dim 0 from the row of
 /// `src0` followed by the row of `src1`. The rows of `dst` are split evenly

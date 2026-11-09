@@ -20,7 +20,7 @@ const Allocator = std.mem.Allocator;
 const srv = common.srv;
 const throw = common.throw;
 
-/// Ports `common_http_url` (common/http.h:17 @8642541b2).
+/// Ports `common_http_url` (common/http.h:17 @cd959bae9).
 pub const HttpUrl = struct {
     scheme: []const u8 = "",
     user: []const u8 = "",
@@ -41,7 +41,7 @@ fn stoi(a: Allocator, s: []const u8) !c_int {
     };
 }
 
-/// Ports `common_http_parse_url` (common/http.h:31 @8642541b2): scheme, user and
+/// Ports `common_http_parse_url` (common/http.h:31 @cd959bae9): scheme, user and
 /// password, host (an IPv6 literal unbracketed), port and path.
 pub fn parseUrl(a: Allocator, url: []const u8) !HttpUrl {
     var parts: HttpUrl = .{};
@@ -95,12 +95,12 @@ pub fn parseUrl(a: Allocator, url: []const u8) !HttpUrl {
     return parts;
 }
 
-/// Ports `proxy_header_to_lower` (server-cors-proxy.h:15 @8642541b2).
+/// Ports `proxy_header_to_lower` (server-cors-proxy.h:15 @cd959bae9).
 fn proxyHeaderToLower(a: Allocator, header: []const u8) ![]u8 {
     return std.ascii.allocLowerString(a, header);
 }
 
-/// Ports `proxy_request` (server-cors-proxy.h:22 @8642541b2): the `url`
+/// Ports `proxy_request` (server-cors-proxy.h:22 @cd959bae9): the `url`
 /// parameter's target, and the request's `x-llama-server-proxy-header-*`
 /// headers with that prefix removed, forwarded.
 fn proxyRequest(req: *const http.Req, method: []const u8) !*http.Res {
@@ -151,9 +151,9 @@ fn proxyRequest(req: *const http.Req, method: []const u8) !*http.Res {
     );
 }
 
-/// Ports `proxy_handler_post` (server-cors-proxy.h:77 @8642541b2).
+/// Ports `proxy_handler_post` (server-cors-proxy.h:77 @cd959bae9).
 pub const handler_post: http.Handler = .{ .ctx = null, .func = post };
-/// Ports `proxy_handler_get` (server-cors-proxy.h:81 @8642541b2).
+/// Ports `proxy_handler_get` (server-cors-proxy.h:81 @cd959bae9).
 pub const handler_get: http.Handler = .{ .ctx = null, .func = get };
 
 fn post(_: ?*anyopaque, req: *const http.Req) anyerror!*http.Res {

@@ -84,7 +84,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             // ViT merger 2x2 + final merger 2x2 = 4x spatial merge per dimension
             hparams.n_merge = 4;
             try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
-            impl.ggmlAssert(hparams.n_merge == 2 or hparams.n_merge == 4, "clip.cpp", 1568, "hparams.n_merge == 2 || hparams.n_merge == 4");
+            impl.ggmlAssert(hparams.n_merge == 2 or hparams.n_merge == 4, "clip.cpp", 1591, "hparams.n_merge == 2 || hparams.n_merge == 4");
 
             // no padding: the reference stretches the refined image to the target size
             hparams.image_pad_ov = .none;
@@ -110,7 +110,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
             try ld.getU32(names.KEY_PREPROC_MIN_TILES, &hparams.preproc_min_tiles, false);
             try ld.getU32(names.KEY_PREPROC_MAX_TILES, &hparams.preproc_max_tiles, false);
-            impl.ggmlAssert(hparams.preproc_min_tiles <= hparams.preproc_max_tiles and hparams.preproc_max_tiles < std.math.maxInt(i32), "clip.cpp", 1595, "hparams.preproc_min_tiles <= hparams.preproc_max_tiles && hparams.preproc_max_tiles < INT32_MAX");
+            impl.ggmlAssert(hparams.preproc_min_tiles <= hparams.preproc_max_tiles and hparams.preproc_max_tiles < std.math.maxInt(i32), "clip.cpp", 1618, "hparams.preproc_min_tiles <= hparams.preproc_max_tiles && hparams.preproc_max_tiles < INT32_MAX");
             try clip.Loader.setInternvlDhrResCandidates(model);
         },
         // PROJECTOR_TYPE_NEMOTRON_V2_VL
@@ -130,9 +130,9 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
         // PROJECTOR_TYPE_PARAKEET
         .parakeet => {
             try ld.getU32(names.KEY_AUDIO_SUBSMPL_FACTOR, &hparams.subsampling_factor, true);
-            impl.ggmlAssert(hparams.subsampling_factor == 8, "clip.cpp", 1616, "hparams.subsampling_factor == 8 && \"subsampling_factor must match the conv strides in clip_graph_parakeet::build()\"");
+            impl.ggmlAssert(hparams.subsampling_factor == 8, "clip.cpp", 1639, "hparams.subsampling_factor == 8 && \"subsampling_factor must match the conv strides in clip_graph_parakeet::build()\"");
             try ld.getU32(names.KEY_A_CONV_KERNEL_SIZE, &hparams.audio_conv_kernel_size, true);
-            impl.ggmlAssert(hparams.audio_conv_kernel_size > 0 and @rem(hparams.audio_conv_kernel_size, 2) == 1, "clip.cpp", 1619, "hparams.audio_conv_kernel_size > 0 && hparams.audio_conv_kernel_size % 2 == 1 && \"audio_conv_kernel_size must be a positive odd integer\"");
+            impl.ggmlAssert(hparams.audio_conv_kernel_size > 0 and @rem(hparams.audio_conv_kernel_size, 2) == 1, "clip.cpp", 1642, "hparams.audio_conv_kernel_size > 0 && hparams.audio_conv_kernel_size % 2 == 1 && \"audio_conv_kernel_size must be a positive odd integer\"");
             hparams.audio_chunk_len = 0;
             hparams.audio_sample_rate = 16000;
             hparams.audio_n_fft = 512;
@@ -187,7 +187,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             try ld.getU32(names.KEY_PREPROC_MAX_TILES, &hparams.preproc_max_tiles, false);
             try ld.getU32(names.KEY_PREPROC_TILE_SIZE, &hparams.preproc_tile_size, false);
             try ld.getF32(names.KEY_PREPROC_MAX_PIXELS_TOLERANCE, &hparams.preproc_max_pixels_tolerance, false);
-            impl.ggmlAssert(hparams.preproc_min_tiles >= 1 and hparams.preproc_min_tiles <= hparams.preproc_max_tiles, "clip.cpp", 1674, "hparams.preproc_min_tiles >= 1 && hparams.preproc_min_tiles <= hparams.preproc_max_tiles");
+            impl.ggmlAssert(hparams.preproc_min_tiles >= 1 and hparams.preproc_min_tiles <= hparams.preproc_max_tiles, "clip.cpp", 1718, "hparams.preproc_min_tiles >= 1 && hparams.preproc_min_tiles <= hparams.preproc_max_tiles");
             hparams.setLimitImageTokens(64, 256);
         },
         // PROJECTOR_TYPE_PHI4
@@ -449,7 +449,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.image_resize_pad = .none;
             try ld.getU32(names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
             // n_merge is used as a divisor; reject 0 to avoid int div-by-zero
-            impl.ggmlAssert(hparams.n_merge > 0, "clip.cpp", 1946, "hparams.n_merge > 0");
+            impl.ggmlAssert(hparams.n_merge > 0, "clip.cpp", 1991, "hparams.n_merge > 0");
             hparams.rope_theta = 10000.0; // vision_config.rope_theta
             // MiniMax-M3: max_pixels 451584 (=672^2) -> 576 merged tokens (image_seq_length)
             hparams.setLimitImageTokens(8, 576);
@@ -465,16 +465,16 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
 
             // the graph indexes the three arrays by stage and model.layers by the running depth sum
             const n_stage = hparams.audio_patch_sizes.items.len;
-            impl.ggmlAssert(n_stage > 0, "clip.cpp", 1962, "n_stage > 0");
-            impl.ggmlAssert(hparams.audio_hidden_sizes.items.len == n_stage, "clip.cpp", 1963, "hparams.audio_hidden_sizes.size() == n_stage");
-            impl.ggmlAssert(hparams.audio_depths.items.len == n_stage, "clip.cpp", 1964, "hparams.audio_depths.size() == n_stage");
-            impl.ggmlAssert(hparams.n_mel_bins == 1, "clip.cpp", 1965, "hparams.n_mel_bins == 1");
-            impl.ggmlAssert(hparams.audio_conv_kernel_size >= 1, "clip.cpp", 1966, "hparams.audio_conv_kernel_size >= 1");
+            impl.ggmlAssert(n_stage > 0, "clip.cpp", 2007, "n_stage > 0");
+            impl.ggmlAssert(hparams.audio_hidden_sizes.items.len == n_stage, "clip.cpp", 2008, "hparams.audio_hidden_sizes.size() == n_stage");
+            impl.ggmlAssert(hparams.audio_depths.items.len == n_stage, "clip.cpp", 2009, "hparams.audio_depths.size() == n_stage");
+            impl.ggmlAssert(hparams.n_mel_bins == 1, "clip.cpp", 2010, "hparams.n_mel_bins == 1");
+            impl.ggmlAssert(hparams.audio_conv_kernel_size >= 1, "clip.cpp", 2011, "hparams.audio_conv_kernel_size >= 1");
 
             var n_blocks: i64 = 0;
             for (0..n_stage) |i| {
-                impl.ggmlAssert(hparams.audio_hidden_sizes.items[i] >= 1, "clip.cpp", 1970, "hparams.audio_hidden_sizes[i] >= 1");
-                impl.ggmlAssert(hparams.audio_depths.items[i] >= 0, "clip.cpp", 1971, "hparams.audio_depths[i] >= 0");
+                impl.ggmlAssert(hparams.audio_hidden_sizes.items[i] >= 1, "clip.cpp", 2015, "hparams.audio_hidden_sizes[i] >= 1");
+                impl.ggmlAssert(hparams.audio_depths.items[i] >= 0, "clip.cpp", 2016, "hparams.audio_depths[i] >= 0");
                 n_blocks += hparams.audio_depths.items[i];
             }
             if (n_blocks != hparams.n_layer) {
@@ -506,7 +506,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             var pat: std.ArrayList(i32) = .empty;
             defer pat.deinit(gpa);
             try ld.getArrInt(names.KEY_WA_PATTERN_MODE, &pat, true);
-            impl.ggmlAssert(@as(i32, @intCast(pat.items.len)) == hparams.n_layer, "clip.cpp", 2002, "(int) pat.size() == hparams.n_layer && \"mimovl wa_pattern_mode length must equal n_layer\"");
+            impl.ggmlAssert(@as(i32, @intCast(pat.items.len)) == hparams.n_layer, "clip.cpp", 2047, "(int) pat.size() == hparams.n_layer && \"mimovl wa_pattern_mode length must equal n_layer\"");
             hparams.wa_pattern_mode.clearRetainingCapacity();
             try hparams.wa_pattern_mode.appendSlice(gpa, pat.items);
             try ld.getU32(names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
@@ -757,7 +757,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             // unlimited-ocr shares the v1 projector but tiles up to 32
             try ld.getU32(names.KEY_PREPROC_MIN_TILES, &hparams.preproc_min_tiles, false);
             try ld.getU32(names.KEY_PREPROC_MAX_TILES, &hparams.preproc_max_tiles, false);
-            impl.ggmlAssert(hparams.preproc_min_tiles >= 0 and hparams.preproc_min_tiles <= hparams.preproc_max_tiles and hparams.preproc_max_tiles <= 256, "clip.cpp", 2269, "hparams.preproc_min_tiles >= 0 && hparams.preproc_min_tiles <= hparams.preproc_max_tiles && hparams.preproc_max_tiles <= 256");
+            impl.ggmlAssert(hparams.preproc_min_tiles >= 0 and hparams.preproc_min_tiles <= hparams.preproc_max_tiles and hparams.preproc_max_tiles <= 256, "clip.cpp", 2327, "hparams.preproc_min_tiles >= 0 && hparams.preproc_min_tiles <= hparams.preproc_max_tiles && hparams.preproc_max_tiles <= 256");
         },
         // PROJECTOR_TYPE_HUNYUANVL
         .hunyuanvl => {
@@ -836,7 +836,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.audio_hop_len = 160;
             try ld.getU32(names.KEY_A_CHUNK_SIZE, &hparams.audio_chunk_size, true);
             // context_size is squared for the attn_dists/mask buffers; cap to prevent int32 overflow
-            impl.ggmlAssert(hparams.audio_chunk_size > 0 and hparams.audio_chunk_size <= 8192, "clip.cpp", 2353, "hparams.audio_chunk_size > 0 && hparams.audio_chunk_size <= 8192");
+            impl.ggmlAssert(hparams.audio_chunk_size > 0 and hparams.audio_chunk_size <= 8192, "clip.cpp", 2411, "hparams.audio_chunk_size > 0 && hparams.audio_chunk_size <= 8192");
             try ld.getU32(names.KEY_A_CONV_KERNEL_SIZE, &hparams.audio_conv_kernel_size, true);
             try ld.getU32(names.KEY_A_MAX_POS_EMB, &hparams.audio_max_pos_emb, true);
             try ld.getU32(names.KEY_A_PROJ_WINDOW_SIZE, &hparams.audio_proj_window_size, true);

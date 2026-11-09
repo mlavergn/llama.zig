@@ -7,7 +7,7 @@
 //! (`8642541b2`), which upstream itself generates. Do not edit; rerun the
 //! script. `scripts/unicode-diff` checks every code point against the C++.
 
-/// Ports `unicode_ranges_flags` (unicode-data.cpp:10 @8642541b2): each
+/// Ports `unicode_ranges_flags` (unicode-data.cpp:10 @cd959bae9): each
 /// entry's flags apply from its start up to the next entry's start. The
 /// last entry is the 0x110000 sentinel.
 pub const ranges_flags = [_]struct { u32, u16 }{
@@ -2286,7 +2286,7 @@ pub const ranges_flags = [_]struct { u32, u16 }{
     .{ 0x110000, 0x0000 },
 };
 
-/// Ports `unicode_set_whitespace` (unicode-data.cpp:2286 @8642541b2),
+/// Ports `unicode_set_whitespace` (unicode-data.cpp:2286 @cd959bae9),
 /// in the source's order.
 pub const set_whitespace = [_]u32{
     0x000009,
@@ -2316,7 +2316,7 @@ pub const set_whitespace = [_]u32{
     0x003000,
 };
 
-/// Ports `unicode_map_lowercase` (unicode-data.cpp:2315 @8642541b2),
+/// Ports `unicode_map_lowercase` (unicode-data.cpp:2315 @cd959bae9),
 /// ascending by code point.
 pub const map_lowercase = [_][2]u32{
     .{ 0x000041, 0x000061 },
@@ -3754,7 +3754,7 @@ pub const map_lowercase = [_][2]u32{
     .{ 0x01E921, 0x01E943 },
 };
 
-/// Ports `unicode_map_uppercase` (unicode-data.cpp:3752 @8642541b2).
+/// Ports `unicode_map_uppercase` (unicode-data.cpp:3752 @cd959bae9).
 pub const map_uppercase = [_][2]u32{
     .{ 0x000061, 0x000041 },
     .{ 0x000062, 0x000042 },
@@ -5208,10 +5208,10 @@ pub const map_uppercase = [_][2]u32{
     .{ 0x01E943, 0x01E921 },
 };
 
-/// Ports `range_nfd` (unicode-data.h:9 @8642541b2).
+/// Ports `range_nfd` (unicode-data.h:9 @cd959bae9).
 pub const RangeNfd = struct { first: u32, last: u32, nfd: u32 };
 
-/// Ports `unicode_ranges_nfd` (unicode-data.cpp:5205 @8642541b2),
+/// Ports `unicode_ranges_nfd` (unicode-data.cpp:5205 @cd959bae9),
 /// ascending by start.
 pub const ranges_nfd = [_]RangeNfd{
     .{ .first = 0x000000, .last = 0x000000, .nfd = 0x000000 },
@@ -7044,7 +7044,7 @@ pub const ranges_nfd = [_]RangeNfd{
     .{ .first = 0x02FA1D, .last = 0x02FA1D, .nfd = 0x02A600 },
 };
 
-/// Ports `unicode_combining_class` (unicode-data.cpp:7036 @8642541b2):
+/// Ports `unicode_combining_class` (unicode-data.cpp:7036 @cd959bae9):
 /// every code point whose canonical combining class is not 0, sorted by
 /// code point (the C++'s is an `unordered_map`, only ever `find`-ed).
 pub const combining_class = [_]struct { u32, u8 }{
@@ -7984,7 +7984,7 @@ pub const combining_class = [_]struct { u32, u8 }{
     .{ 0x01E94A, 7 },
 };
 
-/// Ports `unicode_decomposition` (unicode-data.cpp:7973 @8642541b2): each
+/// Ports `unicode_decomposition` (unicode-data.cpp:7973 @cd959bae9): each
 /// canonical decomposition as one or two code points (the second 0 when
 /// there is one), sorted by the decomposed code point.
 pub const decomposition = [_][3]u32{
@@ -10071,7 +10071,7 @@ pub const decomposition = [_][3]u32{
     .{ 0x02FA1D, 0x02A600, 0x000000 },
 };
 
-/// Ports `unicode_composition` (unicode-data.cpp:10057 @8642541b2): the pair
+/// Ports `unicode_composition` (unicode-data.cpp:10057 @cd959bae9): the pair
 /// `first << 32 | second` to its primary composite, sorted by key.
 pub const composition = [_]struct { u64, u32 }{
     .{ 0x0000003C00000338, 0x00226E },

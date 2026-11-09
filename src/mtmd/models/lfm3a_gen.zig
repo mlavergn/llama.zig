@@ -27,7 +27,7 @@ const nb = graph.nb;
 
 extern fn sqrtf(x: f32) f32;
 
-/// Ports `list_lfm3a_gen_state_slots` (lfm3a-gen.cpp:12 @8642541b2): the
+/// Ports `list_lfm3a_gen_state_slots` (lfm3a-gen.cpp:12 @cd959bae9): the
 /// state carried between GEN_WAV calls: rope offset, short-conv taps and
 /// attention window of the codec decoder. The caller frees the slice with
 /// `module.freeSlots`.
@@ -51,7 +51,7 @@ pub fn listStateSlots(hparams: *const model_mod.Hparams, model: *const model_mod
     return slots.toOwnedSlice(gpa);
 }
 
-/// Ports `build_lfm_attn` (lfm3a-gen.cpp:50 @8642541b2), a member of
+/// Ports `build_lfm_attn` (lfm3a-gen.cpp:50 @cd959bae9), a member of
 /// `clip_graph_lfm3a_gen`: GQA with q/k RMSNorm, NEOX rope, an optional cached
 /// K/V prefix and the LFM3 per-head sigmoid gate.
 fn buildLfmAttn(g: *const graph.Graph, cur: T, layer: *const model_mod.Layer, n_head: c_int, n_head_kv: c_int, eps: f32, rope_theta: f32, il: c_int, inp_pos: T, kq_mask: T, k_cache: T, v_cache: T, k_all: ?*T, v_all: ?*T) T {
@@ -99,7 +99,7 @@ fn buildLfmAttn(g: *const graph.Graph, cur: T, layer: *const model_mod.Layer, n_
     return attn;
 }
 
-/// Ports `build_lfm_conv` (lfm3a-gen.cpp:92 @8642541b2), a member of
+/// Ports `build_lfm_conv` (lfm3a-gen.cpp:92 @cd959bae9), a member of
 /// `clip_graph_lfm3a_gen`: short conv, in_proj -> b * x -> causal depthwise
 /// conv over [conv_state | x] -> c * conv -> out_proj.
 fn buildLfmConv(g: *const graph.Graph, cur_in: T, layer: *const model_mod.Layer, il: c_int, conv_state: T, conv_state_out: *T) T {
@@ -123,14 +123,14 @@ fn buildLfmConv(g: *const graph.Graph, cur_in: T, layer: *const model_mod.Layer,
     return g.buildMm(layer.conv_pw2_w, cur);
 }
 
-/// The first half of `build_lfm_layer` (lfm3a-gen.cpp:32 @8642541b2), the
+/// The first half of `build_lfm_layer` (lfm3a-gen.cpp:32 @cd959bae9), the
 /// pre-norm before its `op`. A `std::function` here splits the method around
 /// the call instead.
 fn lfmLayerPre(g: *const graph.Graph, inp_l: T, layer: *const model_mod.Layer, eps: f32, il: c_int) T {
     return g.buildNorm(inp_l, layer.ln_1_w, null, .rms, eps, il);
 }
 
-/// The second half of `build_lfm_layer` (lfm3a-gen.cpp:32 @8642541b2): the LFM3
+/// The second half of `build_lfm_layer` (lfm3a-gen.cpp:32 @cd959bae9): the LFM3
 /// sandwich norms when the layer has them, and the FFN.
 fn lfmLayerPost(g: *const graph.Graph, inp_l_in: T, cur_in: T, layer: *const model_mod.Layer, eps: f32, il: c_int) T {
     const ctx0 = g.ctx0;
@@ -144,7 +144,7 @@ fn lfmLayerPost(g: *const graph.Graph, inp_l_in: T, cur_in: T, layer: *const mod
     return c.ggml_add(ctx0, inp_l, cur);
 }
 
-/// Ports `build_gen_code` (lfm3a-gen.cpp:113 @8642541b2), a member of
+/// Ports `build_gen_code` (lfm3a-gen.cpp:113 @cd959bae9), a member of
 /// `clip_graph_lfm3a_gen`.
 fn buildGenCode(g: *graph.Graph, all_known: bool) T {
     const ctx0 = g.ctx0;
@@ -210,7 +210,7 @@ fn buildGenCode(g: *graph.Graph, all_known: bool) T {
     return fb;
 }
 
-/// Ports `build_gen_wav` (lfm3a-gen.cpp:172 @8642541b2), a member of
+/// Ports `build_gen_wav` (lfm3a-gen.cpp:172 @cd959bae9), a member of
 /// `clip_graph_lfm3a_gen`.
 fn buildGenWav(g: *graph.Graph, n_frames: c_int) clip.Error!T {
     const ctx0 = g.ctx0;
@@ -305,10 +305,10 @@ fn buildGenWav(g: *graph.Graph, n_frames: c_int) clip.Error!T {
     return cur;
 }
 
-/// Ports `build` (lfm3a-gen.cpp:253 @8642541b2), a member of
+/// Ports `build` (lfm3a-gen.cpp:253 @cd959bae9), a member of
 /// `clip_graph_lfm3a_gen`, with the builder's parameters derived as
 /// clip_get_graph_builder's `PROJECTOR_TYPE_LFM3A_GEN` arm does
-/// (mtmd/clip.cpp:1203 @8642541b2).
+/// (mtmd/clip.cpp:1222 @cd959bae9).
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     const gen_process: impl.GenProcessType = if (params) |p| p.gen_process else .gen_code;
     const n_cb = ne(g.model.gen_code_embd_w, 2);
@@ -316,10 +316,10 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     var n_frames: c_int = 1;
     if (params != null and params.?.codes != null) {
         const codes = params.?.codes.?.items;
-        impl.ggmlAssert(@rem(@as(i64, @intCast(codes.len)), n_cb) == 0, "clip.cpp", 1210, "params->codes->size() % (size_t) n_cb == 0");
+        impl.ggmlAssert(@rem(@as(i64, @intCast(codes.len)), n_cb) == 0, "clip.cpp", 1229, "params->codes->size() % (size_t) n_cb == 0");
         if (gen_process == .gen_wav) {
             n_frames = @intCast(@divTrunc(@as(i64, @intCast(codes.len)), n_cb));
-            impl.ggmlAssert(n_frames > 0, "clip.cpp", 1213, "n_frames > 0");
+            impl.ggmlAssert(n_frames > 0, "clip.cpp", 1232, "n_frames > 0");
         } else {
             // -1 marks a masked codebook, none masked means only the feedback embedding is needed
             all_known = true;

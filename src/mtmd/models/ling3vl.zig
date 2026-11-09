@@ -23,15 +23,15 @@ const PosCtx = struct {
     mrope_sections: [4]c_int,
 };
 
-/// The M-RoPE lambda `build` passes to `build_vit` (ling3vl.cpp:58 @8642541b2).
+/// The M-RoPE lambda `build` passes to `build_vit` (ling3vl.cpp:58 @cd959bae9).
 fn addPos(ctx: ?*anyopaque, g: *graph.Graph, cur: T, layer: *const model_mod.Layer) T {
     _ = layer;
     const p: *PosCtx = @ptrCast(@alignCast(ctx.?));
     return c.ggml_rope_multi(g.ctx0, cur, p.positions, null, @divTrunc(g.d_head, 2), &p.mrope_sections, c.GGML_ROPE_TYPE_VISION, 32768, 10000, 1, 0, 1, 32, 1);
 }
 
-/// Ports `build` (ling3vl.cpp:3 @8642541b2), a member of `clip_graph_ling3vl`
-/// (mtmd/models/models.h:63 @8642541b2), which derives from `clip_graph_qwen3vl` for
+/// Ports `build` (ling3vl.cpp:3 @cd959bae9), a member of `clip_graph_ling3vl`
+/// (mtmd/models/models.h:79 @cd959bae9), which derives from `clip_graph_qwen3vl` for
 /// `build_inp_temporal_merge` alone.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;

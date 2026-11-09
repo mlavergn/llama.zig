@@ -46,7 +46,7 @@ fn pad(x: usize, n: usize) usize {
     return (x + n - 1) & ~(n - 1);
 }
 
-/// Ports `moe_cache_slru` (llama-moe-cache.cpp:17 @8642541b2): the SLRU of
+/// Ports `moe_cache_slru` (llama-moe-cache.cpp:17 @cd959bae9): the SLRU of
 /// the experts of a group of layers; the slot of each expert is kept in the
 /// slot map of its layer.
 pub const Slru = struct {
@@ -88,7 +88,7 @@ pub const Slru = struct {
         self.uniq.deinit(allocator);
     }
 
-    /// Ports `moe_cache_slru`'s `init` (llama-moe-cache.cpp:36 @8642541b2).
+    /// Ports `moe_cache_slru`'s `init` (llama-moe-cache.cpp:36 @cd959bae9).
     pub fn init(self: *Slru, n_layer: usize, n_expert: i32, n_slots: i32) void {
         self.n_expert = n_expert;
         self.n_slots = n_slots;
@@ -112,7 +112,7 @@ pub const Slru = struct {
         @memset(self.seen, 0);
     }
 
-    /// Ports `moe_cache_slru`'s `move` (llama-moe-cache.cpp:54 @8642541b2):
+    /// Ports `moe_cache_slru`'s `move` (llama-moe-cache.cpp:54 @cd959bae9):
     /// moves slot `s` to the most recently used end of a segment.
     fn move(self: *Slru, s: i32, protect: bool) void {
         const su: usize = @intCast(s);
@@ -144,7 +144,7 @@ pub const Slru = struct {
         self.n_protected += @as(i32, @intCast(to)) - @as(i32, @intCast(from));
     }
 
-    /// Ports `moe_cache_slru`'s `touch` (llama-moe-cache.cpp:82 @8642541b2):
+    /// Ports `moe_cache_slru`'s `touch` (llama-moe-cache.cpp:82 @cd959bae9):
     /// promotes slot `s`, keeping the protected half at most half the slots.
     fn touch(self: *Slru, s: i32) void {
         self.move(s, true);
@@ -153,7 +153,7 @@ pub const Slru = struct {
         }
     }
 
-    /// Ports `moe_cache_slru`'s `victim` (llama-moe-cache.cpp:89 @8642541b2):
+    /// Ports `moe_cache_slru`'s `victim` (llama-moe-cache.cpp:89 @cd959bae9):
     /// the slot a miss in layer `il` takes, probation first, keeping every
     /// expert selected by this request, including earlier fills.
     fn victim(self: *const Slru, il: i32) i32 {
@@ -169,7 +169,7 @@ pub const Slru = struct {
         impl.abort("llama-moe-cache.cpp", 99, "no SLRU victim");
     }
 
-    /// Ports `moe_cache_slru`'s `plan` (llama-moe-cache.cpp:109 @8642541b2):
+    /// Ports `moe_cache_slru`'s `plan` (llama-moe-cache.cpp:109 @cd959bae9):
     /// gives a slot to each expert `ids` selects in layer `il`, evicting
     /// from probation first.
     ///
@@ -227,7 +227,7 @@ pub const Slru = struct {
 };
 
 /// Ports `llama_moe_cache_layer_experts` (llama-moe-cache.cpp:158
-/// @8642541b2): gate, up, down, or gate_up, down.
+/// @cd959bae9): gate, up, down, or gate_up, down.
 ///
 /// Return: the tensors, at most four, in `out`'s first slots.
 fn layerExperts(layer: *const model_mod.Layer, out: *[4]*Tensor) usize {
@@ -241,7 +241,7 @@ fn layerExperts(layer: *const model_mod.Layer, out: *[4]*Tensor) usize {
     return n;
 }
 
-/// Ports `llama_moe_cache_same_layout` (llama-moe-cache.cpp:168 @8642541b2).
+/// Ports `llama_moe_cache_same_layout` (llama-moe-cache.cpp:168 @cd959bae9).
 fn sameLayout(a: []const *Tensor, b: []const *Tensor) bool {
     if (a.len != b.len) {
         return false;
@@ -254,15 +254,15 @@ fn sameLayout(a: []const *Tensor, b: []const *Tensor) bool {
     return true;
 }
 
-/// Ports `llama_moe_cache_is_host_weight` (llama-moe-cache.cpp:180 @8642541b2).
+/// Ports `llama_moe_cache_is_host_weight` (llama-moe-cache.cpp:180 @cd959bae9).
 fn isHostWeight(t: *const Tensor) bool {
     return t.buffer != null and
         c.ggml_backend_buffer_get_usage(t.buffer) == c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS and
         c.ggml_backend_buffer_is_host(t.buffer);
 }
 
-/// Ports `llama_moe_cache` (llama-moe-cache.h:13 @8642541b2) and its `impl`
-/// (llama-moe-cache.cpp:188 @8642541b2): keeps recently and repeatedly used
+/// Ports `llama_moe_cache` (llama-moe-cache.h:13 @cd959bae9) and its `impl`
+/// (llama-moe-cache.cpp:188 @cd959bae9): keeps recently and repeatedly used
 /// experts of host-resident MoE layers in a device buffer.
 pub const MoeCache = struct {
     /// A GPU with its own budget and banks; it caches the layers assigned
@@ -350,7 +350,7 @@ pub const MoeCache = struct {
     ctx_views: ?*c.ggml_context = null,
 
     /// Ports the constructor of `llama_moe_cache` (llama-moe-cache.cpp:619
-    /// @8642541b2) and of its `impl` (llama-moe-cache.cpp:256 @8642541b2).
+    /// @cd959bae9) and of its `impl` (llama-moe-cache.cpp:256 @cd959bae9).
     ///
     /// Parameters:
     /// - `model`: the model; borrowed for the cache's lifetime.
@@ -600,7 +600,7 @@ pub const MoeCache = struct {
     }
 
     /// The `init_ctx` lambda of the constructor (llama-moe-cache.cpp:369
-    /// @8642541b2).
+    /// @cd959bae9).
     fn initCtx(n_tensors: usize, exc: *Exception) Thrown!*c.ggml_context {
         return c.ggml_init(.{
             .mem_size = n_tensors * c.ggml_tensor_overhead(),
@@ -610,7 +610,7 @@ pub const MoeCache = struct {
     }
 
     /// The `alloc_size` lambda of the constructor (llama-moe-cache.cpp:306
-    /// @8642541b2): one extra slot at the end, as CUDA's MMQ can read past
+    /// @cd959bae9): one extra slot at the end, as CUDA's MMQ can read past
     /// the last expert.
     fn allocSize(self: *const MoeCache, g: *const Group, n_slots: i32) usize {
         const alignment = c.ggml_backend_buft_get_alignment(self.devices.items[@intCast(g.id)].buft);
@@ -622,7 +622,7 @@ pub const MoeCache = struct {
     }
 
     /// Ports the destructor of `llama_moe_cache`'s `impl`
-    /// (llama-moe-cache.cpp:475 @8642541b2): logs the statistics, then frees
+    /// (llama-moe-cache.cpp:475 @cd959bae9): logs the statistics, then frees
     /// the members.
     ///
     /// Return: nothing.
@@ -653,7 +653,7 @@ pub const MoeCache = struct {
     }
 
     /// Ports `llama_moe_cache`'s `backend` (llama-moe-cache.cpp:625
-    /// @8642541b2).
+    /// @cd959bae9).
     ///
     /// Return: the device that caches layer `il`.
     pub fn backend(self: *const MoeCache, il: i32) c.ggml_backend_t {
@@ -661,8 +661,8 @@ pub const MoeCache = struct {
     }
 
     /// Ports `llama_moe_cache`'s `get_slot_map` (llama-moe-cache.cpp:629
-    /// @8642541b2), through the impl's `get_slot_map` (llama-moe-cache.cpp:479
-    /// @8642541b2).
+    /// @cd959bae9), through the impl's `get_slot_map` (llama-moe-cache.cpp:479
+    /// @cd959bae9).
     /// Large batches use most experts of a layer, so they gain little from
     /// the cache and would evict the experts used in generation.
     ///
@@ -681,7 +681,7 @@ pub const MoeCache = struct {
     }
 
     /// Ports `llama_moe_cache`'s `get_experts` (llama-moe-cache.cpp:633
-    /// @8642541b2).
+    /// @cd959bae9).
     ///
     /// Return: the experts of `w` in the cache, or null when `w` is not
     /// cached.
@@ -691,8 +691,8 @@ pub const MoeCache = struct {
     }
 
     /// Ports `llama_moe_cache`'s `copy_experts` (llama-moe-cache.cpp:641
-    /// @8642541b2), through the impl's `copy_experts` (llama-moe-cache.cpp:497
-    /// @8642541b2):
+    /// @cd959bae9), through the impl's `copy_experts` (llama-moe-cache.cpp:497
+    /// @cd959bae9):
     /// for large batches, copies the experts of `w` that are in the cache,
     /// from expert `e` up to `last`, to `dst`, the copy of `w`. Large
     /// batches only read the cache, so the experts used in generation stay.
@@ -729,8 +729,8 @@ pub const MoeCache = struct {
         return n;
     }
 
-    /// Ports `llama_moe_cache`'s `copy` (llama-moe-cache.cpp:637 @8642541b2),
-    /// through the impl's `copy` (llama-moe-cache.cpp:532 @8642541b2): the
+    /// Ports `llama_moe_cache`'s `copy` (llama-moe-cache.cpp:637 @cd959bae9),
+    /// through the impl's `copy` (llama-moe-cache.cpp:532 @cd959bae9): the
     /// scheduler's copy callback for a slot map.
     ///
     /// Return: false when `src` is not a slot map.
@@ -806,7 +806,7 @@ pub const MoeCache = struct {
         return true;
     }
 
-    /// Ports `impl`'s `log_stats` (llama-moe-cache.cpp:602 @8642541b2).
+    /// Ports `impl`'s `log_stats` (llama-moe-cache.cpp:602 @cd959bae9).
     fn logStats(self: *const MoeCache) void {
         logOne("ubatch <= 8", &self.stats_small);
         logOne("ubatch  > 8", &self.stats_large);
@@ -831,7 +831,7 @@ pub const MoeCache = struct {
     }
 
     /// Ports `llama_moe_cache`'s `memory_breakdown` (llama-moe-cache.cpp:645
-    /// @8642541b2): bytes per buffer type, in the `std::map`'s pointer order.
+    /// @cd959bae9): bytes per buffer type, in the `std::map`'s pointer order.
     ///
     /// Return: the entries, the caller's to free with `impl.allocator`.
     pub fn memoryBreakdown(self: *const MoeCache) []model_mod.BuftSize {

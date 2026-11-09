@@ -13,7 +13,7 @@ const model_mod = @import("../model.zig");
 const kimivl = @import("kimivl.zig");
 const c = impl.c;
 
-/// The `add_spatial_bias` lambda (step3vl.cpp:25 @8642541b2): adds a
+/// The `add_spatial_bias` lambda (step3vl.cpp:25 @cd959bae9): adds a
 /// per-channel bias to a [w, h, c] tensor.
 fn addSpatialBias(g: *graph.Graph, cur_in: graph.T, bias: graph.T) graph.T {
     if (bias == null) return cur_in;
@@ -32,7 +32,7 @@ fn addSpatialBias(g: *graph.Graph, cur_in: graph.T, bias: graph.T) graph.T {
     return cur;
 }
 
-/// Ports `build` (step3vl.cpp:3 @8642541b2), a member of `clip_graph_step3vl`.
+/// Ports `build` (step3vl.cpp:3 @cd959bae9), a member of `clip_graph_step3vl`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

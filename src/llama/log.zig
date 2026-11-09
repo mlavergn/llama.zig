@@ -21,19 +21,19 @@ const impl = @import("impl.zig");
 
 const c = impl.c;
 
-/// Ports `llama_logger_state` (llama-impl.cpp:15 @8642541b2).
+/// Ports `llama_logger_state` (llama-impl.cpp:15 @cd959bae9).
 pub const LoggerState = struct {
     log_callback: c.ggml_log_callback = callbackDefault,
     log_callback_user_data: ?*anyopaque = null,
 };
 
-/// Ports `g_logger_state` (llama-impl.cpp:20 @8642541b2).
+/// Ports `g_logger_state` (llama-impl.cpp:20 @cd959bae9).
 pub var g_logger_state: LoggerState = .{};
 
 extern "c" fn snprintf(buf: [*]u8, size: usize, format: [*:0]const u8, ...) c_int;
 
-/// Ports `llama_log_internal` (llama-impl.cpp:77 @8642541b2) and
-/// `llama_log_internal_v` (llama-impl.cpp:60 @8642541b2): formats into 128
+/// Ports `llama_log_internal` (llama-impl.cpp:77 @cd959bae9) and
+/// `llama_log_internal_v` (llama-impl.cpp:60 @cd959bae9): formats into 128
 /// bytes on the stack, and again on the heap when that was too short, then
 /// hands the text to the callback.
 ///
@@ -64,7 +64,7 @@ pub fn logInternal(level: c.enum_ggml_log_level, comptime format: [:0]const u8, 
     }
 }
 
-/// Ports `llama_log_callback_default` (llama-impl.cpp:84 @8642541b2): the
+/// Ports `llama_log_callback_default` (llama-impl.cpp:84 @cd959bae9): the
 /// text to `stderr`, flushed.
 ///
 /// Parameters:

@@ -32,7 +32,7 @@ const trie = json.trie;
 /// The JSON schema converter's builder, which the grammar is written to.
 pub const GrammarBuilder = s2g.GrammarBuilder;
 
-/// Ports `gbnf_escape_char_class` (peg-parser.cpp:1402 @8642541b2).
+/// Ports `gbnf_escape_char_class` (peg-parser.cpp:1402 @cd959bae9).
 fn escapeCharClass(out: *std.ArrayList(u8), a: Allocator, c: u32) Error!void {
     if (c == '-' or c == ']' or c == '[' or c == '\\') return out.appendSlice(a, &.{ '\\', @intCast(c) });
     if (c == '\n') return out.appendSlice(a, "\\n");
@@ -44,7 +44,7 @@ fn escapeCharClass(out: *std.ArrayList(u8), a: Allocator, c: u32) Error!void {
     return out.print(a, "\\U{X:0>8}", .{c});
 }
 
-/// Ports `gbnf_char_class` (peg-parser.cpp:1452 @8642541b2).
+/// Ports `gbnf_char_class` (peg-parser.cpp:1452 @cd959bae9).
 fn charClass(a: Allocator, chars: []const u32, negate: bool) Error![]u8 {
     var out: std.ArrayList(u8) = .empty;
     try out.appendSlice(a, if (negate) "[^" else "[");
@@ -58,9 +58,9 @@ const Bucket = struct { dest: usize, chars: std.ArrayList(u32) };
 
 const Mode = enum { excluding, including };
 
-/// Ports `gbnf_ac_grammar` (peg-parser.cpp:1460 @8642541b2), with the two
-/// rule bodies of `gbnf_excluding_grammar` (peg-parser.cpp:1515 @8642541b2)
-/// and `gbnf_including_grammar` (peg-parser.cpp:1537 @8642541b2) chosen by
+/// Ports `gbnf_ac_grammar` (peg-parser.cpp:1460 @cd959bae9), with the two
+/// rule bodies of `gbnf_excluding_grammar` (peg-parser.cpp:1515 @cd959bae9)
+/// and `gbnf_including_grammar` (peg-parser.cpp:1537 @cd959bae9) chosen by
 /// `mode`: one rule per non-matching state of the automaton over
 /// `strings`.
 ///
@@ -125,7 +125,7 @@ fn acGrammar(a: Allocator, builder: *GrammarBuilder, prefix: []const u8, strings
     return S.name(a, prefix, 0);
 }
 
-/// Ports `collect_reachable_rules` (peg-parser.cpp:1558 @8642541b2): the
+/// Ports `collect_reachable_rules` (peg-parser.cpp:1558 @cd959bae9): the
 /// names of every rule reachable from `rule`, references followed.
 fn collectReachableRules(a: Allocator, arena: *const Arena, rule: ParserId, reachable: *std.StringHashMapUnmanaged(void)) Error!void {
     var visited: std.StringHashMapUnmanaged(void) = .empty;
@@ -262,7 +262,7 @@ fn lessBytes(_: void, x: []const u8, y: []const u8) bool {
     return std.mem.order(u8, x, y) == .lt;
 }
 
-/// Ports `build_grammar` (peg-parser.cpp:1619 @8642541b2), a member of
+/// Ports `build_grammar` (peg-parser.cpp:1619 @cd959bae9), a member of
 /// `common_peg_arena`: every reachable rule, then `root` -- the root parser,
 /// or, lazily, the trigger rules as alternatives.
 ///

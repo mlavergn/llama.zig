@@ -45,29 +45,29 @@ extern fn ggml_gemm_q5_K_8x8_q8_K_generic(n: c_int, s: [*]f32, bs: usize, vx: *c
 extern fn ggml_gemm_q6_K_8x8_q8_K_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
 extern fn ggml_gemm_q8_0_4x8_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
 
-/// Ports `ggml_gemv_q4_0_8x8_q8_0` (arch/arm/repack.cpp:357 @8642541b2).
+/// Ports `ggml_gemv_q4_0_8x8_q8_0` (arch/arm/repack.cpp:357 @cd959bae9).
 pub export fn ggml_gemv_q4_0_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     ggml_gemv_q4_0_8x8_q8_0_generic(n, s, bs, vx, vy, nr, nc);
 }
 
-/// Ports `ggml_gemm_q4_0_4x8_q8_0` (arch/arm/repack.cpp:2451 @8642541b2).
+/// Ports `ggml_gemm_q4_0_4x8_q8_0` (arch/arm/repack.cpp:2570 @cd959bae9).
 pub export fn ggml_gemm_q4_0_4x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime mmla.enabled) return mmla.gemmQ4_0_4x8(n, s, bs, vx, vy, nr, nc);
     ggml_gemm_q4_0_4x8_q8_0_generic(n, s, bs, vx, vy, nr, nc);
 }
 
-/// Ports `ggml_gemm_q4_0_8x8_q8_0` (arch/arm/repack.cpp:2872 @8642541b2).
+/// Ports `ggml_gemm_q4_0_8x8_q8_0` (arch/arm/repack.cpp:2991 @cd959bae9).
 pub export fn ggml_gemm_q4_0_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     ggml_gemm_q4_0_8x8_q8_0_generic(n, s, bs, vx, vy, nr, nc);
 }
 
-/// Ports `ggml_gemm_q4_K_8x8_q8_K` (arch/arm/repack.cpp:3896 @8642541b2).
+/// Ports `ggml_gemm_q4_K_8x8_q8_K` (arch/arm/repack.cpp:4015 @cd959bae9).
 pub export fn ggml_gemm_q4_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime mmla.enabled) return mmla.gemmQ4_K_8x8(n, s, bs, vx, vy, nr, nc);
     ggml_gemm_q4_K_8x8_q8_K_generic(n, s, bs, vx, vy, nr, nc);
 }
 
-/// Ports `ggml_gemm_q5_K_8x8_q8_K` (arch/arm/repack.cpp:4416 @8642541b2).
+/// Ports `ggml_gemm_q5_K_8x8_q8_K` (arch/arm/repack.cpp:4535 @cd959bae9).
 pub export fn ggml_gemm_q5_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime mmla.enabled) return mmla.gemmQ5_K_8x8(n, s, bs, vx, vy, nr, nc);
     ggml_gemm_q5_K_8x8_q8_K_generic(n, s, bs, vx, vy, nr, nc);
@@ -79,7 +79,7 @@ pub export fn ggml_gemm_q6_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
     ggml_gemm_q6_K_8x8_q8_K_generic(n, s, bs, vx, vy, nr, nc);
 }
 
-/// Ports `ggml_gemm_q8_0_4x8_q8_0` (arch/arm/repack.cpp:5150 @8642541b2).
+/// Ports `ggml_gemm_q8_0_4x8_q8_0` (arch/arm/repack.cpp:5456 @cd959bae9).
 pub export fn ggml_gemm_q8_0_4x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime mmla.enabled) return mmla.gemmQ8_0_4x8(n, s, bs, vx, vy, nr, nc);
     ggml_gemm_q8_0_4x8_q8_0_generic(n, s, bs, vx, vy, nr, nc);

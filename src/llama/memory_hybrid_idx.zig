@@ -65,7 +65,7 @@ const SlotInfo = kv_cache.SlotInfo;
 const MemoryHybrid = memory_hybrid.MemoryHybrid;
 const HybridContext = memory_hybrid.HybridContext;
 
-/// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @8642541b2).
+/// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @cd959bae9).
 const max_seq = kv_cells.max_seq;
 
 fn oom() noreturn {
@@ -85,7 +85,7 @@ fn cloneSinfos(list: []const SlotInfo) std.ArrayList(SlotInfo) {
 }
 
 /// Ports `llama_memory_hybrid_idx`'s `POS_CLEAN` (llama-memory-hybrid-idx.h:99
-/// @8642541b2): no pooled key is stale.
+/// @cd959bae9): no pooled key is stale.
 pub const pos_clean: i32 = std.math.maxInt(i32);
 
 /// Ports `llama_memory_hybrid_idx`'s `stale_pos_t`: per sequence, the
@@ -93,7 +93,7 @@ pub const pos_clean: i32 = std.math.maxInt(i32);
 pub const StalePos = [max_seq]i32;
 
 /// Ports `llama_memory_hybrid_idx`'s `stale_pos_clean`
-/// (llama-memory-hybrid-idx.h:101 @8642541b2).
+/// (llama-memory-hybrid-idx.h:101 @cd959bae9).
 pub fn stalePosClean() StalePos {
     return @splat(pos_clean);
 }
@@ -134,13 +134,13 @@ fn resizeU32(list: *std.ArrayList(u32), n: usize) void {
     }
 }
 
-/// Ports `kpool_pad` (llama-memory-hybrid-idx.cpp:363 @8642541b2): the
+/// Ports `kpool_pad` (llama-memory-hybrid-idx.cpp:363 @cd959bae9): the
 /// padded pool count, whose last pool is always unused.
 fn kpoolPad(n_pool: u32) u32 {
     return @max(64, (n_pool +% 1 +% 63) / 64 * 64);
 }
 
-/// Ports `kpool_rank` (llama-memory-hybrid-idx.cpp:369 @8642541b2): the rank
+/// Ports `kpool_rank` (llama-memory-hybrid-idx.cpp:369 @cd959bae9): the rank
 /// of (pos, cell) among a sequence's cells, ordered by position then cell,
 /// or -1 when absent. In order mode the rank alone places a token: cells
 /// sharing a position (an M-RoPE image) have distinct ranks.
@@ -150,7 +150,7 @@ fn kpoolRank(cells: []const PosCell, pos: i32, cell: u32) i64 {
 }
 
 /// Ports `llama_memory_hybrid_idx`'s `kpool_layout` (llama-memory-hybrid-idx.cpp:333
-/// @8642541b2): which cells of each sequence make up which pool of `kpool`
+/// @cd959bae9): which cells of each sequence make up which pool of `kpool`
 /// consecutive positions (or cells, in order mode), for the whole cache. It
 /// outlives the batch: pools are fixed by positions relative to the
 /// sequence's first, so a ubatch only ever appends to it.
@@ -187,7 +187,7 @@ pub const KpoolLayout = struct {
 };
 
 /// Ports `llama_memory_hybrid_idx_context`'s `kpool_state`
-/// (llama-memory-hybrid-idx.cpp:350 @8642541b2): which pools of the layout
+/// (llama-memory-hybrid-idx.cpp:350 @cd959bae9): which pools of the layout
 /// the current ubatch must re-pool, in the layout's pool order.
 const KpoolState = struct {
     is_new: std.ArrayList(u32) = .empty,
@@ -206,7 +206,7 @@ const KpoolState = struct {
     }
 };
 
-/// Ports `llama_memory_hybrid_idx` (llama-memory-hybrid-idx.h:17 @8642541b2).
+/// Ports `llama_memory_hybrid_idx` (llama-memory-hybrid-idx.h:17 @cd959bae9).
 pub const MemoryHybridIdx = struct {
     /// The `llama_memory_hybrid` this extends.
     base: *MemoryHybrid,
@@ -224,7 +224,7 @@ pub const MemoryHybridIdx = struct {
     mem_idx_stale: StalePos = stalePosClean(),
 
     /// Ports the constructor of `llama_memory_hybrid_idx`
-    /// (llama-memory-hybrid-idx.cpp:19 @8642541b2): the hybrid memory, and
+    /// (llama-memory-hybrid-idx.cpp:19 @cd959bae9): the hybrid memory, and
     /// the indexer cache when `filter_idx` is given (`func != null`). The
     /// indexer is MQA with one key head of `indexer_head_size`, as
     /// `llama_kv_cache_dsa` shapes its own -- `indexer_kpool_row` heads
@@ -291,7 +291,7 @@ pub const MemoryHybridIdx = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `init_batch`
-    /// (llama-memory-hybrid-idx.cpp:73 @8642541b2): `llama_memory_hybrid`'s,
+    /// (llama-memory-hybrid-idx.cpp:73 @cd959bae9): `llama_memory_hybrid`'s,
     /// repeated because the indexer needs the attention slot infos the base
     /// context hides.
     pub fn initBatch(self: *MemoryHybridIdx, balloc: *batch.BatchAllocr, n_ubatch: u32, embd_all: bool) *HybridIdxContext {
@@ -351,12 +351,12 @@ pub const MemoryHybridIdx = struct {
         return HybridIdxContext.createStatus(.failed_prepare);
     }
 
-    /// Ports `llama_memory_hybrid_idx`'s `init_full` (llama-memory-hybrid-idx.cpp:138 @8642541b2).
+    /// Ports `llama_memory_hybrid_idx`'s `init_full` (llama-memory-hybrid-idx.cpp:138 @cd959bae9).
     pub fn initFull(self: *MemoryHybridIdx) *HybridIdxContext {
         return HybridIdxContext.createFull(self);
     }
 
-    /// Ports `llama_memory_hybrid_idx`'s `init_update` (llama-memory-hybrid-idx.cpp:142 @8642541b2).
+    /// Ports `llama_memory_hybrid_idx`'s `init_update` (llama-memory-hybrid-idx.cpp:142 @cd959bae9).
     pub fn initUpdate(self: *MemoryHybridIdx, lctx: *anyopaque, optimize: bool) *HybridIdxContext {
         return HybridIdxContext.createUpdate(self, lctx, optimize);
     }
@@ -366,7 +366,7 @@ pub const MemoryHybridIdx = struct {
         return self.base.getCanShift();
     }
 
-    /// Ports `llama_memory_hybrid_idx`'s `clear` (llama-memory-hybrid-idx.cpp:146 @8642541b2).
+    /// Ports `llama_memory_hybrid_idx`'s `clear` (llama-memory-hybrid-idx.cpp:146 @cd959bae9).
     pub fn clear(self: *MemoryHybridIdx, data: bool) void {
         self.base.clear(data);
         if (self.mem_idx) |m| {
@@ -376,7 +376,7 @@ pub const MemoryHybridIdx = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `mem_idx_stale_set`
-    /// (llama-memory-hybrid-idx.cpp:157 @8642541b2): a pooled key is valid
+    /// (llama-memory-hybrid-idx.cpp:157 @cd959bae9): a pooled key is valid
     /// only while the grouping that produced it holds, and grouping is
     /// relative to the sequence, so an edit at `p0` leaves every pool ending
     /// before it alone. `seq_id < 0` stales every sequence.
@@ -395,7 +395,7 @@ pub const MemoryHybridIdx = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `mem_idx_stale_pos`
-    /// (llama-memory-hybrid-idx.cpp:174 @8642541b2): the position an edit at
+    /// (llama-memory-hybrid-idx.cpp:174 @cd959bae9): the position an edit at
     /// `p0` stales the sequence from -- 0 at or below its first position,
     /// which moves `pos_min` and regroups the whole of it.
     fn memIdxStalePos(self: *const MemoryHybridIdx, seq_id: i32, p0: i32) i32 {
@@ -404,7 +404,7 @@ pub const MemoryHybridIdx = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `seq_rm` (llama-memory-hybrid-idx.cpp:182
-    /// @8642541b2): in `llama_memory_hybrid`'s order, the recurrent cache
+    /// @cd959bae9): in `llama_memory_hybrid`'s order, the recurrent cache
     /// first, since it may refuse.
     pub fn seqRm(self: *MemoryHybridIdx, seq_id: i32, p0: i32, p1: i32) bool {
         if (!self.getMemRecr().seqRm(seq_id, p0, p1)) return false;
@@ -419,7 +419,7 @@ pub const MemoryHybridIdx = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `seq_cp` (llama-memory-hybrid-idx.cpp:197
-    /// @8642541b2): only whole sequences are copied, as the recurrent state
+    /// @cd959bae9): only whole sequences are copied, as the recurrent state
     /// ignores the range and a shared cell holds a single pool grouping. The
     /// destination gets the source's pools, rep rows included: the source
     /// keeps its pooled keys, the destination rebuilds its layout and
@@ -435,7 +435,7 @@ pub const MemoryHybridIdx = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `seq_keep` (llama-memory-hybrid-idx.cpp:211
-    /// @8642541b2): every other sequence loses its cells, so their layouts
+    /// @cd959bae9): every other sequence loses its cells, so their layouts
     /// rebuild.
     pub fn seqKeep(self: *MemoryHybridIdx, seq_id: i32) void {
         self.base.seqKeep(seq_id);
@@ -446,7 +446,7 @@ pub const MemoryHybridIdx = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `seq_add` (llama-memory-hybrid-idx.cpp:221
-    /// @8642541b2): a negative shift moves cells below `p0`, which regroup
+    /// @cd959bae9): a negative shift moves cells below `p0`, which regroup
     /// as well.
     pub fn seqAdd(self: *MemoryHybridIdx, seq_id: i32, p0: i32, p1: i32, shift: i32) void {
         self.base.seqAdd(seq_id, p0, p1, shift);
@@ -457,7 +457,7 @@ pub const MemoryHybridIdx = struct {
         }
     }
 
-    /// Ports `llama_memory_hybrid_idx`'s `seq_div` (llama-memory-hybrid-idx.cpp:232 @8642541b2).
+    /// Ports `llama_memory_hybrid_idx`'s `seq_div` (llama-memory-hybrid-idx.cpp:232 @cd959bae9).
     pub fn seqDiv(self: *MemoryHybridIdx, seq_id: i32, p0: i32, p1: i32, d: c_int) void {
         self.base.seqDiv(seq_id, p0, p1, d);
         if (self.mem_idx) |m| {
@@ -477,7 +477,7 @@ pub const MemoryHybridIdx = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `memory_breakdown`
-    /// (llama-memory-hybrid-idx.cpp:241 @8642541b2): the indexer's bytes
+    /// (llama-memory-hybrid-idx.cpp:241 @cd959bae9): the indexer's bytes
     /// added to the hybrid memory's, per buffer type.
     pub fn memoryBreakdown(self: *const MemoryHybridIdx, out: *std.ArrayList(memory.BuftSize)) void {
         self.base.memoryBreakdown(out);
@@ -485,7 +485,7 @@ pub const MemoryHybridIdx = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `state_write`
-    /// (llama-memory-hybrid-idx.cpp:253 @8642541b2): the indexer section
+    /// (llama-memory-hybrid-idx.cpp:253 @cd959bae9): the indexer section
     /// goes last, a pure suffix ([TAG_HYBRID_IDX_STATE]); the indexer cache
     /// has the attention cache's SWA type, so both skip a partial state
     /// alike.
@@ -495,7 +495,7 @@ pub const MemoryHybridIdx = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `state_read`
-    /// (llama-memory-hybrid-idx.cpp:262 @8642541b2): `llama_memory_hybrid`'s,
+    /// (llama-memory-hybrid-idx.cpp:262 @cd959bae9): `llama_memory_hybrid`'s,
     /// with the indexer restored into the cells the attention restore chose
     /// ([TAG_HYBRID_IDX_SINFO]). A failure drops what was being restored
     /// from all three caches, a state they agree on, and rethrows.
@@ -528,7 +528,7 @@ pub const MemoryHybridIdx = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `state_drop`
-    /// (llama-memory-hybrid-idx.cpp:295 @8642541b2): forget `seq_id` in
+    /// (llama-memory-hybrid-idx.cpp:295 @cd959bae9): forget `seq_id` in
     /// every cache at once, or the whole context when it is negative --
     /// directly, not through `seqRm`, which the recurrent cache may refuse
     /// and leave only the other two cleared.
@@ -556,44 +556,44 @@ pub const MemoryHybridIdx = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `get_mem_idx` (llama-memory-hybrid-idx.cpp:312
-    /// @8642541b2): null when the model carries no indexer.
+    /// @cd959bae9): null when the model carries no indexer.
     pub fn getMemIdx(self: *const MemoryHybridIdx) ?*KvCache {
         return self.mem_idx;
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `get_kpool` (llama-memory-hybrid-idx.h:82
-    /// @8642541b2): the model's indexer pool size.
+    /// @cd959bae9): the model's indexer pool size.
     pub fn getKpool(self: *const MemoryHybridIdx) u32 {
         return self.hparams_idx.indexer_kpool;
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `get_kpool_by_order`
-    /// (llama-memory-hybrid-idx.h:85 @8642541b2): whether a pool is `kpool`
+    /// (llama-memory-hybrid-idx.h:85 @cd959bae9): whether a pool is `kpool`
     /// consecutive cells in sequence order (qwen4exp) rather than `kpool`
     /// consecutive positions.
     pub fn getKpoolByOrder(self: *const MemoryHybridIdx) bool {
         return self.hparams_idx.indexer_kpool_by_order;
     }
 
-    /// Ports `llama_memory_hybrid_idx`'s `mem_idx_stale_get` (llama-memory-hybrid-idx.h:107 @8642541b2).
+    /// Ports `llama_memory_hybrid_idx`'s `mem_idx_stale_get` (llama-memory-hybrid-idx.h:107 @cd959bae9).
     pub fn memIdxStaleGet(self: *const MemoryHybridIdx) *const StalePos {
         return &self.mem_idx_stale;
     }
 
-    /// Ports `llama_memory_hybrid_idx`'s `mem_idx_stale_clear` (llama-memory-hybrid-idx.h:108 @8642541b2).
+    /// Ports `llama_memory_hybrid_idx`'s `mem_idx_stale_clear` (llama-memory-hybrid-idx.h:108 @cd959bae9).
     pub fn memIdxStaleClear(self: *MemoryHybridIdx) void {
         self.mem_idx_stale = stalePosClean();
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `kpool_layout_get`
-    /// (llama-memory-hybrid-idx.cpp:378 @8642541b2).
+    /// (llama-memory-hybrid-idx.cpp:378 @cd959bae9).
     pub fn kpoolLayoutGet(self: *const MemoryHybridIdx) *const KpoolLayout {
         impl.assert(self.kpool_lay != null, "llama-memory-hybrid-idx.cpp", 379, "kpool_lay != nullptr");
         return self.kpool_lay.?;
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `kpool_layout_update`
-    /// (llama-memory-hybrid-idx.cpp:386 @8642541b2): extend each sequence's
+    /// (llama-memory-hybrid-idx.cpp:386 @cd959bae9): extend each sequence's
     /// pools with the cells appended since, or rebuild them when an edit
     /// staled the sequence or its cells no longer add up.
     ///
@@ -783,7 +783,7 @@ pub const MemoryHybridIdx = struct {
 };
 
 /// Ports `llama_memory_hybrid_idx_ns` (llama-memory-hybrid-idx.cpp:321
-/// @8642541b2): the streams in each ubatch's slot info, `get_k`/`get_v`'s
+/// @cd959bae9): the streams in each ubatch's slot info, `get_k`/`get_v`'s
 /// `ns`.
 fn streamsPerUbatch(sinfos: []const SlotInfo) std.ArrayList(u32) {
     var res: std.ArrayList(u32) = .empty;
@@ -793,7 +793,7 @@ fn streamsPerUbatch(sinfos: []const SlotInfo) std.ArrayList(u32) {
 }
 
 /// Ports `llama_memory_hybrid_idx_context`'s `kpool_access`
-/// (llama-memory-hybrid-idx.h:135 @8642541b2): the indexer storage of one
+/// (llama-memory-hybrid-idx.h:135 @cd959bae9): the indexer storage of one
 /// layer seen two ways -- the per-token part of each row (glm5-next: key |
 /// gate, qwen4exp: key) and the pooled key after it.
 pub const KpoolAccess = struct {
@@ -802,7 +802,7 @@ pub const KpoolAccess = struct {
     pooled: *Tensor,
 
     /// Ports the constructor of `kpool_access`
-    /// (llama-memory-hybrid-idx.cpp:572 @8642541b2).
+    /// (llama-memory-hybrid-idx.cpp:572 @cd959bae9).
     fn init(ctx: *c.ggml_context, k: *Tensor, n_embd: i64) KpoolAccess {
         const n_tok = k.ne[0] - n_embd;
         impl.assert(n_tok > 0 and @rem(n_tok, n_embd) == 0, "llama-memory-hybrid-idx.cpp", 575, "n_tok > 0 && n_tok % n_embd == 0");
@@ -818,24 +818,24 @@ pub const KpoolAccess = struct {
         };
     }
 
-    /// Ports `kpool_access`'s `gather_key_gate` (llama-memory-hybrid-idx.cpp:585 @8642541b2).
+    /// Ports `kpool_access`'s `gather_key_gate` (llama-memory-hybrid-idx.cpp:585 @cd959bae9).
     pub fn gatherKeyGate(self: KpoolAccess, idxs: *Tensor) *Tensor {
         return c.ggml_get_rows(self.ctx, self.key_gate, idxs);
     }
 
-    /// Ports `kpool_access`'s `scatter_pooled` (llama-memory-hybrid-idx.cpp:589 @8642541b2).
+    /// Ports `kpool_access`'s `scatter_pooled` (llama-memory-hybrid-idx.cpp:589 @cd959bae9).
     pub fn scatterPooled(self: KpoolAccess, values: *Tensor, idxs: *Tensor) *Tensor {
         return c.ggml_set_rows(self.ctx, self.pooled, values, idxs);
     }
 
-    /// Ports `kpool_access`'s `gather_pooled` (llama-memory-hybrid-idx.cpp:593 @8642541b2).
+    /// Ports `kpool_access`'s `gather_pooled` (llama-memory-hybrid-idx.cpp:593 @cd959bae9).
     pub fn gatherPooled(self: KpoolAccess, idxs: *Tensor) *Tensor {
         return c.ggml_get_rows(self.ctx, self.pooled, idxs);
     }
 };
 
 /// Ports `llama_memory_hybrid_idx_context` (llama-memory-hybrid-idx.h:133
-/// @8642541b2).
+/// @cd959bae9).
 pub const HybridIdxContext = struct {
     /// The `llama_memory_hybrid_idx_context`'s base. The `memory.Context`
     /// points here.
@@ -864,7 +864,7 @@ pub const HybridIdxContext = struct {
     mem_idx_stale_batch: StalePos = stalePosClean(),
 
     /// Ports the status constructor of `llama_memory_hybrid_idx_context`
-    /// (llama-memory-hybrid-idx.cpp:468 @8642541b2).
+    /// (llama-memory-hybrid-idx.cpp:468 @cd959bae9).
     pub fn createStatus(status: memory.Status) *HybridIdxContext {
         const self = allocator.create(HybridIdxContext) catch oom();
         self.* = .{ .base = HybridContext.initStatus(status) };
@@ -872,7 +872,7 @@ pub const HybridIdxContext = struct {
     }
 
     /// Ports the full-memory constructor of `llama_memory_hybrid_idx_context`
-    /// (llama-memory-hybrid-idx.cpp:471 @8642541b2). Graph reservation walks
+    /// (llama-memory-hybrid-idx.cpp:471 @cd959bae9). Graph reservation walks
     /// a full context, and qwen4exp builds the sparse attention only when
     /// the indexer context is set: without it the reserved worst case would
     /// be the dense graph. The pool counts are sized for every pool the
@@ -902,7 +902,7 @@ pub const HybridIdxContext = struct {
     }
 
     /// Ports the update constructor of `llama_memory_hybrid_idx_context`
-    /// (llama-memory-hybrid-idx.cpp:494 @8642541b2): `update` applies a
+    /// (llama-memory-hybrid-idx.cpp:494 @cd959bae9): `update` applies a
     /// pending cross-stream `seq_cp`, without which the copy keeps stale
     /// indexer keys.
     pub fn createUpdate(mem: *MemoryHybridIdx, lctx: *anyopaque, optimize: bool) *HybridIdxContext {
@@ -913,7 +913,7 @@ pub const HybridIdxContext = struct {
     }
 
     /// Ports the batch constructor of `llama_memory_hybrid_idx_context`
-    /// (llama-memory-hybrid-idx.cpp:504 @8642541b2): takes the three lists;
+    /// (llama-memory-hybrid-idx.cpp:504 @cd959bae9): takes the three lists;
     /// the base and the indexer each get their own copy of the ubatches,
     /// and a sequence edit since the last batch forces its touched
     /// positions to re-pool.
@@ -961,7 +961,7 @@ pub const HybridIdxContext = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx_context`'s `next`
-    /// (llama-memory-hybrid-idx.cpp:522 @8642541b2): the staleness is
+    /// (llama-memory-hybrid-idx.cpp:522 @cd959bae9): the staleness is
     /// cleared only after a successful first ubatch.
     pub fn next(self: *HybridIdxContext) bool {
         if (self.i_cur == 0) {
@@ -973,7 +973,7 @@ pub const HybridIdxContext = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx_context`'s `apply`
-    /// (llama-memory-hybrid-idx.cpp:537 @8642541b2): `&`, so the indexer
+    /// (llama-memory-hybrid-idx.cpp:537 @cd959bae9): `&`, so the indexer
     /// applies whatever the base answered; then the pool layout takes this
     /// ubatch's cells, and the state what it must re-pool.
     pub fn apply(self: *HybridIdxContext) bool {
@@ -995,7 +995,7 @@ pub const HybridIdxContext = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx_context`'s `kpool_track`
-    /// (llama-memory-hybrid-idx.cpp:557 @8642541b2): whether this context
+    /// (llama-memory-hybrid-idx.cpp:557 @cd959bae9): whether this context
     /// tracks k-pool states, derived from the memory rather than cached.
     fn kpoolTrack(self: *const HybridIdxContext) bool {
         const m = self.mem orelse return false;
@@ -1023,13 +1023,13 @@ pub const HybridIdxContext = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx_context`'s `get_idx`
-    /// (llama-memory-hybrid-idx.cpp:562 @8642541b2): null with no indexer.
+    /// (llama-memory-hybrid-idx.cpp:562 @cd959bae9): null with no indexer.
     pub fn getIdx(self: *const HybridIdxContext) ?*const kv_cache.KvCacheContext {
         return self.ctx_idx;
     }
 
     /// Ports `llama_memory_hybrid_idx_context`'s `get_n_stream`
-    /// (llama-memory-hybrid-idx.cpp:566 @8642541b2): the streams in the
+    /// (llama-memory-hybrid-idx.cpp:566 @cd959bae9): the streams in the
     /// current slot info, `get_k`/`get_v`'s `ns`; 1 when unified.
     pub fn getNStream(self: *const HybridIdxContext) u32 {
         impl.assert(self.i_cur < self.ns_ubatch.items.len, "llama-memory-hybrid-idx.cpp", 567, "i_cur < ns_ubatch.size()");
@@ -1037,14 +1037,14 @@ pub const HybridIdxContext = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx_context`'s `get_kpool_access`
-    /// (llama-memory-hybrid-idx.cpp:597 @8642541b2).
+    /// (llama-memory-hybrid-idx.cpp:597 @cd959bae9).
     pub fn getKpoolAccess(self: *const HybridIdxContext, ctx: *c.ggml_context, il: i32, n_embd: i64) KpoolAccess {
         impl.assert(self.mem != null and self.mem.?.getMemIdx() != null, "llama-memory-hybrid-idx.cpp", 599, "mem != nullptr && mem->get_mem_idx() != nullptr");
         return KpoolAccess.init(ctx, self.mem.?.getMemIdx().?.getKStorage(il), n_embd);
     }
 
     /// Ports `llama_memory_hybrid_idx_context`'s `kpool_build_sizes`
-    /// (llama-memory-hybrid-idx.cpp:607 @8642541b2): the sizes alone, for
+    /// (llama-memory-hybrid-idx.cpp:607 @cd959bae9): the sizes alone, for
     /// the full context, so `getNKpool` works during graph reserve.
     fn kpoolBuildSizes(self: *const HybridIdxContext) KpoolState {
         const lay = self.mem.?.kpoolLayoutGet();
@@ -1052,7 +1052,7 @@ pub const HybridIdxContext = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx_context`'s `kpool_build_state`
-    /// (llama-memory-hybrid-idx.cpp:625 @8642541b2): which pools this ubatch
+    /// (llama-memory-hybrid-idx.cpp:625 @cd959bae9): which pools this ubatch
     /// must re-pool. `cpy_k` writes each token's key | gate into its row,
     /// pooled slots zeroed; this marks the pools the ubatch touches or
     /// completes as new -- one pool every `kpool` tokens during decode; the
@@ -1171,28 +1171,28 @@ pub const HybridIdxContext = struct {
     }
 
     /// Ports `llama_memory_hybrid_idx_context`'s `kpool_cur`
-    /// (llama-memory-hybrid-idx.cpp:715 @8642541b2).
+    /// (llama-memory-hybrid-idx.cpp:715 @cd959bae9).
     fn kpoolCur(self: *const HybridIdxContext) *const KpoolState {
         impl.assert(self.kpool_st != null and self.i_kpool == self.i_cur, "llama-memory-hybrid-idx.cpp", 716, "kpool_st != nullptr && i_kpool == i_cur && \"k-pool state read before apply()\"");
         return self.kpool_st.?;
     }
 
     /// Ports `llama_memory_hybrid_idx_context`'s `get_n_kpool`
-    /// (llama-memory-hybrid-idx.cpp:721 @8642541b2): the padded pool count,
+    /// (llama-memory-hybrid-idx.cpp:721 @cd959bae9): the padded pool count,
     /// whose last pool is always unused.
     pub fn getNKpool(self: *const HybridIdxContext) u32 {
         return kpoolPad(self.kpoolCur().n_pool_real);
     }
 
     /// Ports `llama_memory_hybrid_idx_context`'s `get_n_kpool_new`
-    /// (llama-memory-hybrid-idx.cpp:725 @8642541b2): the pools to re-pool
+    /// (llama-memory-hybrid-idx.cpp:725 @cd959bae9): the pools to re-pool
     /// this ubatch, padded to a stable bound and never below 1.
     pub fn getNKpoolNew(self: *const HybridIdxContext) u32 {
         return self.kpoolCur().n_new_g;
     }
 
     /// Ports `llama_memory_hybrid_idx_context`'s `set_input_kpool`
-    /// (llama-memory-hybrid-idx.cpp:729 @8642541b2): the k-pool indexer's
+    /// (llama-memory-hybrid-idx.cpp:729 @cd959bae9): the k-pool indexer's
     /// inputs for the current ubatch, every cell index stream-local, the
     /// padding and absent cells at the `n_kv` sentinel row.
     ///

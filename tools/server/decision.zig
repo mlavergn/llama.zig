@@ -56,7 +56,7 @@ const Template = chat.template.Template;
 
 pub const DecisionType = tc.common.DecisionType;
 
-/// `llama-ext.h`'s `llama_decision_order` (llama-ext.h:140 @8642541b2),
+/// `llama-ext.h`'s `llama_decision_order` (llama-ext.h:140 @cd959bae9),
 /// as the `int32_t` values `server_task::decision::order` holds.
 const DecisionOrder = @import("llama").api.batch.llama_decision_order;
 fn orderValue(o: DecisionOrder) i32 {
@@ -70,14 +70,14 @@ extern "c" fn strtoul(s: [*:0]const u8, end: ?*[*:0]u8, base: c_int) c_ulong;
 extern "c" fn strtod(s: [*:0]const u8, end: ?*[*:0]u8) f64;
 extern "c" fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
 
-/// Ports `server_decision_question_type` (server-decision.h:15 @8642541b2).
+/// Ports `server_decision_question_type` (server-decision.h:15 @cd959bae9).
 pub const QuestionType = enum(c_int) {
     choice,
     score,
     noul,
 };
 
-/// Ports `decision_question_type_name` (server-decision.cpp:10 @8642541b2).
+/// Ports `decision_question_type_name` (server-decision.cpp:10 @cd959bae9).
 fn questionTypeName(ty: QuestionType) []const u8 {
     return switch (ty) {
         .choice => "choice",
@@ -89,12 +89,12 @@ fn questionTypeName(ty: QuestionType) []const u8 {
 // lev reads noul from a rating scale: 0 = certainly no, 8 = certainly yes
 const lev_n_ratings: usize = 9;
 
-/// Ports `DECISION_H2O_MAX_STATE_TOKENS` (server-decision.cpp:24 @8642541b2):
+/// Ports `DECISION_H2O_MAX_STATE_TOKENS` (server-decision.cpp:24 @cd959bae9):
 /// h2o-lightning follows serve_config.json and h2o_lightning_shim.py of the
 /// model repo, a longer state keeps its head and its tail.
 const h2o_max_state_tokens: usize = 32000;
 
-/// Ports `RECURSIVE_LIMIT` (server-decision.cpp:27 @8642541b2): the
+/// Ports `RECURSIVE_LIMIT` (server-decision.cpp:27 @cd959bae9): the
 /// recursive functions of this file walk request JSON, a deeper value would
 /// overflow the stack.
 const recursive_limit: usize = 128;
@@ -104,13 +104,13 @@ fn tooDeep() Error {
     return throw(error.InvalidArgument, "JSON is nested more than {d} levels deep", .{recursive_limit});
 }
 
-/// Ports `server_decision_option` (server-decision.h:21 @8642541b2).
+/// Ports `server_decision_option` (server-decision.h:21 @cd959bae9).
 pub const Option = struct {
     key: []const u8,
     description: Value, // null if not provided
 };
 
-/// Ports `server_decision_question` (server-decision.h:26 @8642541b2).
+/// Ports `server_decision_question` (server-decision.h:26 @cd959bae9).
 pub const Question = struct {
     id: []const u8,
     type: QuestionType,
@@ -118,7 +118,7 @@ pub const Question = struct {
     options: []Option, // in the order of the model outputs
 };
 
-/// Ports `decision_meta_str` (server-decision.cpp:29 @8642541b2).
+/// Ports `decision_meta_str` (server-decision.cpp:29 @cd959bae9).
 fn metaStr(a: Allocator, model: ?*const c.llama_model, key: []const u8) Error![]u8 {
     var buf: [256]u8 = undefined;
     const kz = try a.dupeSentinel(u8, key, 0);
@@ -128,7 +128,7 @@ fn metaStr(a: Allocator, model: ?*const c.llama_model, key: []const u8) Error![]
     return a.dupe(u8, std.mem.sliceTo(&buf, 0));
 }
 
-/// Ports `server_decision_context` (server-decision.h:33 @8642541b2).
+/// Ports `server_decision_context` (server-decision.h:33 @cd959bae9).
 pub const DecisionContext = struct {
     gpa: Allocator = std.heap.c_allocator,
 
@@ -181,7 +181,7 @@ pub const DecisionContext = struct {
         self.* = .{ .gpa = gpa };
     }
 
-    /// Ports `init` (server-decision.cpp:39 @8642541b2): read the
+    /// Ports `init` (server-decision.cpp:39 @cd959bae9): read the
     /// "<arch>.decision.*" metadata, type stays NONE if the model has none.
     pub fn init(self: *DecisionContext, gpa: Allocator, model: ?*const c.llama_model) Error!void {
         self.deinit(); // the model can be reloaded
@@ -417,7 +417,7 @@ pub const DecisionContext = struct {
         common.srv(.inf, "init", "decision model type: %s\n", .{z.ptr});
     }
 
-    /// Ports `init_quoted_spellings` (server-decision.cpp:213 @8642541b2):
+    /// Ports `init_quoted_spellings` (server-decision.cpp:213 @cd959bae9):
     /// the texts of the tokens with these attributes, `quoted_spellings`
     /// and `quoted_first`.
     fn initQuotedSpellings(self: *DecisionContext, attrs: u32, min_size: usize) Error!void {
@@ -449,7 +449,7 @@ pub const DecisionContext = struct {
         }
     }
 
-    /// Ports `can_share_prompt` (server-decision.h:40 @8642541b2): true if
+    /// Ports `can_share_prompt` (server-decision.h:40 @cd959bae9): true if
     /// the questions of a request start with the same tokens, and the model
     /// can continue from them.
     pub fn canSharePrompt(self: *const DecisionContext) bool {
@@ -459,18 +459,18 @@ pub const DecisionContext = struct {
         };
     }
 
-    /// Ports `is_joint` (server-decision.h:58 @8642541b2): true if all the
+    /// Ports `is_joint` (server-decision.h:58 @cd959bae9): true if all the
     /// questions of a request go in one prompt, see `fillTaskJoint`.
     pub fn isJoint(self: *const DecisionContext) bool {
         return self.type == .clef;
     }
 
-    /// Ports `is_lfm3_d1` (server-decision.h:62 @8642541b2).
+    /// Ports `is_lfm3_d1` (server-decision.h:62 @cd959bae9).
     pub fn isLfm3D1(self: *const DecisionContext) bool {
         return self.type == .lfm3_d1 or self.type == .lfm3_d1_omni;
     }
 
-    /// Ports `can_use_images` (server-decision.h:67 @8642541b2): true if the
+    /// Ports `can_use_images` (server-decision.h:67 @cd959bae9): true if the
     /// prompt of the model has a place for images.
     pub fn canUseImages(self: *const DecisionContext) bool {
         return switch (self.type) {
@@ -479,7 +479,7 @@ pub const DecisionContext = struct {
         };
     }
 
-    /// Ports `can_generate` (server-decision.h:86 @8642541b2): false for a
+    /// Ports `can_generate` (server-decision.h:86 @cd959bae9): false for a
     /// decision-only model, it serves no text generation.
     pub fn canGenerate(self: *const DecisionContext) bool {
         for (common.serverModelOutputModalities(self.type, true, false)) |m| {
@@ -491,19 +491,19 @@ pub const DecisionContext = struct {
     // -------------------------------------------------------------------------
     // request parsing
 
-    /// Ports `decision_is_spoken` (server-decision.cpp:237 @8642541b2):
+    /// Ports `decision_is_spoken` (server-decision.cpp:237 @cd959bae9):
     /// lfm3-d1-omni, a spoken question, its instructions are an input_audio
     /// part.
     fn isSpoken(instructions: *const Value) bool {
         return instructions.isObject() and std.mem.eql(u8, jsonValue(instructions, "type", []const u8, ""), "input_audio");
     }
 
-    /// Ports `decision_is_payload` (server-decision.cpp:241 @8642541b2).
+    /// Ports `decision_is_payload` (server-decision.cpp:241 @cd959bae9).
     fn isPayload(val: *const Value) bool {
         return val.isString() or val.isObject() or val.isArray();
     }
 
-    /// Ports `parse_questions` (server-decision.cpp:245 @8642541b2).
+    /// Ports `parse_questions` (server-decision.cpp:245 @cd959bae9).
     /// `error.InvalidArgument` on bad input.
     ///
     /// Return: owned by `a` (an arena: nothing is freed piecewise).
@@ -661,7 +661,7 @@ pub const DecisionContext = struct {
         return throw(error.InvalidArgument, "questions.{s}: {s}", .{ id, msg });
     }
 
-    /// Ports `parse_state` (server-decision.cpp:413 @8642541b2): the state
+    /// Ports `parse_state` (server-decision.cpp:413 @cd959bae9): the state
     /// without its images, which are appended to `files` in order. Images
     /// come from "files" (alias "images") and from the image_url and
     /// input_audio parts of a state made of chat messages; an image can be
@@ -747,7 +747,7 @@ pub const DecisionContext = struct {
     // -------------------------------------------------------------------------
     // prompt
 
-    /// Ports `n_variants` (server-decision.cpp:952 @8642541b2): the number of
+    /// Ports `n_variants` (server-decision.cpp:952 @cd959bae9): the number of
     /// prompts that are evaluated to answer this question, each one shows the
     /// options in a different order.
     pub fn nVariants(self: *const DecisionContext, question: *const Question) usize {
@@ -758,7 +758,7 @@ pub const DecisionContext = struct {
         return 1;
     }
 
-    /// Ports `n_outputs` (server-decision.cpp:960 @8642541b2).
+    /// Ports `n_outputs` (server-decision.cpp:960 @cd959bae9).
     fn nOutputs(self: *const DecisionContext, question: *const Question) usize {
         if (self.type == .lev and question.type == .noul) {
             return lev_n_ratings;
@@ -766,7 +766,7 @@ pub const DecisionContext = struct {
         return question.options.len;
     }
 
-    /// Ports `d1_labels` (server-decision.cpp:968 @8642541b2): LFM2_D1, the
+    /// Ports `d1_labels` (server-decision.cpp:968 @cd959bae9): LFM2_D1, the
     /// label text and tokens of each option; the label codes follow
     /// prompt.py of the model repo.
     ///
@@ -881,7 +881,7 @@ pub const DecisionContext = struct {
         }
     }
 
-    /// Ports `render_options` (server-decision.cpp:1067 @8642541b2).
+    /// Ports `render_options` (server-decision.cpp:1067 @cd959bae9).
     fn renderOptions(self: *const DecisionContext, a: Allocator, question: *const Question, variant: usize) Error!Value {
         const n_options = question.options.len;
 
@@ -915,7 +915,7 @@ pub const DecisionContext = struct {
         return options;
     }
 
-    /// Ports `render` (server-decision.cpp:1101 @8642541b2).
+    /// Ports `render` (server-decision.cpp:1101 @cd959bae9).
     ///
     /// Return: owned by `a`.
     fn render(
@@ -1016,7 +1016,7 @@ pub const DecisionContext = struct {
     /// The `escape` of `decision_escape`.
     const Escape = enum { special_tokens, d1_break };
 
-    /// Ports `decision_escape` (server-decision.cpp:606 @8642541b2):
+    /// Ports `decision_escape` (server-decision.cpp:606 @cd959bae9):
     /// lfm2-d1-omni, lfm3-d1, special tokens written in the input must not
     /// be parsed as such, in keys too.
     ///
@@ -1057,7 +1057,7 @@ pub const DecisionContext = struct {
         return null;
     }
 
-    /// Ports `d1_break` (server-decision.cpp:630 @8642541b2): LFM3_D1, a
+    /// Ports `d1_break` (server-decision.cpp:630 @cd959bae9): LFM3_D1, a
     /// zero-width space after the first character of each special token
     /// text (d1 prompt.py: plain).
     ///
@@ -1097,7 +1097,7 @@ pub const DecisionContext = struct {
         return cur;
     }
 
-    /// Ports `h2o_cut_state` (server-decision.cpp:839 @8642541b2): a state
+    /// Ports `h2o_cut_state` (server-decision.cpp:839 @cd959bae9): a state
     /// longer than max_state_tokens keeps its head and its tail around a
     /// "..." line.
     ///
@@ -1131,7 +1131,7 @@ pub const DecisionContext = struct {
         return parsed.get([]const u8);
     }
 
-    /// Ports `h2o_quote` (server-decision.cpp:862 @8642541b2): the special
+    /// Ports `h2o_quote` (server-decision.cpp:862 @cd959bae9): the special
     /// token texts written in the input are quoted with JSON escapes, so
     /// they stay text.
     ///
@@ -1157,7 +1157,7 @@ pub const DecisionContext = struct {
         return out.items;
     }
 
-    /// Ports `prepare_state` (server-decision.cpp:888 @8642541b2): the state
+    /// Ports `prepare_state` (server-decision.cpp:888 @cd959bae9): the state
     /// as the model reads it, done once per request; returns the state for
     /// most models.
     ///
@@ -1171,7 +1171,7 @@ pub const DecisionContext = struct {
         return Value.initString(a, try self.h2oQuote(a, try self.h2oCutState(a, text)));
     }
 
-    /// Ports `render_h2o` (server-decision.cpp:896 @8642541b2): the input of
+    /// Ports `render_h2o` (server-decision.cpp:896 @cd959bae9): the input of
     /// the template, its texts are rendered as the reference shim does.
     ///
     /// Return: owned by `a`.
@@ -1228,7 +1228,7 @@ pub const DecisionContext = struct {
         return r.run(self.tmpl.?, a);
     }
 
-    /// Ports `fill_task` (server-decision.cpp:1190 @8642541b2): set the prompt
+    /// Ports `fill_task` (server-decision.cpp:1190 @cd959bae9): set the prompt
     /// of one variant of this question, and where to read its result.
     /// `mctx` is only used if there are files.
     pub fn fillTask(
@@ -1326,7 +1326,7 @@ pub const DecisionContext = struct {
         task.tokens = new_tokens;
     }
 
-    /// Ports `fill_task_laya` (server-decision.cpp:1271 @8642541b2): the
+    /// Ports `fill_task_laya` (server-decision.cpp:1271 @cd959bae9): the
     /// prompt is `[cls] question [sep] ([marker] option)* [sep] state [sep]`;
     /// options and question are cut to fit max_head_tokens, the same way the
     /// model was trained.
@@ -1392,7 +1392,7 @@ pub const DecisionContext = struct {
         task.decision.column = @backingInt(question.type);
     }
 
-    /// Ports `fill_task_d1omni` (server-decision.cpp:1328 @8642541b2): each
+    /// Ports `fill_task_d1omni` (server-decision.cpp:1328 @cd959bae9): each
     /// piece is cut to its budget as the model was trained (d1-omni
     /// prompt.py: encode), the state gets the room that is left; the media
     /// come first, the text after them has a budget of its own.
@@ -1535,7 +1535,7 @@ pub const DecisionContext = struct {
         }
     }
 
-    /// Ports `fill_task_joint` (server-decision.cpp:1459 @8642541b2): set the
+    /// Ports `fill_task_joint` (server-decision.cpp:1459 @cd959bae9): set the
     /// prompt of all the questions, the result has the scores of all their
     /// options, in order. `mctx` is only used if there are files.
     pub fn fillTaskJoint(
@@ -1668,7 +1668,7 @@ pub const DecisionContext = struct {
     // -------------------------------------------------------------------------
     // answer
 
-    /// Ports `get_temperature` (server-decision.cpp:1572 @8642541b2).
+    /// Ports `get_temperature` (server-decision.cpp:1572 @cd959bae9).
     fn getTemperature(self: *const DecisionContext, question: *const Question) f32 {
         const n = question.options.len;
         const type_name = questionTypeName(question.type);
@@ -1692,12 +1692,12 @@ pub const DecisionContext = struct {
     }
 
     /// `format_answer` with its default argument, `has_media = false`
-    /// (server-decision.h:128 @8642541b2): see `formatAnswerMedia`.
+    /// (server-decision.h:128 @cd959bae9): see `formatAnswerMedia`.
     pub fn formatAnswer(self: *const DecisionContext, a: Allocator, question: *const Question, scores: []const []const f32) Error!Value {
         return self.formatAnswerMedia(a, question, scores, false);
     }
 
-    /// Ports `get_decision_confidence` (server-decision.cpp:1635 @8642541b2).
+    /// Ports `get_decision_confidence` (server-decision.cpp:1635 @cd959bae9).
     fn getDecisionConfidence(self: *const DecisionContext, question_type: QuestionType, probs: []const f64) Error!f64 {
         if (self.type == .vllm_decision2 or self.type == .vllm_d3) {
             return confidenceEntropy(probs);
@@ -1714,7 +1714,7 @@ pub const DecisionContext = struct {
         return throw(error.RuntimeError, "no confidence for this question type", .{});
     }
 
-    /// Ports `format_answer` (server-decision.cpp:1651 @8642541b2): `scores`
+    /// Ports `format_answer` (server-decision.cpp:1651 @cd959bae9): `scores`
     /// holds the raw model outputs of each variant; `has_media` is true if
     /// the request had images or audio.
     ///
@@ -1847,7 +1847,7 @@ fn maxIndex(xs: []const f64) usize {
 
 // confidence formulas are the ones published by TypeSafe
 
-/// Ports `decision_confidence_choice` (server-decision.cpp:1595 @8642541b2).
+/// Ports `decision_confidence_choice` (server-decision.cpp:1595 @cd959bae9).
 fn confidenceChoice(probs: []const f64) f64 {
     if (probs.len < 2) {
         return 1.0;
@@ -1866,7 +1866,7 @@ fn confidenceChoice(probs: []const f64) f64 {
 const score_group: usize = if (builtin.cpu.arch == .aarch64 and
     !std.Target.aarch64.featureSetHas(builtin.cpu.features, .max_interleave_factor_4)) 4 else 8;
 
-/// Ports `decision_confidence_score` (server-decision.cpp:1604 @8642541b2).
+/// Ports `decision_confidence_score` (server-decision.cpp:1604 @cd959bae9).
 fn confidenceScore(probs: []const f64) f64 {
     if (probs.len < 2) {
         return 1.0;
@@ -1899,7 +1899,7 @@ fn confidenceScore(probs: []const f64) f64 {
 }
 
 /// Ports `decision_confidence_entropy` (server-decision.cpp:1622
-/// @8642541b2): VLLM_DECISION2, VLLM_D3, the normalized entropy, as in the
+/// @cd959bae9): VLLM_DECISION2, VLLM_D3, the normalized entropy, as in the
 /// reference implementation.
 fn confidenceEntropy(probs: []const f64) f64 {
     if (probs.len < 2) {
@@ -1923,7 +1923,7 @@ fn confidenceEntropy(probs: []const f64) f64 {
 
 const max_images: usize = 8;
 
-/// Ports `decision_load_image` (server-decision.cpp:392 @8642541b2): any
+/// Ports `decision_load_image` (server-decision.cpp:392 @cd959bae9): any
 /// media, mtmd tells an audio clip or a video from an image by its content.
 fn loadImage(a: Allocator, url: *const Value, files: *std.ArrayList([]u8)) Error!void {
     if (!url.isString() or !std.mem.startsWith(u8, url.string, "data:")) {
@@ -1935,7 +1935,7 @@ fn loadImage(a: Allocator, url: *const Value, files: *std.ArrayList([]u8)) Error
     try oaicompat.handleMedia(a, files, url.string, "");
 }
 
-/// Ports `decision_load_audio` (server-decision.cpp:403 @8642541b2): audio
+/// Ports `decision_load_audio` (server-decision.cpp:403 @cd959bae9): audio
 /// is base64 data, as a data URL or not (OpenAI input_audio).
 fn loadAudio(a: Allocator, data: *const Value, files: *std.ArrayList([]u8)) Error!void {
     if (!data.isString() or std.mem.startsWith(u8, data.string, "http") or std.mem.startsWith(u8, data.string, "file://")) {
@@ -1950,7 +1950,7 @@ fn loadAudio(a: Allocator, data: *const Value, files: *std.ArrayList([]u8)) Erro
 // -----------------------------------------------------------------------------
 // JSON helpers
 
-/// Ports `decision_replace_text` (server-decision.cpp:485 @8642541b2):
+/// Ports `decision_replace_text` (server-decision.cpp:485 @cd959bae9):
 /// replace text in all strings of a JSON value.
 ///
 /// Return: owned by `a`.
@@ -1976,7 +1976,7 @@ fn replaceText(a: Allocator, val: *const Value, search: []const u8, replace: []c
     }
 }
 
-/// Ports `string_replace_all` (common/common.cpp:511 @8642541b2).
+/// Ports `string_replace_all` (common/common.cpp:528 @cd959bae9).
 fn stringReplaceAll(a: Allocator, s: []const u8, search: []const u8, replace: []const u8) Error![]u8 {
     if (search.len == 0) {
         return a.dupe(u8, s);
@@ -1994,7 +1994,7 @@ fn stringReplaceAll(a: Allocator, s: []const u8, search: []const u8, replace: []
     return builder.items;
 }
 
-/// Ports `decision_sort_keys` (server-decision.cpp:512 @8642541b2): sort the
+/// Ports `decision_sort_keys` (server-decision.cpp:512 @cd959bae9): sort the
 /// keys of all objects of a JSON value.
 ///
 /// Return: owned by `a`.
@@ -2030,7 +2030,7 @@ fn sortKeysAt(a: Allocator, val: *const Value, depth: usize) Error!Value {
     }
 }
 
-/// Ports `decision_kev_render` (server-decision.cpp:538 @8642541b2): kev
+/// Ports `decision_kev_render` (server-decision.cpp:538 @cd959bae9): kev
 /// flattens a JSON value into text, the keys of an object are kept as labels.
 ///
 /// Return: owned by `a`.
@@ -2074,7 +2074,7 @@ fn kevRender(a: Allocator, val: *const Value, indent: usize, depth: usize) Error
 }
 
 /// Ports `server_decision_escape_special_tokens` (server-decision.cpp:573
-/// @8642541b2): write `<|name|>` with U+00A6 in place of `|`, so text from
+/// @cd959bae9): write `<|name|>` with U+00A6 in place of `|`, so text from
 /// the request is not parsed as special tokens -- the same result as
 /// `std::regex_replace` with `<\|([A-Za-z0-9_]+)\|>`.
 ///
@@ -2108,7 +2108,7 @@ pub fn escapeSpecialTokens(a: Allocator, text: []const u8) Error![]const u8 {
     return out.items;
 }
 
-/// Ports `decision_kev_text` (server-decision.cpp:600 @8642541b2): kev text
+/// Ports `decision_kev_text` (server-decision.cpp:600 @cd959bae9): kev text
 /// input, special tokens written in the text must not be parsed as such.
 ///
 /// Return: a string value owned by `a`.
@@ -2119,7 +2119,7 @@ fn kevText(a: Allocator, val: *const Value) Error!Value {
 // -----------------------------------------------------------------------------
 // h2o-lightning: the texts are rendered the way the reference shim renders them with Python (json.dumps, str.lstrip)
 
-/// Ports `decision_utf8_next` (server-decision.cpp:668 @8642541b2): one code
+/// Ports `decision_utf8_next` (server-decision.cpp:668 @cd959bae9): one code
 /// point of UTF-8 text at `s[i.*]`, `i` moves past it; an invalid byte is
 /// read as is.
 fn utf8Next(s: []const u8, i: *usize) u32 {
@@ -2136,14 +2136,14 @@ fn utf8Next(s: []const u8, i: *usize) u32 {
     return cp;
 }
 
-/// Ports `decision_py_isspace` (server-decision.cpp:683 @8642541b2):
+/// Ports `decision_py_isspace` (server-decision.cpp:683 @cd959bae9):
 /// `str.isspace()` of Python.
 fn pyIsspace(cp: u32) bool {
     return (cp >= 0x09 and cp <= 0x0d) or (cp >= 0x1c and cp <= 0x20) or cp == 0x85 or cp == 0xa0 or cp == 0x1680 or
         (cp >= 0x2000 and cp <= 0x200a) or cp == 0x2028 or cp == 0x2029 or cp == 0x202f or cp == 0x205f or cp == 0x3000;
 }
 
-/// Ports `decision_py_rstrip` (server-decision.cpp:688 @8642541b2).
+/// Ports `decision_py_rstrip` (server-decision.cpp:688 @cd959bae9).
 ///
 /// Return: a slice of `s`.
 fn pyRstrip(s: []const u8) []const u8 {
@@ -2157,7 +2157,7 @@ fn pyRstrip(s: []const u8) []const u8 {
     return s[0..end];
 }
 
-/// Ports `decision_py_lstrip` (server-decision.cpp:698 @8642541b2).
+/// Ports `decision_py_lstrip` (server-decision.cpp:698 @cd959bae9).
 ///
 /// Return: a slice of `s`.
 fn pyLstrip(s: []const u8) []const u8 {
@@ -2172,7 +2172,7 @@ fn pyLstrip(s: []const u8) []const u8 {
     return s[i..];
 }
 
-/// Ports `decision_py_escape_cp` (server-decision.cpp:711 @8642541b2): a code
+/// Ports `decision_py_escape_cp` (server-decision.cpp:711 @cd959bae9): a code
 /// point as JSON escapes, a surrogate pair above the BMP.
 fn pyEscapeCp(a: Allocator, out: *std.ArrayList(u8), cp_in: u32) Error!void {
     if (cp_in < 0x10000) {
@@ -2182,7 +2182,7 @@ fn pyEscapeCp(a: Allocator, out: *std.ArrayList(u8), cp_in: u32) Error!void {
     try out.print(a, "\\u{x:0>4}\\u{x:0>4}", .{ 0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff) });
 }
 
-/// Ports `decision_py_float` (server-decision.cpp:720 @8642541b2): repr() of
+/// Ports `decision_py_float` (server-decision.cpp:720 @cd959bae9): repr() of
 /// a Python float: the shortest digits that read back the same, in exponent
 /// form below 1e-4 and from 1e16.
 fn pyFloat(a: Allocator, out: *std.ArrayList(u8), v: f64) Error!void {
@@ -2238,7 +2238,7 @@ fn pyFloat(a: Allocator, out: *std.ArrayList(u8), v: f64) Error!void {
     try out.appendSlice(a, digits.items);
 }
 
-/// Ports `decision_py_str` (server-decision.cpp:754 @8642541b2).
+/// Ports `decision_py_str` (server-decision.cpp:754 @cd959bae9).
 fn pyStr(a: Allocator, out: *std.ArrayList(u8), s: []const u8, ensure_ascii: bool) Error!void {
     try out.append(a, '"');
     var i: usize = 0;
@@ -2280,7 +2280,7 @@ fn pyNewline(a: Allocator, out: *std.ArrayList(u8), indent: i32, level: usize) E
     }
 }
 
-/// Ports `decision_py_dump` (server-decision.cpp:782 @8642541b2): json.dumps()
+/// Ports `decision_py_dump` (server-decision.cpp:782 @cd959bae9): json.dumps()
 /// of Python: `indent` < 0 is no indent, keys stay in their order.
 fn pyDump(a: Allocator, out: *std.ArrayList(u8), val: *const Value, indent: i32, level: usize, item_sep: []const u8, key_sep: []const u8, ensure_ascii: bool) Error!void {
     if (level >= recursive_limit) {
@@ -2332,7 +2332,7 @@ fn pyDump(a: Allocator, out: *std.ArrayList(u8), val: *const Value, indent: i32,
     }
 }
 
-/// Ports `decision_py_dumps` (server-decision.cpp:832 @8642541b2).
+/// Ports `decision_py_dumps` (server-decision.cpp:832 @cd959bae9).
 ///
 /// Return: owned by `a`.
 fn pyDumps(a: Allocator, val: *const Value, indent: i32, item_sep: []const u8, key_sep: []const u8, ensure_ascii: bool) Error![]const u8 {
@@ -2341,7 +2341,7 @@ fn pyDumps(a: Allocator, val: *const Value, indent: i32, item_sep: []const u8, k
     return out.items;
 }
 
-/// `llama_model_decision_label` (llama-ext.h:151 @8642541b2): the label's
+/// `llama_model_decision_label` (llama-ext.h:151 @cd959bae9): the label's
 /// text, or null past the last one.
 fn decisionLabel(model: ?*const c.llama_model, i: u32) ?[*:0]const u8 {
     return @import("llama").api.model.llama_model_decision_label(@ptrCast(model), i);
@@ -2349,7 +2349,7 @@ fn decisionLabel(model: ?*const c.llama_model, i: u32) ?[*:0]const u8 {
 
 /// Ports `D1OMNI_MARKER`, `D1OMNI_SEP`, `D1OMNI_MARK_STATE`,
 /// `D1OMNI_MARK_QUESTION` and `D1OMNI_MARK_OPTION` (server-decision.cpp:941,
-/// 942, 943, 944, 945 @8642541b2): given to the lfm2-d1-omni template, the
+/// 942, 943, 944, 945 @cd959bae9): given to the lfm2-d1-omni template, the
 /// text between the pieces of the prompt, and at the start of the pieces
 /// that are cut to a token budget.
 const d1omni_marker = "<<d1omni:";
@@ -2359,14 +2359,14 @@ const d1omni_mark_question = "<<d1omni:question>>";
 const d1omni_mark_option = "<<d1omni:option>>";
 
 /// Ports `D1OMNI_MAX_TOKENS`, `D1OMNI_MAX_TOKENS_IMAGE` and
-/// `D1OMNI_MAX_TOKENS_AUDIO` (server-decision.cpp:948, 949, 950 @8642541b2):
+/// `D1OMNI_MAX_TOKENS_AUDIO` (server-decision.cpp:948, 949, 950 @cd959bae9):
 /// max_length, image_text_length and audio_text_length of the model config.
 const d1omni_max_tokens: usize = 16384;
 const d1omni_max_tokens_image: usize = 896;
 const d1omni_max_tokens_audio: usize = 15360;
 
 /// Ports `CLEF_MARKER`, `CLEF_SEP`, `CLEF_MARK_QUESTION` and
-/// `CLEF_MARK_OPTION` (server-decision.cpp:1454, 1455, 1456, 1457 @8642541b2):
+/// `CLEF_MARK_OPTION` (server-decision.cpp:1454, 1455, 1456, 1457 @cd959bae9):
 /// the joint prompt's (clef) text given to the template, between the pieces
 /// of the prompt, and at the start of the span of a question or of an option.
 const clef_marker = "<<clef:";

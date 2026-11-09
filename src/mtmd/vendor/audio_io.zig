@@ -26,20 +26,20 @@ pub const Io = struct {
     mode: Mode,
 
     pub const Mode = enum {
-        /// `ma_dr_wav__on_seek_memory` (miniaudio.h:82551 @8642541b2):
+        /// `ma_dr_wav__on_seek_memory` (miniaudio.h:82927 @cd959bae9):
         /// fails outside `[0, size]`.
         dr_wav,
         /// `ma_dr_flac__on_seek_memory`: fails past the end.
         dr_flac,
         /// `ma_dr_mp3__on_seek_memory`: fails past the end.
         dr_mp3,
-        /// `ma_decoder__on_seek_memory` (miniaudio.h:66412 @8642541b2):
+        /// `ma_decoder__on_seek_memory` (miniaudio.h:66628 @cd959bae9):
         /// clamps to `[0, size]` and always succeeds.
         decoder,
     };
 
-    /// Ports `ma_dr_wav__on_read_memory` (miniaudio.h:82535 @8642541b2)
-    /// and `ma_decoder__on_read_memory` (miniaudio.h:66381 @8642541b2),
+    /// Ports `ma_dr_wav__on_read_memory` (miniaudio.h:82911 @cd959bae9)
+    /// and `ma_decoder__on_read_memory` (miniaudio.h:66597 @cd959bae9),
     /// which agree on the bytes delivered.
     ///
     /// Return: the bytes copied into `buf`, fewer at the end.
@@ -93,7 +93,7 @@ pub const Io = struct {
         }
     }
 
-    /// Ports `ma_dr_wav__seek_forward` (miniaudio.h:80372 @8642541b2):
+    /// Ports `ma_dr_wav__seek_forward` (miniaudio.h:80668 @cd959bae9):
     /// forward in steps of at most 0x7FFFFFFF.
     ///
     /// A clamping stream reaches its end on the first step and stays, so
@@ -110,15 +110,15 @@ pub const Io = struct {
         return true;
     }
 
-    /// Ports `ma_dr_wav__seek_from_start` (miniaudio.h:80390 @8642541b2).
+    /// Ports `ma_dr_wav__seek_from_start` (miniaudio.h:80686 @cd959bae9).
     pub fn seekFromStart(self: *Io, offset: u64) bool {
         if (offset <= 0x7FFFFFFF) return self.seek(@intCast(offset), .set);
         if (!self.seek(0x7FFFFFFF, .set)) return false;
         return self.seekForward(offset - 0x7FFFFFFF);
     }
 
-    /// Ports `ma_dr_wav__on_tell_memory` (miniaudio.h:82629 @8642541b2)
-    /// and `ma_decoder__on_tell_memory` (miniaudio.h:66455 @8642541b2).
+    /// Ports `ma_dr_wav__on_tell_memory` (miniaudio.h:83005 @cd959bae9)
+    /// and `ma_decoder__on_tell_memory` (miniaudio.h:66671 @cd959bae9).
     pub fn tell(self: *const Io) i64 {
         return @intCast(self.pos);
     }

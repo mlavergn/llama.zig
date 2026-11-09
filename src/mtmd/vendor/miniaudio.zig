@@ -49,7 +49,7 @@ pub fn resetIndeterminate() void {
     dr_flac.read_indeterminate = false;
 }
 
-/// Ports `audio_helpers`' `is_audio_file` (mtmd-helper.cpp:303 @8642541b2).
+/// Ports `audio_helpers`' `is_audio_file` (mtmd-helper.cpp:303 @cd959bae9).
 ///
 /// Parameters:
 /// - `buf`: the file's bytes.
@@ -63,7 +63,7 @@ pub fn isAudioFile(buf: []const u8) bool {
     return is_wav or is_mp3 or is_flac;
 }
 
-/// Ports `audio_helpers`' `decode_audio_from_buf` (mtmd-helper.cpp:322 @8642541b2).
+/// Ports `audio_helpers`' `decode_audio_from_buf` (mtmd-helper.cpp:322 @cd959bae9).
 ///
 /// Parameters:
 /// - `gpa`: allocates the decoder's state and `out`'s storage.
@@ -88,13 +88,13 @@ pub fn decodeAudioFromBuf(gpa: std.mem.Allocator, buf: []const u8, target_sample
     return read.ok;
 }
 
-/// `MA_MAX_CHANNELS` (miniaudio.h:4280 @8642541b2).
+/// `MA_MAX_CHANNELS` (miniaudio.h:4280 @cd959bae9).
 const max_channels = 254;
-/// `MA_DATA_CONVERTER_STACK_BUFFER_SIZE` (miniaudio.h:17489 @8642541b2).
+/// `MA_DATA_CONVERTER_STACK_BUFFER_SIZE` (miniaudio.h:17565 @cd959bae9).
 const stack_buffer_size = 4096;
-/// `MA_DEFAULT_RESAMPLER_LPF_ORDER` (miniaudio.h:12233 @8642541b2).
+/// `MA_DEFAULT_RESAMPLER_LPF_ORDER` (miniaudio.h:12261 @cd959bae9).
 const lpf_order = 4;
-/// `MA_PI_D` (miniaudio.h:12190 @8642541b2).
+/// `MA_PI_D` (miniaudio.h:12218 @cd959bae9).
 const pi_d: f64 = 3.14159265358979323846264;
 
 /// The decoding backend `ma_decoder` settled on.
@@ -121,7 +121,7 @@ pub const Backend = union(enum) {
 
     /// Ports `ma_wav_get_length_in_pcm_frames`,
     /// `ma_flac_get_length_in_pcm_frames` and
-    /// `ma_mp3_get_length_in_pcm_frames` (miniaudio.h:63822, 64468, 65165 @8642541b2).
+    /// `ma_mp3_get_length_in_pcm_frames` (miniaudio.h:64038, 64684, 65381 @cd959bae9).
     fn length(b: *Backend) u64 {
         return switch (b.*) {
             .wav => |*w| w.total_pcm_frame_count,
@@ -131,7 +131,7 @@ pub const Backend = union(enum) {
     }
 
     /// Ports `ma_wav_read_pcm_frames`, `ma_flac_read_pcm_frames` and
-    /// `ma_mp3_read_pcm_frames` (miniaudio.h:63637, 64285, 64990 @8642541b2)
+    /// `ma_mp3_read_pcm_frames` (miniaudio.h:63853, 64501, 65206 @cd959bae9)
     /// at `f32`: the frames read, `MA_AT_END` when there are none.
     fn read(b: *Backend, out: []f32, frames: u64) u64 {
         return switch (b.*) {
@@ -160,7 +160,7 @@ pub const Decoder = struct {
     output_sample_rate: u32,
     converter: Converter,
 
-    /// Ports `ma_decoder_init_memory` (miniaudio.h:66484 @8642541b2) with
+    /// Ports `ma_decoder_init_memory` (miniaudio.h:66700 @cd959bae9) with
     /// `ma_decoder_config_init(ma_format_f32, 1, sample_rate)`.
     ///
     /// Parameters:
@@ -190,7 +190,7 @@ pub const Decoder = struct {
     }
 
     /// Ports `ma_decoder__postinit` and `ma_decoder__init_data_converter`
-    /// (miniaudio.h:66246, 62915 @8642541b2).
+    /// (miniaudio.h:66462, 63131 @cd959bae9).
     fn postinit(backend_in: Backend, sample_rate: u32) ?Decoder {
         var backend = backend_in;
         const channels_in = backend.channels();
@@ -212,7 +212,7 @@ pub const Decoder = struct {
         d.backend.deinit();
     }
 
-    /// Ports `ma_decoder_get_length_in_pcm_frames` (miniaudio.h:67626 @8642541b2).
+    /// Ports `ma_decoder_get_length_in_pcm_frames` (miniaudio.h:67842 @cd959bae9).
     ///
     /// Return: the length in output frames.
     pub fn lengthInPcmFrames(d: *Decoder) u64 {
@@ -222,7 +222,7 @@ pub const Decoder = struct {
         return frameCountAfterResampling(d.output_sample_rate, rate_in, internal);
     }
 
-    /// Ports `ma_decoder_read_pcm_frames` (miniaudio.h:67374 @8642541b2).
+    /// Ports `ma_decoder_read_pcm_frames` (miniaudio.h:67590 @cd959bae9).
     ///
     /// Parameters:
     /// - `out`: receives up to `out.len` mono frames.
@@ -272,7 +272,7 @@ pub const Decoder = struct {
 
 const DsRead = struct { frames: u64, ok: bool, at_end: bool };
 
-/// Ports `ma_data_source_read_pcm_frames` (miniaudio.h:59337 @8642541b2)
+/// Ports `ma_data_source_read_pcm_frames` (miniaudio.h:59536 @cd959bae9)
 /// for an unchained, unlooped source with no range: the backend is called
 /// until it has delivered `frame_count` frames or delivers none.
 fn dataSourceRead(backend: *Backend, out: []f32, frame_count: u64) DsRead {
@@ -288,7 +288,7 @@ fn dataSourceRead(backend: *Backend, out: []f32, frame_count: u64) DsRead {
     return .{ .frames = total, .ok = true, .at_end = false };
 }
 
-/// Ports `ma_calculate_frame_count_after_resampling` (miniaudio.h:17461 @8642541b2),
+/// Ports `ma_calculate_frame_count_after_resampling` (miniaudio.h:17537 @cd959bae9),
 /// including its use of `sampleRateIn / sampleRateOut` where the
 /// resampler's own estimate divides the other way.
 pub fn frameCountAfterResampling(rate_out: u32, rate_in: u32, frames_in: u64) u64 {
@@ -310,7 +310,7 @@ const Converter = struct {
     channels_in: u32,
     resampler: LinearResampler,
 
-    /// Ports `ma_data_converter_init_preallocated` (miniaudio.h:56082 @8642541b2).
+    /// Ports `ma_data_converter_init_preallocated` (miniaudio.h:56281 @cd959bae9).
     fn init(channels_in: u32, rate_in: u32, rate_out: u32) ?Converter {
         // one channel to one is a passthrough; more go through `mono_out`
         const has_channel_converter = channels_in != 1;
@@ -323,18 +323,18 @@ const Converter = struct {
         return c;
     }
 
-    /// Ports `ma_data_converter_get_required_input_frame_count` (miniaudio.h:56987 @8642541b2).
+    /// Ports `ma_data_converter_get_required_input_frame_count` (miniaudio.h:57186 @cd959bae9).
     fn requiredInputFrameCount(c: *const Converter, out_frames: u64) u64 {
         if (c.path == .resample_only or c.path == .channels_first) return c.resampler.requiredInputFrameCount(out_frames);
         return out_frames;
     }
 
-    /// Ports `ma_data_converter_process_pcm_frames` (miniaudio.h:56917 @8642541b2).
+    /// Ports `ma_data_converter_process_pcm_frames` (miniaudio.h:57116 @cd959bae9).
     fn process(c: *Converter, in: []const f32, count_in: *u64, out: []f32, count_out: *u64) void {
         switch (c.path) {
             .passthrough => unreachable, // the decoder reads straight through
             .channels_only => {
-                // `ma_data_converter_process_pcm_frames__channels_only` (miniaudio.h:56478 @8642541b2)
+                // `ma_data_converter_process_pcm_frames__channels_only` (miniaudio.h:56677 @cd959bae9)
                 const n = @min(count_in.*, count_out.*);
                 monoOut(out, in, n, c.channels_in);
                 count_in.* = n;
@@ -345,7 +345,7 @@ const Converter = struct {
         }
     }
 
-    /// Ports `ma_data_converter_process_pcm_frames__channels_first` (miniaudio.h:56753 @8642541b2).
+    /// Ports `ma_data_converter_process_pcm_frames__channels_first` (miniaudio.h:56952 @cd959bae9).
     fn processChannelsFirst(c: *Converter, in: []const f32, count_in: *u64, out: []f32, count_out: *u64) void {
         const frame_count_in = count_in.*;
         const frame_count_out = count_out.*;
@@ -371,7 +371,7 @@ const Converter = struct {
     }
 };
 
-/// Ports `ma_channel_converter_process_pcm_frames__mono_out` (miniaudio.h:55649 @8642541b2)
+/// Ports `ma_channel_converter_process_pcm_frames__mono_out` (miniaudio.h:55848 @cd959bae9)
 /// at `f32`: a sum in channel order, then one division.
 fn monoOut(out: []f32, in: []const f32, frames: u64, channels_in: u32) void {
     const n: usize = @intCast(frames);
@@ -385,7 +385,7 @@ fn monoOut(out: []f32, in: []const f32, frames: u64, channels_in: u32) void {
 
 extern "c" fn sin(x: f64) f64;
 
-/// `ma_biquad` (miniaudio.h:4631 @8642541b2), at f32 with one channel.
+/// `ma_biquad` (miniaudio.h:4631 @cd959bae9), at f32 with one channel.
 const Biquad = struct {
     b0: f32,
     b1: f32,
@@ -396,7 +396,7 @@ const Biquad = struct {
     r2: f32 = 0,
 
     /// Ports `ma_lpf2__get_biquad_config` and `ma_biquad_reinit`
-    /// (miniaudio.h:47774, 47308 @8642541b2).
+    /// (miniaudio.h:47959, 47494 @cd959bae9).
     fn lpf2(sample_rate: u32, cutoff: f64, q: f64) Biquad {
         const w = 2 * pi_d * cutoff / @as(f64, @floatFromInt(sample_rate));
         const s = sin(w);
@@ -418,7 +418,7 @@ const Biquad = struct {
     }
 
     /// Ports `ma_biquad_process_pcm_frame_f32__direct_form_2_transposed`
-    /// (miniaudio.h:47372 @8642541b2). Clang contracts each statement: the
+    /// (miniaudio.h:47558 @cd959bae9). Clang contracts each statement: the
     /// first product fuses with the add, and of `b1*x - a1*y + r2` the left
     /// product fuses with the subtraction before `r2` is added.
     fn process(bq: *Biquad, x: f32) f32 {
@@ -431,7 +431,7 @@ const Biquad = struct {
     }
 };
 
-/// Ports `ma_cosd` (miniaudio.h:12444 @8642541b2): `sin(pi/2 - x)`.
+/// Ports `ma_cosd` (miniaudio.h:12472 @cd959bae9): `sin(pi/2 - x)`.
 fn cosd(x: f64) f64 {
     return sin((pi_d * 0.5) - x);
 }
@@ -450,7 +450,7 @@ const LinearResampler = struct {
     lpf: [lpf_order / 2]Biquad,
 
     /// Ports `ma_linear_resampler_init_preallocated` and
-    /// `ma_linear_resampler_set_rate_internal` (miniaudio.h:53213, 53074 @8642541b2).
+    /// `ma_linear_resampler_set_rate_internal` (miniaudio.h:53412, 53273 @cd959bae9).
     fn init(rate_in_full: u32, rate_out_full: u32) ?LinearResampler {
         if (rate_in_full == 0 or rate_out_full == 0) return null;
         const g = gcf(rate_in_full, rate_out_full);
@@ -459,7 +459,7 @@ const LinearResampler = struct {
         const lpf_rate = @max(rate_in, rate_out);
         const cutoff: f64 = @as(f64, @floatFromInt(@min(rate_in, rate_out))) * 0.5 * 1.0;
         var lpf: [lpf_order / 2]Biquad = undefined;
-        // `ma_lpf_reinit__internal` (miniaudio.h:48026 @8642541b2): an even
+        // `ma_lpf_reinit__internal` (miniaudio.h:48211 @cd959bae9): an even
         // order is all second-order sections
         for (&lpf, 0..) |*bq, i| {
             const a = @as(f64, @floatFromInt(1 + i * 2)) * (pi_d / @as(f64, @floatFromInt(lpf_order * 2)));
@@ -487,7 +487,7 @@ const LinearResampler = struct {
         return a;
     }
 
-    /// Ports `ma_lpf_process_pcm_frame_f32` (miniaudio.h:48267 @8642541b2).
+    /// Ports `ma_lpf_process_pcm_frame_f32` (miniaudio.h:48452 @cd959bae9).
     fn filter(r: *LinearResampler, x: f32) f32 {
         var y = x;
         for (&r.lpf) |*bq| y = bq.process(y);
@@ -495,7 +495,7 @@ const LinearResampler = struct {
     }
 
     /// Ports `ma_linear_resampler_interpolate_frame_f32` and
-    /// `ma_mix_f32_fast` (miniaudio.h:53332, 13978 @8642541b2): three
+    /// `ma_mix_f32_fast` (miniaudio.h:53531, 14006 @cd959bae9): three
     /// statements, so three roundings.
     fn interpolate(r: *const LinearResampler) f32 {
         const a = @as(f32, @floatFromInt(r.in_time_frac)) / @as(f32, @floatFromInt(r.rate_out));
@@ -514,7 +514,7 @@ const LinearResampler = struct {
     }
 
     /// Ports `ma_linear_resampler_process_pcm_frames_f32_downsample` and
-    /// `ma_linear_resampler_process_pcm_frames_f32_upsample` (miniaudio.h:53514, 53590 @8642541b2).
+    /// `ma_linear_resampler_process_pcm_frames_f32_upsample` (miniaudio.h:53713, 53789 @cd959bae9).
     fn process(r: *LinearResampler, in: []const f32, count_in: *u64, out: []f32, count_out: *u64) void {
         const downsample = r.rate_in > r.rate_out;
         const frame_count_in = count_in.*;
@@ -542,7 +542,7 @@ const LinearResampler = struct {
         count_out.* = processed_out;
     }
 
-    /// Ports `ma_linear_resampler_get_required_input_frame_count` (miniaudio.h:53744 @8642541b2).
+    /// Ports `ma_linear_resampler_get_required_input_frame_count` (miniaudio.h:53943 @cd959bae9).
     fn requiredInputFrameCount(r: *const LinearResampler, out_frames_in: u64) u64 {
         if (out_frames_in == 0) return 0;
         var input: u64 = r.in_time_int;

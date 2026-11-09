@@ -34,18 +34,18 @@ const src = "models/hy-v4.cpp";
 // -----------------------------------------------------------------------------
 // Views
 
-/// Ports `hy_v4_elem_offset` (models/hy-v4.cpp:12 @8642541b2).
+/// Ports `hy_v4_elem_offset` (models/hy-v4.cpp:12 @cd959bae9).
 fn elemOffset(t: *const Tensor, i: i64) usize {
     return c.ggml_row_size(t.type, i);
 }
 
-/// Ports `hy_v4_view_1d` (models/hy-v4.cpp:16 @8642541b2): `ne0`
+/// Ports `hy_v4_view_1d` (models/hy-v4.cpp:16 @cd959bae9): `ne0`
 /// elements from element `j0`.
 fn view1d(ctx: *c.ggml_context, t: *Tensor, ne0: i64, j0: i64) *Tensor {
     return c.ggml_view_1d(ctx, t, ne0, elemOffset(t, j0));
 }
 
-/// Ports `hy_v4_view_2d` (models/hy-v4.cpp:20 @8642541b2): `ne0` by
+/// Ports `hy_v4_view_2d` (models/hy-v4.cpp:20 @cd959bae9): `ne0` by
 /// `ne1` from element `j0` of each row.
 fn view2d(ctx: *c.ggml_context, t: *Tensor, ne0: i64, ne1: i64, j0: i64) *Tensor {
     return c.ggml_view_2d(ctx, t, ne0, ne1, t.nb[1], elemOffset(t, j0));
@@ -54,7 +54,7 @@ fn view2d(ctx: *c.ggml_context, t: *Tensor, ne0: i64, ne1: i64, j0: i64) *Tensor
 // -----------------------------------------------------------------------------
 // Loading
 
-/// Ports `llama_model_hy_v4`'s `load_arch_hparams` (models/hy-v4.cpp:24 @8642541b2).
+/// Ports `llama_model_hy_v4`'s `load_arch_hparams` (models/hy-v4.cpp:24 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -105,7 +105,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     self.type = .unknown;
 }
 
-/// Ports `llama_model_hy_v4`'s `load_arch_tensors` (models/hy-v4.cpp:70 @8642541b2).
+/// Ports `llama_model_hy_v4`'s `load_arch_tensors` (models/hy-v4.cpp:70 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -198,7 +198,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_hy_v4`'s `build_arch_graph` (models/hy-v4.cpp:157 @8642541b2).
+/// Ports `llama_model_hy_v4`'s `build_arch_graph` (models/hy-v4.cpp:157 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
@@ -206,7 +206,7 @@ pub fn buildArchGraph(model: *const Model, b: *const Builder, _: *const graph.Pa
 // -----------------------------------------------------------------------------
 // Hyper-connections
 
-/// Ports `hy_v4_hc_reduce` (models/hy-v4.cpp:163 @8642541b2): the streams
+/// Ports `hy_v4_hc_reduce` (models/hy-v4.cpp:163 @cd959bae9): the streams
 /// `x[:, i, :]` weighted by `w[i, :]` and summed, `[n_embd, n_tokens]`, in
 /// f32 as the reference runs it.
 fn hcReduce(ctx: *c.ggml_context, x: *Tensor, w: *Tensor, hc: i64, n_embd: i64, nt: i64, out_type: c.ggml_type) *Tensor {
@@ -223,7 +223,7 @@ fn hcReduce(ctx: *c.ggml_context, x: *Tensor, w: *Tensor, hc: i64, n_embd: i64, 
     return c.ggml_cast(ctx, result.?, out_type);
 }
 
-/// Mirrors the graph's `hc_pre` (src/models/models.h:2280 @8642541b2).
+/// Mirrors the graph's `hc_pre` (src/models/models.h:2344 @cd959bae9).
 const HcPre = struct {
     /// The collapsed stream.
     cur: *Tensor,
@@ -232,7 +232,7 @@ const HcPre = struct {
 };
 
 /// Ports `llama_model_hy_v4`'s graph's `build_hc_pre`
-/// (models/hy-v4.cpp:176 @8642541b2): an iHC's mixes -- the pre weights it
+/// (models/hy-v4.cpp:176 @cd959bae9): an iHC's mixes -- the pre weights it
 /// reduces the streams with, here, and the post weights, scaled by
 /// `hc_magnitude`, for `build_hc_post`.
 fn buildHcPre(b: *const Builder, x: *Tensor, hc_fn: *Tensor, hc_scale: *Tensor, hc_base: *Tensor, il: c_int) HcPre {
@@ -274,7 +274,7 @@ fn buildHcPre(b: *const Builder, x: *Tensor, hc_fn: *Tensor, hc_scale: *Tensor, 
 }
 
 /// Ports `llama_model_hy_v4`'s graph's `build_hc_post`
-/// (models/hy-v4.cpp:216 @8642541b2): the block's output spread over the
+/// (models/hy-v4.cpp:216 @cd959bae9): the block's output spread over the
 /// streams by `post` and added to the residual streams, in f32 so the
 /// rounding does not accumulate across the layers.
 ///
@@ -308,7 +308,7 @@ fn buildHcPost(b: *const Builder, x: *Tensor, residual: *Tensor, post: *Tensor, 
 }
 
 /// Ports `llama_model_hy_v4`'s graph's `build_hc_head`
-/// (models/hy-v4.cpp:247 @8642541b2): the streams reduced to one for the
+/// (models/hy-v4.cpp:247 @cd959bae9): the streams reduced to one for the
 /// output head.
 fn buildHcHead(b: *const Builder, x: *Tensor, hc_fn: *Tensor, hc_scale: *Tensor, hc_base: *Tensor) *Tensor {
     const ctx = b.ctx0;
@@ -396,7 +396,7 @@ fn buildGatedOut(b: *const Builder, layer: *const model_mod.Layer, attn_: *Tenso
 }
 
 /// Ports `llama_model_hy_v4`'s graph's `build_attention`
-/// (models/hy-v4.cpp:269 @8642541b2): MLA as MQA over a K-only cache, the
+/// (models/hy-v4.cpp:269 @cd959bae9): MLA as MQA over a K-only cache, the
 /// gate before `wo`.
 fn buildAttention(b: *const Builder, model: *const Model, inp_attn: *graph.InpAttnK, cur: *Tensor, inp_pos: *Tensor, kq_scale: f32, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -497,7 +497,7 @@ fn buildIndexerTopK(b: *const Builder, model: *const Model, inp_attn_dsa: *graph
     return c.ggml_cont(ctx, c.ggml_top_k(ctx, score, @intCast(n_top_k)));
 }
 
-/// Mirrors the graph's `attn_dsa` (src/models/models.h:2323 @8642541b2): the
+/// Mirrors the graph's `attn_dsa` (src/models/models.h:2387 @cd959bae9): the
 /// attention output and the top-k to carry to the
 /// following "shared" layers.
 const AttnDsa = struct {
@@ -506,7 +506,7 @@ const AttnDsa = struct {
 };
 
 /// Ports `llama_model_hy_v4`'s graph's `build_attention_dsa`
-/// (models/hy-v4.cpp:421 @8642541b2): `build_attention` over the DSA
+/// (models/hy-v4.cpp:421 @cd959bae9): `build_attention` over the DSA
 /// cache, attending only to the top-k keys -- this layer's own when it
 /// owns an indexer, else the last full layer's, `last_top_k`.
 fn buildAttentionDsa(b: *const Builder, model: *const Model, inp_attn_dsa: *graph.InpAttnKDsa, cur: *Tensor, inp_pos: *Tensor, last_top_k: ?*Tensor, kq_scale: f32, il: c_int) AttnDsa {
@@ -539,7 +539,7 @@ fn buildAttentionDsa(b: *const Builder, model: *const Model, inp_attn_dsa: *grap
 // The graph
 
 /// Ports the constructor of `llama_model_hy_v4`'s `graph`
-/// (models/hy-v4.cpp:498 @8642541b2).
+/// (models/hy-v4.cpp:498 @cd959bae9).
 fn buildGraph(model: *const Model, b: *const Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

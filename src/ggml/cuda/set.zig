@@ -21,7 +21,7 @@ fn opParamSize(dst: *const Tensor, i: usize) usize {
     return @bitCast(@as(i64, impl.getOpParamsI32(dst, i)));
 }
 
-/// Ports `ggml_cuda_op_set` (set.cu:4 @8642541b2).
+/// Ports `ggml_cuda_op_set` (set.cu:4 @cd959bae9).
 pub fn opSet(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);

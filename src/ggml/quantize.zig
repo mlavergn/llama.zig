@@ -86,7 +86,7 @@ fn quantizerFor(t: c.enum_ggml_type) ?QuantizeFn {
     return null;
 }
 
-/// Ports `ggml_quantize_init` (ggml.c:8113 @8642541b2).
+/// Ports `ggml_quantize_init` (ggml.c:8158 @cd959bae9).
 ///
 /// Builds the shared codebook the i-quants index into. Idempotent, and a
 /// no-op for every other format.
@@ -108,7 +108,7 @@ pub export fn ggml_quantize_init(t: c.enum_ggml_type) void {
     c.ggml_critical_section_end();
 }
 
-/// Ports `ggml_quantize_free` (ggml.c:8131 @8642541b2).
+/// Ports `ggml_quantize_free` (ggml.c:8176 @cd959bae9).
 ///
 /// Releases every codebook unconditionally rather than tracking which were
 /// built; the free routines tolerate a table that was never allocated.
@@ -126,7 +126,7 @@ pub export fn ggml_quantize_free() void {
     c.ggml_critical_section_end();
 }
 
-/// Ports `ggml_quantize_requires_imatrix` (ggml.c:8145 @8642541b2).
+/// Ports `ggml_quantize_requires_imatrix` (ggml.c:8190 @cd959bae9).
 ///
 /// Note `IQ1_M` is absent: the C lists it commented out, and leaving it out is
 /// deliberate rather than an oversight, so it is left out here too.

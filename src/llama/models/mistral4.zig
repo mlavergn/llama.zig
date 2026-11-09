@@ -17,7 +17,7 @@ const deepseek2 = @import("deepseek2.zig");
 const Model = model_mod.Model;
 
 /// Ports `llama_model_mistral4`'s `build_arch_graph` (models/mistral4.cpp:3
-/// @8642541b2): DeepSeek-V2's main graph, whatever the graph type.
+/// @cd959bae9): DeepSeek-V2's main graph, whatever the graph type.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     deepseek2.buildGraph(model, b);
 }

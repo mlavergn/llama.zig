@@ -41,7 +41,7 @@ fn oom() noreturn {
     impl.abort("llama-kv-cache-msa.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_kv_cache_msa` (llama-kv-cache-msa.h:14 @8642541b2): two
+/// Ports `llama_kv_cache_msa` (llama-kv-cache-msa.h:14 @cd959bae9): two
 /// `llama_kv_cache`s, the first for K/V and the second for the indexer
 /// keys.
 pub const KvCacheMsa = struct {
@@ -59,7 +59,7 @@ pub const KvCacheMsa = struct {
     kv_idx: *KvCache = undefined,
 
     /// Ports the constructor of `llama_kv_cache_msa`
-    /// (llama-kv-cache-msa.cpp:13 @8642541b2).
+    /// (llama-kv-cache-msa.cpp:13 @cd959bae9).
     ///
     /// Parameters:
     /// - `filter`: the base cache's layers; empty selects every layer.
@@ -121,14 +121,14 @@ pub const KvCacheMsa = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `llama_kv_cache_msa`'s `clear` (llama-kv-cache-msa.cpp:52 @8642541b2).
+    /// Ports `llama_kv_cache_msa`'s `clear` (llama-kv-cache-msa.cpp:52 @cd959bae9).
     pub fn clear(self: *KvCacheMsa, data: bool) void {
         self.kv_base.clear(data);
         self.kv_idx.clear(data);
     }
 
     /// Ports `llama_kv_cache_msa`'s `seq_rm` (llama-kv-cache-msa.cpp:57
-    /// @8642541b2): both caches, whatever the first answers.
+    /// @cd959bae9): both caches, whatever the first answers.
     pub fn seqRm(self: *KvCacheMsa, seq_id: i32, p0: i32, p1: i32) bool {
         var res = true;
         res = self.kv_base.seqRm(seq_id, p0, p1) and res;
@@ -136,50 +136,50 @@ pub const KvCacheMsa = struct {
         return res;
     }
 
-    /// Ports `llama_kv_cache_msa`'s `seq_cp` (llama-kv-cache-msa.cpp:66 @8642541b2).
+    /// Ports `llama_kv_cache_msa`'s `seq_cp` (llama-kv-cache-msa.cpp:66 @cd959bae9).
     pub fn seqCp(self: *KvCacheMsa, seq_id_src: i32, seq_id_dst: i32, p0: i32, p1: i32) void {
         self.kv_base.seqCp(seq_id_src, seq_id_dst, p0, p1);
         self.kv_idx.seqCp(seq_id_src, seq_id_dst, p0, p1);
     }
 
-    /// Ports `llama_kv_cache_msa`'s `seq_keep` (llama-kv-cache-msa.cpp:71 @8642541b2).
+    /// Ports `llama_kv_cache_msa`'s `seq_keep` (llama-kv-cache-msa.cpp:71 @cd959bae9).
     pub fn seqKeep(self: *KvCacheMsa, seq_id: i32) void {
         self.kv_base.seqKeep(seq_id);
         self.kv_idx.seqKeep(seq_id);
     }
 
-    /// Ports `llama_kv_cache_msa`'s `seq_add` (llama-kv-cache-msa.cpp:76 @8642541b2).
+    /// Ports `llama_kv_cache_msa`'s `seq_add` (llama-kv-cache-msa.cpp:76 @cd959bae9).
     pub fn seqAdd(self: *KvCacheMsa, seq_id: i32, p0: i32, p1: i32, shift: i32) void {
         self.kv_base.seqAdd(seq_id, p0, p1, shift);
         self.kv_idx.seqAdd(seq_id, p0, p1, shift);
     }
 
-    /// Ports `llama_kv_cache_msa`'s `seq_div` (llama-kv-cache-msa.cpp:81 @8642541b2).
+    /// Ports `llama_kv_cache_msa`'s `seq_div` (llama-kv-cache-msa.cpp:81 @cd959bae9).
     pub fn seqDiv(self: *KvCacheMsa, seq_id: i32, p0: i32, p1: i32, d: c_int) void {
         self.kv_base.seqDiv(seq_id, p0, p1, d);
         self.kv_idx.seqDiv(seq_id, p0, p1, d);
     }
 
     /// Ports `llama_kv_cache_msa`'s `seq_pos_min` (llama-kv-cache-msa.cpp:86
-    /// @8642541b2): the base cache answers.
+    /// @cd959bae9): the base cache answers.
     pub fn seqPosMin(self: *const KvCacheMsa, seq_id: i32) i32 {
         return self.kv_base.seqPosMin(seq_id);
     }
 
-    /// Ports `llama_kv_cache_msa`'s `seq_pos_max` (llama-kv-cache-msa.cpp:90 @8642541b2).
+    /// Ports `llama_kv_cache_msa`'s `seq_pos_max` (llama-kv-cache-msa.cpp:90 @cd959bae9).
     pub fn seqPosMax(self: *const KvCacheMsa, seq_id: i32) i32 {
         return self.kv_base.seqPosMax(seq_id);
     }
 
     /// Ports `llama_kv_cache_msa`'s `memory_breakdown` (llama-kv-cache-msa.cpp:94
-    /// @8642541b2): the indexer cache's sizes added to the base cache's.
+    /// @cd959bae9): the indexer cache's sizes added to the base cache's.
     pub fn memoryBreakdown(self: *const KvCacheMsa, out: *std.ArrayList(memory.BuftSize)) void {
         self.kv_base.memoryBreakdown(out);
         self.kv_idx.memoryBreakdown(out);
     }
 
     /// Ports `llama_kv_cache_msa`'s `init_batch` (llama-kv-cache-msa.cpp:102
-    /// @8642541b2): a simple split for one stream, else an equal split; every
+    /// @cd959bae9): a simple split for one stream, else an equal split; every
     /// ubatch must fit in both caches.
     pub fn initBatch(self: *KvCacheMsa, balloc: *batch.BatchAllocr, n_ubatch: u32, embd_all: bool) *MsaContext {
         _ = embd_all;
@@ -230,18 +230,18 @@ pub const KvCacheMsa = struct {
         return MsaContext.createStatus(.failed_prepare);
     }
 
-    /// Ports `llama_kv_cache_msa`'s `init_full` (llama-kv-cache-msa.cpp:146 @8642541b2).
+    /// Ports `llama_kv_cache_msa`'s `init_full` (llama-kv-cache-msa.cpp:146 @cd959bae9).
     pub fn initFull(self: *KvCacheMsa) *MsaContext {
         return MsaContext.createFull(self);
     }
 
-    /// Ports `llama_kv_cache_msa`'s `init_update` (llama-kv-cache-msa.cpp:150 @8642541b2).
+    /// Ports `llama_kv_cache_msa`'s `init_update` (llama-kv-cache-msa.cpp:150 @cd959bae9).
     pub fn initUpdate(self: *KvCacheMsa, lctx: *anyopaque, optimize: bool) *MsaContext {
         return MsaContext.createUpdate(self, lctx, optimize);
     }
 
     /// Ports `llama_kv_cache_msa`'s `get_can_shift` (llama-kv-cache-msa.cpp:154
-    /// @8642541b2): only when both can and the two are the same size.
+    /// @cd959bae9): only when both can and the two are the same size.
     pub fn getCanShift(self: *const KvCacheMsa) bool {
         return self.kv_base.getCanShift() and
             self.kv_idx.getCanShift() and
@@ -249,39 +249,39 @@ pub const KvCacheMsa = struct {
     }
 
     /// Ports `llama_kv_cache_msa`'s `state_write` (llama-kv-cache-msa.cpp:160
-    /// @8642541b2): both caches, whatever the flags.
+    /// @cd959bae9): both caches, whatever the flags.
     pub fn stateWrite(self: *const KvCacheMsa, w: io.Writer, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
         try self.kv_base.stateWrite(w, seq_id, flags, exc);
         try self.kv_idx.stateWrite(w, seq_id, flags, exc);
     }
 
-    /// Ports `llama_kv_cache_msa`'s `state_read` (llama-kv-cache-msa.cpp:165 @8642541b2).
+    /// Ports `llama_kv_cache_msa`'s `state_read` (llama-kv-cache-msa.cpp:165 @cd959bae9).
     pub fn stateRead(self: *KvCacheMsa, r: io.Reader, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
         try self.kv_base.stateRead(r, seq_id, flags, exc);
         try self.kv_idx.stateRead(r, seq_id, flags, exc);
     }
 
-    /// Ports `llama_kv_cache_msa`'s `get_base` (llama-kv-cache-msa.cpp:170 @8642541b2).
+    /// Ports `llama_kv_cache_msa`'s `get_base` (llama-kv-cache-msa.cpp:170 @cd959bae9).
     pub fn getBase(self: *const KvCacheMsa) *KvCache {
         return self.kv_base;
     }
 
-    /// Ports `llama_kv_cache_msa`'s `get_idx` (llama-kv-cache-msa.cpp:174 @8642541b2).
+    /// Ports `llama_kv_cache_msa`'s `get_idx` (llama-kv-cache-msa.cpp:174 @cd959bae9).
     pub fn getIdx(self: *const KvCacheMsa) *KvCache {
         return self.kv_idx;
     }
 
-    /// Ports `llama_kv_cache_msa`'s `get_n_seq_max` (llama-kv-cache-msa.h:70 @8642541b2).
+    /// Ports `llama_kv_cache_msa`'s `get_n_seq_max` (llama-kv-cache-msa.h:70 @cd959bae9).
     pub fn getNSeqMax(self: *const KvCacheMsa) u32 {
         return self.n_seq_max;
     }
 
-    /// Ports `llama_kv_cache_msa`'s `get_n_swa` (llama-kv-cache-msa.h:71 @8642541b2).
+    /// Ports `llama_kv_cache_msa`'s `get_n_swa` (llama-kv-cache-msa.h:71 @cd959bae9).
     pub fn getNSwa(self: *const KvCacheMsa) u32 {
         return self.n_swa;
     }
 
-    /// Ports `llama_kv_cache_msa`'s `get_swa_type` (llama-kv-cache-msa.h:72 @8642541b2).
+    /// Ports `llama_kv_cache_msa`'s `get_swa_type` (llama-kv-cache-msa.h:72 @cd959bae9).
     pub fn getSwaType(self: *const KvCacheMsa) hparams_mod.SwaType {
         return self.swa_type;
     }
@@ -381,7 +381,7 @@ pub const KvCacheMsa = struct {
     }
 };
 
-/// `GGML_PAD` (ggml.h:267 @8642541b2) over `uint32_t`.
+/// `GGML_PAD` (ggml.h:267 @cd959bae9) over `uint32_t`.
 fn padU32(x: u32, n: u32) u32 {
     return (x +% n -% 1) & ~(n -% 1);
 }
@@ -406,7 +406,7 @@ fn retainedCopy(list: []const Ubatch) std.ArrayList(Ubatch) {
     return out;
 }
 
-/// Ports `llama_kv_cache_msa_context` (llama-kv-cache-msa.h:88 @8642541b2).
+/// Ports `llama_kv_cache_msa_context` (llama-kv-cache-msa.h:88 @cd959bae9).
 pub const MsaContext = struct {
     kv: ?*KvCacheMsa = null,
     /// The index of the next ubatch to process.
@@ -417,7 +417,7 @@ pub const MsaContext = struct {
     status: memory.Status,
 
     /// Ports the error constructor of `llama_kv_cache_msa_context`
-    /// (llama-kv-cache-msa.cpp:180 @8642541b2).
+    /// (llama-kv-cache-msa.cpp:180 @cd959bae9).
     pub fn createStatus(status: memory.Status) *MsaContext {
         const self = allocator.create(MsaContext) catch oom();
         self.* = .{ .status = status };
@@ -425,7 +425,7 @@ pub const MsaContext = struct {
     }
 
     /// Ports the full-cache constructor of `llama_kv_cache_msa_context`
-    /// (llama-kv-cache-msa.cpp:183 @8642541b2).
+    /// (llama-kv-cache-msa.cpp:183 @cd959bae9).
     pub fn createFull(kv: *KvCacheMsa) *MsaContext {
         const self = allocator.create(MsaContext) catch oom();
         const b = kv.getBase().initFull();
@@ -435,7 +435,7 @@ pub const MsaContext = struct {
     }
 
     /// Ports the update constructor of `llama_kv_cache_msa_context`
-    /// (llama-kv-cache-msa.cpp:191 @8642541b2).
+    /// (llama-kv-cache-msa.cpp:191 @cd959bae9).
     pub fn createUpdate(kv: *KvCacheMsa, lctx: *anyopaque, optimize: bool) *MsaContext {
         const self = allocator.create(MsaContext) catch oom();
         const b = kv.getBase().initUpdate(lctx, optimize);
@@ -445,7 +445,7 @@ pub const MsaContext = struct {
     }
 
     /// Ports the batch constructor of `llama_kv_cache_msa_context`
-    /// (llama-kv-cache-msa.cpp:201 @8642541b2): each cache gets its own copy
+    /// (llama-kv-cache-msa.cpp:201 @cd959bae9): each cache gets its own copy
     /// of the ubatches, as the C++ copies them.
     pub fn createBatch(kv: *KvCacheMsa, sinfos_base: std.ArrayList(SlotInfo), sinfos_idx: std.ArrayList(SlotInfo), ubatches: std.ArrayList(Ubatch)) *MsaContext {
         const self = allocator.create(MsaContext) catch oom();
@@ -463,7 +463,7 @@ pub const MsaContext = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `llama_kv_cache_msa_context`'s `next` (llama-kv-cache-msa.cpp:216 @8642541b2).
+    /// Ports `llama_kv_cache_msa_context`'s `next` (llama-kv-cache-msa.cpp:216 @cd959bae9).
     pub fn next(self: *MsaContext) bool {
         std.debug.assert(self.status == .success);
         _ = self.ctx_base.?.next();
@@ -473,7 +473,7 @@ pub const MsaContext = struct {
     }
 
     /// Ports `llama_kv_cache_msa_context`'s `apply` (llama-kv-cache-msa.cpp:229
-    /// @8642541b2): both caches apply, whatever the first answers.
+    /// @cd959bae9): both caches apply, whatever the first answers.
     pub fn apply(self: *MsaContext) bool {
         std.debug.assert(!memory.statusIsFail(self.status));
         var res = true;
@@ -482,31 +482,31 @@ pub const MsaContext = struct {
         return res;
     }
 
-    /// Ports `llama_kv_cache_msa_context`'s `get_status` (llama-kv-cache-msa.cpp:240 @8642541b2).
+    /// Ports `llama_kv_cache_msa_context`'s `get_status` (llama-kv-cache-msa.cpp:240 @cd959bae9).
     pub fn getStatus(self: *const MsaContext) memory.Status {
         return self.status;
     }
 
-    /// Ports `llama_kv_cache_msa_context`'s `get_ubatch` (llama-kv-cache-msa.cpp:244 @8642541b2).
+    /// Ports `llama_kv_cache_msa_context`'s `get_ubatch` (llama-kv-cache-msa.cpp:244 @cd959bae9).
     pub fn getUbatch(self: *const MsaContext) *const Ubatch {
         std.debug.assert(self.status == .success);
         return &self.ubatches.items[self.i_next];
     }
 
-    /// Ports `llama_kv_cache_msa_context`'s `get_base` (llama-kv-cache-msa.cpp:250 @8642541b2).
+    /// Ports `llama_kv_cache_msa_context`'s `get_base` (llama-kv-cache-msa.cpp:250 @cd959bae9).
     pub fn getBase(self: *const MsaContext) *const KvCacheContext {
         std.debug.assert(self.status == .success);
         return self.ctx_base.?;
     }
 
-    /// Ports `llama_kv_cache_msa_context`'s `get_idx` (llama-kv-cache-msa.cpp:256 @8642541b2).
+    /// Ports `llama_kv_cache_msa_context`'s `get_idx` (llama-kv-cache-msa.cpp:256 @cd959bae9).
     pub fn getIdx(self: *const MsaContext) *const KvCacheContext {
         std.debug.assert(self.status == .success);
         return self.ctx_idx.?;
     }
 
     /// Ports `llama_kv_cache_msa_context`'s `get_n_pos` (llama-kv-cache-msa.cpp:262
-    /// @8642541b2): the largest position in the cache plus one, padded. MSA
+    /// @cd959bae9): the largest position in the cache plus one, padded. MSA
     /// blocks are defined over token positions, so the block-selection
     /// tensors are sized by this rather than by the number of cells.
     pub fn getNPos(self: *const MsaContext) u32 {
@@ -526,7 +526,7 @@ pub const MsaContext = struct {
     }
 
     /// Ports `llama_kv_cache_msa_context`'s `set_input_cell_pos`
-    /// (llama-kv-cache-msa.cpp:275 @8642541b2): each cell's position divided
+    /// (llama-kv-cache-msa.cpp:275 @cd959bae9): each cell's position divided
     /// by `div`, per stream. The value for an empty or another sequence's
     /// cell is 0; consumers mask those.
     pub fn setInputCellPos(self: *const MsaContext, dst: *Tensor, ubatch: *const Ubatch, div: i32) void {
@@ -564,7 +564,7 @@ pub const MsaContext = struct {
     }
 
     /// Ports `llama_kv_cache_msa_context`'s `set_input_pos_slot`
-    /// (llama-kv-cache-msa.cpp:304 @8642541b2): each position's cell, per
+    /// (llama-kv-cache-msa.cpp:304 @cd959bae9): each position's cell, per
     /// stream. A position without a cell maps to cell 0, which consumers
     /// must mask; it assumes one sequence per stream.
     pub fn setInputPosSlot(self: *const MsaContext, dst: *Tensor, ubatch: *const Ubatch) void {
@@ -612,7 +612,7 @@ pub const MsaContext = struct {
     }
 
     /// Ports `llama_kv_cache_msa_context`'s `set_input_pos_mask`
-    /// (llama-kv-cache-msa.cpp:348 @8642541b2): 0 where a token sees a
+    /// (llama-kv-cache-msa.cpp:348 @cd959bae9): 0 where a token sees a
     /// position, -inf elsewhere -- causal, and windowed when the cache is.
     pub fn setInputPosMask(self: *const MsaContext, dst: *Tensor, ubatch: *const Ubatch) void {
         impl.assert(c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache-msa.cpp", 349, "ggml_backend_buffer_is_host(dst->buffer)");

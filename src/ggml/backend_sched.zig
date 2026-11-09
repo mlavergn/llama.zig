@@ -35,7 +35,7 @@
 //!
 //! The C keeps a per-node string explaining why it landed on a backend, behind
 //! an `#if 0` whose live `#else` defines `SET_CAUSE`
-//! (src/ggml-backend.cpp:1064 @8642541b2) as nothing. With that arm off, `SET_CAUSE`
+//! (src/ggml-backend.cpp:1324 @cd959bae9) as nothing. With that arm off, `SET_CAUSE`
 //! expands to nothing and `GET_CAUSE` to `""`. This port has the same, as an
 //! empty `setCause` and a `""` from `getCause`, so the call sites stay
 //! readable against the C rather than disappearing.
@@ -45,22 +45,22 @@ const impl = @import("impl.zig");
 const backend = @import("backend.zig");
 const c = impl.c;
 
-/// Ports `GGML_SCHED_MAX_BACKENDS` (src/ggml-backend.cpp:904 @8642541b2).
+/// Ports `GGML_SCHED_MAX_BACKENDS` (src/ggml-backend.cpp:1164 @cd959bae9).
 const max_backends = 16;
 
-/// Ports `GGML_SCHED_MAX_SPLIT_INPUTS` (src/ggml-backend.cpp:908 @8642541b2).
+/// Ports `GGML_SCHED_MAX_SPLIT_INPUTS` (src/ggml-backend.cpp:1168 @cd959bae9).
 ///
 /// Only the *initial* capacity: both input arrays grow by doubling, with a
 /// warning, rather than overflowing.
 const max_split_inputs = 30;
 
-/// Ports `GGML_SCHED_MAX_COPIES` (src/ggml-backend.cpp:912 @8642541b2).
+/// Ports `GGML_SCHED_MAX_COPIES` (src/ggml-backend.cpp:1172 @cd959bae9).
 ///
 /// `build/llamacpp.zig` passes `-DGGML_SCHED_MAX_COPIES=4`, which is also the
 /// C's default, so the `#ifndef` arm and the build agree.
 const max_copies = 4;
 
-/// Ports `struct ggml_backend_sched_split` (src/ggml-backend.cpp:915 @8642541b2).
+/// Ports `struct ggml_backend_sched_split` (src/ggml-backend.cpp:1175 @cd959bae9).
 const Split = extern struct {
     backend_id: c_int,
     i_start: c_int,
@@ -72,7 +72,7 @@ const Split = extern struct {
     graph: impl.CGraph,
 };
 
-/// Ports `struct ggml_backend_sched` (src/ggml-backend.cpp:926 @8642541b2).
+/// Ports `struct ggml_backend_sched` (src/ggml-backend.cpp:1186 @cd959bae9).
 ///
 /// Laid out field for field as the C, because `ggml_backend_sched_t` is an
 /// opaque pointer that crosses the ABI and the C++ that still holds one must
@@ -159,27 +159,27 @@ inline fn schedOf(p: c.ggml_backend_sched_t) *Sched {
 // The four addressing macros
 //
 // Ports `hash_id`, `tensor_backend_id`, `tensor_id_copy` and `tensor_copy`
-// (src/ggml-backend.cpp:991, 992, 993, 994 @8642541b2). The C writes them as
+// (src/ggml-backend.cpp:1251, 1252, 1253, 1254 @cd959bae9). The C writes them as
 // macros so they can appear on the left of an assignment; Zig returns a
 // pointer where the C yields an lvalue, and the call sites dereference.
 
-/// Ports the `hash_id` macro (src/ggml-backend.cpp:994 @8642541b2).
+/// Ports the `hash_id` macro (src/ggml-backend.cpp:1254 @cd959bae9).
 inline fn hashId(sched: *Sched, tensor: *c.ggml_tensor) usize {
     return impl.hashFindOrInsert(&sched.hash_set, tensor);
 }
 
-/// Ports the `tensor_backend_id` macro (src/ggml-backend.cpp:992 @8642541b2),
+/// Ports the `tensor_backend_id` macro (src/ggml-backend.cpp:1252 @cd959bae9),
 /// as a pointer so it can be assigned through.
 inline fn tensorBackendIdPtr(sched: *Sched, tensor: *c.ggml_tensor) *c_int {
     return &impl.many(c_int, sched.hv_tensor_backend_ids)[hashId(sched, tensor)];
 }
 
-/// Reading form of `tensor_backend_id` (src/ggml-backend.cpp:992 @8642541b2).
+/// Reading form of `tensor_backend_id` (src/ggml-backend.cpp:1252 @cd959bae9).
 inline fn tensorBackendId(sched: *Sched, tensor: *c.ggml_tensor) c_int {
     return tensorBackendIdPtr(sched, tensor).*;
 }
 
-/// Ports the `tensor_id_copy` macro (src/ggml-backend.cpp:993 @8642541b2).
+/// Ports the `tensor_id_copy` macro (src/ggml-backend.cpp:1253 @cd959bae9).
 inline fn tensorIdCopyPtr(sched: *Sched, id: usize, backend_id: c_int, copy_id: c_int) *?*c.ggml_tensor {
     const nb: usize = @intCast(sched.n_backends);
     const nc: usize = @intCast(sched.n_copies);
@@ -188,19 +188,19 @@ inline fn tensorIdCopyPtr(sched: *Sched, id: usize, backend_id: c_int, copy_id: 
     return &impl.many(?*c.ggml_tensor, sched.hv_tensor_copies)[id * nb * nc + b * nc + cp];
 }
 
-/// Ports the `tensor_copy` macro (src/ggml-backend.cpp:994 @8642541b2).
+/// Ports the `tensor_copy` macro (src/ggml-backend.cpp:1254 @cd959bae9).
 inline fn tensorCopy(sched: *Sched, tensor: *c.ggml_tensor, backend_id: c_int, copy_id: c_int) ?*c.ggml_tensor {
     return tensorIdCopyPtr(sched, hashId(sched, tensor), backend_id, copy_id).*;
 }
 
-/// Ports the `SET_CAUSE` macro (src/ggml-backend.cpp:1064 @8642541b2), the
+/// Ports the `SET_CAUSE` macro (src/ggml-backend.cpp:1324 @cd959bae9), the
 /// `#else` arm that this build compiles: the debug arm is behind `#if 0`.
 inline fn setCause(tensor: ?*c.ggml_tensor, comptime why: []const u8) void {
     _ = tensor;
     _ = why;
 }
 
-/// Ports the `GET_CAUSE` macro (src/ggml-backend.cpp:1065 @8642541b2), likewise
+/// Ports the `GET_CAUSE` macro (src/ggml-backend.cpp:1325 @cd959bae9), likewise
 /// the compiled arm.
 inline fn getCause(tensor: ?*c.ggml_tensor) [*:0]const u8 {
     _ = tensor;
@@ -210,7 +210,7 @@ inline fn getCause(tensor: ?*c.ggml_tensor) [*:0]const u8 {
 // -----------------------------------------------------------------------------
 // Growing the input arrays
 
-/// Ports `ggml_backend_sched_split_inputs_grow` (src/ggml-backend.cpp:996 @8642541b2).
+/// Ports `ggml_backend_sched_split_inputs_grow` (src/ggml-backend.cpp:1256 @cd959bae9).
 fn splitInputsGrow(split: *Split) void {
     var new_cap: c_int = max_split_inputs;
     if (split.inputs_capacity > 0) {
@@ -230,7 +230,7 @@ fn splitInputsGrow(split: *Split) void {
     split.inputs_capacity = new_cap;
 }
 
-/// Ports `ggml_backend_sched_graph_inputs_grow` (src/ggml-backend.cpp:1011 @8642541b2).
+/// Ports `ggml_backend_sched_graph_inputs_grow` (src/ggml-backend.cpp:1271 @cd959bae9).
 fn graphInputsGrow(sched: *Sched) void {
     var new_cap: c_int = max_split_inputs;
     if (sched.graph_inputs_capacity > 0) {
@@ -253,7 +253,7 @@ fn graphInputsGrow(sched: *Sched) void {
 // -----------------------------------------------------------------------------
 // Choosing a backend for a node
 
-/// Ports `ggml_backend_sched_backend_id` (src/ggml-backend.cpp:1027 @8642541b2).
+/// Ports `ggml_backend_sched_backend_id` (src/ggml-backend.cpp:1287 @cd959bae9).
 ///
 /// Return: the backend's priority index, lower being higher priority, or -1.
 fn backendId(sched: *Sched, b: c.ggml_backend_t) c_int {
@@ -266,7 +266,7 @@ fn backendId(sched: *Sched, b: c.ggml_backend_t) c_int {
     return -1;
 }
 
-/// Ports `ggml_backend_sched_backend_from_buffer` (src/ggml-backend.cpp:1036 @8642541b2).
+/// Ports `ggml_backend_sched_backend_from_buffer` (src/ggml-backend.cpp:1296 @cd959bae9).
 ///
 /// Return: the highest-priority backend that both supports `tensor`'s buffer
 /// type and can run `op`, or -1 when none can — in which case the weight will
@@ -305,7 +305,7 @@ fn backendFromBuffer(sched: *Sched, tensor: *const c.ggml_tensor, op: *const c.g
 /// Mirrors `NDEBUG`, which gates the diagnostics in this file.
 const debug_off = @import("builtin").mode != .debug;
 
-/// Ports `ggml_backend_sched_backend_id_from_cur` (src/ggml-backend.cpp:1069 @8642541b2).
+/// Ports `ggml_backend_sched_backend_id_from_cur` (src/ggml-backend.cpp:1329 @cd959bae9).
 ///
 /// Return: the backend this node should run on given where its data already
 /// is, or -1 if nothing decides it yet. Aborts when a pre-allocated tensor
@@ -381,7 +381,7 @@ fn backendIdFromCur(sched: *Sched, tensor: *c.ggml_tensor) c_int {
     return -1;
 }
 
-/// Ports `fmt_size` (src/ggml-backend.cpp:1135 @8642541b2).
+/// Ports `fmt_size` (src/ggml-backend.cpp:1395 @cd959bae9).
 ///
 /// Uses one process-wide buffer, exactly as the C's `static char buffer[128]`
 /// does, so two calls in one format string would collide — and the C has that
@@ -401,7 +401,7 @@ fn fmtSize(size: usize) [*:0]const u8 {
     return out.ptr;
 }
 
-/// Ports `ggml_backend_sched_print_assignments` (src/ggml-backend.cpp:1145 @8642541b2).
+/// Ports `ggml_backend_sched_print_assignments` (src/ggml-backend.cpp:1405 @cd959bae9).
 ///
 /// Only runs when `GGML_SCHED_DEBUG` is set in the environment.
 fn printAssignments(sched: *Sched, graph: *impl.CGraph) void {
@@ -464,7 +464,7 @@ fn printAssignments(sched: *Sched, graph: *impl.CGraph) void {
     }
 }
 
-/// Ports `ggml_backend_sched_buffer_supported` (src/ggml-backend.cpp:1185 @8642541b2).
+/// Ports `ggml_backend_sched_buffer_supported` (src/ggml-backend.cpp:1445 @cd959bae9).
 ///
 /// Return: whether `backend_id` can use the buffer type `t` already lives in,
 /// or the one its assigned backend would give it.
@@ -490,7 +490,7 @@ fn bufferSupported(sched: *Sched, t: *c.ggml_tensor, backend_id: c_int) bool {
     return buft != null and backend.ggml_backend_supports_buft(sched.backends[@intCast(backend_id)], buft);
 }
 
-/// Ports `ggml_backend_sched_set_if_supported` (src/ggml-backend.cpp:1206 @8642541b2).
+/// Ports `ggml_backend_sched_set_if_supported` (src/ggml-backend.cpp:1466 @cd959bae9).
 fn setIfSupported(sched: *Sched, node: *c.ggml_tensor, cur_backend_id: c_int, node_backend_id: *c_int) void {
     if (backend.ggml_backend_supports_op(sched.backends[@intCast(cur_backend_id)], node)) {
         node_backend_id.* = cur_backend_id;
@@ -512,7 +512,7 @@ const max_src: usize = c.GGML_MAX_SRC;
 const AllocDeps = std.AutoHashMapUnmanaged(*c.ggml_tensor, std.ArrayList(*c.ggml_tensor));
 
 /// The lambda `ggml_backend_sched_split_graph` passes to `graph_optimize` as
-/// `add_alloc_dep` (src/ggml-backend.cpp:1612 @8642541b2): keeps `tensor`
+/// `add_alloc_dep` (src/ggml-backend.cpp:1872 @cd959bae9): keeps `tensor`
 /// allocated until `until` is computed; a repeat is ignored, so the longest
 /// lifetime applies.
 fn addAllocDep(user_data: ?*anyopaque, tensor: [*c]c.ggml_tensor, until: [*c]c.ggml_tensor) callconv(.c) void {
@@ -524,7 +524,7 @@ fn addAllocDep(user_data: ?*anyopaque, tensor: [*c]c.ggml_tensor, until: [*c]c.g
     gop.value_ptr.append(std.heap.c_allocator, t) catch impl.abort("sched: out of memory");
 }
 
-/// Ports `ggml_backend_sched_split_graph` (src/ggml-backend.cpp:1214 @8642541b2).
+/// Ports `ggml_backend_sched_split_graph` (src/ggml-backend.cpp:1474 @cd959bae9).
 ///
 /// Assigns backends to ops and splits the graph into subgraphs that can be
 /// computed on the same backend. The six passes are described in the file
@@ -696,8 +696,8 @@ export fn ggml_backend_sched_split_graph(sched_: c.ggml_backend_sched_t, graph: 
                             // **A deliberate difference.** The C writes this
                             // with `tensor_backend_id` applied to both `src`
                             // and `src->view_src` in one condition, at
-                            // `n_supported` (src/ggml-backend.cpp:1371
-                            // @8642541b2), and `||`
+                            // `n_supported` (src/ggml-backend.cpp:1631
+                            // @cd959bae9), and `||`
                             // short-circuits, so the second term is evaluated
                             // whenever the first is false -- with `view_src`
                             // null for most tensors. `hash_id` then inserts a
@@ -1144,7 +1144,7 @@ export fn ggml_backend_sched_split_graph(sched_: c.ggml_backend_sched_t, graph: 
     }
 }
 
-/// Ports `ggml_backend_sched_alloc_splits` (src/ggml-backend.cpp:1755 @8642541b2).
+/// Ports `ggml_backend_sched_alloc_splits` (src/ggml-backend.cpp:2015 @cd959bae9).
 ///
 /// Return: false when the reserve itself fails, or when the allocator cannot
 /// fit the graph even after it. A change of backend ids alone does not force a realloc — only a
@@ -1220,7 +1220,7 @@ fn allocSplits(sched: *Sched) bool {
     return true;
 }
 
-/// Ports `ggml_backend_sched_is_host_weight` (src/ggml-backend.cpp:1817 @8642541b2).
+/// Ports `ggml_backend_sched_is_host_weight` (src/ggml-backend.cpp:2077 @cd959bae9).
 ///
 /// Return: true for a weight that lives in a host buffer -- the inputs the
 /// copy callback is offered, and the ones `computeSplits` copies last.
@@ -1230,7 +1230,7 @@ fn isHostWeight(t: *const c.ggml_tensor) bool {
         backend.ggml_backend_buffer_is_host(t.buffer);
 }
 
-/// Ports `ggml_backend_sched_copy_input` (src/ggml-backend.cpp:1823 @8642541b2).
+/// Ports `ggml_backend_sched_copy_input` (src/ggml-backend.cpp:2083 @cd959bae9).
 ///
 /// Copies one input of `split` to the split's backend. A host weight is first
 /// offered to the copy callback, which may copy part of it itself (libllama's
@@ -1288,7 +1288,7 @@ fn copyInput(sched: *Sched, split: *Split, input: *c.ggml_tensor) void {
     }
 }
 
-/// Ports `ggml_backend_sched_compute_splits` (src/ggml-backend.cpp:1865 @8642541b2).
+/// Ports `ggml_backend_sched_compute_splits` (src/ggml-backend.cpp:2125 @cd959bae9).
 ///
 /// Runs each split on its backend, copying inputs across first. Two details
 /// carry the complexity:
@@ -1393,7 +1393,7 @@ fn computeSplits(sched: *Sched) c.enum_ggml_status {
 // -----------------------------------------------------------------------------
 // Public API
 
-/// Ports `ggml_backend_sched_new` (src/ggml-backend.cpp:1949 @8642541b2).
+/// Ports `ggml_backend_sched_new` (src/ggml-backend.cpp:2209 @cd959bae9).
 ///
 /// Parameters:
 /// - `backends`: in priority order, highest first. The **last must be a CPU
@@ -1502,7 +1502,7 @@ fn envInt(comptime name: [*:0]const u8, fallback: c_int) c_int {
     return std.fmt.parseInt(c_int, std.mem.span(raw), 10) catch 0;
 }
 
-/// Ports `ggml_backend_sched_free` (src/ggml-backend.cpp:2021 @8642541b2).
+/// Ports `ggml_backend_sched_free` (src/ggml-backend.cpp:2281 @cd959bae9).
 export fn ggml_backend_sched_free(sched_: c.ggml_backend_sched_t) callconv(.c) void {
     if (sched_ == null) {
         return;
@@ -1536,7 +1536,7 @@ export fn ggml_backend_sched_free(sched_: c.ggml_backend_sched_t) callconv(.c) v
     std.c.free(sched);
 }
 
-/// Ports `ggml_backend_sched_reset` (src/ggml-backend.cpp:2050 @8642541b2).
+/// Ports `ggml_backend_sched_reset` (src/ggml-backend.cpp:2310 @cd959bae9).
 ///
 /// Clears the per-run state. Idempotent: `is_reset` guards the expensive part
 /// so a second call costs nothing.
@@ -1554,7 +1554,7 @@ export fn ggml_backend_sched_reset(sched_: c.ggml_backend_sched_t) callconv(.c) 
     sched.is_alloc = false;
 }
 
-/// Ports `ggml_backend_sched_reserve_size` (src/ggml-backend.cpp:2062 @8642541b2).
+/// Ports `ggml_backend_sched_reserve_size` (src/ggml-backend.cpp:2322 @cd959bae9).
 export fn ggml_backend_sched_reserve_size(sched_: c.ggml_backend_sched_t, measure_graph: *impl.CGraph, sizes: [*c]usize) callconv(.c) void {
     impl.assert(sched_ != null, "sched");
     const sched = schedOf(sched_);
@@ -1570,7 +1570,7 @@ export fn ggml_backend_sched_reserve_size(sched_: c.ggml_backend_sched_t, measur
     c.ggml_gallocr_reserve_n_size(sched.galloc, @ptrCast(&sched.graph), sched.node_backend_ids, sched.leaf_backend_ids, sizes);
 }
 
-/// Ports `ggml_backend_sched_reserve` (src/ggml-backend.cpp:2076 @8642541b2).
+/// Ports `ggml_backend_sched_reserve` (src/ggml-backend.cpp:2336 @cd959bae9).
 ///
 /// Return: false if the allocator could not reserve for `measure_graph`.
 export fn ggml_backend_sched_reserve(sched_: c.ggml_backend_sched_t, measure_graph: *impl.CGraph) callconv(.c) bool {
@@ -1591,7 +1591,7 @@ export fn ggml_backend_sched_reserve(sched_: c.ggml_backend_sched_t, measure_gra
     return true;
 }
 
-/// Ports `ggml_backend_sched_alloc_graph` (src/ggml-backend.cpp:2093 @8642541b2).
+/// Ports `ggml_backend_sched_alloc_graph` (src/ggml-backend.cpp:2353 @cd959bae9).
 ///
 /// Advances `cur_copy` to the next pipeline slot, splits, and allocates.
 export fn ggml_backend_sched_alloc_graph(sched_: c.ggml_backend_sched_t, graph: *impl.CGraph) callconv(.c) bool {
@@ -1614,14 +1614,14 @@ export fn ggml_backend_sched_alloc_graph(sched_: c.ggml_backend_sched_t, graph: 
     return true;
 }
 
-/// Ports `ggml_backend_sched_graph_compute` (src/ggml-backend.cpp:2112 @8642541b2).
+/// Ports `ggml_backend_sched_graph_compute` (src/ggml-backend.cpp:2372 @cd959bae9).
 export fn ggml_backend_sched_graph_compute(sched_: c.ggml_backend_sched_t, graph: *impl.CGraph) callconv(.c) c.enum_ggml_status {
     const err = ggml_backend_sched_graph_compute_async(sched_, graph);
     ggml_backend_sched_synchronize(sched_);
     return err;
 }
 
-/// Ports `ggml_backend_sched_graph_compute_async` (src/ggml-backend.cpp:2118 @8642541b2).
+/// Ports `ggml_backend_sched_graph_compute_async` (src/ggml-backend.cpp:2378 @cd959bae9).
 export fn ggml_backend_sched_graph_compute_async(sched_: c.ggml_backend_sched_t, graph: *impl.CGraph) callconv(.c) c.enum_ggml_status {
     impl.assert(sched_ != null, "sched");
     const sched = schedOf(sched_);
@@ -1638,7 +1638,7 @@ export fn ggml_backend_sched_graph_compute_async(sched_: c.ggml_backend_sched_t,
     return computeSplits(sched);
 }
 
-/// Ports `ggml_backend_sched_synchronize` (src/ggml-backend.cpp:2133 @8642541b2).
+/// Ports `ggml_backend_sched_synchronize` (src/ggml-backend.cpp:2393 @cd959bae9).
 ///
 /// Resets `next_copy` to 0 when nothing is allocated, so generation keeps
 /// using the same copy every step — a changing copy would change the graph
@@ -1659,7 +1659,7 @@ export fn ggml_backend_sched_synchronize(sched_: c.ggml_backend_sched_t) callcon
     }
 }
 
-/// Ports `ggml_backend_sched_set_eval_callback` (src/ggml-backend.cpp:2146 @8642541b2).
+/// Ports `ggml_backend_sched_set_eval_callback` (src/ggml-backend.cpp:2406 @cd959bae9).
 export fn ggml_backend_sched_set_eval_callback(
     sched_: c.ggml_backend_sched_t,
     callback: c.ggml_backend_sched_eval_callback,
@@ -1671,7 +1671,7 @@ export fn ggml_backend_sched_set_eval_callback(
     sched.callback_eval_user_data = user_data;
 }
 
-/// Ports `ggml_backend_sched_set_copy_callback` (src/ggml-backend.cpp:2152 @8642541b2).
+/// Ports `ggml_backend_sched_set_copy_callback` (src/ggml-backend.cpp:2412 @cd959bae9).
 export fn ggml_backend_sched_set_copy_callback(
     sched_: c.ggml_backend_sched_t,
     callback: c.ggml_backend_sched_copy_callback,
@@ -1683,7 +1683,7 @@ export fn ggml_backend_sched_set_copy_callback(
     sched.callback_copy_user_data = user_data;
 }
 
-/// Ports `ggml_backend_sched_set_realloc_callback` (src/ggml-backend.cpp:2158 @8642541b2).
+/// Ports `ggml_backend_sched_set_realloc_callback` (src/ggml-backend.cpp:2418 @cd959bae9).
 export fn ggml_backend_sched_set_realloc_callback(
     sched_: c.ggml_backend_sched_t,
     callback: c.ggml_backend_sched_realloc_callback,
@@ -1695,25 +1695,25 @@ export fn ggml_backend_sched_set_realloc_callback(
     sched.callback_realloc_user_data = user_data;
 }
 
-/// Ports `ggml_backend_sched_get_n_splits` (src/ggml-backend.cpp:2164 @8642541b2).
+/// Ports `ggml_backend_sched_get_n_splits` (src/ggml-backend.cpp:2424 @cd959bae9).
 export fn ggml_backend_sched_get_n_splits(sched_: c.ggml_backend_sched_t) callconv(.c) c_int {
     impl.assert(sched_ != null, "sched");
     return schedOf(sched_).n_splits;
 }
 
-/// Ports `ggml_backend_sched_get_n_copies` (src/ggml-backend.cpp:2169 @8642541b2).
+/// Ports `ggml_backend_sched_get_n_copies` (src/ggml-backend.cpp:2429 @cd959bae9).
 export fn ggml_backend_sched_get_n_copies(sched_: c.ggml_backend_sched_t) callconv(.c) c_int {
     impl.assert(sched_ != null, "sched");
     return schedOf(sched_).n_copies;
 }
 
-/// Ports `ggml_backend_sched_get_n_backends` (src/ggml-backend.cpp:2174 @8642541b2).
+/// Ports `ggml_backend_sched_get_n_backends` (src/ggml-backend.cpp:2434 @cd959bae9).
 export fn ggml_backend_sched_get_n_backends(sched_: c.ggml_backend_sched_t) callconv(.c) c_int {
     impl.assert(sched_ != null, "sched");
     return schedOf(sched_).n_backends;
 }
 
-/// Ports `ggml_backend_sched_get_backend` (src/ggml-backend.cpp:2179 @8642541b2).
+/// Ports `ggml_backend_sched_get_backend` (src/ggml-backend.cpp:2439 @cd959bae9).
 export fn ggml_backend_sched_get_backend(sched_: c.ggml_backend_sched_t, i: c_int) callconv(.c) c.ggml_backend_t {
     impl.assert(sched_ != null, "sched");
     const sched = schedOf(sched_);
@@ -1721,7 +1721,7 @@ export fn ggml_backend_sched_get_backend(sched_: c.ggml_backend_sched_t, i: c_in
     return sched.backends[@intCast(i)];
 }
 
-/// Ports `ggml_backend_sched_get_buffer_type` (src/ggml-backend.cpp:2185 @8642541b2).
+/// Ports `ggml_backend_sched_get_buffer_type` (src/ggml-backend.cpp:2445 @cd959bae9).
 export fn ggml_backend_sched_get_buffer_type(sched_: c.ggml_backend_sched_t, b: c.ggml_backend_t) callconv(.c) c.ggml_backend_buffer_type_t {
     impl.assert(sched_ != null, "sched");
     const sched = schedOf(sched_);
@@ -1731,7 +1731,7 @@ export fn ggml_backend_sched_get_buffer_type(sched_: c.ggml_backend_sched_t, b: 
     return sched.bufts[@intCast(backend_index)];
 }
 
-/// Ports `ggml_backend_sched_get_buffer_size` (src/ggml-backend.cpp:2193 @8642541b2).
+/// Ports `ggml_backend_sched_get_buffer_size` (src/ggml-backend.cpp:2453 @cd959bae9).
 export fn ggml_backend_sched_get_buffer_size(sched_: c.ggml_backend_sched_t, b: c.ggml_backend_t) callconv(.c) usize {
     impl.assert(sched_ != null, "sched");
     const sched = schedOf(sched_);
@@ -1741,7 +1741,7 @@ export fn ggml_backend_sched_get_buffer_size(sched_: c.ggml_backend_sched_t, b: 
     return c.ggml_gallocr_get_buffer_size(sched.galloc, backend_index);
 }
 
-/// Ports `ggml_backend_sched_set_tensor_backend` (src/ggml-backend.cpp:2201 @8642541b2).
+/// Ports `ggml_backend_sched_set_tensor_backend` (src/ggml-backend.cpp:2461 @cd959bae9).
 ///
 /// A user assignment. Clears `is_reset` so the next split keeps it — pass 1
 /// only fills in nodes still at -1.
@@ -1755,7 +1755,7 @@ export fn ggml_backend_sched_set_tensor_backend(sched_: c.ggml_backend_sched_t, 
     sched.is_reset = false;
 }
 
-/// Ports `ggml_backend_sched_get_tensor_backend` (src/ggml-backend.cpp:2210 @8642541b2).
+/// Ports `ggml_backend_sched_get_tensor_backend` (src/ggml-backend.cpp:2470 @cd959bae9).
 ///
 /// Return: the backend the node is assigned to, or null if it has none yet.
 export fn ggml_backend_sched_get_tensor_backend(sched_: c.ggml_backend_sched_t, node: *c.ggml_tensor) callconv(.c) c.ggml_backend_t {

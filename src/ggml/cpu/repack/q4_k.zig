@@ -58,7 +58,7 @@ inline fn unpackScales(utmp: *[32]u32, bl: *const blocks.block_q4_Kx8) void {
 
 /// Ports `ggml_gemv_q4_K_8x4_q8_K_generic` and
 /// `ggml_gemv_q4_K_8x8_q8_K_generic`
-/// (ggml-cpu/repack.cpp:887, 958 @8642541b2).
+/// (ggml-cpu/repack.cpp:887, 958 @cd959bae9).
 fn gemv(
     comptime blocklen: i32,
     n: c_int,
@@ -141,7 +141,7 @@ fn gemv(
 
 /// Ports `ggml_gemm_q4_K_8x4_q8_K_generic` and
 /// `ggml_gemm_q4_K_8x8_q8_K_generic`
-/// (ggml-cpu/repack.cpp:1949, 2032 @8642541b2).
+/// (ggml-cpu/repack.cpp:1949, 2032 @cd959bae9).
 fn gemm(
     comptime blocklen: i32,
     n: c_int,

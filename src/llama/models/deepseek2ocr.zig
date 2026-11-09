@@ -23,7 +23,7 @@ const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 
-/// Ports `llama_model_deepseek2ocr`'s `load_arch_hparams` (models/deepseek2ocr.cpp:3 @8642541b2).
+/// Ports `llama_model_deepseek2ocr`'s `load_arch_hparams` (models/deepseek2ocr.cpp:3 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -47,7 +47,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_deepseek2ocr`'s `load_arch_tensors` (models/deepseek2ocr.cpp:23 @8642541b2).
+/// Ports `llama_model_deepseek2ocr`'s `load_arch_tensors` (models/deepseek2ocr.cpp:23 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -106,7 +106,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_deepseek2ocr`'s `build_arch_graph` (models/deepseek2ocr.cpp:77
-/// @8642541b2): DeepSeek-V2's main graph, whatever the graph type.
+/// @cd959bae9): DeepSeek-V2's main graph, whatever the graph type.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     deepseek2.buildGraph(model, b);
 }

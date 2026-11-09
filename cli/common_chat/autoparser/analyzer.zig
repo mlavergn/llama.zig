@@ -56,7 +56,7 @@ const npos = util.npos;
 // Probes
 
 /// Ports `FUN_FIRST` and the other probe strings (chat-diff-analyzer.cpp:24
-/// @8642541b2).
+/// @cd959bae9).
 const FUN_FIRST = "FFF_FIRST_FUN_F";
 const FUN_SECOND = "SSS_SECOND_FUN_S";
 const ARG_FIRST = "AA_ARG_FST_AA";
@@ -69,25 +69,25 @@ const CALL_ID_001 = "call00001";
 const CALL_ID_002 = "call00002";
 const CALL_ID_999 = "call99999";
 
-/// Ports `params_schema` (chat-diff-analyzer.cpp:208 @8642541b2).
+/// Ports `params_schema` (chat-diff-analyzer.cpp:208 @cd959bae9).
 const params_schema = "{\"type\":\"object\",\"properties\":{\"" ++ ARG_FIRST ++ "\":{\"type\":\"string\",\"description\":\"First argument\"}," ++
     "\"" ++ ARG_SECOND ++ "\":{\"type\":\"string\",\"description\":\"Second argument\"}},\"required\":[]}";
 
-/// Ports `tools` (chat-diff-analyzer.cpp:216 @8642541b2).
+/// Ports `tools` (chat-diff-analyzer.cpp:216 @cd959bae9).
 const probe_tools = "[{\"type\":\"function\",\"function\":{\"name\":\"" ++ FUN_FIRST ++ "\",\"description\":\"Test function foo\",\"parameters\":" ++ params_schema ++ "}}," ++
     "{\"type\":\"function\",\"function\":{\"name\":\"" ++ FUN_SECOND ++ "\",\"description\":\"Test function bar\",\"parameters\":" ++ params_schema ++ "}}]";
 
-/// Ports `user_msg` (chat-diff-analyzer.cpp:225 @8642541b2).
+/// Ports `user_msg` (chat-diff-analyzer.cpp:225 @cd959bae9).
 const user_msg = "{\"role\":\"user\",\"content\":\"" ++ USER_MSG ++ "\"}";
 
-/// Ports `build_tool_call` (chat-diff-analyzer.cpp:230 @8642541b2): `args`
+/// Ports `build_tool_call` (chat-diff-analyzer.cpp:230 @cd959bae9): `args`
 /// is JSON text.
 fn buildToolCall(comptime name: []const u8, comptime args: []const u8, comptime id: []const u8) []const u8 {
     return "{\"id\":\"" ++ id ++ "\",\"type\":\"function\",\"function\":{\"name\":\"" ++ name ++ "\",\"arguments\":" ++ args ++ "}}";
 }
 
 /// Ports `first_tool_call_zero_args` and the other probe calls
-/// (chat-diff-analyzer.cpp:238 @8642541b2).
+/// (chat-diff-analyzer.cpp:238 @cd959bae9).
 const first_tool_call_zero_args = buildToolCall(FUN_FIRST, "{}", CALL_ID_001);
 const first_tool_call_one_arg = buildToolCall(FUN_FIRST, "{\"" ++ ARG_FIRST ++ "\":\"XXXX\"}", CALL_ID_001);
 const first_tool_call_one_arg_other_val = buildToolCall(FUN_FIRST, "{\"" ++ ARG_FIRST ++ "\":\"YYYY\"}", CALL_ID_001);
@@ -183,7 +183,7 @@ fn srcHas(tmpl: *const Template, needle: []const u8) bool {
     return util.contains(tmpl.src, needle);
 }
 
-/// Ports `workarounds` (chat-diff-analyzer.cpp:36 @8642541b2): the
+/// Ports `workarounds` (chat-diff-analyzer.cpp:36 @cd959bae9): the
 /// templates the analysis reads wrong, patched by name.
 fn applyWorkarounds(tmpl: *const Template, analysis: *Autoparser, a: Allocator) Error!void {
     // Old reasoning Qwen templates - they don't really display reasoning content, but we still want to
@@ -339,7 +339,7 @@ fn applyWorkarounds(tmpl: *const Template, analysis: *Autoparser, a: Allocator) 
 // autoparser
 
 /// Ports `autoparser`'s `analyze_template` (chat-diff-analyzer.cpp:257
-/// @8642541b2): every phase of the analysis, then the workarounds.
+/// @cd959bae9): every phase of the analysis, then the workarounds.
 pub fn analyzeTemplate(self: *Autoparser, a: Allocator, tmpl: *const Template) Error!void {
     self.jinja_caps = tmpl.originalCaps();
     self.reasoning = try analyzeReasoning(a, tmpl, self.jinja_caps.supports_tool_calls);
@@ -403,7 +403,7 @@ fn logAnalysis(self: *const Autoparser, a: Allocator) Error!void {
 }
 
 /// Ports `autoparser`'s `collect_preserved_tokens` (chat-diff-analyzer.cpp:313
-/// @8642541b2): every marker found, trimmed, once.
+/// @cd959bae9): every marker found, trimmed, once.
 fn collectPreservedTokens(self: *Autoparser, a: Allocator) Error!void {
     const t = &self.tools;
     const all = [_][]const u8{
@@ -429,7 +429,7 @@ fn collectPreservedTokens(self: *Autoparser, a: Allocator) Error!void {
 }
 
 /// Ports `autoparser`'s `detect_assistant_start_marker` (chat-diff-analyzer.cpp:347
-/// @8642541b2): what a template writes before an assistant message's text.
+/// @cd959bae9): what a template writes before an assistant message's text.
 fn detectAssistantStartMarker(self: *const Autoparser, a: Allocator, tmpl: *const Template) Error![]const u8 {
     const params = try probe(a, "[" ++ user_msg ++ "]", false);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ assistant_content ++ "]");
@@ -454,7 +454,7 @@ fn detectAssistantStartMarker(self: *const Autoparser, a: Allocator, tmpl: *cons
 }
 
 /// Ports `autoparser`'s `detect_user_start_marker` (chat-diff-analyzer.cpp:389
-/// @8642541b2): what a template writes before a user message's text, an
+/// @cd959bae9): what a template writes before a user message's text, an
 /// end marker of the turn before skipped.
 fn detectUserStartMarker(a: Allocator, tmpl: *const Template) Error![]const u8 {
     const user_msg_two = "{\"role\":\"user\",\"content\":\"" ++ USER_MSG_TWO ++ "\"}";
@@ -507,7 +507,7 @@ fn detectUserStartMarker(a: Allocator, tmpl: *const Template) Error![]const u8 {
 // analyze_reasoning
 
 /// Ports `analyze_reasoning`'s constructor (chat-diff-analyzer.cpp:461
-/// @8642541b2).
+/// @cd959bae9).
 fn analyzeReasoning(a: Allocator, tmpl: *const Template, supports_tools: bool) Error!types.AnalyzeReasoning {
     log.dbg("\x1b[1m\x1b[38;5;126m=== Starting differential analysis ===\n\x1b[0m", .{});
     log.dbg("\x1b[1m\x1b[38;5;214mPhase 1: Reasoning analysis\n\x1b[0m", .{});
@@ -549,7 +549,7 @@ const ReasoningParsers = struct {
 };
 
 /// Ports `analyze_reasoning`'s `compare_reasoning_presence` (chat-diff-analyzer.cpp:473
-/// @8642541b2): the markers around reasoning content in an assistant turn.
+/// @cd959bae9): the markers around reasoning content in an assistant turn.
 fn compareReasoningPresence(r: *types.AnalyzeReasoning, a: Allocator, tmpl: *const Template) Error!void {
     const assistant_with_reasoning = "{\"role\":\"assistant\",\"content\":\"" ++ ASSISTANT_MSG ++ "\",\"reasoning_content\":\"" ++ THINKING_CONTENT ++ "\"}";
     const params = try probe(a, "[" ++ user_msg ++ "," ++ assistant_content ++ "]", false);
@@ -580,7 +580,7 @@ fn compareReasoningPresence(r: *types.AnalyzeReasoning, a: Allocator, tmpl: *con
 }
 
 /// Ports `analyze_reasoning`'s `compare_thinking_enabled` (chat-diff-analyzer.cpp:532
-/// @8642541b2): what `enable_thinking` changes in the generation prompt.
+/// @cd959bae9): what `enable_thinking` changes in the generation prompt.
 fn compareThinkingEnabled(r: *types.AnalyzeReasoning, a: Allocator, tmpl: *const Template) Error!void {
     var params = try probe(a, "[" ++ user_msg ++ "]", false);
     params.add_generation_prompt = true;
@@ -654,7 +654,7 @@ fn compareThinkingEnabled(r: *types.AnalyzeReasoning, a: Allocator, tmpl: *const
 }
 
 /// Ports `analyze_reasoning`'s `compare_reasoning_scope` (chat-diff-analyzer.cpp:616
-/// @8642541b2): reasoning that a template shows only beside tool calls.
+/// @cd959bae9): reasoning that a template shows only beside tool calls.
 fn compareReasoningScope(r: *types.AnalyzeReasoning, a: Allocator, tmpl: *const Template) Error!void {
     const assistant_reasoning_content = "{\"role\":\"assistant\",\"content\":\"" ++ ASSISTANT_MSG ++ "\",\"reasoning_content\":\"" ++ THINKING_CONTENT ++ "\"}";
     const assistant_reasoning_tools = "{\"role\":\"assistant\",\"content\":null,\"reasoning_content\":\"" ++ THINKING_CONTENT ++ "\",\"tool_calls\":[" ++
@@ -719,7 +719,7 @@ const ContentParsers = struct {
 };
 
 /// Ports `analyze_content`'s constructor (chat-diff-analyzer.cpp:677
-/// @8642541b2): the markers around an assistant message's text.
+/// @cd959bae9): the markers around an assistant message's text.
 fn analyzeContent(a: Allocator, tmpl: *const Template, reasoning: *const types.AnalyzeReasoning) Error!types.AnalyzeContent {
     log.dbg("\x1b[1m\x1b[38;5;214mPhase 2: Content analysis\n\x1b[0m", .{});
     var c: types.AnalyzeContent = .{};
@@ -781,7 +781,7 @@ fn analyzeContent(a: Allocator, tmpl: *const Template, reasoning: *const types.A
 // analyze_tools
 
 /// Ports `analyze_tools`'s constructor (chat-diff-analyzer.cpp:768
-/// @8642541b2): the tool-call format, then, outside JSON, the function,
+/// @cd959bae9): the tool-call format, then, outside JSON, the function,
 /// argument and call-id markers.
 fn analyzeTools(a: Allocator, tmpl: *const Template, caps: *const @import("../caps.zig").Caps, reasoning: *const types.AnalyzeReasoning) Error!types.AnalyzeTools {
     log.dbg("\x1b[1m\x1b[38;5;214mPhase 3: Tool call analysis\n\x1b[0m", .{});
@@ -808,7 +808,7 @@ fn analyzeTools(a: Allocator, tmpl: *const Template, caps: *const @import("../ca
 }
 
 /// Ports `analyze_tools`'s `analyze_tool_calls` (chat-diff-analyzer.cpp:793
-/// @8642541b2): the text one tool call adds to an assistant turn.
+/// @cd959bae9): the text one tool call adds to an assistant turn.
 fn analyzeToolCalls(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template, reasoning: *const types.AnalyzeReasoning, supports_parallel_tool_calls: bool) Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ assistant_content ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call) ++ "]");
@@ -833,7 +833,7 @@ const ToolParsers = struct {
 };
 
 /// Ports `analyze_tools`'s `analyze_tool_call_format` (chat-diff-analyzer.cpp:830
-/// @8642541b2): JSON, tagged with JSON arguments, or tagged throughout,
+/// @cd959bae9): JSON, tagged with JSON arguments, or tagged throughout,
 /// decided by whether the names appear quoted after `{` or `:`.
 fn analyzeToolCallFormat(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template, haystack: []const u8, fun_name_needle: []const u8, arg_name_needle: []const u8, reasoning: *const types.AnalyzeReasoning, supports_parallel_tool_calls: bool) Error!void {
     if (fun_name_needle.len == 0 or arg_name_needle.len == 0 or haystack.len == 0) return;
@@ -879,7 +879,7 @@ fn analyzeToolCallFormat(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Temp
 }
 
 /// Ports `analyze_tools`'s `analyze_json_native_parallel_calls` (chat-diff-analyzer.cpp:888
-/// @8642541b2): a section marker repeated per call is a per-call marker.
+/// @cd959bae9): a section marker repeated per call is a per-call marker.
 fn analyzeJsonNativeParallelCalls(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template) Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call ++ "," ++ second_tool_call) ++ "]");
@@ -905,7 +905,7 @@ fn substrInt(s: []const u8, pos: i64, n: i64) Error![]const u8 {
 }
 
 /// Ports `analyze_tools`'s `analyze_tool_call_format_json_native` (chat-diff-analyzer.cpp:924
-/// @8642541b2): the call's JSON parsed, its fields named by what they hold,
+/// @cd959bae9): the call's JSON parsed, its fields named by what they hold,
 /// and the markers around it.
 fn analyzeToolCallFormatJsonNative(t: *types.AnalyzeTools, a: Allocator, clean_haystack: []const u8, fun_name_needle: []const u8, arg_name_needle: []const u8) Error!void {
     // we might not have the typical OpenAI tool calling structure
@@ -1012,7 +1012,7 @@ fn analyzeToolCallFormatJsonNative(t: *types.AnalyzeTools, a: Allocator, clean_h
 }
 
 /// Ports `analyze_tools`'s `analyze_tool_call_format_non_json` (chat-diff-analyzer.cpp:1003
-/// @8642541b2): the section and per-call markers around a tagged call.
+/// @cd959bae9): the section and per-call markers around a tagged call.
 fn analyzeToolCallFormatNonJson(t: *types.AnalyzeTools, a: Allocator, clean_haystack: []const u8, fun_name_needle: []const u8) Error!void {
     const P = struct {
         // first, let's find out if the function is inside a tag or standalone
@@ -1075,7 +1075,7 @@ fn analyzeToolCallFormatNonJson(t: *types.AnalyzeTools, a: Allocator, clean_hays
 }
 
 /// Ports `analyze_tools`'s `check_per_call_markers` (chat-diff-analyzer.cpp:1047
-/// @8642541b2): whether a second call repeats the section markers.
+/// @cd959bae9): whether a second call repeats the section markers.
 fn checkPerCallMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template) Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call ++ "," ++ second_tool_call) ++ "]");
@@ -1155,7 +1155,7 @@ const FunctionParsers = struct {
 };
 
 /// Ports `analyze_tools`'s `extract_function_markers` (chat-diff-analyzer.cpp:1103
-/// @8642541b2): the markers around a function's name, before its arguments
+/// @cd959bae9): the markers around a function's name, before its arguments
 /// and after them.
 fn extractFunctionMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template) Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call) ++ "]", true);
@@ -1239,7 +1239,7 @@ fn extractFunctionMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Tem
     }
 }
 
-/// Ports `analyze_tools`'s `analyze_arguments` (chat-diff-analyzer.cpp:1246 @8642541b2).
+/// Ports `analyze_tools`'s `analyze_arguments` (chat-diff-analyzer.cpp:1246 @cd959bae9).
 fn analyzeArguments(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template) Error!void {
     try extractArgumentNameMarkers(t, a, tmpl);
     try extractArgumentValueMarkers(t, a, tmpl);
@@ -1271,7 +1271,7 @@ const ArgumentParsers = struct {
 };
 
 /// Ports `analyze_tools`'s `extract_argument_name_markers` (chat-diff-analyzer.cpp:1251
-/// @8642541b2): the markers around an argument's name.
+/// @cd959bae9): the markers around an argument's name.
 fn extractArgumentNameMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template) Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_one_arg) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_other_arg) ++ "]");
@@ -1312,7 +1312,7 @@ fn extractArgumentNameMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const
 }
 
 /// Ports `analyze_tools`'s `extract_argument_value_markers` (chat-diff-analyzer.cpp:1325
-/// @8642541b2): the markers around an argument's value.
+/// @cd959bae9): the markers around an argument's value.
 fn extractArgumentValueMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template) Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_one_arg) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_one_arg_other_val) ++ "]");
@@ -1355,7 +1355,7 @@ fn extractArgumentValueMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *cons
 }
 
 /// Ports `analyze_tools`'s `extract_argument_separator` (chat-diff-analyzer.cpp:1390
-/// @8642541b2): what a second argument is preceded by.
+/// @cd959bae9): what a second argument is preceded by.
 fn extractArgumentSeparator(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template) Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_one_arg) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call) ++ "]");
@@ -1372,7 +1372,7 @@ fn extractArgumentSeparator(t: *types.AnalyzeTools, a: Allocator, tmpl: *const T
 }
 
 /// Ports `analyze_tools`'s `extract_args_markers` (chat-diff-analyzer.cpp:1425
-/// @8642541b2): markers around a JSON call's arguments.
+/// @cd959bae9): markers around a JSON call's arguments.
 fn extractArgsMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template) Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_zero_args) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_one_arg) ++ "]");
@@ -1447,7 +1447,7 @@ fn findFirstMarker(a: Allocator, str: []const u8) Error![]const u8 {
 }
 
 /// Ports `analyze_tools`'s `extract_call_id_markers` (chat-diff-analyzer.cpp:1486
-/// @8642541b2): where a call's id sits, and the markers around it.
+/// @cd959bae9): where a call's id sits, and the markers around it.
 fn extractCallIdMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template) Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_alt_id) ++ "]");

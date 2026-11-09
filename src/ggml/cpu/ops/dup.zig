@@ -29,7 +29,7 @@ const c = impl.c;
 const Tensor = common.Tensor;
 const ComputeParams = common.ComputeParams;
 
-/// Ports `ggml_compute_forward_dup_same_cont` (ops.cpp:17 @8642541b2).
+/// Ports `ggml_compute_forward_dup_same_cont` (ops.cpp:17 @cd959bae9).
 fn dupSameCont(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -57,7 +57,7 @@ fn dupSameCont(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_dup_flt` (ops.cpp:47 @8642541b2), the
+/// Ports `ggml_compute_forward_dup_flt` (ops.cpp:47 @cd959bae9), the
 /// `template<typename src_t, typename dst_t>` form.
 fn dupFlt(comptime SrcT: type, comptime DstT: type, params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
@@ -309,7 +309,7 @@ fn dupFlt(comptime SrcT: type, comptime DstT: type, params: *const ComputeParams
     }
 }
 
-/// Ports `ggml_compute_forward_dup_to_q` (ops.cpp:270 @8642541b2), the
+/// Ports `ggml_compute_forward_dup_to_q` (ops.cpp:270 @cd959bae9), the
 /// `template<typename src_t>` form.
 fn dupToQ(comptime SrcT: type, params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
@@ -366,7 +366,7 @@ fn dupToQ(comptime SrcT: type, params: *const ComputeParams, dst: *Tensor) void 
     }
 }
 
-/// Ports `ggml_compute_forward_dup_bytes` (ops.cpp:326 @8642541b2).
+/// Ports `ggml_compute_forward_dup_bytes` (ops.cpp:326 @cd959bae9).
 ///
 /// "A simplified version of ggml_compute_forward_dup that doesn't do float
 /// upcasting, and just plain old memcpy", in the C's words.
@@ -532,7 +532,7 @@ fn dupBytes(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_dup_from_q` (ops.cpp:475 @8642541b2).
+/// Ports `ggml_compute_forward_dup_from_q` (ops.cpp:475 @cd959bae9).
 fn dupFromQ(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -619,12 +619,12 @@ pub export fn ggml_compute_forward_dup(params: *const ComputeParams, dst: *Tenso
     }
 }
 
-/// Ports `ggml_compute_forward_cpy` (ops.cpp:5157 @8642541b2).
+/// Ports `ggml_compute_forward_cpy` (ops.cpp:5171 @cd959bae9).
 pub export fn ggml_compute_forward_cpy(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     ggml_compute_forward_dup(params, dst);
 }
 
-/// Ports `ggml_compute_forward_cont` (ops.cpp:5165 @8642541b2).
+/// Ports `ggml_compute_forward_cont` (ops.cpp:5179 @cd959bae9).
 pub export fn ggml_compute_forward_cont(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     ggml_compute_forward_dup(params, dst);
 }

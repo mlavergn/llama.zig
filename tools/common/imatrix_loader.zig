@@ -19,23 +19,23 @@ const log = @import("log.zig");
 const strings = @import("strings.zig");
 
 /// `LLM_KV_IMATRIX_DATASETS`, `LLM_KV_IMATRIX_CHUNK_COUNT`, `LLM_KV_IMATRIX_CHUNK_SIZE`
-/// (imatrix-loader.h:8, 9, 10 @8642541b2).
+/// (imatrix-loader.h:8, 9, 10 @cd959bae9).
 pub const kv_datasets = "imatrix.datasets";
 pub const kv_chunk_count = "imatrix.chunk_count";
 pub const kv_chunk_size = "imatrix.chunk_size";
 /// `LLM_KV_IMATRIX_STATS_SCHEMA`, `LLM_KV_IMATRIX_N_LAYER_NEXTN`
-/// (imatrix-loader.h:11, 12 @8642541b2).
+/// (imatrix-loader.h:11, 12 @cd959bae9).
 pub const kv_stats_schema = "imatrix.stats_schema";
 pub const kv_n_layer_nextn = "imatrix.n_layer_nextn";
 
-/// Ports `common_imatrix_entry` (imatrix-loader.h:14 @8642541b2).
+/// Ports `common_imatrix_entry` (imatrix-loader.h:14 @cd959bae9).
 pub const Entry = struct {
     sums: std.ArrayList(f32) = .empty,
     activations: std.ArrayList(f32) = .empty,
     counts: std.ArrayList(i64) = .empty,
 };
 
-/// Ports `common_imatrix` (imatrix-loader.h:20 @8642541b2).
+/// Ports `common_imatrix` (imatrix-loader.h:20 @cd959bae9).
 pub const Imatrix = struct {
     allocator: std.mem.Allocator,
     /// `entries`, by name.
@@ -124,7 +124,7 @@ const In = struct {
     }
 };
 
-/// Ports `common_imatrix_load_legacy` (imatrix-loader.cpp:10 @8642541b2).
+/// Ports `common_imatrix_load_legacy` (imatrix-loader.cpp:10 @cd959bae9).
 fn loadLegacy(fname: [:0]const u8, imatrix: *Imatrix) !bool {
     const func = "common_imatrix_load_legacy";
     const f = fopen(fname.ptr, "rb") orelse {
@@ -199,7 +199,7 @@ fn loadLegacy(fname: [:0]const u8, imatrix: *Imatrix) !bool {
     return true;
 }
 
-/// Ports `common_imatrix_load` (imatrix-loader.cpp:82 @8642541b2).
+/// Ports `common_imatrix_load` (imatrix-loader.cpp:82 @cd959bae9).
 ///
 /// Parameters:
 /// - `fname`: a GGUF imatrix, or the legacy format if it does not parse as one.

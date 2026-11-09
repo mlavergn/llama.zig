@@ -74,7 +74,7 @@ fn setErrno(e: c_int) void {
     std.c._errno().* = e;
 }
 
-/// Ports `subprocess_option_e` (subprocess.h:75 @8642541b2).
+/// Ports `subprocess_option_e` (subprocess.h:75 @cd959bae9).
 pub const option_combined_stdout_stderr: c_int = 0x1;
 pub const option_inherit_environment: c_int = 0x2;
 pub const option_enable_async: c_int = 0x4;
@@ -82,7 +82,7 @@ pub const option_no_window: c_int = 0x8;
 pub const option_search_user_path: c_int = 0x10;
 pub const option_enable_async_no_wait: c_int = 0x20;
 
-/// Ports `subprocess_error_e` (subprocess.h:101 @8642541b2).
+/// Ports `subprocess_error_e` (subprocess.h:101 @cd959bae9).
 const err_unknown: c_int = -1;
 const err_invalid_options: c_int = -2;
 const err_invalid_environment: c_int = -3;
@@ -93,7 +93,7 @@ const err_pipe: c_int = -7;
 const err_spawn: c_int = -8;
 const err_not_supported: c_int = -9;
 
-/// Ports `subprocess_s` (subprocess.h:563 @8642541b2), its POSIX members.
+/// Ports `subprocess_s` (subprocess.h:563 @cd959bae9), its POSIX members.
 const Process = struct {
     stdin_file: ?*File = null,
     stdout_file: ?*File = null,
@@ -104,7 +104,7 @@ const Process = struct {
     no_wait: c_int = 0,
 };
 
-/// Ports `subprocess_error_from_errno` (subprocess.h:622 @8642541b2).
+/// Ports `subprocess_error_from_errno` (subprocess.h:622 @cd959bae9).
 fn errorFromErrno(e: c_int) c_int {
     const E = std.posix.E;
     return switch (e) {
@@ -116,7 +116,7 @@ fn errorFromErrno(e: c_int) c_int {
     };
 }
 
-/// Ports `subprocess_fds_above_std` (subprocess.h:732 @8642541b2): moves a
+/// Ports `subprocess_fds_above_std` (subprocess.h:732 @cd959bae9): moves a
 /// pipe end off 0, 1 or 2, keeping it close-on-exec.
 fn fdsAboveStd(fds: *[2]c_int) c_int {
     for (0..2) |index| {
@@ -145,7 +145,7 @@ fn fdsAboveStd(fds: *[2]c_int) c_int {
     return 0;
 }
 
-/// Ports `subprocess_pipe_cloexec` (subprocess.h:774 @8642541b2): a pipe
+/// Ports `subprocess_pipe_cloexec` (subprocess.h:774 @cd959bae9): a pipe
 /// whose ends later children do not inherit.
 fn pipeCloexec(fds: *[2]c_int) c_int {
     if (comptime builtin.os.tag == .linux or builtin.os.tag == .freebsd or builtin.os.tag == .netbsd or builtin.os.tag == .openbsd) {
@@ -176,7 +176,7 @@ fn spawnError(posix_error: c_int) c_int {
     return if (r == err_unknown) err_spawn else r;
 }
 
-/// Ports `subprocess_create_ex` (subprocess.h:826 @8642541b2), its
+/// Ports `subprocess_create_ex` (subprocess.h:826 @cd959bae9), its
 /// `posix_spawn` arm.
 fn createEx(command_line: [*]const ?[*:0]const u8, options: c_int, environment: ?[*]const ?[*:0]const u8, process_cwd: ?[*:0]const u8, out: *Process) c_int {
     var stdinfd: [2]c_int = .{ -1, -1 };
@@ -370,7 +370,7 @@ fn exitStatus(status: c_int) c_int {
     return EXIT_FAILURE;
 }
 
-/// Ports `subprocess_join` (subprocess.h:1903 @8642541b2), its POSIX arm.
+/// Ports `subprocess_join` (subprocess.h:1903 @cd959bae9), its POSIX arm.
 fn processJoin(p: *Process, out_return_code: ?*c_int) c_int {
     if (p.stdin_file) |f| {
         _ = fclose(f);
@@ -387,7 +387,7 @@ fn processJoin(p: *Process, out_return_code: ?*c_int) c_int {
     return 0;
 }
 
-/// Ports `subprocess_destroy` (subprocess.h:1963 @8642541b2).
+/// Ports `subprocess_destroy` (subprocess.h:1963 @cd959bae9).
 fn processDestroy(p: *Process) void {
     if (p.stdin_file) |f| {
         _ = fclose(f);
@@ -403,7 +403,7 @@ fn processDestroy(p: *Process) void {
     }
 }
 
-/// Ports `subprocess_alive` (subprocess.h:2140 @8642541b2): reaps the child
+/// Ports `subprocess_alive` (subprocess.h:2140 @cd959bae9): reaps the child
 /// when it has exited.
 fn processAlive(p: *Process) c_int {
     var is_alive = p.alive;
@@ -422,19 +422,19 @@ fn processAlive(p: *Process) c_int {
     return is_alive;
 }
 
-/// Ports `common_subproc` (subproc.h:22 @8642541b2): a RAII wrapper around
+/// Ports `common_subproc` (subproc.h:22 @cd959bae9): a RAII wrapper around
 /// `subprocess_s`. Not copyable: hold it in place.
 pub const Subproc = struct {
     proc: Process = .{},
     is_created: std.atomic.Value(bool) = .init(false),
 
-    /// Ports `common_subproc`'s `is_supported` (subproc.cpp:3 @8642541b2): true
+    /// Ports `common_subproc`'s `is_supported` (subproc.cpp:3 @cd959bae9): true
     /// where the reference defines `LLAMA_SUBPROCESS`.
     pub fn isSupported() bool {
         return comptime builtin.os.tag != .ios and builtin.os.tag != .windows;
     }
 
-    /// Ports `common_subproc`'s destructor (subproc.cpp:23 @8642541b2).
+    /// Ports `common_subproc`'s destructor (subproc.cpp:23 @cd959bae9).
     pub fn deinit(self: *Subproc) void {
         if (self.is_created.load(.seq_cst)) {
             processDestroy(&self.proc);
@@ -442,7 +442,7 @@ pub const Subproc = struct {
         }
     }
 
-    /// Ports `common_subproc`'s `create` (subproc.cpp:30 @8642541b2): spawns a
+    /// Ports `common_subproc`'s `create` (subproc.cpp:30 @cd959bae9): spawns a
     /// child; a non-empty `env` replaces its environment (do not combine
     /// with `option_inherit_environment`).
     ///
@@ -471,7 +471,7 @@ pub const Subproc = struct {
         return result == 0;
     }
 
-    /// Ports `to_cstr_vec` (subproc.cpp:13 @8642541b2): a null-terminated
+    /// Ports `to_cstr_vec` (subproc.cpp:13 @cd959bae9): a null-terminated
     /// `char *` array.
     fn toCstrVec(a: std.mem.Allocator, v: []const []const u8) ![*]const ?[*:0]const u8 {
         const r = try a.alloc(?[*:0]const u8, v.len + 1);
@@ -480,29 +480,29 @@ pub const Subproc = struct {
         return r.ptr;
     }
 
-    /// Ports `common_subproc`'s `has_handle` (subproc.cpp:49 @8642541b2).
+    /// Ports `common_subproc`'s `has_handle` (subproc.cpp:49 @cd959bae9).
     fn hasHandle(self: *const Subproc) bool {
         if (!self.is_created.load(.seq_cst)) return false;
         return self.proc.child > 0;
     }
 
-    /// Ports `common_subproc`'s `alive` (subproc.cpp:60 @8642541b2).
+    /// Ports `common_subproc`'s `alive` (subproc.cpp:60 @cd959bae9).
     pub fn alive(self: *Subproc) bool {
         return self.is_created.load(.seq_cst) and processAlive(&self.proc) != 0;
     }
 
-    /// Ports `common_subproc`'s `stdin_file` (subproc.cpp:64 @8642541b2).
+    /// Ports `common_subproc`'s `stdin_file` (subproc.cpp:64 @cd959bae9).
     pub fn stdinFile(self: *Subproc) ?*File {
         return if (self.is_created.load(.seq_cst)) self.proc.stdin_file else null;
     }
 
-    /// Ports `common_subproc`'s `stdout_file` (subproc.cpp:68 @8642541b2).
+    /// Ports `common_subproc`'s `stdout_file` (subproc.cpp:68 @cd959bae9).
     pub fn stdoutFile(self: *Subproc) ?*File {
         return if (self.is_created.load(.seq_cst)) self.proc.stdout_file else null;
     }
 
-    /// Ports `common_subproc`'s `stderr_file` (subproc.cpp:72 @8642541b2), over
-    /// `subprocess_stderr` (subprocess.h:1895 @8642541b2): null when stderr
+    /// Ports `common_subproc`'s `stderr_file` (subproc.cpp:72 @cd959bae9), over
+    /// `subprocess_stderr` (subprocess.h:1895 @cd959bae9): null when stderr
     /// is combined with stdout.
     pub fn stderrFile(self: *Subproc) ?*File {
         if (!self.is_created.load(.seq_cst)) return null;
@@ -510,7 +510,7 @@ pub const Subproc = struct {
         return null;
     }
 
-    /// Ports `common_subproc`'s `close_stdin` (subproc.cpp:76 @8642541b2):
+    /// Ports `common_subproc`'s `close_stdin` (subproc.cpp:76 @cd959bae9):
     /// EOF to the child while it runs.
     pub fn closeStdin(self: *Subproc) void {
         if (self.is_created.load(.seq_cst)) {
@@ -521,13 +521,13 @@ pub const Subproc = struct {
         }
     }
 
-    /// Ports `common_subproc`'s `terminate` (subproc.cpp:83 @8642541b2), over
-    /// `subprocess_terminate` (subprocess.h:2002 @8642541b2): `SIGKILL`.
+    /// Ports `common_subproc`'s `terminate` (subproc.cpp:83 @cd959bae9), over
+    /// `subprocess_terminate` (subprocess.h:2002 @cd959bae9): `SIGKILL`.
     pub fn terminate(self: *Subproc) void {
         if (self.hasHandle()) _ = kill(self.proc.child, 9);
     }
 
-    /// Ports `common_subproc`'s `join` (subproc.cpp:89 @8642541b2): waits for
+    /// Ports `common_subproc`'s `join` (subproc.cpp:89 @cd959bae9): waits for
     /// the child, releases it.
     ///
     /// Return: its exit code -- `EXIT_FAILURE` when a signal ended it, -1

@@ -812,14 +812,14 @@ pub const Tensor = enum(c_int) {
     attn_v_exps,
 };
 
-/// Mirrors `llm_tensor_layer` (llama-arch.h:833 @8642541b2).
+/// Mirrors `llm_tensor_layer` (llama-arch.h:890 @cd959bae9).
 pub const TensorLayer = enum(c_int) {
     input,
     repeating,
     output,
 };
 
-/// Mirrors `llm_tensor_info` (llama-arch.h:896 @8642541b2).
+/// Mirrors `llm_tensor_info` (llama-arch.h:953 @cd959bae9).
 pub const TensorInfo = struct {
     layer: TensorLayer,
     op: c.enum_ggml_op,

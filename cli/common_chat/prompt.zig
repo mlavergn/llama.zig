@@ -19,19 +19,19 @@ const std = @import("std");
 
 const Allocator = std.mem.Allocator;
 
-/// Ports `common_chat_prompt_part` (chat.h:282 @8642541b2).
+/// Ports `common_chat_prompt_part` (chat.h:282 @cd959bae9).
 pub const PromptPart = struct {
     text: []const u8,
     /// from user input, special tokens inside must not be parsed
     is_input: bool = false,
 };
 
-/// Ports `common_chat_prompt` (chat.h:288 @8642541b2): the rendered chat
+/// Ports `common_chat_prompt` (chat.h:288 @cd959bae9): the rendered chat
 /// template, split into template parts and user input parts.
 pub const Prompt = struct {
     parts: std.ArrayList(PromptPart) = .empty,
 
-    /// Ports `common_chat_prompt` (chat.h:294 @8642541b2), the constructor
+    /// Ports `common_chat_prompt` (chat.h:294 @cd959bae9), the constructor
     /// from text: a single part of template text, borrowed.
     pub fn fromText(a: Allocator, text: []const u8) Allocator.Error!Prompt {
         var self: Prompt = .{};
@@ -39,7 +39,7 @@ pub const Prompt = struct {
         return self;
     }
 
-    /// Ports `str` (chat.cpp:1685 @8642541b2): the parts joined.
+    /// Ports `str` (chat.cpp:1685 @cd959bae9): the parts joined.
     ///
     /// Return: the one part's text when there is one, else owned by `a`.
     pub fn str(self: *const Prompt, a: Allocator) Allocator.Error![]const u8 {
@@ -55,7 +55,7 @@ pub const Prompt = struct {
         return out;
     }
 
-    /// Ports `append` (chat.cpp:1701 @8642541b2): `text` joined onto the
+    /// Ports `append` (chat.cpp:1701 @cd959bae9): `text` joined onto the
     /// last part when it is of the same kind, else a new part. Empty text
     /// adds nothing.
     pub fn append(self: *Prompt, a: Allocator, text: []const u8, is_input: bool) Allocator.Error!void {
@@ -68,7 +68,7 @@ pub const Prompt = struct {
         }
     }
 
-    /// Ports `replace_last` (chat.cpp:1712 @8642541b2): the last occurrence
+    /// Ports `replace_last` (chat.cpp:1712 @cd959bae9): the last occurrence
     /// of `from` within one template part, searching the parts from the
     /// end, replaced by `to`. User input parts are skipped, and an
     /// occurrence spanning two parts is not one.

@@ -70,7 +70,7 @@ const c = impl.c;
 const F32 = simd.F32;
 const F16 = simd.F16;
 
-/// Mirrors `ggml_float` (vec.h:15 @8642541b2), the `double` the
+/// Mirrors `ggml_float` (vec.h:15 @cd959bae9), the `double` the
 /// reductions accumulate in. Named rather than written as `f64` so the C's
 /// casts stay readable at each site.
 const GgmlFloat = f64;
@@ -182,14 +182,14 @@ inline fn hsum(v: VF) f32 {
 // The gelu lookup tables
 //
 // Ports `ggml_table_gelu_f16` and `ggml_table_gelu_quick_f16`
-// (vec.cpp:6, 9 @8642541b2). Definitions, not declarations: `cpu/convert.zig`
+// (vec.cpp:6, 9 @cd959bae9). Definitions, not declarations: `cpu/convert.zig`
 // fills them from `ggml_cpu_init` and until now declared them `extern var`
 // against `vec.o`. 65,536 entries each, one per `f16` bit pattern.
 
-/// Ports `ggml_table_gelu_f16` (vec.cpp:6 @8642541b2).
+/// Ports `ggml_table_gelu_f16` (vec.cpp:6 @cd959bae9).
 pub export var ggml_table_gelu_f16: [1 << 16]c.ggml_fp16_t = undefined;
 
-/// Ports `ggml_table_gelu_quick_f16` (vec.cpp:9 @8642541b2).
+/// Ports `ggml_table_gelu_quick_f16` (vec.cpp:9 @cd959bae9).
 pub export var ggml_table_gelu_quick_f16: [1 << 16]c.ggml_fp16_t = undefined;
 
 // -----------------------------------------------------------------------------
@@ -389,7 +389,7 @@ pub export fn ggml_vec_dot_f16(
 // -----------------------------------------------------------------------------
 // The vectorized exponential
 //
-// Ports `ggml_v_expf`, `ggml_v_expf` (vec.h:1154, 1250 @8642541b2), the `__ARM_NEON &&
+// Ports `ggml_v_expf`, `ggml_v_expf` (vec.h:1154, 1250 @cd959bae9), the `__ARM_NEON &&
 // __aarch64__` arm and the `__AVX2__ && __FMA__` one. `inline static` in the
 // C, so it has no symbol and is private here.
 //
@@ -411,7 +411,7 @@ pub export fn ggml_vec_dot_f16(
 // `_mm512_scalef_ps` compiles to: unmasked, current rounding mode (4).
 extern fn @"llvm.x86.avx512.mask.scalef.ps.512"(@Vector(16, f32), @Vector(16, f32), @Vector(16, f32), u16, i32) callconv(.{ .x86_64_sysv = .{} }) @Vector(16, f32);
 
-/// Ports `ggml_v_expf` (vec.h:1200 @8642541b2), the `__AVX512F__ &&
+/// Ports `ggml_v_expf` (vec.h:1200 @cd959bae9), the `__AVX512F__ &&
 /// __AVX512DQ__` arm.
 ///
 /// Not the NEON and AVX2 routine at sixteen lanes. The polynomial's last
@@ -444,7 +444,7 @@ inline fn vExpf512(x: VF) VF {
     return @select(f32, d, alt, res);
 }
 
-/// Ports `ggml_v_expf`, `ggml_v_expf` (vec.h:1154, 1250 @8642541b2), the
+/// Ports `ggml_v_expf`, `ggml_v_expf` (vec.h:1154, 1250 @cd959bae9), the
 /// NEON and AVX2 arms; the AVX-512 arm is `vExpf512`.
 inline fn vExpf(x: VF) VF {
     if (comptime lanes == 16) return vExpf512(x);
@@ -500,7 +500,7 @@ inline fn vExpf(x: VF) VF {
 }
 
 /// Ports `ggml_v_silu`, `ggml_v_silu`, `ggml_v_silu` (vec.h:1178, 1228,
-/// 1290 @8642541b2), the NEON, AVX-512 and AVX2 arms: `x / (1 + exp(-x))`.
+/// 1290 @cd959bae9), the NEON, AVX-512 and AVX2 arms: `x / (1 + exp(-x))`.
 inline fn vSilu(x: VF) VF {
     const one = dup_n_f32(1.0);
     const zero = dup_n_f32(0.0);
@@ -510,7 +510,7 @@ inline fn vSilu(x: VF) VF {
     return div_f32(x, one_plus_exp_neg_x);
 }
 
-/// Ports `ggml_silu_f32` (vec.h:1060 @8642541b2), the scalar tail's version.
+/// Ports `ggml_silu_f32` (vec.h:1060 @cd959bae9), the scalar tail's version.
 ///
 /// Note this is **not** the same computation as `vSilu`: it divides by
 /// `1 + expf(-x)` using libm's `expf`, where the vector path uses ARM's
@@ -520,11 +520,11 @@ inline fn siluF32(x: f32) f32 {
     return x / (1.0 + expf(-x));
 }
 
-/// Ports `GELU_QUICK_COEF` (vec.h:963 @8642541b2).
+/// Ports `GELU_QUICK_COEF` (vec.h:963 @cd959bae9).
 const gelu_quick_coef: f32 = -1.702;
 
 /// Ports `ggml_v_gelu_quick`, `ggml_v_gelu_quick`, `ggml_v_gelu_quick`
-/// (vec.h:1188, 1238, 1300 @8642541b2), the NEON, AVX-512 and AVX2 arms:
+/// (vec.h:1188, 1238, 1300 @cd959bae9), the NEON, AVX-512 and AVX2 arms:
 /// `x / (1 + exp(-1.702 x))`, with `x` the numerator so it cannot overflow.
 inline fn vGeluQuick(x: VF) VF {
     const one = dup_n_f32(1.0);
@@ -532,7 +532,7 @@ inline fn vGeluQuick(x: VF) VF {
     return div_f32(x, add_f32(one, exp_cx));
 }
 
-/// Ports `ggml_gelu_quick_f32` (vec.h:1029 @8642541b2), the scalar tail's
+/// Ports `ggml_gelu_quick_f32` (vec.h:1029 @cd959bae9), the scalar tail's
 /// version, with `x` multiplying a reciprocal where `vGeluQuick` divides.
 inline fn geluQuickF32(x: f32) f32 {
     return x * (1.0 / (1.0 + expf(gelu_quick_coef * x)));
@@ -580,7 +580,7 @@ pub export fn ggml_vec_swiglu_f32(n: c_int, y: [*]f32, x: [*]const f32, g: [*]co
     }
 }
 
-/// Ports `ggml_vec_gelu_quick_f32` (vec.cpp:465 @8642541b2), new at v0.8.0,
+/// Ports `ggml_vec_gelu_quick_f32` (vec.cpp:465 @cd959bae9), new at v0.8.0,
 /// when `vec.h` stopped defining `GGML_GELU_QUICK_FP16`: the NEON, AVX2 and
 /// AVX-512 arms, computed in `f32` where the table lost precision.
 pub export fn ggml_vec_gelu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32) callconv(.c) void {
@@ -596,7 +596,7 @@ pub export fn ggml_vec_gelu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32) call
     }
 }
 
-/// Ports `ggml_vec_geglu_quick_f32` (vec.cpp:506 @8642541b2), new at v0.8.0:
+/// Ports `ggml_vec_geglu_quick_f32` (vec.cpp:506 @cd959bae9), new at v0.8.0:
 /// the NEON, AVX2 and AVX-512 arms.
 pub export fn ggml_vec_geglu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32, g: [*]const f32) callconv(.c) void {
     var i: c_int = 0;
@@ -670,7 +670,7 @@ pub export fn ggml_vec_soft_max_f32(n: c_int, y: [*]f32, x: [*]const f32, max: f
     return sum;
 }
 
-/// Ports `ggml_vec_log_soft_max_f32` (vec.cpp:702 @8642541b2).
+/// Ports `ggml_vec_log_soft_max_f32` (vec.cpp:702 @cd959bae9).
 ///
 /// Scalar throughout — the C has no vector arm for this one on any target.
 pub export fn ggml_vec_log_soft_max_f32(n: c_int, y: [*]f32, x: [*]const f32, max: f32) callconv(.c) GgmlFloat {

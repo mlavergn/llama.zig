@@ -43,7 +43,7 @@ extern fn ggml_gemm_q4_0_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *c
 
 const c = impl.c;
 
-/// Ports `ggml_gemm_q4_0_4x4_q8_0` (arch/arm/repack.cpp:1970 @8642541b2).
+/// Ports `ggml_gemm_q4_0_4x4_q8_0` (arch/arm/repack.cpp:2089 @cd959bae9).
 ///
 /// Parameters:
 /// - `n`: the reduction length; `nb = n / 32` blocks.

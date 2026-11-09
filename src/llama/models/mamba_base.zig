@@ -56,7 +56,7 @@ pub const SsmRows = struct {
 };
 
 /// Ports `llm_build_mamba_base`'s `build_mamba_layer` (models/mamba-base.cpp:9
-/// @8642541b2): a Mamba-1 block over the recurrent states.
+/// @cd959bae9): a Mamba-1 block over the recurrent states.
 ///
 /// Return: `{n_embd, n_tokens}`.
 pub fn buildMambaLayer(b: *const Builder, inp: *const graph.InpRs, cur_: *Tensor, model: *const Model, il: c_int) *Tensor {

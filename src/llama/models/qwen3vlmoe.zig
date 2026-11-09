@@ -20,7 +20,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_qwen3vlmoe`'s `load_arch_hparams` (models/qwen3vlmoe.cpp:3 @8642541b2).
+/// Ports `llama_model_qwen3vlmoe`'s `load_arch_hparams` (models/qwen3vlmoe.cpp:3 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -37,7 +37,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_qwen3vlmoe`'s `load_arch_tensors` (models/qwen3vlmoe.cpp:16 @8642541b2).
+/// Ports `llama_model_qwen3vlmoe`'s `load_arch_tensors` (models/qwen3vlmoe.cpp:16 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -86,13 +86,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_qwen3vlmoe`'s `build_arch_graph` (models/qwen3vlmoe.cpp:60 @8642541b2).
+/// Ports `llama_model_qwen3vlmoe`'s `build_arch_graph` (models/qwen3vlmoe.cpp:60 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_qwen3vlmoe`'s `graph`
-/// (models/qwen3vlmoe.cpp:64 @8642541b2).
+/// (models/qwen3vlmoe.cpp:64 @cd959bae9).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

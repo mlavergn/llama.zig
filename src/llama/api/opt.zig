@@ -17,7 +17,7 @@ const api_context = @import("context.zig");
 
 const c = impl.c;
 
-/// Ports `llama_opt_param_filter_all` (llama-context.cpp:4697 @8642541b2).
+/// Ports `llama_opt_param_filter_all` (llama-context.cpp:4950 @cd959bae9).
 ///
 /// Parameters:
 /// - `tensor`: unused.
@@ -30,7 +30,7 @@ pub fn llama_opt_param_filter_all(tensor: [*c]const c.struct_ggml_tensor, userda
     return true;
 }
 
-/// Ports `llama_opt_init` (llama-context.cpp:4703 @8642541b2).
+/// Ports `llama_opt_init` (llama-context.cpp:4956 @cd959bae9).
 ///
 /// Parameters:
 /// - `ctx`: the context; it must not have been initialised for training.
@@ -42,7 +42,7 @@ pub fn llama_opt_init(ctx: ?*c.struct_llama_context, model: ?*c.struct_llama_mod
     context_opt.optInit(api_context.ctxOf(ctx), api_context.modelOf(model), lopt_params);
 }
 
-/// Ports `llama_opt_epoch` (llama-context.cpp:4707 @8642541b2).
+/// Ports `llama_opt_epoch` (llama-context.cpp:4960 @cd959bae9).
 ///
 /// Parameters:
 /// - `ctx`: the context, after `llama_opt_init`.

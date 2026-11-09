@@ -222,10 +222,10 @@ pub fn Wide(comptime bits: u16) type {
         }
 
         /// `mul_sum_i8_pairs_acc_int32x8` (arch/x86/repack.cpp:165
-        /// @8642541b2) and `mul_sum_i8_pairs_acc_int32x16`
-        /// (arch/x86/repack.cpp:134 @8642541b2), the latter with
+        /// @cd959bae9) and `mul_sum_i8_pairs_acc_int32x16`
+        /// (arch/x86/repack.cpp:134 @cd959bae9), the latter with
         /// `mul_sum_us8_pairs_acc_int32x16` and `sum_i16_pairs_acc_int32x16`
-        /// (arch/x86/repack.cpp:123, 118 @8642541b2) inlined: `vpdpbusd` with
+        /// (arch/x86/repack.cpp:123, 118 @cd959bae9) inlined: `vpdpbusd` with
         /// `__AVX512VNNI__`, `maddubs` then `madd` without.
         pub inline fn mul_sum_i8_pairs_acc(acc: I, x: I, y: I) I {
             if (bits == 256) return common.mul_sum_i8_pairs_acc_int32x8(acc, x, y);

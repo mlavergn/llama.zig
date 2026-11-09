@@ -69,11 +69,11 @@ fn shapeCase(comptime n_head: i64, use_wmma: bool, k_type: c.enum_ggml_type, n_k
     }
 }
 
-/// Ports `LIGHTNING_INDEXER_TILE_TOKENS` (lightning-indexer.cu:240 @8642541b2):
+/// Ports `LIGHTNING_INDEXER_TILE_TOKENS` (lightning-indexer.cu:240 @cd959bae9):
 /// tokens scored per block by the tile kernel.
 const tile_tokens = 8;
 
-/// Ports `ggml_cuda_lightning_indexer` (lightning-indexer.cu:569 @8642541b2).
+/// Ports `ggml_cuda_lightning_indexer` (lightning-indexer.cu:569 @cd959bae9).
 /// v0.7.0 dropped the tile arm's `#ifndef GGML_USE_MUSA` (MUSA now takes the tile
 /// kernel too, staging fewer heads per pass); nothing changed on CUDA.
 pub fn opLightningIndexer(ctx: *common.Context, dst: *Tensor) void {
@@ -151,7 +151,7 @@ pub fn opLightningIndexer(ctx: *common.Context, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_cuda_lightning_indexer_supported` (lightning-indexer.cu:743 @8642541b2).
+/// Ports `ggml_cuda_lightning_indexer_supported` (lightning-indexer.cu:743 @cd959bae9).
 pub fn supported(device: c_int, dst: *const Tensor) bool {
     _ = device;
     const q = impl.one(Tensor, dst.src[0]);

@@ -21,7 +21,7 @@
 //! # `mxfp4`'s exponent is computed, not looked up
 //!
 //! `GGML_CPU_E8M0_TO_FP32_HALF` has a table arm and a compute arm, and the
-//! table is **x86-only** (simd-mappings.h:134 @8642541b2), the `#else` arm. On ARM the compute arm is
+//! table is **x86-only** (simd-mappings.h:138 @cd959bae9), the `#else` arm. On ARM the compute arm is
 //! what expands, so this calls `impl.e8m0ToFp32Half` — the same choice
 //! `cpu/quants/legacy.zig` made.
 //!
@@ -64,7 +64,7 @@ inline fn colScale(comptime fmt: Fmt, blk: anytype, j: usize) f32 {
 /// `ggml_gemv_iq4_nl_8x8_q8_0_generic`,
 /// `ggml_gemv_mxfp4_4x4_q8_0_generic` and
 /// `ggml_gemv_mxfp4_8x8_q8_0_generic`
-/// (ggml-cpu/repack.cpp:1122, 1160, 1198, 1236 @8642541b2).
+/// (ggml-cpu/repack.cpp:1122, 1160, 1198, 1236 @cd959bae9).
 fn gemv(
     comptime fmt: Fmt,
     comptime ncols_interleaved: i32,
@@ -123,7 +123,7 @@ fn gemv(
 /// `ggml_gemm_iq4_nl_8x8_q8_0_generic`,
 /// `ggml_gemm_mxfp4_4x4_q8_0_generic` and
 /// `ggml_gemm_mxfp4_8x8_q8_0_generic`
-/// (ggml-cpu/repack.cpp:2219, 2275, 2319, 2363 @8642541b2).
+/// (ggml-cpu/repack.cpp:2219, 2275, 2319, 2363 @cd959bae9).
 fn gemm(
     comptime fmt: Fmt,
     comptime ncols_interleaved: i32,

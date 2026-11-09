@@ -18,8 +18,8 @@
 const std = @import("std");
 const serializer = @import("serializer.zig");
 
-/// Ports `dump_escaped` (json.hpp:19363 @8642541b2), a member of
-/// `serializer`, as `dump_safe` (json.cpp:343 @8642541b2) calls it:
+/// Ports `dump_escaped` (json.hpp:19363 @cd959bae9), a member of
+/// `serializer`, as `dump_safe` (json.cpp:343 @cd959bae9) calls it:
 /// `ensure_ascii` false and `error_handler_t::replace`. Writes `s` without
 /// its quotes.
 ///

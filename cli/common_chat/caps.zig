@@ -33,11 +33,11 @@ const Error = exception.Error;
 const Template = template.Template;
 const Render = template.Render;
 
-/// `g_jinja_debug` (runtime.h:15 @8642541b2): the engine's debug switch,
+/// `g_jinja_debug` (runtime.h:15 @cd959bae9): the engine's debug switch,
 /// off unless a debugger sets it.
 pub var jinja_debug: bool = false;
 
-/// Ports `jinja`'s `caps` (caps.h:11 @8642541b2).
+/// Ports `jinja`'s `caps` (caps.h:11 @cd959bae9).
 pub const Caps = struct {
     supports_tools: bool = true,
     supports_tool_calls: bool = true,
@@ -56,7 +56,7 @@ pub const Caps = struct {
     /// One entry of `to_map`.
     pub const Entry = struct { name: []const u8, value: bool };
 
-    /// Ports `to_map` (caps.cpp:108 @8642541b2), in the `std`'s `map`'s order:
+    /// Ports `to_map` (caps.cpp:108 @cd959bae9), in the `std`'s `map`'s order:
     /// sorted by name.
     pub fn toMap(self: Caps) [9]Entry {
         return .{
@@ -72,7 +72,7 @@ pub const Caps = struct {
         };
     }
 
-    /// Ports `to_string` (caps.cpp:122 @8642541b2).
+    /// Ports `to_string` (caps.cpp:122 @cd959bae9).
     ///
     /// Return: owned by `a`.
     pub fn toString(self: Caps, a: Allocator) Error![]u8 {
@@ -120,7 +120,7 @@ const CtxFn = union(enum) {
     reasoning_effort: []const u8,
 };
 
-/// Ports `caps_try_execute` (caps.cpp:37 @8642541b2): `messages` and
+/// Ports `caps_try_execute` (caps.cpp:37 @cd959bae9): `messages` and
 /// `tools` bound with empty BOS and EOS and a generation prompt, the
 /// context adjusted, the template run with statistics on. A render that
 /// fails leaves an empty result, as upstream catches and ignores it -- but
@@ -182,7 +182,7 @@ fn tryExecute(p: *Probe, gpa: Allocator, tmpl: *const Template, messages_json: [
     }
 }
 
-/// The retry's edit inside `caps_try_execute` (caps.cpp:37 @8642541b2):
+/// The retry's edit inside `caps_try_execute` (caps.cpp:37 @cd959bae9):
 /// `reasoning_content: ""` on every assistant message that has none.
 /// With `a` null it only reports whether there is one to add.
 ///
@@ -231,7 +231,7 @@ fn toolCallMessages(comptime args: []const u8, comptime second_call: bool) []con
         "{\"role\":\"user\",\"content\":\"User message\"}]";
 }
 
-/// `render` in `caps_get` (caps.cpp:132 @8642541b2): a single user turn with
+/// `render` in `caps_get` (caps.cpp:132 @cd959bae9): a single user turn with
 /// the given effort, nothing when the template raises.
 ///
 /// Return: the text, owned by `gpa`, or null.
@@ -242,7 +242,7 @@ fn renderEffort(gpa: Allocator, tmpl: *const Template, effort: []const u8) Error
     return if (p.success) try gpa.dupe(u8, p.result) else null;
 }
 
-/// The reasoning effort levels of `caps_get` (caps.cpp:132 @8642541b2): an
+/// The reasoning effort levels of `caps_get` (caps.cpp:132 @cd959bae9): an
 /// unknown level shows the render of the template fallback, a level that
 /// renders the same is not honored; levels sharing a render are aliases and
 /// the highest one is kept.
@@ -281,7 +281,7 @@ fn reasoningEffortLevels(gpa: Allocator, tmpl: *const Template) Error![]const []
     return levels.toOwnedSlice(gpa);
 }
 
-/// Ports `caps_get` (caps.cpp:132 @8642541b2): the template rendered over
+/// Ports `caps_get` (caps.cpp:132 @cd959bae9): the template rendered over
 /// the probes, each capability read off what the render touched.
 pub fn capsGet(tmpl: *const Template) Error!Caps {
     const gpa = tmpl.gpa;
@@ -402,7 +402,7 @@ pub fn capsGet(tmpl: *const Template) Error!Caps {
         result.reasoning_effort_levels = try reasoningEffortLevels(gpa, tmpl);
     }
 
-    // `JJ_DEBUG` (runtime.h:13 @8642541b2): printed only under the engine's own debug switch
+    // `JJ_DEBUG` (runtime.h:13 @cd959bae9): printed only under the engine's own debug switch
     // (`g_jinja_debug`), which nothing sets -- never through `common_log`
     if (jinja_debug) {
         var arena_state = std.heap.ArenaAllocator.init(gpa);

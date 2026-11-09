@@ -18,7 +18,7 @@ const c = impl.c;
 const ne = graph.ne;
 const nb = graph.nb;
 
-/// Ports `build` (voxtral-rt.cpp:5 @8642541b2), a member of
+/// Ports `build` (voxtral-rt.cpp:5 @cd959bae9), a member of
 /// `clip_graph_voxtral_rt`, with the state `clip_get_graph_builder`
 /// (mtmd/clip.cpp:979 @8642541b2) passes it: null during warmup, the cache is
 /// then a graph input.

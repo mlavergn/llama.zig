@@ -54,7 +54,7 @@ pub fn buildLfmShortconv(model: *const Model, b: *const graph.Builder, mctx_recr
     b.cb(bcx, "model.layers.{}.conv.in_proj", il);
 
     const n_chunks = 3;
-    impl.assert(@rem(bcx.ne[0], n_chunks) == 0, "models/lfm-base.cpp", 32, "bcx->ne[0] % n_chunks == 0");
+    impl.assert(@rem(bcx.ne[0], n_chunks) == 0, "models/lfm-base.cpp", 31, "bcx->ne[0] % n_chunks == 0");
     const chunk_size = @divTrunc(bcx.ne[0], n_chunks);
     const es = c.ggml_element_size(bcx);
     const chunk_bytes: usize = @intCast(chunk_size);
@@ -78,7 +78,7 @@ pub fn buildLfmShortconv(model: *const Model, b: *const graph.Builder, mctx_recr
         const left: *Tensor = c.ggml_cont(ctx, c.ggml_view_3d(ctx, conv, pad, n_embd, n_seqs, conv.nb[1], conv.nb[2], @as(usize, @intCast(@as(i64, d_conv) - pad)) * conv.nb[0]));
         bx = c.ggml_pad_ext(ctx, c.ggml_concat(ctx, left, bx, 0), 0, @intCast(pad), 0, 0, 0, 0, 0, 0);
     }
-    impl.assert(bx.ne[0] > conv.ne[0], "models/lfm-base.cpp", 57, "bx->ne[0] > conv->ne[0]");
+    impl.assert(bx.ne[0] > conv.ne[0], "models/lfm-base.cpp", 56, "bx->ne[0] > conv->ne[0]");
 
     // Write the conv states: slot 0 is the final state, slot s the state s
     // tokens back (for a partial rollback).
@@ -106,8 +106,8 @@ pub fn buildLfmShortconv(model: *const Model, b: *const graph.Builder, mctx_recr
     return y;
 }
 
-/// Ports `llm_build_lfm_base`'s `build_lfm_shortconv` (lfm-base.cpp:87
-/// @8642541b2), the overload with no recurrent state, for the decision
+/// Ports `llm_build_lfm_base`'s `build_lfm_shortconv` (lfm-base.cpp:86
+/// @cd959bae9), the overload with no recurrent state, for the decision
 /// graphs: causal over the ubatch from a zero state.
 ///
 /// Parameters:
@@ -158,9 +158,9 @@ pub fn buildLfmShortconvNoState(model: *const Model, b: *const graph.Builder, cu
 /// Return: the feed-forward's output.
 pub fn buildLfmDenseFfn(model: *const Model, b: *const graph.Builder, cur: *Tensor, il: c_int) *Tensor {
     const layer = &model.layers[@intCast(il)];
-    impl.assert(layer.ffn_up_b == null, "models/lfm-base.cpp", 117, "!model.layers[il].ffn_up_b");
-    impl.assert(layer.ffn_gate_b == null, "models/lfm-base.cpp", 118, "!model.layers[il].ffn_gate_b");
-    impl.assert(layer.ffn_down_b == null, "models/lfm-base.cpp", 119, "!model.layers[il].ffn_down_b");
+    impl.assert(layer.ffn_up_b == null, "models/lfm-base.cpp", 116, "!model.layers[il].ffn_up_b");
+    impl.assert(layer.ffn_gate_b == null, "models/lfm-base.cpp", 117, "!model.layers[il].ffn_gate_b");
+    impl.assert(layer.ffn_down_b == null, "models/lfm-base.cpp", 118, "!model.layers[il].ffn_down_b");
     return b.buildFfn(cur, layer.ffn_up, null, null, layer.ffn_gate, null, null, layer.ffn_down, null, null, null, .silu, .par, il);
 }
 

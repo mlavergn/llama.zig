@@ -35,14 +35,14 @@ extern fn exp(x: f64) f64;
 // -----------------------------------------------------------------------------
 // mtmd-helper.h
 
-/// Ports `mtmd_helper_gen_audio_outtype` (mtmd-helper.h:223 @8642541b2).
+/// Ports `mtmd_helper_gen_audio_outtype` (mtmd-helper.h:223 @cd959bae9).
 pub const OutType = enum(c_int) {
     pcm, // raw PCM
     wav, // WAV PCM 16-bit LE, mono
     _,
 };
 
-/// Ports `mtmd_helper_gen_audio_out_mode` (mtmd-helper.h:228 @8642541b2): what a
+/// Ports `mtmd_helper_gen_audio_out_mode` (mtmd-helper.h:228 @cd959bae9): what a
 /// response that continues a sequence (`n_past > 0`) outputs.
 pub const OutMode = enum(c_int) {
     auto, // the model switches between text and audio itself
@@ -82,7 +82,7 @@ fn oom() noreturn {
 }
 
 /// Ports `tts_lang_codes` and `tts_resolve_lang` (mtmd-helper-gen.cpp:27,
-/// 40 @8642541b2): a `--tts-lang` code to the language name the
+/// 40 @cd959bae9): a `--tts-lang` code to the language name the
 /// `codec_language` special tokens use, anything else unchanged.
 fn ttsResolveLang(lang: []const u8) []const u8 {
     const codes = [_][2][]const u8{
@@ -95,7 +95,7 @@ fn ttsResolveLang(lang: []const u8) []const u8 {
     return lang;
 }
 
-/// Ports `find_special_token` (mtmd-helper-gen.cpp:45 @8642541b2): the
+/// Ports `find_special_token` (mtmd-helper-gen.cpp:45 @cd959bae9): the
 /// first token whose text is `piece`.
 fn findSpecialToken(vocab: ?*const c.struct_llama_vocab, piece: []const u8) Token {
     const n = lapi.vocab.llama_vocab_n_tokens(vocab);
@@ -116,12 +116,12 @@ fn stdMax(a: f32, b: f32) f32 {
     return if (a < b) b else a;
 }
 
-/// The `buf.insert` of `put_bytes` (mtmd-helper-gen.cpp:55 @8642541b2).
+/// The `buf.insert` of `put_bytes` (mtmd-helper-gen.cpp:55 @cd959bae9).
 fn putBytes(b: *std.ArrayList(u8), bytes: []const u8) void {
     b.appendSlice(gpa, bytes) catch oom();
 }
 
-/// Ports `write_wav16_header` (mtmd-helper-gen.cpp:61 @8642541b2): `data_sz ==
+/// Ports `write_wav16_header` (mtmd-helper-gen.cpp:61 @cd959bae9): `data_sz ==
 /// UINT32_MAX` writes the "unknown length" sentinel (streaming), as ffmpeg
 /// does on a pipe.
 fn writeWav16Header(buf: *std.ArrayList(u8), data_sz: u32, rate: i32) void {
@@ -148,7 +148,7 @@ fn writeWav16Header(buf: *std.ArrayList(u8), data_sz: u32, rate: i32) void {
     putBytes(buf, std.mem.asBytes(&data_sz));
 }
 
-/// Ports `append_wav16_pcm` (mtmd-helper-gen.cpp:73 @8642541b2).
+/// Ports `append_wav16_pcm` (mtmd-helper-gen.cpp:73 @cd959bae9).
 fn appendWav16Pcm(buf: *std.ArrayList(u8), pcm: []const f32) void {
     buf.ensureUnusedCapacity(gpa, pcm.len * 2) catch oom();
     for (pcm) |v| {
@@ -157,7 +157,7 @@ fn appendWav16Pcm(buf: *std.ArrayList(u8), pcm: []const f32) void {
     }
 }
 
-/// Ports `write_wav16` (mtmd-helper-gen.cpp:80 @8642541b2): 16-bit mono WAV.
+/// Ports `write_wav16` (mtmd-helper-gen.cpp:80 @cd959bae9): 16-bit mono WAV.
 fn writeWav16(buf: *std.ArrayList(u8), pcm: []const f32, rate: i32) bool {
     // RIFF chunk sizes are 32-bit; refuse to emit a file with a truncated header
     if (pcm.len > (@as(usize, std.math.maxInt(u32)) - 36) / 2) return false;
@@ -212,7 +212,7 @@ const Base = struct {
         self.gen_state = null;
     }
 
-    /// Ports `init_gen_state` (mtmd-helper-gen.cpp:116 @8642541b2): one state per
+    /// Ports `init_gen_state` (mtmd-helper-gen.cpp:116 @cd959bae9): one state per
     /// generation, so a fixed seed always gives the same output.
     fn initGenState(self: *Base, seed: u32) bool {
         var params = mtmd.mtmd_gen_state_params_default();
@@ -231,7 +231,7 @@ const Base = struct {
     }
 
     /// The token embedding matrix, F32: the shared half of `ensure_cache` and
-    /// `ensure_cache` (mtmd-helper-gen.cpp:395, 786 @8642541b2), one per pipeline.
+    /// `ensure_cache` (mtmd-helper-gen.cpp:428, 786 @cd959bae9), one per pipeline.
     fn loadTokEmbd(self: *const Base, tok_embd: *std.ArrayList(f32)) bool {
         const n_tok_embd = lapi.model.llama_model_get_tok_embd(self.model, null);
         if (n_tok_embd == 0) {
@@ -282,10 +282,10 @@ const Base = struct {
         return ok;
     }
 
-    /// Ports `step_prompt` and `step_prompt` (mtmd-helper-gen.cpp:256, 650
-    /// @8642541b2), the same in both pipelines: at most `n_batch` tokens of the prompt batch.
+    /// Ports `step_prompt` and `step_prompt` (mtmd-helper-gen.cpp:289, 650
+    /// @cd959bae9), the same in both pipelines: at most `n_batch` tokens of the prompt batch.
     fn stepPrompt(self: *const Base, st: *PromptState, pos: *c_int, n_batch: i32) i32 {
-        impl.ggmlAssert(n_batch > 0, "mtmd-helper-gen.cpp", 257, "n_batch > 0");
+        impl.ggmlAssert(n_batch > 0, "mtmd-helper-gen.cpp", 290, "n_batch > 0");
         if (st.prompt_pos >= st.n_prompt) return 0;
         const n_tokens_batch = @min(n_batch, st.n_prompt - st.prompt_pos);
 
@@ -310,7 +310,7 @@ const Base = struct {
     }
 
     /// Ports `get_output`, `get_output` and `get_output` (mtmd-helper-gen.cpp:105,
-    /// 339, 730 @8642541b2), one per pipeline but soprano's, after their flush:
+    /// 372, 730 @cd959bae9), one per pipeline but soprano's, after their flush:
     /// everything, or with `so.stream` only what is new since the last call.
     fn getOutput(self: *const Base, audio_pcm: *const std.ArrayList(f32), out_type: OutType, out_buf: *std.ArrayList(u8), so: *StreamOut, out_data: *?[*]const u8, out_data_len: *usize, out_n_samples: ?*i64) i32 {
         if (!so.stream) {
@@ -445,7 +445,7 @@ const Qwen3tts = struct {
         self.out_buf.deinit(gpa);
     }
 
-    /// `reset` (mtmd-helper-gen.cpp:142 @8642541b2).
+    /// `reset` (mtmd-helper-gen.cpp:175 @cd959bae9).
     fn reset(self: *Qwen3tts) void {
         self.seq_id = 0;
         self.pos = 0;
@@ -465,7 +465,7 @@ const Qwen3tts = struct {
         return self.tok_embd.items[k * n_e .. (k + 1) * n_e];
     }
 
-    /// `sum_row` and `sum_vec` (mtmd-helper-gen.cpp:187, 192 @8642541b2),
+    /// `sum_row` and `sum_vec` (mtmd-helper-gen.cpp:220, 225 @cd959bae9),
     /// appended to `dst`.
     fn pushSum(self: *const Qwen3tts, dst: *std.ArrayList(f32), a: Token, vb: []const f32) void {
         const va = self.row(a);
@@ -473,7 +473,7 @@ const Qwen3tts = struct {
         for (va, 0..) |x, i| dst.appendAssumeCapacity(x + vb[i]);
     }
 
-    /// `set_input` (mtmd-helper-gen.cpp:160 @8642541b2).
+    /// `set_input` (mtmd-helper-gen.cpp:193 @cd959bae9).
     fn setInput(self: *Qwen3tts, inp: *const Inp) i32 {
         self.reset();
         self.seq_id = inp.seq_id;
@@ -568,7 +568,7 @@ const Qwen3tts = struct {
         return 0;
     }
 
-    /// `step_gen` (mtmd-helper-gen.cpp:285 @8642541b2).
+    /// `step_gen` (mtmd-helper-gen.cpp:318 @cd959bae9).
     fn stepGen(self: *Qwen3tts, sampled: Token, h_state_in: ?[*]const f32, h_state_out: *?[*]const f32, out_stop: *bool) i32 {
         if (sampled == token_null) {
             logErr("mtmd_helper_gen_audio: qwen3tts requires a token sampled from the backbone\n", .{});
@@ -621,7 +621,7 @@ const Qwen3tts = struct {
         return 0;
     }
 
-    /// `get_output` (mtmd-helper-gen.cpp:105 @8642541b2).
+    /// `get_output` (mtmd-helper-gen.cpp:105 @cd959bae9).
     fn getOutput(self: *Qwen3tts, out_sample_rate: *i32, out_data: *?[*]const u8, out_data_len: *usize, out_n_samples: ?*i64) i32 {
         out_sample_rate.* = self.base.info.sample_rate;
         // one-shot call: force out whatever's left, regardless of window_frames
@@ -629,12 +629,12 @@ const Qwen3tts = struct {
         return self.base.getOutput(&self.audio_pcm, self.out_type, &self.out_buf, &self.so, out_data, out_data_len, out_n_samples);
     }
 
-    /// `flush` (mtmd-helper-gen.cpp:390 @8642541b2).
+    /// `flush` (mtmd-helper-gen.cpp:423 @cd959bae9).
     fn flush(self: *Qwen3tts) i32 {
         return if (self.flushGenWav()) 0 else 1;
     }
 
-    /// `ensure_cache` (mtmd-helper-gen.cpp:395 @8642541b2).
+    /// `ensure_cache` (mtmd-helper-gen.cpp:428 @cd959bae9).
     fn ensureCache(self: *Qwen3tts) bool {
         if (self.specials_ok) return true;
         const v = self.base.vocab;
@@ -659,7 +659,7 @@ const Qwen3tts = struct {
         return true;
     }
 
-    /// `flush_gen_wav` (mtmd-helper-gen.cpp:465 @8642541b2): one GEN_WAV
+    /// `flush_gen_wav` (mtmd-helper-gen.cpp:465 @cd959bae9): one GEN_WAV
     /// call over the buffered codes, state carried across batches.
     fn flushGenWav(self: *Qwen3tts) bool {
         if (self.codes_buf.items.len == 0) return true;
@@ -681,7 +681,7 @@ const Qwen3tts = struct {
 // -----------------------------------------------------------------------------
 // pocket-tts
 
-/// Ports `pockettts_pack_settings` (mtmd-helper-gen.cpp:525 @8642541b2):
+/// Ports `pockettts_pack_settings` (mtmd-helper-gen.cpp:525 @cd959bae9):
 /// settings that live only in the reference's per-pack yaml.
 const PackSettings = struct {
     temp: f32 = 0.0,
@@ -689,7 +689,7 @@ const PackSettings = struct {
     pad_short_text: bool = false,
 };
 
-/// Ports `pockettts_pack` (mtmd-helper-gen.cpp:531 @8642541b2).
+/// Ports `pockettts_pack` (mtmd-helper-gen.cpp:531 @cd959bae9).
 fn pocketttsPack(variant: ?[*:0]const u8) PackSettings {
     const packs = [_]struct { []const u8, PackSettings }{
         .{ "english", .{ .temp = 0.3, .frames_after_eos = 0, .pad_short_text = false } },
@@ -758,7 +758,7 @@ const Pockettts = struct {
         self.out_buf.deinit(gpa);
     }
 
-    /// `reset` (mtmd-helper-gen.cpp:553 @8642541b2).
+    /// `reset` (mtmd-helper-gen.cpp:553 @cd959bae9).
     fn reset(self: *Pockettts) void {
         self.seq_id = 0;
         self.pos = 0;
@@ -778,7 +778,7 @@ const Pockettts = struct {
         self.so.reset();
     }
 
-    /// `set_input` (mtmd-helper-gen.cpp:576 @8642541b2).
+    /// `set_input` (mtmd-helper-gen.cpp:576 @cd959bae9).
     fn setInput(self: *Pockettts, inp: *const Inp) i32 {
         self.reset();
         self.seq_id = inp.seq_id;
@@ -849,7 +849,7 @@ const Pockettts = struct {
         return 0;
     }
 
-    /// `step_gen` (mtmd-helper-gen.cpp:677 @8642541b2). `sampled` is unused:
+    /// `step_gen` (mtmd-helper-gen.cpp:677 @cd959bae9). `sampled` is unused:
     /// the backbone output is continuous.
     fn stepGen(self: *Pockettts, h_state_in: ?[*]const f32, h_state_out: *?[*]const f32, out_stop: *bool) i32 {
         var inp = mtmd.mtmd_gen_inp_default(self.base.mctx);
@@ -894,7 +894,7 @@ const Pockettts = struct {
         return 0;
     }
 
-    /// `get_output` (mtmd-helper-gen.cpp:339 @8642541b2).
+    /// `get_output` (mtmd-helper-gen.cpp:372 @cd959bae9).
     fn getOutput(self: *Pockettts, out_sample_rate: *i32, out_data: *?[*]const u8, out_data_len: *usize, out_n_samples: ?*i64) i32 {
         out_sample_rate.* = self.base.info.sample_rate;
         // one-shot call: force out whatever's left, regardless of window_frames
@@ -902,12 +902,12 @@ const Pockettts = struct {
         return self.base.getOutput(&self.audio_pcm, self.out_type, &self.out_buf, &self.so, out_data, out_data_len, out_n_samples);
     }
 
-    /// `flush` (mtmd-helper-gen.cpp:781 @8642541b2).
+    /// `flush` (mtmd-helper-gen.cpp:781 @cd959bae9).
     fn flush(self: *Pockettts) i32 {
         return if (self.flushGenWav()) 0 else 1;
     }
 
-    /// `ensure_cache` (mtmd-helper-gen.cpp:786 @8642541b2).
+    /// `ensure_cache` (mtmd-helper-gen.cpp:786 @cd959bae9).
     fn ensureCache(self: *Pockettts) bool {
         if (self.specials_ok) return true;
         // bos_before_voice is optional, some packs do not insert it
@@ -924,7 +924,7 @@ const Pockettts = struct {
         return true;
     }
 
-    /// `push_embd_row` (mtmd-helper-gen.cpp:813 @8642541b2): the table can
+    /// `push_embd_row` (mtmd-helper-gen.cpp:813 @cd959bae9): the table can
     /// be shorter than the vocab, so the row lookup is bounded.
     fn pushEmbdRow(self: *const Pockettts, dst: *std.ArrayList(f32), t: Token) void {
         const n_e = self.base.nE();
@@ -934,7 +934,7 @@ const Pockettts = struct {
         dst.appendSlice(gpa, self.tok_embd.items[k * n_e .. (k + 1) * n_e]) catch oom();
     }
 
-    /// `punct_ids` (mtmd-helper-gen.cpp:823 @8642541b2): the token ids of
+    /// `punct_ids` (mtmd-helper-gen.cpp:823 @cd959bae9): the token ids of
     /// the pieces the reference splits on, without the dummy prefix.
     fn punctIds(self: *const Pockettts, s: [:0]const u8) TokenList {
         var ids: [16]Token = @splat(0);
@@ -945,7 +945,7 @@ const Pockettts = struct {
         return out;
     }
 
-    /// `split_on` (mtmd-helper-gen.cpp:833 @8642541b2): cut after runs of
+    /// `split_on` (mtmd-helper-gen.cpp:833 @cd959bae9): cut after runs of
     /// boundary tokens, so punctuation stays with the sentence it ends.
     fn splitOn(ids: []const Token, boundary: []const Token) std.ArrayList(TokenList) {
         var out: std.ArrayList(TokenList) = .empty;
@@ -967,7 +967,7 @@ const Pockettts = struct {
         return out;
     }
 
-    /// `split_chunks` (mtmd-helper-gen.cpp:850 @8642541b2).
+    /// `split_chunks` (mtmd-helper-gen.cpp:850 @cd959bae9).
     fn splitChunks(self: *const Pockettts, ids: []const Token) std.ArrayList(TokenList) {
         var out: std.ArrayList(TokenList) = .empty;
         if (@as(c_int, @intCast(ids.len)) <= max_chunk_tokens) {
@@ -1026,7 +1026,7 @@ const Pockettts = struct {
         return out;
     }
 
-    /// `arm_chunk_budget` (mtmd-helper-gen.cpp:898 @8642541b2):
+    /// `arm_chunk_budget` (mtmd-helper-gen.cpp:898 @cd959bae9):
     /// `_estimate_max_gen_len()` plus the per-chunk tail guess, in frames.
     fn armChunkBudget(self: *Pockettts, idx: usize) void {
         const n_tok: c_int = @intCast(self.chunks.items[idx].items.len);
@@ -1037,7 +1037,7 @@ const Pockettts = struct {
         self.eos_step = -1;
     }
 
-    /// `finish_chunk` (mtmd-helper-gen.cpp:908 @8642541b2): ends the chunk
+    /// `finish_chunk` (mtmd-helper-gen.cpp:908 @cd959bae9): ends the chunk
     /// and re-prompts the next on top of the voice.
     fn finishChunk(self: *Pockettts, h_state_out: *?[*]const f32, out_stop: *bool) i32 {
         if (!self.flushGenWav()) return 1;
@@ -1080,7 +1080,7 @@ const Pockettts = struct {
         return 0;
     }
 
-    /// `prepare_text` (mtmd-helper-gen.cpp:954 @8642541b2): the reference's
+    /// `prepare_text` (mtmd-helper-gen.cpp:954 @cd959bae9): the reference's
     /// `prepare_text_prompt()` normalization. The caller owns the text.
     fn prepareText(in: []const u8, pad_short: bool) []u8 {
         var s: std.ArrayList(u8) = .empty;
@@ -1110,7 +1110,7 @@ const Pockettts = struct {
         return out.toOwnedSlice(gpa) catch oom();
     }
 
-    /// `count_words` (mtmd-helper-gen.cpp:985 @8642541b2).
+    /// `count_words` (mtmd-helper-gen.cpp:985 @cd959bae9).
     fn countWords(s: []const u8) c_int {
         var n: c_int = 0;
         var in_word = false;
@@ -1125,7 +1125,7 @@ const Pockettts = struct {
         return n;
     }
 
-    /// `flush_gen_wav` (mtmd-helper-gen.cpp:1033 @8642541b2): decodes the
+    /// `flush_gen_wav` (mtmd-helper-gen.cpp:1000 @cd959bae9): decodes the
     /// buffered latents, the mimi decoder state carrying over.
     fn flushGenWav(self: *Pockettts) bool {
         if (self.feats_buf.items.len == 0) return true;
@@ -1147,8 +1147,8 @@ const Pockettts = struct {
 // -----------------------------------------------------------------------------
 // Soprano
 
-/// Ports `soprano_gen_audio_pipeline` (mtmd-helper-gen.cpp:1087
-/// @8642541b2): uses the hidden state that predicts each non-EOS token,
+/// Ports `soprano_gen_audio_pipeline` (mtmd-helper-gen.cpp:1054
+/// @cd959bae9): uses the hidden state that predicts each non-EOS token,
 /// including the prompt's last state.
 const Soprano = struct {
     base: Base,
@@ -1175,7 +1175,7 @@ const Soprano = struct {
         self.wav.deinit(gpa);
     }
 
-    /// `reset` (mtmd-helper-gen.cpp:1091 @8642541b2).
+    /// `reset` (mtmd-helper-gen.cpp:1058 @cd959bae9).
     fn reset(self: *Soprano) void {
         self.prompt.clearRetainingCapacity();
         self.features.clearRetainingCapacity();
@@ -1188,7 +1188,7 @@ const Soprano = struct {
         self.sent = false;
     }
 
-    /// `set_input` (mtmd-helper-gen.cpp:1103 @8642541b2).
+    /// `set_input` (mtmd-helper-gen.cpp:1070 @cd959bae9).
     fn setInput(self: *Soprano, inp: *const Inp) i32 {
         self.reset();
         const lctx = self.base.lctx;
@@ -1229,7 +1229,7 @@ const Soprano = struct {
         return 0;
     }
 
-    /// `step_prompt` (mtmd-helper-gen.cpp:1143 @8642541b2).
+    /// `step_prompt` (mtmd-helper-gen.cpp:1110 @cd959bae9).
     fn stepPrompt(self: *Soprano, n_batch: i32) i32 {
         if (n_batch <= 0 or self.prompt.items.len == 0) return -1;
         const n_prompt: c_int = @intCast(self.prompt.items.len);
@@ -1240,7 +1240,7 @@ const Soprano = struct {
         return n_prompt - self.prompt_pos;
     }
 
-    /// `step_gen` (mtmd-helper-gen.cpp:1158 @8642541b2).
+    /// `step_gen` (mtmd-helper-gen.cpp:1125 @cd959bae9).
     fn stepGen(self: *Soprano, sampled_in: Token, h_state_in: ?[*]const f32, h_state_out: *?[*]const f32, out_stop: *bool) i32 {
         const lctx = self.base.lctx;
         const vocab = self.base.vocab;
@@ -1264,7 +1264,7 @@ const Soprano = struct {
         return 0;
     }
 
-    /// `get_output` (mtmd-helper-gen.cpp:1182 @8642541b2).
+    /// `get_output` (mtmd-helper-gen.cpp:1149 @cd959bae9).
     fn getOutput(self: *Soprano, sample_rate: *i32, data: *?[*]const u8, data_len: *usize, n_samples: ?*i64) i32 {
         sample_rate.* = self.base.info.sample_rate;
         data_len.* = 0;
@@ -1289,13 +1289,13 @@ const Soprano = struct {
         return 0;
     }
 
-    /// `flush` (mtmd-helper-gen.cpp:1211 @8642541b2): the whole utterance is
+    /// `flush` (mtmd-helper-gen.cpp:1178 @cd959bae9): the whole utterance is
     /// decoded at once.
     fn flush(self: *Soprano) i32 {
         return if (self.decodeAudio()) 0 else 1;
     }
 
-    /// `decode_audio` (mtmd-helper-gen.cpp:1216 @8642541b2).
+    /// `decode_audio` (mtmd-helper-gen.cpp:1183 @cd959bae9).
     fn decodeAudio(self: *Soprano) bool {
         if (self.decoded) return true;
         if (self.features.items.len < 2 * self.base.nE()) {
@@ -1313,7 +1313,7 @@ const Soprano = struct {
         return true;
     }
 
-    /// `decode` (mtmd-helper-gen.cpp:1237 @8642541b2).
+    /// `decode` (mtmd-helper-gen.cpp:1204 @cd959bae9).
     fn decode(self: *Soprano, tokens: [*]const Token, n: c_int) bool {
         var batch = lapi.batch.llama_batch_init(n, 0, 1);
         batch.n_tokens = n;
@@ -1473,13 +1473,13 @@ const Lfm3a = struct {
     so: StreamOut = .{},
 
     // checked by the converter
-    /// `n_cb` (mtmd-helper-gen.cpp:1525 @8642541b2).
+    /// `n_cb` (mtmd-helper-gen.cpp:1493 @cd959bae9).
     const n_cb: usize = 12;
-    /// `schedule` (mtmd-helper-gen.cpp:1526 @8642541b2): codebooks revealed per depthformer pass.
+    /// `schedule` (mtmd-helper-gen.cpp:1494 @cd959bae9): codebooks revealed per depthformer pass.
     const schedule = [_]c_int{ 4, 4, 4 };
-    /// `n_text_block` (mtmd-helper-gen.cpp:1682 @8642541b2): interleaved_n_text.
+    /// `n_text_block` (mtmd-helper-gen.cpp:1650 @cd959bae9): interleaved_n_text.
     const n_text_block: c_int = 6;
-    /// `n_audio_block` (mtmd-helper-gen.cpp:1683 @8642541b2): interleaved_n_audio.
+    /// `n_audio_block` (mtmd-helper-gen.cpp:1651 @cd959bae9): interleaved_n_audio.
     const n_audio_block: c_int = 12;
 
     /// generate() modes: text, audio until end of audio, interleaved until <|text_end|>
@@ -1496,7 +1496,7 @@ const Lfm3a = struct {
         self.out_buf.deinit(gpa);
     }
 
-    /// `reset` (mtmd-helper-gen.cpp:1277 @8642541b2). The C++ leaves `stream`
+    /// `reset` (mtmd-helper-gen.cpp:1244 @cd959bae9). The C++ leaves `stream`
     /// alone, `set_input` sets it next.
     fn reset(self: *Lfm3a) void {
         self.seq_id = 0;
@@ -1575,9 +1575,9 @@ const Lfm3a = struct {
         return if (self.base.initGenState(inp.seed)) 0 else 1;
     }
 
-    /// `step_prompt` (mtmd-helper-gen.cpp:1354 @8642541b2).
+    /// `step_prompt` (mtmd-helper-gen.cpp:1322 @cd959bae9).
     fn stepPrompt(self: *Lfm3a, n_batch: i32) i32 {
-        impl.ggmlAssert(n_batch > 0, "mtmd-helper-gen.cpp", 1355, "n_batch > 0");
+        impl.ggmlAssert(n_batch > 0, "mtmd-helper-gen.cpp", 1323, "n_batch > 0");
         const n_prompt: c_int = @intCast(self.prompt_tokens.items.len);
         if (self.prompt_pos >= n_prompt) return 0;
         const n = @min(n_batch, n_prompt - self.prompt_pos);
@@ -1603,12 +1603,12 @@ const Lfm3a = struct {
         return n_prompt - self.prompt_pos;
     }
 
-    /// `next_is_text` (mtmd-helper-gen.cpp:1385 @8642541b2).
+    /// `next_is_text` (mtmd-helper-gen.cpp:1353 @cd959bae9).
     fn nextIsText(self: *const Lfm3a) bool {
         return self.mode == .text or (self.mode == .mixed and !self.speaking);
     }
 
-    /// `step_gen` (mtmd-helper-gen.cpp:1390 @8642541b2): one generate() step, a text
+    /// `step_gen` (mtmd-helper-gen.cpp:1358 @cd959bae9): one generate() step, a text
     /// token from the caller or an audio frame from the hidden state.
     fn stepGen(self: *Lfm3a, sampled_in: Token, h_state_in: ?[*]const f32, h_state_out: *?[*]const f32, out_stop: *bool) i32 {
         var sampled = sampled_in;
@@ -1678,7 +1678,7 @@ const Lfm3a = struct {
         return 0;
     }
 
-    /// `get_output` (mtmd-helper-gen.cpp:1464 @8642541b2). Streaming: every frame
+    /// `get_output` (mtmd-helper-gen.cpp:1432 @cd959bae9). Streaming: every frame
     /// is decoded as it is sampled.
     fn getOutput(self: *Lfm3a, out_sample_rate: *i32, out_data: *?[*]const u8, out_data_len: *usize, out_n_samples: ?*i64) i32 {
         out_sample_rate.* = self.base.info.sample_rate;
@@ -1686,7 +1686,7 @@ const Lfm3a = struct {
         return self.base.getOutput(&self.audio_pcm, self.out_type, &self.out_buf, &self.so, out_data, out_data_len, out_n_samples);
     }
 
-    /// `flush` (mtmd-helper-gen.cpp:1513 @8642541b2): the ISTFT holds back the
+    /// `flush` (mtmd-helper-gen.cpp:1481 @cd959bae9): the ISTFT holds back the
     /// overlap of the last frame.
     fn flush(self: *Lfm3a) i32 {
         if (self.pending_tail) {
@@ -1696,7 +1696,7 @@ const Lfm3a = struct {
         return 0;
     }
 
-    /// `sample_frame` (mtmd-helper-gen.cpp:1530 @8642541b2): a random order of the
+    /// `sample_frame` (mtmd-helper-gen.cpp:1498 @cd959bae9): a random order of the
     /// codebooks, revealed by the schedule; `fb` is the feedback embedding of the
     /// codes. At the end of audio every code is the end code, its feedback
     /// embedding is only built when continuing.
@@ -1754,7 +1754,7 @@ const Lfm3a = struct {
         return true;
     }
 
-    /// `apply_rep_penalty` (mtmd-helper-gen.cpp:1583 @8642541b2): the CTRL penalty
+    /// `apply_rep_penalty` (mtmd-helper-gen.cpp:1551 @cd959bae9): the CTRL penalty
     /// over the codes codebook `cb` took in the last `rep_window` frames.
     fn applyRepPenalty(self: *const Lfm3a, l: []f32, cb: usize) void {
         if (self.rep_penalty <= 1.0 or self.rep_window <= 0) return;
@@ -1774,7 +1774,7 @@ const Lfm3a = struct {
         }
     }
 
-    /// `sample` (mtmd-helper-gen.cpp:1600 @8642541b2).
+    /// `sample` (mtmd-helper-gen.cpp:1568 @cd959bae9).
     fn sample(self: *Lfm3a, l: []const f32) i32 {
         const n_vocab = l.len;
         if (self.temp <= 0.0) return @intCast(maxElement(l));
@@ -1811,7 +1811,7 @@ const Lfm3a = struct {
         return best;
     }
 
-    /// `decode_wav` (mtmd-helper-gen.cpp:1629 @8642541b2): `n_codes == 0` flushes the
+    /// `decode_wav` (mtmd-helper-gen.cpp:1597 @cd959bae9): `n_codes == 0` flushes the
     /// ISTFT tail.
     fn decodeWav(self: *Lfm3a, codes: ?[*]const i32, n_codes: usize) bool {
         var inp = mtmd.mtmd_gen_inp_default(self.base.mctx);
@@ -1828,7 +1828,7 @@ const Lfm3a = struct {
         return true;
     }
 
-    /// `find_tokens` (mtmd-helper-gen.cpp:1644 @8642541b2).
+    /// `find_tokens` (mtmd-helper-gen.cpp:1612 @cd959bae9).
     fn findTokens(self: *Lfm3a) bool {
         const v = self.base.vocab;
         self.tok_audio_start = findSpecialToken(v, "<|audio_start|>");
@@ -1844,7 +1844,7 @@ const Lfm3a = struct {
         return true;
     }
 
-    /// `decode` (mtmd-helper-gen.cpp:1657 @8642541b2): over `llama_batch_get_one(&sampled, 1)`.
+    /// `decode` (mtmd-helper-gen.cpp:1625 @cd959bae9): over `llama_batch_get_one(&sampled, 1)`.
     fn decodeToken(self: *Lfm3a, token: *Token) bool {
         var batch = lapi.batch.llama_batch_get_one(token, 1);
         var position: c.llama_pos = self.pos;
@@ -1879,7 +1879,7 @@ const Pipeline = union(enum) {
     }
 };
 
-/// Ports `mtmd_helper_gen_audio` (mtmd-helper-gen.cpp:1735 @8642541b2).
+/// Ports `mtmd_helper_gen_audio` (mtmd-helper-gen.cpp:2097 @cd959bae9).
 pub const GenAudio = struct {
     pipeline: ?Pipeline = null,
 };
@@ -1895,21 +1895,21 @@ fn makePipeline(lctx: ?*c.struct_llama_context, mctx: *Context) ?Pipeline {
     };
 }
 
-/// Ports `mtmd_helper_gen_audio_init` (mtmd-helper-gen.cpp:1739 @8642541b2).
+/// Ports `mtmd_helper_gen_audio_init` (mtmd-helper-gen.cpp:2101 @cd959bae9).
 pub fn mtmd_helper_gen_audio_init(lctx: ?*c.struct_llama_context, mctx: *Context) callconv(.c) *GenAudio {
     const ctx = gpa.create(GenAudio) catch oom();
     ctx.* = .{ .pipeline = makePipeline(lctx, mctx) };
     return ctx;
 }
 
-/// Ports `mtmd_helper_gen_audio_free` (mtmd-helper-gen.cpp:1745 @8642541b2).
+/// Ports `mtmd_helper_gen_audio_free` (mtmd-helper-gen.cpp:2107 @cd959bae9).
 pub fn mtmd_helper_gen_audio_free(ctx: ?*GenAudio) callconv(.c) void {
     const x = ctx orelse return;
     if (x.pipeline) |*p| p.deinit();
     gpa.destroy(x);
 }
 
-/// Ports `mtmd_helper_gen_audio_reset` (mtmd-helper-gen.cpp:1749 @8642541b2).
+/// Ports `mtmd_helper_gen_audio_reset` (mtmd-helper-gen.cpp:2111 @cd959bae9).
 pub fn mtmd_helper_gen_audio_reset(ctx: ?*GenAudio) callconv(.c) void {
     const x = ctx orelse return;
     if (x.pipeline) |*p| switch (p.*) {
@@ -1917,7 +1917,7 @@ pub fn mtmd_helper_gen_audio_reset(ctx: ?*GenAudio) callconv(.c) void {
     };
 }
 
-/// Ports `mtmd_helper_gen_audio_inp_default` (mtmd-helper-gen.cpp:1755 @8642541b2).
+/// Ports `mtmd_helper_gen_audio_inp_default` (mtmd-helper-gen.cpp:2117 @cd959bae9).
 pub fn mtmd_helper_gen_audio_inp_default() callconv(.c) Inp {
     var inp = std.mem.zeroes(Inp);
     inp.top_k = 50;
@@ -1927,8 +1927,8 @@ pub fn mtmd_helper_gen_audio_inp_default() callconv(.c) Inp {
     return inp;
 }
 
-/// Ports `mtmd_helper_gen_audio_set_input` (mtmd-helper-gen.cpp:1764
-/// @8642541b2).
+/// Ports `mtmd_helper_gen_audio_set_input` (mtmd-helper-gen.cpp:2126
+/// @cd959bae9).
 pub fn mtmd_helper_gen_audio_set_input(ctx: *GenAudio, inp: *const Inp) callconv(.c) i32 {
     const p = if (ctx.pipeline) |*p| p else {
         logErr("mtmd_helper_gen_audio: unsupported or missing gen-audio pipeline\n", .{});
@@ -1946,8 +1946,8 @@ pub fn mtmd_helper_gen_audio_set_input(ctx: *GenAudio, inp: *const Inp) callconv
     };
 }
 
-/// Ports `mtmd_helper_gen_audio_step_prompt` (mtmd-helper-gen.cpp:1777
-/// @8642541b2): >0 prompt tokens remaining, 0 done, <0 an error.
+/// Ports `mtmd_helper_gen_audio_step_prompt` (mtmd-helper-gen.cpp:2139
+/// @cd959bae9): >0 prompt tokens remaining, 0 done, <0 an error.
 pub fn mtmd_helper_gen_audio_step_prompt(ctx: *GenAudio, n_batch: i32) callconv(.c) i32 {
     const p = if (ctx.pipeline) |*p| p else return -1;
     return switch (p.*) {
@@ -1957,7 +1957,7 @@ pub fn mtmd_helper_gen_audio_step_prompt(ctx: *GenAudio, n_batch: i32) callconv(
     };
 }
 
-/// Ports `mtmd_helper_gen_audio_next_is_text` (mtmd-helper-gen.cpp:1784 @8642541b2).
+/// Ports `mtmd_helper_gen_audio_next_is_text` (mtmd-helper-gen.cpp:2146 @cd959bae9).
 pub fn mtmd_helper_gen_audio_next_is_text(ctx: *GenAudio) callconv(.c) bool {
     const p = if (ctx.pipeline) |*p| p else return false;
     return switch (p.*) {
@@ -1966,7 +1966,7 @@ pub fn mtmd_helper_gen_audio_next_is_text(ctx: *GenAudio) callconv(.c) bool {
     };
 }
 
-/// Ports `mtmd_helper_gen_audio_get_logit_bias` (mtmd-helper-gen.cpp:1788 @8642541b2).
+/// Ports `mtmd_helper_gen_audio_get_logit_bias` (mtmd-helper-gen.cpp:2150 @cd959bae9).
 pub fn mtmd_helper_gen_audio_get_logit_bias(ctx: *GenAudio, n_bias: *usize) callconv(.c) ?[*]const c.llama_logit_bias {
     const p = if (ctx.pipeline) |*p| p else {
         n_bias.* = 0;
@@ -1979,7 +1979,7 @@ pub fn mtmd_helper_gen_audio_get_logit_bias(ctx: *GenAudio, n_bias: *usize) call
     return if (items.len != 0) items.ptr else null;
 }
 
-/// Ports `mtmd_helper_audio_stream_get_logit_bias` (mtmd-helper-gen.cpp:1793 @8642541b2):
+/// Ports `mtmd_helper_audio_stream_get_logit_bias` (mtmd-helper-gen.cpp:2155 @cd959bae9):
 /// the bias for the text a caller samples while it transcribes an audio stream
 /// opened with a prompt. Writes up to `n_max` entries to `out`.
 pub fn mtmd_helper_audio_stream_get_logit_bias(mctx: *const Context, model: ?*const c.struct_llama_model, out: ?[*]c.llama_logit_bias, n_max: i32) callconv(.c) i32 {
@@ -2001,8 +2001,8 @@ pub fn mtmd_helper_audio_stream_get_logit_bias(mctx: *const Context, model: ?*co
     return @intCast(n);
 }
 
-/// Ports `mtmd_helper_gen_audio_step_gen` (mtmd-helper-gen.cpp:1812
-/// @8642541b2).
+/// Ports `mtmd_helper_gen_audio_step_gen` (mtmd-helper-gen.cpp:2174
+/// @cd959bae9).
 pub fn mtmd_helper_gen_audio_step_gen(ctx: *GenAudio, sampled: Token, h_state_in: ?[*]const f32, h_state_out: *?[*]const f32, out_stop: ?*bool) callconv(.c) i32 {
     const p = if (ctx.pipeline) |*p| p else return 1;
     var stop = false;
@@ -2016,8 +2016,8 @@ pub fn mtmd_helper_gen_audio_step_gen(ctx: *GenAudio, sampled: Token, h_state_in
     return ret;
 }
 
-/// Ports `mtmd_helper_gen_audio_get_output` (mtmd-helper-gen.cpp:1826
-/// @8642541b2).
+/// Ports `mtmd_helper_gen_audio_get_output` (mtmd-helper-gen.cpp:2188
+/// @cd959bae9).
 pub fn mtmd_helper_gen_audio_get_output(ctx: *GenAudio, out_sample_rate: *i32, out_data: *?[*]const u8, out_data_len: *usize, out_n_samples: ?*i64) callconv(.c) i32 {
     const p = if (ctx.pipeline) |*p| p else return 1;
     return switch (p.*) {
@@ -2025,7 +2025,7 @@ pub fn mtmd_helper_gen_audio_get_output(ctx: *GenAudio, out_sample_rate: *i32, o
     };
 }
 
-/// Ports `mtmd_helper_gen_audio_flush` (mtmd-helper-gen.cpp:1834 @8642541b2): forces any
+/// Ports `mtmd_helper_gen_audio_flush` (mtmd-helper-gen.cpp:2196 @cd959bae9): forces any
 /// buffered codes through code2wav now, regardless of `window_frames`.
 pub fn mtmd_helper_gen_audio_flush(ctx: *GenAudio) callconv(.c) i32 {
     const p = if (ctx.pipeline) |*p| p else return 1;

@@ -14,8 +14,8 @@
 //! (`8642541b2`): `llama_model_minimax_m3`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, its `graph` with
 //! `build_attn_msa_fa`, and `llm_graph_input_msa`, which upstream defines
-//! in the model's own file. `msa_params` (src/models/models.h:2521
-//! @8642541b2) is not kept on the model: its three fields are the
+//! in the model's own file. `msa_params` (src/models/models.h:2585
+//! @cd959bae9) is not kept on the model: its three fields are the
 //! hyperparameters they are loaded from, read where the graph needs them.
 
 const std = @import("std");
@@ -33,7 +33,7 @@ const Tensor = c.ggml_tensor;
 const Ubatch = @import("../batch.zig").Ubatch;
 const MsaContext = kv_cache_msa.MsaContext;
 
-/// Ports `llama_model_minimax_m3`'s `load_arch_hparams` (src/models/minimax-m3.cpp:13 @8642541b2).
+/// Ports `llama_model_minimax_m3`'s `load_arch_hparams` (src/models/minimax-m3.cpp:13 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -60,7 +60,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_minimax_m3`'s `load_arch_tensors` (src/models/minimax-m3.cpp:41 @8642541b2).
+/// Ports `llama_model_minimax_m3`'s `load_arch_tensors` (src/models/minimax-m3.cpp:41 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -114,18 +114,18 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_minimax_m3`'s `build_arch_graph` (src/models/minimax-m3.cpp:92 @8642541b2).
+/// Ports `llama_model_minimax_m3`'s `build_arch_graph` (src/models/minimax-m3.cpp:92 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
-/// `GGML_PAD` (ggml.h:267 @8642541b2) over `int64_t`: a mask, so for a
+/// `GGML_PAD` (ggml.h:267 @cd959bae9) over `int64_t`: a mask, so for a
 /// block size that is not a power of two it is not a round-up, as in the C.
 fn padI64(x: i64, n: i64) i64 {
     return (x +% n -% 1) & ~(n -% 1);
 }
 
-/// Ports `llm_graph_input_msa` (src/models/minimax-m3.cpp:96 @8642541b2): the
+/// Ports `llm_graph_input_msa` (src/models/minimax-m3.cpp:96 @cd959bae9): the
 /// per-ubatch maps between positions and cells that MSA's block selection
 /// reads, and the bias that forces the local blocks.
 const InpMsa = struct {
@@ -145,7 +145,7 @@ const InpMsa = struct {
     blk: c_int,
     local: c_int,
 
-    /// Ports `llm_graph_input_msa`'s `set_input` (src/models/minimax-m3.cpp:101 @8642541b2).
+    /// Ports `llm_graph_input_msa`'s `set_input` (src/models/minimax-m3.cpp:101 @cd959bae9).
     pub fn setInput(self: *InpMsa, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         if (self.pos_slot_i) |t| self.mctx.setInputPosSlot(t, ubatch);
@@ -176,7 +176,7 @@ const InpMsa = struct {
     }
 
     /// Ports `llm_graph_input_msa`'s `can_reuse` (src/models/minimax-m3.cpp:126
-    /// @8642541b2): valid while the tensors' dimensions still match the new
+    /// @cd959bae9): valid while the tensors' dimensions still match the new
     /// ubatch and cache window, and the ubatch is in the same regime --
     /// decode graphs have `pos_slot_f`, batch graphs `cell_blk`.
     pub fn canReuse(self: *InpMsa, params: *const graph.Params) bool {
@@ -221,7 +221,7 @@ const InpMsa = struct {
 };
 
 /// Ports `llama_model_minimax_m3`'s `graph`'s `build_attn_msa_fa`
-/// (src/models/minimax-m3.cpp:176 @8642541b2): one flash-attention call for
+/// (src/models/minimax-m3.cpp:176 @cd959bae9): one flash-attention call for
 /// every GQA group -- and at a multi-stream decode, every stream -- by
 /// mapping them onto its sequence dimension, `ne[3]`.
 ///

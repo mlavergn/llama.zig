@@ -29,295 +29,295 @@
 
 const std = @import("std");
 
-/// Mirrors `SZ_SIMDGROUP` (ggml-metal-impl.h:8 @8642541b2).
+/// Mirrors `SZ_SIMDGROUP` (ggml-metal-impl.h:8 @cd959bae9).
 pub const SZ_SIMDGROUP: c_int = 16;
-/// Mirrors `N_MM_NK` (ggml-metal-impl.h:9 @8642541b2).
+/// Mirrors `N_MM_NK` (ggml-metal-impl.h:9 @cd959bae9).
 pub const N_MM_NK: c_int = 2;
-/// Mirrors `N_MM_BLOCK_X` (ggml-metal-impl.h:12 @8642541b2).
+/// Mirrors `N_MM_BLOCK_X` (ggml-metal-impl.h:12 @cd959bae9).
 pub const N_MM_BLOCK_X: c_int = 4;
-/// Mirrors `N_MM_BLOCK_Y` (ggml-metal-impl.h:13 @8642541b2).
+/// Mirrors `N_MM_BLOCK_Y` (ggml-metal-impl.h:13 @cd959bae9).
 pub const N_MM_BLOCK_Y: c_int = 2;
-/// Mirrors `N_MM_SIMD_GROUP_X` (ggml-metal-impl.h:14 @8642541b2).
+/// Mirrors `N_MM_SIMD_GROUP_X` (ggml-metal-impl.h:14 @cd959bae9).
 pub const N_MM_SIMD_GROUP_X: c_int = 2;
-/// Mirrors `N_MM_SIMD_GROUP_Y` (ggml-metal-impl.h:15 @8642541b2).
+/// Mirrors `N_MM_SIMD_GROUP_Y` (ggml-metal-impl.h:15 @cd959bae9).
 pub const N_MM_SIMD_GROUP_Y: c_int = 2;
-/// Mirrors `N_ARGMAX_NPART_MAX` (ggml-metal-impl.h:17 @8642541b2): the most
+/// Mirrors `N_ARGMAX_NPART_MAX` (ggml-metal-impl.h:17 @cd959bae9): the most
 /// parts the two-stage `ARGMAX` splits a row into.
 pub const N_ARGMAX_NPART_MAX: c_int = 256;
-/// Mirrors `N_ARGMAX_CHUNK` (ggml-metal-impl.h:18 @8642541b2): the row
+/// Mirrors `N_ARGMAX_CHUNK` (ggml-metal-impl.h:18 @cd959bae9): the row
 /// length past which `ARGMAX` takes two stages, and the part size up to
 /// the limit above.
 pub const N_ARGMAX_CHUNK: c_int = 4096;
-/// Mirrors `N_R0_Q1_0` (ggml-metal-impl.h:27 @8642541b2).
+/// Mirrors `N_R0_Q1_0` (ggml-metal-impl.h:27 @cd959bae9).
 pub const N_R0_Q1_0: c_int = 8;
-/// Mirrors `N_SG_Q1_0` (ggml-metal-impl.h:28 @8642541b2).
+/// Mirrors `N_SG_Q1_0` (ggml-metal-impl.h:28 @cd959bae9).
 pub const N_SG_Q1_0: c_int = 2;
-/// Mirrors `N_R0_Q2_0` (ggml-metal-impl.h:30 @8642541b2).
+/// Mirrors `N_R0_Q2_0` (ggml-metal-impl.h:30 @cd959bae9).
 pub const N_R0_Q2_0: c_int = 8;
-/// Mirrors `N_SG_Q2_0` (ggml-metal-impl.h:31 @8642541b2).
+/// Mirrors `N_SG_Q2_0` (ggml-metal-impl.h:31 @cd959bae9).
 pub const N_SG_Q2_0: c_int = 2;
-/// Mirrors `N_R0_Q4_0` (ggml-metal-impl.h:33 @8642541b2).
+/// Mirrors `N_R0_Q4_0` (ggml-metal-impl.h:33 @cd959bae9).
 pub const N_R0_Q4_0: c_int = 4;
-/// Mirrors `N_SG_Q4_0` (ggml-metal-impl.h:34 @8642541b2).
+/// Mirrors `N_SG_Q4_0` (ggml-metal-impl.h:34 @cd959bae9).
 pub const N_SG_Q4_0: c_int = 2;
-/// Mirrors `N_R0_Q4_1` (ggml-metal-impl.h:36 @8642541b2).
+/// Mirrors `N_R0_Q4_1` (ggml-metal-impl.h:36 @cd959bae9).
 pub const N_R0_Q4_1: c_int = 4;
-/// Mirrors `N_SG_Q4_1` (ggml-metal-impl.h:37 @8642541b2).
+/// Mirrors `N_SG_Q4_1` (ggml-metal-impl.h:37 @cd959bae9).
 pub const N_SG_Q4_1: c_int = 2;
-/// Mirrors `N_R0_Q5_0` (ggml-metal-impl.h:39 @8642541b2).
+/// Mirrors `N_R0_Q5_0` (ggml-metal-impl.h:39 @cd959bae9).
 pub const N_R0_Q5_0: c_int = 4;
-/// Mirrors `N_SG_Q5_0` (ggml-metal-impl.h:40 @8642541b2).
+/// Mirrors `N_SG_Q5_0` (ggml-metal-impl.h:40 @cd959bae9).
 pub const N_SG_Q5_0: c_int = 2;
-/// Mirrors `N_R0_Q5_1` (ggml-metal-impl.h:42 @8642541b2).
+/// Mirrors `N_R0_Q5_1` (ggml-metal-impl.h:42 @cd959bae9).
 pub const N_R0_Q5_1: c_int = 4;
-/// Mirrors `N_SG_Q5_1` (ggml-metal-impl.h:43 @8642541b2).
+/// Mirrors `N_SG_Q5_1` (ggml-metal-impl.h:43 @cd959bae9).
 pub const N_SG_Q5_1: c_int = 2;
-/// Mirrors `N_R0_Q8_0` (ggml-metal-impl.h:45 @8642541b2).
+/// Mirrors `N_R0_Q8_0` (ggml-metal-impl.h:45 @cd959bae9).
 pub const N_R0_Q8_0: c_int = 2;
-/// Mirrors `N_SG_Q8_0` (ggml-metal-impl.h:46 @8642541b2).
+/// Mirrors `N_SG_Q8_0` (ggml-metal-impl.h:46 @cd959bae9).
 pub const N_SG_Q8_0: c_int = 4;
-/// Mirrors `N_R0_MXFP4` (ggml-metal-impl.h:48 @8642541b2).
+/// Mirrors `N_R0_MXFP4` (ggml-metal-impl.h:48 @cd959bae9).
 pub const N_R0_MXFP4: c_int = 2;
-/// Mirrors `N_SG_MXFP4` (ggml-metal-impl.h:49 @8642541b2).
+/// Mirrors `N_SG_MXFP4` (ggml-metal-impl.h:49 @cd959bae9).
 pub const N_SG_MXFP4: c_int = 2;
-/// Mirrors `N_R0_Q2_K` (ggml-metal-impl.h:51 @8642541b2).
+/// Mirrors `N_R0_Q2_K` (ggml-metal-impl.h:51 @cd959bae9).
 pub const N_R0_Q2_K: c_int = 4;
-/// Mirrors `N_SG_Q2_K` (ggml-metal-impl.h:52 @8642541b2).
+/// Mirrors `N_SG_Q2_K` (ggml-metal-impl.h:52 @cd959bae9).
 pub const N_SG_Q2_K: c_int = 2;
-/// Mirrors `N_R0_Q3_K` (ggml-metal-impl.h:54 @8642541b2).
+/// Mirrors `N_R0_Q3_K` (ggml-metal-impl.h:54 @cd959bae9).
 pub const N_R0_Q3_K: c_int = 2;
-/// Mirrors `N_SG_Q3_K` (ggml-metal-impl.h:55 @8642541b2).
+/// Mirrors `N_SG_Q3_K` (ggml-metal-impl.h:55 @cd959bae9).
 pub const N_SG_Q3_K: c_int = 2;
-/// Mirrors `N_R0_Q4_K` (ggml-metal-impl.h:57 @8642541b2).
+/// Mirrors `N_R0_Q4_K` (ggml-metal-impl.h:57 @cd959bae9).
 pub const N_R0_Q4_K: c_int = 2;
-/// Mirrors `N_SG_Q4_K` (ggml-metal-impl.h:58 @8642541b2).
+/// Mirrors `N_SG_Q4_K` (ggml-metal-impl.h:58 @cd959bae9).
 pub const N_SG_Q4_K: c_int = 2;
-/// Mirrors `N_R0_Q5_K` (ggml-metal-impl.h:60 @8642541b2).
+/// Mirrors `N_R0_Q5_K` (ggml-metal-impl.h:60 @cd959bae9).
 pub const N_R0_Q5_K: c_int = 1;
-/// Mirrors `N_SG_Q5_K` (ggml-metal-impl.h:61 @8642541b2).
+/// Mirrors `N_SG_Q5_K` (ggml-metal-impl.h:61 @cd959bae9).
 pub const N_SG_Q5_K: c_int = 2;
-/// Mirrors `N_R0_Q6_K` (ggml-metal-impl.h:63 @8642541b2).
+/// Mirrors `N_R0_Q6_K` (ggml-metal-impl.h:63 @cd959bae9).
 pub const N_R0_Q6_K: c_int = 2;
-/// Mirrors `N_SG_Q6_K` (ggml-metal-impl.h:64 @8642541b2).
+/// Mirrors `N_SG_Q6_K` (ggml-metal-impl.h:64 @cd959bae9).
 pub const N_SG_Q6_K: c_int = 2;
-/// Mirrors `N_R0_IQ1_S` (ggml-metal-impl.h:66 @8642541b2).
+/// Mirrors `N_R0_IQ1_S` (ggml-metal-impl.h:66 @cd959bae9).
 pub const N_R0_IQ1_S: c_int = 4;
-/// Mirrors `N_SG_IQ1_S` (ggml-metal-impl.h:67 @8642541b2).
+/// Mirrors `N_SG_IQ1_S` (ggml-metal-impl.h:67 @cd959bae9).
 pub const N_SG_IQ1_S: c_int = 2;
-/// Mirrors `N_R0_IQ1_S_SPLIT` (ggml-metal-impl.h:68 @8642541b2).
+/// Mirrors `N_R0_IQ1_S_SPLIT` (ggml-metal-impl.h:68 @cd959bae9).
 pub const N_R0_IQ1_S_SPLIT: c_int = 8;
-/// Mirrors `N_R0_IQ1_M` (ggml-metal-impl.h:70 @8642541b2).
+/// Mirrors `N_R0_IQ1_M` (ggml-metal-impl.h:70 @cd959bae9).
 pub const N_R0_IQ1_M: c_int = 4;
-/// Mirrors `N_SG_IQ1_M` (ggml-metal-impl.h:71 @8642541b2).
+/// Mirrors `N_SG_IQ1_M` (ggml-metal-impl.h:71 @cd959bae9).
 pub const N_SG_IQ1_M: c_int = 2;
-/// Mirrors `N_R0_IQ1_M_SPLIT` (ggml-metal-impl.h:72 @8642541b2).
+/// Mirrors `N_R0_IQ1_M_SPLIT` (ggml-metal-impl.h:72 @cd959bae9).
 pub const N_R0_IQ1_M_SPLIT: c_int = 8;
-/// Mirrors `N_R0_IQ2_XXS` (ggml-metal-impl.h:74 @8642541b2).
+/// Mirrors `N_R0_IQ2_XXS` (ggml-metal-impl.h:74 @cd959bae9).
 pub const N_R0_IQ2_XXS: c_int = 4;
-/// Mirrors `N_SG_IQ2_XXS` (ggml-metal-impl.h:75 @8642541b2).
+/// Mirrors `N_SG_IQ2_XXS` (ggml-metal-impl.h:75 @cd959bae9).
 pub const N_SG_IQ2_XXS: c_int = 2;
-/// Mirrors `N_R0_IQ2_XXS_SPLIT` (ggml-metal-impl.h:76 @8642541b2).
+/// Mirrors `N_R0_IQ2_XXS_SPLIT` (ggml-metal-impl.h:76 @cd959bae9).
 pub const N_R0_IQ2_XXS_SPLIT: c_int = 8;
-/// Mirrors `N_R0_IQ2_XS` (ggml-metal-impl.h:78 @8642541b2).
+/// Mirrors `N_R0_IQ2_XS` (ggml-metal-impl.h:78 @cd959bae9).
 pub const N_R0_IQ2_XS: c_int = 4;
-/// Mirrors `N_SG_IQ2_XS` (ggml-metal-impl.h:79 @8642541b2).
+/// Mirrors `N_SG_IQ2_XS` (ggml-metal-impl.h:79 @cd959bae9).
 pub const N_SG_IQ2_XS: c_int = 2;
-/// Mirrors `N_R0_IQ2_XS_SPLIT` (ggml-metal-impl.h:80 @8642541b2).
+/// Mirrors `N_R0_IQ2_XS_SPLIT` (ggml-metal-impl.h:80 @cd959bae9).
 pub const N_R0_IQ2_XS_SPLIT: c_int = 8;
-/// Mirrors `N_R0_IQ2_S` (ggml-metal-impl.h:82 @8642541b2).
+/// Mirrors `N_R0_IQ2_S` (ggml-metal-impl.h:82 @cd959bae9).
 pub const N_R0_IQ2_S: c_int = 4;
-/// Mirrors `N_SG_IQ2_S` (ggml-metal-impl.h:83 @8642541b2).
+/// Mirrors `N_SG_IQ2_S` (ggml-metal-impl.h:83 @cd959bae9).
 pub const N_SG_IQ2_S: c_int = 2;
-/// Mirrors `N_R0_IQ2_S_SPLIT` (ggml-metal-impl.h:84 @8642541b2).
+/// Mirrors `N_R0_IQ2_S_SPLIT` (ggml-metal-impl.h:84 @cd959bae9).
 pub const N_R0_IQ2_S_SPLIT: c_int = 8;
-/// Mirrors `N_R0_IQ3_XXS` (ggml-metal-impl.h:86 @8642541b2).
+/// Mirrors `N_R0_IQ3_XXS` (ggml-metal-impl.h:86 @cd959bae9).
 pub const N_R0_IQ3_XXS: c_int = 4;
-/// Mirrors `N_SG_IQ3_XXS` (ggml-metal-impl.h:87 @8642541b2).
+/// Mirrors `N_SG_IQ3_XXS` (ggml-metal-impl.h:87 @cd959bae9).
 pub const N_SG_IQ3_XXS: c_int = 2;
-/// Mirrors `N_R0_IQ3_XXS_SPLIT` (ggml-metal-impl.h:88 @8642541b2).
+/// Mirrors `N_R0_IQ3_XXS_SPLIT` (ggml-metal-impl.h:88 @cd959bae9).
 pub const N_R0_IQ3_XXS_SPLIT: c_int = 8;
-/// Mirrors `N_R0_IQ3_S` (ggml-metal-impl.h:90 @8642541b2).
+/// Mirrors `N_R0_IQ3_S` (ggml-metal-impl.h:90 @cd959bae9).
 pub const N_R0_IQ3_S: c_int = 4;
-/// Mirrors `N_SG_IQ3_S` (ggml-metal-impl.h:91 @8642541b2).
+/// Mirrors `N_SG_IQ3_S` (ggml-metal-impl.h:91 @cd959bae9).
 pub const N_SG_IQ3_S: c_int = 2;
-/// Mirrors `N_R0_IQ3_S_SPLIT` (ggml-metal-impl.h:92 @8642541b2).
+/// Mirrors `N_R0_IQ3_S_SPLIT` (ggml-metal-impl.h:92 @cd959bae9).
 pub const N_R0_IQ3_S_SPLIT: c_int = 8;
-/// Mirrors `N_R0_IQ4_NL` (ggml-metal-impl.h:94 @8642541b2).
+/// Mirrors `N_R0_IQ4_NL` (ggml-metal-impl.h:94 @cd959bae9).
 pub const N_R0_IQ4_NL: c_int = 2;
-/// Mirrors `N_SG_IQ4_NL` (ggml-metal-impl.h:95 @8642541b2).
+/// Mirrors `N_SG_IQ4_NL` (ggml-metal-impl.h:95 @cd959bae9).
 pub const N_SG_IQ4_NL: c_int = 2;
-/// Mirrors `N_R0_IQ4_XS` (ggml-metal-impl.h:97 @8642541b2).
+/// Mirrors `N_R0_IQ4_XS` (ggml-metal-impl.h:97 @cd959bae9).
 pub const N_R0_IQ4_XS: c_int = 2;
-/// Mirrors `N_SG_IQ4_XS` (ggml-metal-impl.h:98 @8642541b2).
+/// Mirrors `N_SG_IQ4_XS` (ggml-metal-impl.h:98 @cd959bae9).
 pub const N_SG_IQ4_XS: c_int = 2;
-/// Mirrors `N_R0_TQ2_0` (ggml-metal-impl.h:100 @8642541b2).
+/// Mirrors `N_R0_TQ2_0` (ggml-metal-impl.h:100 @cd959bae9).
 pub const N_R0_TQ2_0: c_int = 4;
-/// Mirrors `N_SG_TQ2_0` (ggml-metal-impl.h:101 @8642541b2).
+/// Mirrors `N_SG_TQ2_0` (ggml-metal-impl.h:101 @cd959bae9).
 pub const N_SG_TQ2_0: c_int = 2;
-/// Mirrors `FC_FLASH_ATTN_EXT_PAD` (ggml-metal-impl.h:104 @8642541b2).
+/// Mirrors `FC_FLASH_ATTN_EXT_PAD` (ggml-metal-impl.h:104 @cd959bae9).
 pub const FC_FLASH_ATTN_EXT_PAD: c_int = 100;
-/// Mirrors `FC_FLASH_ATTN_EXT_BLK` (ggml-metal-impl.h:105 @8642541b2).
+/// Mirrors `FC_FLASH_ATTN_EXT_BLK` (ggml-metal-impl.h:105 @cd959bae9).
 pub const FC_FLASH_ATTN_EXT_BLK: c_int = 200;
-/// Mirrors `FC_FLASH_ATTN_EXT` (ggml-metal-impl.h:106 @8642541b2).
+/// Mirrors `FC_FLASH_ATTN_EXT` (ggml-metal-impl.h:106 @cd959bae9).
 pub const FC_FLASH_ATTN_EXT: c_int = 300;
-/// Mirrors `FC_FLASH_ATTN_EXT_VEC` (ggml-metal-impl.h:107 @8642541b2).
+/// Mirrors `FC_FLASH_ATTN_EXT_VEC` (ggml-metal-impl.h:107 @cd959bae9).
 pub const FC_FLASH_ATTN_EXT_VEC: c_int = 400;
-/// Mirrors `FC_FLASH_ATTN_EXT_VEC_REDUCE` (ggml-metal-impl.h:108 @8642541b2).
+/// Mirrors `FC_FLASH_ATTN_EXT_VEC_REDUCE` (ggml-metal-impl.h:108 @cd959bae9).
 pub const FC_FLASH_ATTN_EXT_VEC_REDUCE: c_int = 500;
-/// Mirrors `FC_MUL_MV` (ggml-metal-impl.h:109 @8642541b2).
+/// Mirrors `FC_MUL_MV` (ggml-metal-impl.h:109 @cd959bae9).
 pub const FC_MUL_MV: c_int = 600;
-/// Mirrors `FC_MUL_MM` (ggml-metal-impl.h:110 @8642541b2).
+/// Mirrors `FC_MUL_MM` (ggml-metal-impl.h:110 @cd959bae9).
 pub const FC_MUL_MM: c_int = 700;
-/// Mirrors `FC_ROPE` (ggml-metal-impl.h:111 @8642541b2).
+/// Mirrors `FC_ROPE` (ggml-metal-impl.h:111 @cd959bae9).
 pub const FC_ROPE: c_int = 800;
-/// Mirrors `FC_SSM_CONV` (ggml-metal-impl.h:112 @8642541b2).
+/// Mirrors `FC_SSM_CONV` (ggml-metal-impl.h:112 @cd959bae9).
 pub const FC_SSM_CONV: c_int = 900;
-/// Mirrors `FC_SOLVE_TRI` (ggml-metal-impl.h:113 @8642541b2).
+/// Mirrors `FC_SOLVE_TRI` (ggml-metal-impl.h:113 @cd959bae9).
 pub const FC_SOLVE_TRI: c_int = 1000;
-/// Mirrors `FC_COUNT_EQUAL` (ggml-metal-impl.h:114 @8642541b2).
+/// Mirrors `FC_COUNT_EQUAL` (ggml-metal-impl.h:114 @cd959bae9).
 pub const FC_COUNT_EQUAL: c_int = 1100;
-/// Mirrors `FC_UNARY` (ggml-metal-impl.h:115 @8642541b2).
+/// Mirrors `FC_UNARY` (ggml-metal-impl.h:115 @cd959bae9).
 pub const FC_UNARY: c_int = 1200;
-/// Mirrors `FC_BIN` (ggml-metal-impl.h:116 @8642541b2).
+/// Mirrors `FC_BIN` (ggml-metal-impl.h:116 @cd959bae9).
 pub const FC_BIN: c_int = 1300;
-/// Mirrors `FC_SUM_ROWS` (ggml-metal-impl.h:117 @8642541b2).
+/// Mirrors `FC_SUM_ROWS` (ggml-metal-impl.h:117 @cd959bae9).
 pub const FC_SUM_ROWS: c_int = 1400;
-/// Mirrors `FC_UPSCALE` (ggml-metal-impl.h:118 @8642541b2).
+/// Mirrors `FC_UPSCALE` (ggml-metal-impl.h:118 @cd959bae9).
 pub const FC_UPSCALE: c_int = 1500;
-/// Mirrors `FC_GATED_DELTA_NET` (ggml-metal-impl.h:119 @8642541b2).
+/// Mirrors `FC_GATED_DELTA_NET` (ggml-metal-impl.h:119 @cd959bae9).
 pub const FC_GATED_DELTA_NET: c_int = 1600;
-/// Mirrors `FC_NORM` (ggml-metal-impl.h:120 @8642541b2).
+/// Mirrors `FC_NORM` (ggml-metal-impl.h:120 @cd959bae9).
 pub const FC_NORM: c_int = 1700;
-/// Mirrors `FC_TOPK_MOE` (ggml-metal-impl.h:121 @8642541b2).
+/// Mirrors `FC_TOPK_MOE` (ggml-metal-impl.h:121 @cd959bae9).
 pub const FC_TOPK_MOE: c_int = 1800;
-/// Mirrors `FC_MOE_REDUCE` (ggml-metal-impl.h:122 @8642541b2).
+/// Mirrors `FC_MOE_REDUCE` (ggml-metal-impl.h:122 @cd959bae9).
 pub const FC_MOE_REDUCE: c_int = 1900;
-/// Mirrors `FC_DSV4_HC` (ggml-metal-impl.h:123 @8642541b2).
+/// Mirrors `FC_DSV4_HC` (ggml-metal-impl.h:123 @cd959bae9).
 pub const FC_DSV4_HC: c_int = 2000;
-/// Mirrors `FC_PAD` (ggml-metal-impl.h:124 @8642541b2).
+/// Mirrors `FC_PAD` (ggml-metal-impl.h:124 @cd959bae9).
 pub const FC_PAD: c_int = 2100;
-/// Mirrors `FC_FLASH_ATTN_EXT_TENSOR` (ggml-metal-impl.h:125 @8642541b2).
+/// Mirrors `FC_FLASH_ATTN_EXT_TENSOR` (ggml-metal-impl.h:125 @cd959bae9).
 pub const FC_FLASH_ATTN_EXT_TENSOR: c_int = 2200;
-/// Mirrors `FC_LIGHTNING_INDEXER` (ggml-metal-impl.h:126 @8642541b2).
+/// Mirrors `FC_LIGHTNING_INDEXER` (ggml-metal-impl.h:126 @cd959bae9).
 ///
 /// **The same value as `FC_FLASH_ATTN_EXT_TENSOR`**, upstream's own
 /// collision. Harmless there -- the two kernels are in different libraries
 /// and each pipeline gets its own constant values -- and reproduced, not
 /// corrected, because the slot is what the kernel reads.
 pub const FC_LIGHTNING_INDEXER: c_int = 2200;
-/// Mirrors `FC_MUL_MV_MMA` (ggml-metal-impl.h:127 @8642541b2).
+/// Mirrors `FC_MUL_MV_MMA` (ggml-metal-impl.h:127 @cd959bae9).
 pub const FC_MUL_MV_MMA: c_int = 2300;
-/// Mirrors `FC_TOP_K_MASK` (ggml-metal-impl.h:128 @8642541b2).
+/// Mirrors `FC_TOP_K_MASK` (ggml-metal-impl.h:128 @cd959bae9).
 pub const FC_TOP_K_MASK: c_int = 2400;
-/// Mirrors `OP_FLASH_ATTN_EXT_NQPSG` (ggml-metal-impl.h:131 @8642541b2).
+/// Mirrors `OP_FLASH_ATTN_EXT_NQPSG` (ggml-metal-impl.h:131 @cd959bae9).
 pub const OP_FLASH_ATTN_EXT_NQPSG: c_int = 8;
-/// Mirrors `OP_FLASH_ATTN_EXT_NCPSG` (ggml-metal-impl.h:132 @8642541b2).
+/// Mirrors `OP_FLASH_ATTN_EXT_NCPSG` (ggml-metal-impl.h:132 @cd959bae9).
 pub const OP_FLASH_ATTN_EXT_NCPSG: c_int = 64;
-/// Mirrors `OP_FLASH_ATTN_EXT_TENSOR_NQPSG` (ggml-metal-impl.h:134 @8642541b2).
+/// Mirrors `OP_FLASH_ATTN_EXT_TENSOR_NQPSG` (ggml-metal-impl.h:134 @cd959bae9).
 pub const OP_FLASH_ATTN_EXT_TENSOR_NQPSG: c_int = 32;
 /// Mirrors `OP_FLASH_ATTN_EXT_TENSOR_NQPSG_LARGE` (ggml-metal-impl.h:135
-/// @8642541b2): queries per threadgroup for heads of 512 and up.
+/// @cd959bae9): queries per threadgroup for heads of 512 and up.
 pub const OP_FLASH_ATTN_EXT_TENSOR_NQPSG_LARGE: c_int = 16;
-/// Mirrors `OP_FLASH_ATTN_EXT_TENSOR_NCPSG` (ggml-metal-impl.h:136 @8642541b2).
+/// Mirrors `OP_FLASH_ATTN_EXT_TENSOR_NCPSG` (ggml-metal-impl.h:136 @cd959bae9).
 pub const OP_FLASH_ATTN_EXT_TENSOR_NCPSG: c_int = 64;
-/// Mirrors `OP_FLASH_ATTN_EXT_TENSOR_NSG` (ggml-metal-impl.h:137 @8642541b2).
+/// Mirrors `OP_FLASH_ATTN_EXT_TENSOR_NSG` (ggml-metal-impl.h:137 @cd959bae9).
 pub const OP_FLASH_ATTN_EXT_TENSOR_NSG: c_int = 8;
-/// Mirrors `OP_FLASH_ATTN_EXT_VEC_NQPSG` (ggml-metal-impl.h:139 @8642541b2).
+/// Mirrors `OP_FLASH_ATTN_EXT_VEC_NQPSG` (ggml-metal-impl.h:139 @cd959bae9).
 pub const OP_FLASH_ATTN_EXT_VEC_NQPSG: c_int = 1;
-/// Mirrors `OP_FLASH_ATTN_EXT_VEC_NCPSG` (ggml-metal-impl.h:140 @8642541b2).
+/// Mirrors `OP_FLASH_ATTN_EXT_VEC_NCPSG` (ggml-metal-impl.h:140 @cd959bae9).
 pub const OP_FLASH_ATTN_EXT_VEC_NCPSG: c_int = 32;
-/// Mirrors `OP_LIGHTNING_INDEXER_DK` (ggml-metal-impl.h:142 @8642541b2).
+/// Mirrors `OP_LIGHTNING_INDEXER_DK` (ggml-metal-impl.h:142 @cd959bae9).
 pub const OP_LIGHTNING_INDEXER_DK: c_int = 128;
-/// Mirrors `OP_LIGHTNING_INDEXER_NHPTG` (ggml-metal-impl.h:143 @8642541b2).
+/// Mirrors `OP_LIGHTNING_INDEXER_NHPTG` (ggml-metal-impl.h:143 @cd959bae9).
 pub const OP_LIGHTNING_INDEXER_NHPTG: c_int = 8;
-/// Mirrors `OP_LIGHTNING_INDEXER_NKPSG` (ggml-metal-impl.h:144 @8642541b2).
+/// Mirrors `OP_LIGHTNING_INDEXER_NKPSG` (ggml-metal-impl.h:144 @cd959bae9).
 pub const OP_LIGHTNING_INDEXER_NKPSG: c_int = 8;
-/// Mirrors `OP_LIGHTNING_INDEXER_NSG` (ggml-metal-impl.h:145 @8642541b2).
+/// Mirrors `OP_LIGHTNING_INDEXER_NSG` (ggml-metal-impl.h:145 @cd959bae9).
 pub const OP_LIGHTNING_INDEXER_NSG: c_int = 8;
-/// Mirrors `OP_LIGHTNING_INDEXER_NBPTG` (ggml-metal-impl.h:146 @8642541b2).
+/// Mirrors `OP_LIGHTNING_INDEXER_NBPTG` (ggml-metal-impl.h:146 @cd959bae9).
 pub const OP_LIGHTNING_INDEXER_NBPTG: c_int = 8;
-/// Mirrors `OP_UNARY_NUM_SCALE` (ggml-metal-impl.h:148 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_SCALE` (ggml-metal-impl.h:148 @cd959bae9).
 pub const OP_UNARY_NUM_SCALE: c_int = 10;
-/// Mirrors `OP_UNARY_NUM_FILL` (ggml-metal-impl.h:149 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_FILL` (ggml-metal-impl.h:149 @cd959bae9).
 pub const OP_UNARY_NUM_FILL: c_int = 11;
-/// Mirrors `OP_UNARY_NUM_CLAMP` (ggml-metal-impl.h:150 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_CLAMP` (ggml-metal-impl.h:150 @cd959bae9).
 pub const OP_UNARY_NUM_CLAMP: c_int = 12;
-/// Mirrors `OP_UNARY_NUM_SQR` (ggml-metal-impl.h:151 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_SQR` (ggml-metal-impl.h:151 @cd959bae9).
 pub const OP_UNARY_NUM_SQR: c_int = 13;
-/// Mirrors `OP_UNARY_NUM_SQRT` (ggml-metal-impl.h:152 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_SQRT` (ggml-metal-impl.h:152 @cd959bae9).
 pub const OP_UNARY_NUM_SQRT: c_int = 14;
-/// Mirrors `OP_UNARY_NUM_SIN` (ggml-metal-impl.h:153 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_SIN` (ggml-metal-impl.h:153 @cd959bae9).
 pub const OP_UNARY_NUM_SIN: c_int = 15;
-/// Mirrors `OP_UNARY_NUM_COS` (ggml-metal-impl.h:154 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_COS` (ggml-metal-impl.h:154 @cd959bae9).
 pub const OP_UNARY_NUM_COS: c_int = 16;
-/// Mirrors `OP_UNARY_NUM_LOG` (ggml-metal-impl.h:155 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_LOG` (ggml-metal-impl.h:155 @cd959bae9).
 pub const OP_UNARY_NUM_LOG: c_int = 17;
-/// Mirrors `OP_UNARY_NUM_LEAKY_RELU` (ggml-metal-impl.h:156 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_LEAKY_RELU` (ggml-metal-impl.h:156 @cd959bae9).
 pub const OP_UNARY_NUM_LEAKY_RELU: c_int = 18;
-/// Mirrors `OP_UNARY_NUM_TANH` (ggml-metal-impl.h:158 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_TANH` (ggml-metal-impl.h:158 @cd959bae9).
 pub const OP_UNARY_NUM_TANH: c_int = 100;
-/// Mirrors `OP_UNARY_NUM_RELU` (ggml-metal-impl.h:159 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_RELU` (ggml-metal-impl.h:159 @cd959bae9).
 pub const OP_UNARY_NUM_RELU: c_int = 101;
-/// Mirrors `OP_UNARY_NUM_SIGMOID` (ggml-metal-impl.h:160 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_SIGMOID` (ggml-metal-impl.h:160 @cd959bae9).
 pub const OP_UNARY_NUM_SIGMOID: c_int = 102;
-/// Mirrors `OP_UNARY_NUM_GELU` (ggml-metal-impl.h:161 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_GELU` (ggml-metal-impl.h:161 @cd959bae9).
 pub const OP_UNARY_NUM_GELU: c_int = 103;
-/// Mirrors `OP_UNARY_NUM_GELU_ERF` (ggml-metal-impl.h:162 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_GELU_ERF` (ggml-metal-impl.h:162 @cd959bae9).
 pub const OP_UNARY_NUM_GELU_ERF: c_int = 104;
-/// Mirrors `OP_UNARY_NUM_GELU_QUICK` (ggml-metal-impl.h:163 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_GELU_QUICK` (ggml-metal-impl.h:163 @cd959bae9).
 pub const OP_UNARY_NUM_GELU_QUICK: c_int = 105;
-/// Mirrors `OP_UNARY_NUM_SILU` (ggml-metal-impl.h:164 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_SILU` (ggml-metal-impl.h:164 @cd959bae9).
 pub const OP_UNARY_NUM_SILU: c_int = 106;
-/// Mirrors `OP_UNARY_NUM_ELU` (ggml-metal-impl.h:165 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_ELU` (ggml-metal-impl.h:165 @cd959bae9).
 pub const OP_UNARY_NUM_ELU: c_int = 107;
-/// Mirrors `OP_UNARY_NUM_NEG` (ggml-metal-impl.h:166 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_NEG` (ggml-metal-impl.h:166 @cd959bae9).
 pub const OP_UNARY_NUM_NEG: c_int = 108;
-/// Mirrors `OP_UNARY_NUM_ABS` (ggml-metal-impl.h:167 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_ABS` (ggml-metal-impl.h:167 @cd959bae9).
 pub const OP_UNARY_NUM_ABS: c_int = 109;
-/// Mirrors `OP_UNARY_NUM_SGN` (ggml-metal-impl.h:168 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_SGN` (ggml-metal-impl.h:168 @cd959bae9).
 pub const OP_UNARY_NUM_SGN: c_int = 110;
-/// Mirrors `OP_UNARY_NUM_STEP` (ggml-metal-impl.h:169 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_STEP` (ggml-metal-impl.h:169 @cd959bae9).
 pub const OP_UNARY_NUM_STEP: c_int = 111;
-/// Mirrors `OP_UNARY_NUM_HARDSWISH` (ggml-metal-impl.h:170 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_HARDSWISH` (ggml-metal-impl.h:170 @cd959bae9).
 pub const OP_UNARY_NUM_HARDSWISH: c_int = 112;
-/// Mirrors `OP_UNARY_NUM_HARDSIGMOID` (ggml-metal-impl.h:171 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_HARDSIGMOID` (ggml-metal-impl.h:171 @cd959bae9).
 pub const OP_UNARY_NUM_HARDSIGMOID: c_int = 113;
-/// Mirrors `OP_UNARY_NUM_EXP` (ggml-metal-impl.h:172 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_EXP` (ggml-metal-impl.h:172 @cd959bae9).
 pub const OP_UNARY_NUM_EXP: c_int = 114;
-/// Mirrors `OP_UNARY_NUM_SOFTPLUS` (ggml-metal-impl.h:173 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_SOFTPLUS` (ggml-metal-impl.h:173 @cd959bae9).
 pub const OP_UNARY_NUM_SOFTPLUS: c_int = 115;
-/// Mirrors `OP_UNARY_NUM_EXPM1` (ggml-metal-impl.h:174 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_EXPM1` (ggml-metal-impl.h:174 @cd959bae9).
 pub const OP_UNARY_NUM_EXPM1: c_int = 116;
-/// Mirrors `OP_UNARY_NUM_FLOOR` (ggml-metal-impl.h:175 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_FLOOR` (ggml-metal-impl.h:175 @cd959bae9).
 pub const OP_UNARY_NUM_FLOOR: c_int = 117;
-/// Mirrors `OP_UNARY_NUM_CEIL` (ggml-metal-impl.h:176 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_CEIL` (ggml-metal-impl.h:176 @cd959bae9).
 pub const OP_UNARY_NUM_CEIL: c_int = 118;
-/// Mirrors `OP_UNARY_NUM_ROUND` (ggml-metal-impl.h:177 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_ROUND` (ggml-metal-impl.h:177 @cd959bae9).
 pub const OP_UNARY_NUM_ROUND: c_int = 119;
-/// Mirrors `OP_UNARY_NUM_TRUNC` (ggml-metal-impl.h:178 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_TRUNC` (ggml-metal-impl.h:178 @cd959bae9).
 pub const OP_UNARY_NUM_TRUNC: c_int = 120;
-/// Mirrors `OP_UNARY_NUM_XIELU` (ggml-metal-impl.h:179 @8642541b2).
+/// Mirrors `OP_UNARY_NUM_XIELU` (ggml-metal-impl.h:179 @cd959bae9).
 pub const OP_UNARY_NUM_XIELU: c_int = 121;
-/// Mirrors `OP_SUM_ROWS_NUM_SUM_ROWS` (ggml-metal-impl.h:181 @8642541b2).
+/// Mirrors `OP_SUM_ROWS_NUM_SUM_ROWS` (ggml-metal-impl.h:181 @cd959bae9).
 pub const OP_SUM_ROWS_NUM_SUM_ROWS: c_int = 10;
-/// Mirrors `OP_SUM_ROWS_NUM_MEAN` (ggml-metal-impl.h:182 @8642541b2).
+/// Mirrors `OP_SUM_ROWS_NUM_MEAN` (ggml-metal-impl.h:182 @cd959bae9).
 pub const OP_SUM_ROWS_NUM_MEAN: c_int = 11;
-/// Mirrors `OP_SSM_SCAN_SSD_CS` (ggml-metal-impl.h:184 @8642541b2): the SSD
+/// Mirrors `OP_SSM_SCAN_SSD_CS` (ggml-metal-impl.h:184 @cd959bae9): the SSD
 /// scan's chunk size.
 pub const OP_SSM_SCAN_SSD_CS: c_int = 64;
-/// Mirrors `OP_SSM_SCAN_SSD_HD` (ggml-metal-impl.h:185 @8642541b2): the head
+/// Mirrors `OP_SSM_SCAN_SSD_HD` (ggml-metal-impl.h:185 @cd959bae9): the head
 /// dimension the MMA kernel is specialised for.
 pub const OP_SSM_SCAN_SSD_HD: c_int = 64;
-/// Mirrors `OP_SSM_SCAN_SSD_NSG` (ggml-metal-impl.h:186 @8642541b2): simdgroups
+/// Mirrors `OP_SSM_SCAN_SSD_NSG` (ggml-metal-impl.h:186 @cd959bae9): simdgroups
 /// per threadgroup.
 pub const OP_SSM_SCAN_SSD_NSG: c_int = 4;
-/// Mirrors `GGML_METAL_FWHT_TG_MIN_N` (ggml-metal-impl.h:1252 @8642541b2):
+/// Mirrors `GGML_METAL_FWHT_TG_MIN_N` (ggml-metal-impl.h:1265 @cd959bae9):
 /// FWHT widths at or above this run the threadgroup kernel, one row per
 /// threadgroup of `GGML_METAL_FWHT_TG_NT` threads.
 pub const GGML_METAL_FWHT_TG_MIN_N: c_int = 512;
-/// Mirrors `GGML_METAL_FWHT_TG_NT` (ggml-metal-impl.h:1253 @8642541b2).
+/// Mirrors `GGML_METAL_FWHT_TG_NT` (ggml-metal-impl.h:1266 @cd959bae9).
 pub const GGML_METAL_FWHT_TG_NT: c_int = 256;
-/// Mirrors `N_MM_NK_TOTAL` (ggml-metal-impl.h:10 @8642541b2).
+/// Mirrors `N_MM_NK_TOTAL` (ggml-metal-impl.h:10 @cd959bae9).
 ///
 /// The one computed define: the C writes `(SZ_SIMDGROUP * N_MM_NK)`, kept as an
 /// expression here so it tracks its operands.

@@ -15,7 +15,7 @@ const c = impl.c;
 const T = graph.T;
 const ne = graph.ne;
 
-/// Ports `build` (llava.cpp:5 @8642541b2), a member of `clip_graph_llava`.
+/// Ports `build` (llava.cpp:5 @cd959bae9), a member of `clip_graph_llava`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

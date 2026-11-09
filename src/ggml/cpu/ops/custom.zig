@@ -55,7 +55,7 @@ fn customParams(dst: *const Tensor) impl.CustomOpParams {
 // -----------------------------------------------------------------------------
 // The user-callback ops
 
-/// Ports `ggml_compute_forward_map_custom1` (ops.cpp:11929 @8642541b2).
+/// Ports `ggml_compute_forward_map_custom1` (ops.cpp:11965 @cd959bae9).
 pub export fn ggml_compute_forward_map_custom1(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const a = dst.src[0];
 
@@ -65,7 +65,7 @@ pub export fn ggml_compute_forward_map_custom1(params: *const ComputeParams, dst
     fun.?(dst, a, params.ith, params.nth, p.userdata);
 }
 
-/// Ports `ggml_compute_forward_map_custom2` (ops.cpp:11943 @8642541b2).
+/// Ports `ggml_compute_forward_map_custom2` (ops.cpp:11979 @cd959bae9).
 pub export fn ggml_compute_forward_map_custom2(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const a = dst.src[0];
     const b = dst.src[1];
@@ -76,7 +76,7 @@ pub export fn ggml_compute_forward_map_custom2(params: *const ComputeParams, dst
     fun.?(dst, a, b, params.ith, params.nth, p.userdata);
 }
 
-/// Ports `ggml_compute_forward_map_custom3` (ops.cpp:11958 @8642541b2).
+/// Ports `ggml_compute_forward_map_custom3` (ops.cpp:11994 @cd959bae9).
 pub export fn ggml_compute_forward_map_custom3(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const a = dst.src[0];
     const b = dst.src[1];
@@ -88,7 +88,7 @@ pub export fn ggml_compute_forward_map_custom3(params: *const ComputeParams, dst
     fun.?(dst, a, b, cc, params.ith, params.nth, p.userdata);
 }
 
-/// Ports `ggml_compute_forward_custom` (ops.cpp:11974 @8642541b2).
+/// Ports `ggml_compute_forward_custom` (ops.cpp:12010 @cd959bae9).
 pub export fn ggml_compute_forward_custom(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const p = customParams(dst);
     const fun: c.ggml_custom_op_t = @ptrCast(@alignCast(p.fun));
@@ -99,7 +99,7 @@ pub export fn ggml_compute_forward_custom(params: *const ComputeParams, dst: *Te
 // -----------------------------------------------------------------------------
 // cross_entropy_loss
 
-/// Ports `ggml_compute_forward_cross_entropy_loss_f32` (ops.cpp:11986 @8642541b2).
+/// Ports `ggml_compute_forward_cross_entropy_loss_f32` (ops.cpp:12022 @cd959bae9).
 fn crossEntropyLossF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -167,7 +167,7 @@ fn crossEntropyLossF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_cross_entropy_loss` (ops.cpp:12062 @8642541b2).
+/// Ports `ggml_compute_forward_cross_entropy_loss` (ops.cpp:12098 @cd959bae9).
 pub export fn ggml_compute_forward_cross_entropy_loss(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -181,7 +181,7 @@ pub export fn ggml_compute_forward_cross_entropy_loss(params: *const ComputePara
 // cross_entropy_loss_back
 
 /// Ports `ggml_compute_forward_cross_entropy_loss_back_f32`
-/// (ops.cpp:12082 @8642541b2).
+/// (ops.cpp:12118 @cd959bae9).
 fn crossEntropyLossBackF32(params: *const ComputeParams, dst: *Tensor) void {
     const grad = impl.one(Tensor, dst.src[0]); // gradient of forward pass output
     const src0f = impl.one(Tensor, dst.src[1]); // src0 of forward pass
@@ -239,7 +239,7 @@ fn crossEntropyLossBackF32(params: *const ComputeParams, dst: *Tensor) void {
 }
 
 /// Ports `ggml_compute_forward_cross_entropy_loss_back`
-/// (ops.cpp:12145 @8642541b2).
+/// (ops.cpp:12181 @cd959bae9).
 pub export fn ggml_compute_forward_cross_entropy_loss_back(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -252,7 +252,7 @@ pub export fn ggml_compute_forward_cross_entropy_loss_back(params: *const Comput
 // -----------------------------------------------------------------------------
 // opt_step_adamw
 
-/// Ports `ggml_compute_forward_opt_step_adamw_f32` (ops.cpp:12163 @8642541b2).
+/// Ports `ggml_compute_forward_opt_step_adamw_f32` (ops.cpp:12199 @cd959bae9).
 ///
 /// The C counts rows in `int`; `i64` here holds the same values.
 fn optStepAdamwF32(params: *const ComputeParams, dst: *Tensor) void {
@@ -335,7 +335,7 @@ fn optStepAdamwF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_opt_step_adamw` (ops.cpp:12230 @8642541b2).
+/// Ports `ggml_compute_forward_opt_step_adamw` (ops.cpp:12266 @cd959bae9).
 pub export fn ggml_compute_forward_opt_step_adamw(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -348,7 +348,7 @@ pub export fn ggml_compute_forward_opt_step_adamw(params: *const ComputeParams, 
 // -----------------------------------------------------------------------------
 // opt_step_sgd
 
-/// Ports `ggml_compute_forward_opt_step_sgd_f32` (ops.cpp:12248 @8642541b2).
+/// Ports `ggml_compute_forward_opt_step_sgd_f32` (ops.cpp:12284 @cd959bae9).
 fn optStepSgdF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_grad = impl.one(Tensor, dst.src[1]);
@@ -400,7 +400,7 @@ fn optStepSgdF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_opt_step_sgd` (ops.cpp:12292 @8642541b2).
+/// Ports `ggml_compute_forward_opt_step_sgd` (ops.cpp:12328 @cd959bae9).
 pub export fn ggml_compute_forward_opt_step_sgd(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -413,7 +413,7 @@ pub export fn ggml_compute_forward_opt_step_sgd(params: *const ComputeParams, ds
 // -----------------------------------------------------------------------------
 // solve_tri
 
-/// Ports `ggml_compute_forward_solve_tri_f32` (ops.cpp:11028 @8642541b2):
+/// Ports `ggml_compute_forward_solve_tri_f32` (ops.cpp:11064 @cd959bae9):
 /// forward substitution, one right-hand-side column per work unit.
 fn solveTriF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]); // A (lower triangular)
@@ -483,7 +483,7 @@ fn solveTriF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_solve_tri` (ops.cpp:11087 @8642541b2).
+/// Ports `ggml_compute_forward_solve_tri` (ops.cpp:11123 @cd959bae9).
 pub export fn ggml_compute_forward_solve_tri(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);

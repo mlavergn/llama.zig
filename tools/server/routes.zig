@@ -71,7 +71,7 @@ fn ggmlAssert(ok: bool, comptime line: c_int, comptime cond: [*:0]const u8) void
 // -----------------------------------------------------------------------------
 // server_res_generator
 
-/// Ports `server_res_generator` (server-context.cpp:5271 @8642541b2): a
+/// Ports `server_res_generator` (server-context.cpp:5280 @cd959bae9): a
 /// generator-like response, its reader on the task queues, and the stream
 /// replay tee it derives from (`server_res_spipe`).
 pub const ResGenerator = struct {
@@ -88,8 +88,8 @@ pub const ResGenerator = struct {
 
     const vtable: http.Res.VTable = .{ .on_complete = onComplete, .destroy = destroyGen };
 
-    /// Ports `server_res_generator`'s constructor (server-context.cpp:5273
-    /// @8642541b2): may bypass sleep if the task does not use the context.
+    /// Ports `server_res_generator`'s constructor (server-context.cpp:5282
+    /// @cd959bae9): may bypass sleep if the task does not use the context.
     fn create(queue_tasks: *context.TaskQueue, queue_results: *context.ResultQueue, sleep_idle_seconds: c_int, bypass_sleep_in: bool) !*ResGenerator {
         const self = try gpa.create(ResGenerator);
         errdefer gpa.destroy(self);
@@ -126,13 +126,13 @@ pub const ResGenerator = struct {
         return self.base.allocator();
     }
 
-    /// Ports `server_res_generator`'s `ok` (server-context.cpp:5281 @8642541b2).
+    /// Ports `server_res_generator`'s `ok` (server-context.cpp:5290 @cd959bae9).
     fn ok(self: *ResGenerator, response_data: *const Value) !void {
         self.base.status = 200;
         try self.base.setData(try common.safeJsonToStr(self.alloc(), response_data));
     }
 
-    /// Ports `server_res_generator`'s `error` (server-context.cpp:5285 @8642541b2).
+    /// Ports `server_res_generator`'s `error` (server-context.cpp:5294 @cd959bae9).
     fn err(self: *ResGenerator, error_data: *const Value) !void {
         const a = self.alloc();
         self.base.status = common.jsonValue(error_data, "code", c_int, 500);
@@ -164,7 +164,7 @@ const ReqStop = struct {
 // -----------------------------------------------------------------------------
 // server_routes
 
-/// Ports `server_routes` (server-context.h:98 @8642541b2): every handler,
+/// Ports `server_routes` (server-context.h:99 @cd959bae9): every handler,
 /// as a field so router mode can replace it, and what they share.
 pub const Routes = struct {
     // handlers using lambda function, so that they can capture `this` without `std::bind`
@@ -218,8 +218,8 @@ pub const Routes = struct {
     // set when a scrape during sleep already reported the throughput buckets
     should_reset_buckets: bool = false,
 
-    /// Ports the constructor of `server_routes` (server-context.cpp:5582
-    /// @8642541b2). `self` must not move afterwards: the handlers and the
+    /// Ports the constructor of `server_routes` (server-context.cpp:5591
+    /// @cd959bae9). `self` must not move afterwards: the handlers and the
     /// sleeping callback point at it.
     pub fn init(self: *Routes, params: *const Params, ctx_server: *context.ServerContext) !void {
         self.* = .{
@@ -247,8 +247,8 @@ pub const Routes = struct {
         };
     }
 
-    /// Ports `server_routes`'s `update_meta` (server-context.h:104
-    /// @8642541b2): not thread-safe, only while `is_ready` is false.
+    /// Ports `server_routes`'s `update_meta` (server-context.h:105
+    /// @cd959bae9): not thread-safe, only while `is_ready` is false.
     pub fn updateMeta(self: *Routes, ctx_server: *const context.ServerContext) !void {
         _ = self.meta_arena.reset(.free_all);
         self.meta = try ctx_server.getMeta(self.meta_arena.allocator());
@@ -258,7 +258,7 @@ pub const Routes = struct {
         return &self.meta.?;
     }
 
-    /// Ports `server_routes`'s `create_response` (server-context.cpp:5578 @8642541b2).
+    /// Ports `server_routes`'s `create_response` (server-context.cpp:5587 @cd959bae9).
     fn createResponse(self: *Routes, bypass_sleep: bool) !*ResGenerator {
         return ResGenerator.create(self.queue_tasks, self.queue_results, self.params.sleep_idle_seconds, bypass_sleep);
     }
@@ -309,7 +309,7 @@ pub const Routes = struct {
     // -------------------------------------------------------------------------
     // the handlers
 
-    /// The `get_health` lambda (server-context.cpp:5716 @8642541b2): error
+    /// The `get_health` lambda (server-context.cpp:5728 @cd959bae9): error
     /// and loading states are handled by the middleware; reachable during
     /// sleep.
     fn getHealth(self: *Routes, _: *const http.Req) anyerror!*http.Res {
@@ -323,7 +323,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The cached-metrics lambda of `get_metrics` (server-context.cpp:5729 @8642541b2).
+    /// The cached-metrics lambda of `get_metrics` (server-context.cpp:5741 @cd959bae9).
     fn useCachedMetrics(self: *Routes, res: *ResGenerator) !void {
         _ = std.c.pthread_mutex_lock(&self.mutex_cache);
         defer _ = std.c.pthread_mutex_unlock(&self.mutex_cache);
@@ -340,7 +340,7 @@ pub const Routes = struct {
         self.should_reset_buckets = true;
     }
 
-    /// The `get_metrics` lambda (server-context.cpp:5729 @8642541b2).
+    /// The `get_metrics` lambda (server-context.cpp:5741 @cd959bae9).
     fn getMetrics(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(true);
         errdefer res.destroy();
@@ -395,7 +395,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `get_slots` lambda (server-context.cpp:5791 @8642541b2).
+    /// The `get_slots` lambda (server-context.cpp:5803 @cd959bae9).
     fn getSlots(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -440,7 +440,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `post_slots` lambda (server-context.cpp:5833 @8642541b2).
+    /// The `post_slots` lambda (server-context.cpp:5845 @cd959bae9).
     fn postSlots(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         var res_alive = true;
@@ -479,7 +479,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `get_props` lambda (server-context.cpp:5866 @8642541b2): must be
+    /// The `get_props` lambda (server-context.cpp:5878 @cd959bae9): must be
     /// reachable during sleep, so it never touches the context.
     fn getProps(self: *Routes, _: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(true);
@@ -495,7 +495,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `post_props` lambda (server-context.cpp:5878 @8642541b2).
+    /// The `post_props` lambda (server-context.cpp:5890 @cd959bae9).
     fn postProps(self: *Routes, _: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -512,7 +512,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `post_infill` lambda (server-context.cpp:5890 @8642541b2). Its
+    /// The `post_infill` lambda (server-context.cpp:5902 @cd959bae9). Its
     /// three "required" checks set an error on a response that is then
     /// dropped, as upstream's do; a missing field throws at `at` instead.
     fn postInfill(self: *Routes, req: *const http.Req) anyerror!*http.Res {
@@ -605,7 +605,7 @@ pub const Routes = struct {
         return self.handleCompletionsImpl(req, .infill, &data, &.{}, .none, null); // infill is not OAI compatible
     }
 
-    /// The `post_completions` lambda (server-context.cpp:5968 @8642541b2).
+    /// The `post_completions` lambda (server-context.cpp:5980 @cd959bae9).
     fn postCompletions(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         defer res.destroy();
@@ -614,7 +614,7 @@ pub const Routes = struct {
         return self.handleCompletionsImpl(req, .completion, &body, &.{}, .none, null);
     }
 
-    /// The `post_completions_oai` lambda (server-context.cpp:5980 @8642541b2).
+    /// The `post_completions_oai` lambda (server-context.cpp:5992 @cd959bae9).
     fn postCompletionsOai(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         defer res.destroy();
@@ -687,7 +687,7 @@ pub const Routes = struct {
         gpa.destroy(p);
     }
 
-    /// The `post_chat_completions` lambda (server-context.cpp:5992 @8642541b2).
+    /// The `post_chat_completions` lambda (server-context.cpp:6004 @cd959bae9).
     fn postChatCompletions(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         defer res.destroy();
@@ -696,12 +696,12 @@ pub const Routes = struct {
         return self.handleCompletionsImpl(req, .completion, &p.body, p.files.items, .oai_chat, &p.session);
     }
 
-    /// The `post_chat_completions_tok` lambda (server-context.cpp:6012 @8642541b2).
+    /// The `post_chat_completions_tok` lambda (server-context.cpp:6024 @cd959bae9).
     fn postChatCompletionsTok(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         return self.handleCountTokens(req, .oai_chat);
     }
 
-    /// The `post_control` lambda (server-context.cpp:6016 @8642541b2).
+    /// The `post_control` lambda (server-context.cpp:6028 @cd959bae9).
     fn postControl(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -742,7 +742,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `post_responses_oai` lambda (server-context.cpp:6053 @8642541b2):
+    /// The `post_responses_oai` lambda (server-context.cpp:6065 @cd959bae9):
     /// the request converted from the Responses API, then run as chat.
     fn postResponsesOai(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
@@ -752,13 +752,13 @@ pub const Routes = struct {
         return self.handleCompletionsImpl(req, .completion, &p.body, p.files.items, .oai_resp, &p.session);
     }
 
-    /// The `post_responses_tok_oai` lambda (server-context.cpp:6075 @8642541b2).
+    /// The `post_responses_tok_oai` lambda (server-context.cpp:6087 @cd959bae9).
     fn postResponsesTokOai(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         return self.handleCountTokens(req, .oai_resp);
     }
 
-    /// The `post_transcriptions_oai` lambda (server-context.cpp:6079
-    /// @8642541b2): refused without audio input; otherwise the upload and
+    /// The `post_transcriptions_oai` lambda (server-context.cpp:6091
+    /// @cd959bae9): refused without audio input; otherwise the upload and
     /// its form converted into chat over the template's ASR preset.
     fn postTranscriptionsOai(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
@@ -775,8 +775,8 @@ pub const Routes = struct {
         return self.handleCompletionsImpl(req, .completion, &p.body, p.files.items, .oai_asr, &p.session);
     }
 
-    /// The `post_anthropic_messages` lambda (server-context.cpp:6313
-    /// @8642541b2): the request converted from the Anthropic Messages API,
+    /// The `post_anthropic_messages` lambda (server-context.cpp:6325
+    /// @cd959bae9): the request converted from the Anthropic Messages API,
     /// then run as chat.
     fn postAnthropicMessages(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
@@ -786,13 +786,13 @@ pub const Routes = struct {
         return self.handleCompletionsImpl(req, .completion, &p.body, p.files.items, .anthropic, &p.session);
     }
 
-    /// The `post_anthropic_count_tokens` lambda (server-context.cpp:6335 @8642541b2).
+    /// The `post_anthropic_count_tokens` lambda (server-context.cpp:6347 @cd959bae9).
     fn postAnthropicCountTokens(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         return self.handleCountTokens(req, .anthropic);
     }
 
-    /// The `post_apply_template` lambda (server-context.cpp:6340
-    /// @8642541b2): `handle_chat_completions` without the inference.
+    /// The `post_apply_template` lambda (server-context.cpp:6352
+    /// @cd959bae9): `handle_chat_completions` without the inference.
     fn postApplyTemplate(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -806,7 +806,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `get_models` lambda (server-context.cpp:6355 @8642541b2).
+    /// The `get_models` lambda (server-context.cpp:6367 @cd959bae9).
     fn getModels(self: *Routes, _: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(true);
         errdefer res.destroy();
@@ -822,7 +822,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `post_tokenize` lambda (server-context.cpp:6367 @8642541b2).
+    /// The `post_tokenize` lambda (server-context.cpp:6379 @cd959bae9).
     fn postTokenize(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -869,7 +869,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `post_detokenize` lambda (server-context.cpp:6408 @8642541b2).
+    /// The `post_detokenize` lambda (server-context.cpp:6420 @cd959bae9).
     fn postDetokenize(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -889,17 +889,17 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `post_embeddings` lambda (server-context.cpp:6422 @8642541b2).
+    /// The `post_embeddings` lambda (server-context.cpp:6434 @cd959bae9).
     fn postEmbeddings(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         return self.handleEmbeddingsImpl(req, .none);
     }
 
-    /// The `post_embeddings_oai` lambda (server-context.cpp:6426 @8642541b2).
+    /// The `post_embeddings_oai` lambda (server-context.cpp:6438 @cd959bae9).
     fn postEmbeddingsOai(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         return self.handleEmbeddingsImpl(req, .oai_embd);
     }
 
-    /// The `post_systemone` lambda (server-context.cpp:6604 @8642541b2): the
+    /// The `post_systemone` lambda (server-context.cpp:6639 @cd959bae9): the
     /// typed decision API. One task per variant of each question, or one
     /// task for all the questions of a joint model.
     fn postSystemone(self: *Routes, req: *const http.Req) anyerror!*http.Res {
@@ -1010,7 +1010,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `post_rerank` lambda (server-context.cpp:6430 @8642541b2).
+    /// The `post_rerank` lambda (server-context.cpp:6442 @cd959bae9).
     fn postRerank(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         return self.handleRerankImpl(req);
     }
@@ -1058,7 +1058,7 @@ pub const Routes = struct {
         }
     }
 
-    /// Ports `server_routes`'s `handle_rerank_impl` (server-context.cpp:6972 @8642541b2).
+    /// Ports `server_routes`'s `handle_rerank_impl` (server-context.cpp:7007 @cd959bae9).
     fn handleRerankImpl(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -1312,7 +1312,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `set_next` lambda (server-context.cpp:6571 @8642541b2) of `post_tts`.
+    /// The `set_next` lambda (server-context.cpp:6606 @cd959bae9) of `post_tts`.
     fn ttsNext(ctx: ?*anyopaque, output: *std.ArrayList(u8), oa: Allocator) anyerror!bool {
         const res_this: *ResGenerator = @ptrCast(@alignCast(ctx.?));
         // flush buffered audio before is_done - the first result can already be final
@@ -1361,7 +1361,7 @@ pub const Routes = struct {
         };
     }
 
-    /// The `ws_realtime` lambda (server-context.cpp:6114 @8642541b2):
+    /// The `ws_realtime` lambda (server-context.cpp:6126 @cd959bae9):
     /// realtime transcription over websocket, modeled after the OpenAI
     /// realtime API. Audio is PCM16 mono at the model sample rate, sent as
     /// base64 in input_audio_buffer.append events;
@@ -1390,7 +1390,7 @@ pub const Routes = struct {
         try session.run();
     }
 
-    /// The `get_lora_adapters` lambda (server-context.cpp:6690 @8642541b2).
+    /// The `get_lora_adapters` lambda (server-context.cpp:6725 @cd959bae9).
     fn getLoraAdapters(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -1405,7 +1405,7 @@ pub const Routes = struct {
         return self.finishSimple(res, req, .get_lora, 6713);
     }
 
-    /// The `post_lora_adapters` lambda (server-context.cpp:6718 @8642541b2).
+    /// The `post_lora_adapters` lambda (server-context.cpp:6753 @cd959bae9).
     fn postLoraAdapters(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -1488,8 +1488,8 @@ pub const Routes = struct {
         return self.finishSimple(res, req, kind, line);
     }
 
-    /// Ports `server_routes`'s `handle_slots_save` (server-context.cpp:6753
-    /// @8642541b2). Its result is not type-checked, as upstream's is not.
+    /// Ports `server_routes`'s `handle_slots_save` (server-context.cpp:6788
+    /// @cd959bae9). Its result is not type-checked, as upstream's is not.
     fn handleSlotsSave(self: *Routes, req: *const http.Req, id_slot: c_int) !*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -1522,17 +1522,17 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// Ports `server_routes`'s `handle_slots_restore` (server-context.cpp:6789 @8642541b2).
+    /// Ports `server_routes`'s `handle_slots_restore` (server-context.cpp:6824 @cd959bae9).
     fn handleSlotsRestore(self: *Routes, req: *const http.Req, id_slot: c_int) !*http.Res {
         return self.postSlotAction(req, .slot_restore, id_slot, .slot_save_load, 6821);
     }
 
-    /// Ports `server_routes`'s `handle_slots_erase` (server-context.cpp:6826 @8642541b2).
+    /// Ports `server_routes`'s `handle_slots_erase` (server-context.cpp:6861 @cd959bae9).
     fn handleSlotsErase(self: *Routes, req: *const http.Req, id_slot: c_int) !*http.Res {
         return self.postSlotAction(req, .slot_erase, id_slot, .slot_erase, 6848);
     }
 
-    /// Ports `server_routes`'s `handle_embeddings_impl` (server-context.cpp:6853 @8642541b2).
+    /// Ports `server_routes`'s `handle_embeddings_impl` (server-context.cpp:6888 @cd959bae9).
     fn handleEmbeddingsImpl(self: *Routes, req: *const http.Req, res_type_in: ResponseType) !*http.Res {
         var res_type = res_type_in;
         const res = try self.createResponse(false);
@@ -1675,8 +1675,8 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// Ports `server_routes`'s `handle_count_tokens` (server-context.cpp:7120
-    /// @8642541b2): the prompt a chat, Responses or Anthropic request would
+    /// Ports `server_routes`'s `handle_count_tokens` (server-context.cpp:7155
+    /// @cd959bae9): the prompt a chat, Responses or Anthropic request would
     /// render, counted in tokens.
     fn handleCountTokens(self: *Routes, req: *const http.Req, res_type: ResponseType) !*http.Res {
         const res = try self.createResponse(false);
@@ -1731,7 +1731,7 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// Ports `server_routes`'s `handle_completions_impl` (server-context.cpp:5299 @8642541b2).
+    /// Ports `server_routes`'s `handle_completions_impl` (server-context.cpp:5308 @cd959bae9).
     /// `chat_session`: the request's, or null for the default one.
     fn handleCompletionsImpl(self: *Routes, req: *const http.Req, ty: TaskType, data: *Value, files: []const []u8, res_type: ResponseType, chat_session: ?*const chat.session.Session) !*http.Res {
         ggmlAssert(ty == .completion or ty == .infill, 5306, "type == SERVER_TASK_TYPE_COMPLETION || type == SERVER_TASK_TYPE_INFILL");
@@ -1843,8 +1843,8 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `try` block of `handle_completions_impl` (server-context.cpp:5299
-    /// @8642541b2): tokenize, build one task per prompt (and its children),
+    /// The `try` block of `handle_completions_impl` (server-context.cpp:5308
+    /// @cd959bae9): tokenize, build one task per prompt (and its children),
     /// post them.
     fn postCompletionTasks(self: *Routes, res: *ResGenerator, ty: TaskType, data: *Value, files: []const []u8, res_type: ResponseType, completion_id: []const u8, sse_ping_interval: *i32, chat_session: ?*const chat.session.Session) !void {
         const params = self.params;
@@ -1913,7 +1913,7 @@ pub const Routes = struct {
     }
 
     /// The `path_prompts_log_dir` block of `handle_completions_impl`
-    /// (server-context.cpp:5299 @8642541b2): the prompt, written to a file
+    /// (server-context.cpp:5308 @cd959bae9): the prompt, written to a file
     /// named for the time.
     fn logPrompt(a: Allocator, dir: []const u8, prompt: *const Value) !void {
         const name = try std.fmt.allocPrint(a, "{d:0>12}.txt", .{c.ggml_time_ms()});
@@ -1931,7 +1931,7 @@ pub const Routes = struct {
     }
 
     /// The `set_next` lambda of `handle_completions_impl`
-    /// (server-context.cpp:5299 @8642541b2): one result per call as SSE, a
+    /// (server-context.cpp:5308 @cd959bae9): one result per call as SSE, a
     /// ping when the stream stays silent, `[DONE]` at the end where the
     /// format has one.
     fn streamNext(ctx: ?*anyopaque, output: *std.ArrayList(u8), oa: Allocator) anyerror!bool {
@@ -1951,7 +1951,7 @@ pub const Routes = struct {
         };
     }
 
-    /// The `format_error` lambda of the streaming lambda (server-context.cpp:5468 @8642541b2).
+    /// The `format_error` lambda of the streaming lambda (server-context.cpp:5477 @cd959bae9).
     fn formatError(a: Allocator, res_type: ResponseType, res_json: *const Value) ![]u8 {
         if (res_type == .anthropic) {
             var o = common.Obj.init(a);
@@ -2053,14 +2053,14 @@ pub const Routes = struct {
         return true;
     }
 
-    /// Ports `server_routes`'s `get_model_info` (server-context.cpp:5708
-    /// @8642541b2): for router mode.
+    /// Ports `server_routes`'s `get_model_info` (server-context.cpp:5720
+    /// @cd959bae9): for router mode.
     pub fn getModelInfo(self: *const Routes, a: Allocator) !Value {
         return getResModelInfo(a, self.metaRef());
     }
 
-    /// Ports `server_routes`'s `update_cached_responses` (server-context.cpp:7174
-    /// @8642541b2): the caller is the task queue, so the context can be
+    /// Ports `server_routes`'s `update_cached_responses` (server-context.cpp:7209
+    /// @cd959bae9): the caller is the task queue, so the context can be
     /// read without holding locks.
     fn updateCachedResponses(self: *Routes, is_sleeping: bool) !void {
         _ = std.c.pthread_mutex_lock(&self.mutex_cache);
@@ -2106,7 +2106,7 @@ fn jsonValueStringsOr(a: Allocator, body: *const Value, key: []const u8, default
     return a.dupe([]const u8, default_value);
 }
 
-/// Ports `get_res_model_info` (server-context.cpp:5596 @8642541b2): do NOT
+/// Ports `get_res_model_info` (server-context.cpp:5605 @cd959bae9): do NOT
 /// use the context here, so it works during sleep.
 fn getResModelInfo(a: Allocator, meta: *const Meta) !Value {
     var o = common.Obj.init(a);
@@ -2125,7 +2125,7 @@ fn getResModelInfo(a: Allocator, meta: *const Meta) !Value {
     try o.put("owned_by", "llamacpp");
     var m = common.Obj.init(a);
     // since v0.5.0 an enum is its underlying type in a `common_json_value`
-    // (json.h:86 @8642541b2); before, `llama_vocab_type` converted to `bool`
+    // (json.h:86 @cd959bae9); before, `llama_vocab_type` converted to `bool`
     try m.put("vocab_type", @as(c_uint, @intCast(meta.model_vocab_type)));
     try m.put("n_vocab", meta.model_vocab_n_tokens);
     try m.put("n_ctx", meta.slot_n_ctx);
@@ -2138,7 +2138,7 @@ fn getResModelInfo(a: Allocator, meta: *const Meta) !Value {
     return o.done();
 }
 
-/// Ports `get_res_models` (server-context.cpp:5624 @8642541b2).
+/// Ports `get_res_models` (server-context.cpp:5633 @cd959bae9).
 fn getResModels(a: Allocator, meta: *const Meta) !Value {
     var model = common.Obj.init(a);
     try model.put("name", meta.model_name);
@@ -2236,7 +2236,7 @@ const ConnStop = struct {
     }
 };
 
-/// What the `ws_realtime` lambda (server-context.cpp:6114 @8642541b2) keeps
+/// What the `ws_realtime` lambda (server-context.cpp:6126 @cd959bae9) keeps
 /// on its stack for a live transcription session.
 const LiveAsr = struct {
     routes: *Routes,

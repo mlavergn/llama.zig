@@ -27,18 +27,18 @@ const gpa = context.gpa;
 extern "c" fn fgets(buf: [*]u8, n: c_int, stream: *anyopaque) ?[*:0]u8;
 
 /// Ports `CONNECT_ROOM_CODE_LEN` and `CONNECT_PASS_CODE_LEN`
-/// (server-connect.cpp:18, 19 @8642541b2): share code = room code + pass
+/// (server-connect.cpp:18, 19 @cd959bae9): share code = room code + pass
 /// code, must match llama-connect and the Web UI.
 const connect_room_code_len = 8;
 const connect_pass_code_len = 32;
 
-/// Ports `CONNECT_CODE_CHARS` (server-connect.cpp:21 @8642541b2).
+/// Ports `CONNECT_CODE_CHARS` (server-connect.cpp:21 @cd959bae9).
 const connect_code_chars = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
 
-/// Ports `CONNECT_EXE_NAME` (server-connect.cpp:27 @8642541b2).
+/// Ports `CONNECT_EXE_NAME` (server-connect.cpp:27 @cd959bae9).
 const connect_exe_name = "llama-connect";
 
-/// Ports `CONNECT_STOP_TIMEOUT_MS` (server-connect.cpp:32 @8642541b2): how
+/// Ports `CONNECT_STOP_TIMEOUT_MS` (server-connect.cpp:32 @cd959bae9): how
 /// long to wait for the child to notice the closed stdin before killing it.
 const connect_stop_timeout_ms = 3000;
 
@@ -46,7 +46,7 @@ fn zs(a: Allocator, s: []const u8) Allocator.Error![*:0]const u8 {
     return (try a.dupeSentinel(u8, s, 0)).ptr;
 }
 
-/// Ports `gen_share_code` (server-connect.cpp:35 @8642541b2): the pass code
+/// Ports `gen_share_code` (server-connect.cpp:35 @cd959bae9): the pass code
 /// guards the tunnel, so it is drawn from the system's random device,
 /// uniformly, by rejection.
 fn genShareCode(a: Allocator) Allocator.Error![]u8 {
@@ -64,7 +64,7 @@ fn genShareCode(a: Allocator) Allocator.Error![]u8 {
     return code;
 }
 
-/// Ports `format_share_code` (server-connect.cpp:47 @8642541b2): blocks of 8.
+/// Ports `format_share_code` (server-connect.cpp:47 @cd959bae9): blocks of 8.
 fn formatShareCode(a: Allocator, code: []const u8) Allocator.Error![]u8 {
     var out: std.ArrayList(u8) = .empty;
     var i: usize = 0;
@@ -82,7 +82,7 @@ fn isSpace(ch: u8) bool {
     return ch == ' ' or (ch >= '\t' and ch <= '\r');
 }
 
-/// Ports `normalize_share_code` (server-connect.cpp:60 @8642541b2):
+/// Ports `normalize_share_code` (server-connect.cpp:60 @cd959bae9):
 /// whitespace is tolerated, the Web UI shows the code in blocks and users
 /// paste it back.
 ///
@@ -108,7 +108,7 @@ fn normalizeShareCode(a: Allocator, key: []const u8) Allocator.Error![]const u8 
     return code.items;
 }
 
-/// Ports `forward_child_log` (server-connect.cpp:80 @8642541b2): llama-connect
+/// Ports `forward_child_log` (server-connect.cpp:80 @cd959bae9): llama-connect
 /// logs as `[LEVEL] text`, forwarded at the same level so our verbosity
 /// filter applies. Untagged lines are the startup banner, shown as info.
 fn forwardChildLog(line: [*:0]const u8) void {
@@ -141,7 +141,7 @@ fn forwardChildLog(line: [*:0]const u8) void {
     }
 }
 
-/// Ports `upstream_host` (server-connect.cpp:111 @8642541b2): the child dials
+/// Ports `upstream_host` (server-connect.cpp:111 @cd959bae9): the child dials
 /// over TCP: a wildcard bind is reached on loopback, a specific address on
 /// itself.
 ///
@@ -166,14 +166,14 @@ fn upstreamHost(a: Allocator, hosts: []const []const u8) Allocator.Error![]const
     return "";
 }
 
-/// Ports `server_connect` (server-connect.h:14 @8642541b2): the
+/// Ports `server_connect` (server-connect.h:14 @cd959bae9): the
 /// `llama-connect` child, its log thread, and whether its exit is expected.
 pub const ServerConnect = struct {
     proc: ?*tc.subproc.Subproc = null,
     log_thread: ?std.Thread = null,
     stopping: std.atomic.Value(bool) = .init(false), // tells the log thread the exit is expected
 
-    /// Ports `find_binary` (server-connect.cpp:136 @8642541b2): the path of
+    /// Ports `find_binary` (server-connect.cpp:136 @cd959bae9): the path of
     /// the llama-connect binary, preferring the copy shipped next to
     /// llama-server over an unrelated one in `PATH`.
     ///
@@ -206,7 +206,7 @@ pub const ServerConnect = struct {
         return "";
     }
 
-    /// Ports `unavailable_reason` (server-connect.cpp:167 @8642541b2): why
+    /// Ports `unavailable_reason` (server-connect.cpp:167 @cd959bae9): why
     /// `--connect` cannot work here.
     ///
     /// Return: empty if it can.
@@ -232,7 +232,7 @@ pub const ServerConnect = struct {
         return "";
     }
 
-    /// Ports `resolve_code` (server-connect.cpp:190 @8642541b2).
+    /// Ports `resolve_code` (server-connect.cpp:190 @cd959bae9).
     pub fn resolveCode(a: Allocator, code: []const u8) Allocator.Error![]const u8 {
         return if (code.len == 0) try genShareCode(a) else try normalizeShareCode(a, code);
     }
@@ -254,7 +254,7 @@ pub const ServerConnect = struct {
         }
     }
 
-    /// Ports `start` (server-connect.cpp:194 @8642541b2), a member of
+    /// Ports `start` (server-connect.cpp:194 @cd959bae9), a member of
     /// `server_connect`.
     ///
     /// Parameters:
@@ -311,7 +311,7 @@ pub const ServerConnect = struct {
         return true;
     }
 
-    /// Ports `stop` (server-connect.cpp:253 @8642541b2), a member of
+    /// Ports `stop` (server-connect.cpp:253 @cd959bae9), a member of
     /// `server_connect`: idempotent, also called by the destructor.
     pub fn stop(self: *ServerConnect) void {
         const proc = self.proc orelse return;
@@ -345,7 +345,7 @@ pub const ServerConnect = struct {
     }
 
     /// Ports the destructor of `server_connect` (server-connect.cpp:289
-    /// @8642541b2).
+    /// @cd959bae9).
     pub fn deinit(self: *ServerConnect) void {
         self.stop();
     }

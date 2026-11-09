@@ -17,10 +17,10 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_SCALE_BLOCK_SIZE` (scale.cuh:3 @8642541b2).
+/// Ports `CUDA_SCALE_BLOCK_SIZE` (scale.cuh:3 @cd959bae9).
 const block_size = 256;
 
-/// Ports `MAX_GRIDDIM_X` (scale.cu:4 @8642541b2).
+/// Ports `MAX_GRIDDIM_X` (scale.cu:4 @cd959bae9).
 const max_griddim_x = 0x7FFFFFFF;
 
 /// A byte stride in elements, into the kernel's `uint32_t` parameter.
@@ -28,7 +28,7 @@ fn elems(nb: usize, ts: usize) u32 {
     return @truncate(nb / ts);
 }
 
-/// Ports `scale_f32_cuda` (scale.cu:31 @8642541b2), its element type `T`
+/// Ports `scale_f32_cuda` (scale.cu:31 @cd959bae9), its element type `T`
 /// comptime: `f32` or `kernels.bf16`.
 fn scaleF32Cuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, scale: f32, bias: f32, src0: *const Tensor, t: *const Tensor, stream: common.cu.cudaStream_t) void {
     const k = c.ggml_nelements(src0);
@@ -52,7 +52,7 @@ fn scaleF32Cuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, scale:
     });
 }
 
-/// Ports `ggml_cuda_op_scale` (scale.cu:47 @8642541b2).
+/// Ports `ggml_cuda_op_scale` (scale.cu:47 @cd959bae9).
 pub fn opScale(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const stream = ctx.stream();

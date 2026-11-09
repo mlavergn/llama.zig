@@ -15,11 +15,11 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_CONV2D_TRANSPOSE_BLOCK_SIZE` (conv2d-transpose.cuh:3 @8642541b2).
+/// Ports `CUDA_CONV2D_TRANSPOSE_BLOCK_SIZE` (conv2d-transpose.cuh:3 @cd959bae9).
 const block_size = 256;
 
 /// Ports `ggml_cuda_conv_2d_transpose_p0` (conv2d-transpose.cu:71
-/// @8642541b2). Input is (W, H, C_in, N), kernel is (W, H, C_out, C_in).
+/// @cd959bae9). Input is (W, H, C_in, N), kernel is (W, H, C_out, C_in).
 pub fn conv2dTransposeP0(ctx: *common.Context, dst: *Tensor) void {
     const kernel = impl.one(Tensor, dst.src[0]);
     const input = impl.one(Tensor, dst.src[1]);

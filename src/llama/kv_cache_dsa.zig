@@ -38,7 +38,7 @@ fn oom() noreturn {
     impl.abort("llama-kv-cache-dsa.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_kv_cache_dsa` (llama-kv-cache-dsa.h:15 @8642541b2): two
+/// Ports `llama_kv_cache_dsa` (llama-kv-cache-dsa.h:15 @cd959bae9): two
 /// `llama_kv_cache`s, the first for the model's keys and the second for
 /// the lightning indexer's.
 pub const KvCacheDsa = struct {
@@ -115,14 +115,14 @@ pub const KvCacheDsa = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `llama_kv_cache_dsa`'s `clear` (llama-kv-cache-dsa.cpp:56 @8642541b2).
+    /// Ports `llama_kv_cache_dsa`'s `clear` (llama-kv-cache-dsa.cpp:60 @cd959bae9).
     pub fn clear(self: *KvCacheDsa, data: bool) void {
         self.kv_mla.clear(data);
         self.kv_lid.clear(data);
     }
 
-    /// Ports `llama_kv_cache_dsa`'s `seq_rm` (llama-kv-cache-dsa.cpp:61
-    /// @8642541b2): both caches, whatever the first answers.
+    /// Ports `llama_kv_cache_dsa`'s `seq_rm` (llama-kv-cache-dsa.cpp:65
+    /// @cd959bae9): both caches, whatever the first answers.
     pub fn seqRm(self: *KvCacheDsa, seq_id: i32, p0: i32, p1: i32) bool {
         var res = true;
         res = self.kv_mla.seqRm(seq_id, p0, p1) and res;
@@ -130,49 +130,49 @@ pub const KvCacheDsa = struct {
         return res;
     }
 
-    /// Ports `llama_kv_cache_dsa`'s `seq_cp` (llama-kv-cache-dsa.cpp:70 @8642541b2).
+    /// Ports `llama_kv_cache_dsa`'s `seq_cp` (llama-kv-cache-dsa.cpp:74 @cd959bae9).
     pub fn seqCp(self: *KvCacheDsa, seq_id_src: i32, seq_id_dst: i32, p0: i32, p1: i32) void {
         self.kv_mla.seqCp(seq_id_src, seq_id_dst, p0, p1);
         self.kv_lid.seqCp(seq_id_src, seq_id_dst, p0, p1);
     }
 
-    /// Ports `llama_kv_cache_dsa`'s `seq_keep` (llama-kv-cache-dsa.cpp:75 @8642541b2).
+    /// Ports `llama_kv_cache_dsa`'s `seq_keep` (llama-kv-cache-dsa.cpp:79 @cd959bae9).
     pub fn seqKeep(self: *KvCacheDsa, seq_id: i32) void {
         self.kv_mla.seqKeep(seq_id);
         self.kv_lid.seqKeep(seq_id);
     }
 
-    /// Ports `llama_kv_cache_dsa`'s `seq_add` (llama-kv-cache-dsa.cpp:80 @8642541b2).
+    /// Ports `llama_kv_cache_dsa`'s `seq_add` (llama-kv-cache-dsa.cpp:84 @cd959bae9).
     pub fn seqAdd(self: *KvCacheDsa, seq_id: i32, p0: i32, p1: i32, shift: i32) void {
         self.kv_mla.seqAdd(seq_id, p0, p1, shift);
         self.kv_lid.seqAdd(seq_id, p0, p1, shift);
     }
 
-    /// Ports `llama_kv_cache_dsa`'s `seq_div` (llama-kv-cache-dsa.cpp:85 @8642541b2).
+    /// Ports `llama_kv_cache_dsa`'s `seq_div` (llama-kv-cache-dsa.cpp:89 @cd959bae9).
     pub fn seqDiv(self: *KvCacheDsa, seq_id: i32, p0: i32, p1: i32, d: c_int) void {
         self.kv_mla.seqDiv(seq_id, p0, p1, d);
         self.kv_lid.seqDiv(seq_id, p0, p1, d);
     }
 
-    /// Ports `llama_kv_cache_dsa`'s `seq_pos_min` (llama-kv-cache-dsa.cpp:90
-    /// @8642541b2): the main cache answers.
+    /// Ports `llama_kv_cache_dsa`'s `seq_pos_min` (llama-kv-cache-dsa.cpp:94
+    /// @cd959bae9): the main cache answers.
     pub fn seqPosMin(self: *const KvCacheDsa, seq_id: i32) i32 {
         return self.kv_mla.seqPosMin(seq_id);
     }
 
-    /// Ports `llama_kv_cache_dsa`'s `seq_pos_max` (llama-kv-cache-dsa.cpp:94 @8642541b2).
+    /// Ports `llama_kv_cache_dsa`'s `seq_pos_max` (llama-kv-cache-dsa.cpp:98 @cd959bae9).
     pub fn seqPosMax(self: *const KvCacheDsa, seq_id: i32) i32 {
         return self.kv_mla.seqPosMax(seq_id);
     }
 
-    /// Ports `llama_kv_cache_dsa`'s `memory_breakdown` (llama-kv-cache-dsa.cpp:98 @8642541b2).
+    /// Ports `llama_kv_cache_dsa`'s `memory_breakdown` (llama-kv-cache-dsa.cpp:102 @cd959bae9).
     pub fn memoryBreakdown(self: *const KvCacheDsa, out: *std.ArrayList(memory.BuftSize)) void {
         self.kv_mla.memoryBreakdown(out);
         self.kv_lid.memoryBreakdown(out);
     }
 
-    /// Ports `llama_kv_cache_dsa`'s `init_batch` (llama-kv-cache-dsa.cpp:106
-    /// @8642541b2): a simple split for a single stream, an equal one
+    /// Ports `llama_kv_cache_dsa`'s `init_batch` (llama-kv-cache-dsa.cpp:110
+    /// @cd959bae9): a simple split for a single stream, an equal one
     /// otherwise; every ubatch must find a slot in both caches.
     pub fn initBatch(self: *KvCacheDsa, balloc: *batch.BatchAllocr, n_ubatch: u32, embd_all: bool) *DsaContext {
         _ = embd_all;
@@ -223,32 +223,32 @@ pub const KvCacheDsa = struct {
         return DsaContext.createStatus(.failed_prepare);
     }
 
-    /// Ports `llama_kv_cache_dsa`'s `init_full` (llama-kv-cache-dsa.cpp:150 @8642541b2).
+    /// Ports `llama_kv_cache_dsa`'s `init_full` (llama-kv-cache-dsa.cpp:154 @cd959bae9).
     pub fn initFull(self: *KvCacheDsa) *DsaContext {
         return DsaContext.createFull(self);
     }
 
-    /// Ports `llama_kv_cache_dsa`'s `init_update` (llama-kv-cache-dsa.cpp:154 @8642541b2).
+    /// Ports `llama_kv_cache_dsa`'s `init_update` (llama-kv-cache-dsa.cpp:158 @cd959bae9).
     pub fn initUpdate(self: *KvCacheDsa, lctx: *anyopaque, optimize: bool) *DsaContext {
         return DsaContext.createUpdate(self, lctx, optimize);
     }
 
-    /// Ports `llama_kv_cache_dsa`'s `get_can_shift` (llama-kv-cache-dsa.cpp:158
-    /// @8642541b2): only when both can and the two are the same size.
+    /// Ports `llama_kv_cache_dsa`'s `get_can_shift` (llama-kv-cache-dsa.cpp:162
+    /// @cd959bae9): only when both can and the two are the same size.
     pub fn getCanShift(self: *const KvCacheDsa) bool {
         return self.kv_mla.getCanShift() and
             self.kv_lid.getCanShift() and
             self.kv_mla.getSize() == self.kv_lid.getSize();
     }
 
-    /// Ports `llama_kv_cache_dsa`'s `state_write` (llama-kv-cache-dsa.cpp:164 @8642541b2).
+    /// Ports `llama_kv_cache_dsa`'s `state_write` (llama-kv-cache-dsa.cpp:168 @cd959bae9).
     pub fn stateWrite(self: *const KvCacheDsa, w: io.Writer, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
         try self.kv_mla.stateWrite(w, seq_id, flags, exc);
         try self.kv_lid.stateWrite(w, seq_id, flags, exc);
     }
 
-    /// Ports `llama_kv_cache_dsa`'s `state_read` (llama-kv-cache-dsa.cpp:169
-    /// @8642541b2): an indexer restore that fails undoes the MLA restore, so
+    /// Ports `llama_kv_cache_dsa`'s `state_read` (llama-kv-cache-dsa.cpp:173
+    /// @cd959bae9): an indexer restore that fails undoes the MLA restore, so
     /// a failed restore leaves nothing behind.
     pub fn stateRead(self: *KvCacheDsa, r: io.Reader, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
         try self.kv_mla.stateRead(r, seq_id, flags, exc);
@@ -258,12 +258,12 @@ pub const KvCacheDsa = struct {
         };
     }
 
-    /// Ports `llama_kv_cache_dsa`'s `get_mla` (llama-kv-cache-dsa.cpp:182 @8642541b2).
+    /// Ports `llama_kv_cache_dsa`'s `get_mla` (llama-kv-cache-dsa.cpp:186 @cd959bae9).
     pub fn getMla(self: *const KvCacheDsa) *KvCache {
         return self.kv_mla;
     }
 
-    /// Ports `llama_kv_cache_dsa`'s `get_lid` (llama-kv-cache-dsa.cpp:186 @8642541b2).
+    /// Ports `llama_kv_cache_dsa`'s `get_lid` (llama-kv-cache-dsa.cpp:190 @cd959bae9).
     pub fn getLid(self: *const KvCacheDsa) *KvCache {
         return self.kv_lid;
     }
@@ -383,7 +383,7 @@ fn retainedCopy(list: []const Ubatch) std.ArrayList(Ubatch) {
     return out;
 }
 
-/// Ports `llama_kv_cache_dsa_context` (llama-kv-cache-dsa.h:84 @8642541b2).
+/// Ports `llama_kv_cache_dsa_context` (llama-kv-cache-dsa.h:84 @cd959bae9).
 pub const DsaContext = struct {
     /// The index of the next ubatch to process.
     i_next: usize = 0,
@@ -393,7 +393,7 @@ pub const DsaContext = struct {
     status: memory.Status,
 
     /// Ports the error constructor of `llama_kv_cache_dsa_context`
-    /// (llama-kv-cache-dsa.cpp:194 @8642541b2).
+    /// (llama-kv-cache-dsa.cpp:198 @cd959bae9).
     pub fn createStatus(status: memory.Status) *DsaContext {
         const self = allocator.create(DsaContext) catch oom();
         self.* = .{ .status = status };
@@ -401,7 +401,7 @@ pub const DsaContext = struct {
     }
 
     /// Ports the full-cache constructor of `llama_kv_cache_dsa_context`
-    /// (llama-kv-cache-dsa.cpp:196 @8642541b2).
+    /// (llama-kv-cache-dsa.cpp:200 @cd959bae9).
     pub fn createFull(kv: *KvCacheDsa) *DsaContext {
         const self = allocator.create(DsaContext) catch oom();
         const m = kv.getMla().initFull();
@@ -411,7 +411,7 @@ pub const DsaContext = struct {
     }
 
     /// Ports the update constructor of `llama_kv_cache_dsa_context`
-    /// (llama-kv-cache-dsa.cpp:203 @8642541b2).
+    /// (llama-kv-cache-dsa.cpp:207 @cd959bae9).
     pub fn createUpdate(kv: *KvCacheDsa, lctx: *anyopaque, optimize: bool) *DsaContext {
         const self = allocator.create(DsaContext) catch oom();
         const m = kv.getMla().initUpdate(lctx, optimize);
@@ -421,7 +421,7 @@ pub const DsaContext = struct {
     }
 
     /// Ports the batch constructor of `llama_kv_cache_dsa_context`
-    /// (llama-kv-cache-dsa.cpp:212 @8642541b2): each cache gets its own copy
+    /// (llama-kv-cache-dsa.cpp:216 @cd959bae9): each cache gets its own copy
     /// of the ubatches, as the C++ copies them.
     pub fn createBatch(kv: *KvCacheDsa, sinfos_mla: std.ArrayList(SlotInfo), sinfos_lid: std.ArrayList(SlotInfo), ubatches: std.ArrayList(Ubatch)) *DsaContext {
         const self = allocator.create(DsaContext) catch oom();
@@ -439,7 +439,7 @@ pub const DsaContext = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `llama_kv_cache_dsa_context`'s `next` (llama-kv-cache-dsa.cpp:226 @8642541b2).
+    /// Ports `llama_kv_cache_dsa_context`'s `next` (llama-kv-cache-dsa.cpp:230 @cd959bae9).
     pub fn next(self: *DsaContext) bool {
         std.debug.assert(self.status == .success);
         _ = self.ctx_mla.?.next();
@@ -448,8 +448,8 @@ pub const DsaContext = struct {
         return self.i_next < self.ubatches.items.len;
     }
 
-    /// Ports `llama_kv_cache_dsa_context`'s `apply` (llama-kv-cache-dsa.cpp:239
-    /// @8642541b2): both caches apply, whatever the first answers.
+    /// Ports `llama_kv_cache_dsa_context`'s `apply` (llama-kv-cache-dsa.cpp:243
+    /// @cd959bae9): both caches apply, whatever the first answers.
     pub fn apply(self: *DsaContext) bool {
         std.debug.assert(!memory.statusIsFail(self.status));
         var res = true;
@@ -458,24 +458,24 @@ pub const DsaContext = struct {
         return res;
     }
 
-    /// Ports `llama_kv_cache_dsa_context`'s `get_status` (llama-kv-cache-dsa.cpp:250 @8642541b2).
+    /// Ports `llama_kv_cache_dsa_context`'s `get_status` (llama-kv-cache-dsa.cpp:254 @cd959bae9).
     pub fn getStatus(self: *const DsaContext) memory.Status {
         return self.status;
     }
 
-    /// Ports `llama_kv_cache_dsa_context`'s `get_ubatch` (llama-kv-cache-dsa.cpp:254 @8642541b2).
+    /// Ports `llama_kv_cache_dsa_context`'s `get_ubatch` (llama-kv-cache-dsa.cpp:258 @cd959bae9).
     pub fn getUbatch(self: *const DsaContext) *const Ubatch {
         std.debug.assert(self.status == .success);
         return &self.ubatches.items[self.i_next];
     }
 
-    /// Ports `llama_kv_cache_dsa_context`'s `get_mla` (llama-kv-cache-dsa.cpp:260 @8642541b2).
+    /// Ports `llama_kv_cache_dsa_context`'s `get_mla` (llama-kv-cache-dsa.cpp:264 @cd959bae9).
     pub fn getMla(self: *const DsaContext) *const KvCacheContext {
         std.debug.assert(self.status == .success);
         return self.ctx_mla.?;
     }
 
-    /// Ports `llama_kv_cache_dsa_context`'s `get_lid` (llama-kv-cache-dsa.cpp:266 @8642541b2).
+    /// Ports `llama_kv_cache_dsa_context`'s `get_lid` (llama-kv-cache-dsa.cpp:270 @cd959bae9).
     pub fn getLid(self: *const DsaContext) *const KvCacheContext {
         std.debug.assert(self.status == .success);
         return self.ctx_lid.?;

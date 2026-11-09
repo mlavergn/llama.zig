@@ -76,7 +76,7 @@ fn oom() noreturn {
     impl.abort("ggml-backend-meta: out of memory");
 }
 
-/// Ports `GGML_ABORT` with format arguments (ggml.h:287 @8642541b2).
+/// Ports `GGML_ABORT` with format arguments (ggml.h:287 @cd959bae9).
 ///
 /// `impl.abort` takes only a literal; the meta backend's aborts name tensors.
 ///
@@ -104,7 +104,7 @@ const axis_unknown: Axis = c.GGML_BACKEND_SPLIT_AXIS_UNKNOWN;
 
 const max_dims: usize = c.GGML_MAX_DIMS;
 const max_src: usize = c.GGML_MAX_SRC;
-/// Ports `GGML_BACKEND_META_MAX_DEVICES` (ggml-backend.h:385 @8642541b2).
+/// Ports `GGML_BACKEND_META_MAX_DEVICES` (ggml-backend.h:400 @cd959bae9).
 const max_devices: usize = c.GGML_BACKEND_META_MAX_DEVICES;
 
 /// True for an axis that names a tensor dimension — the C's recurring
@@ -165,7 +165,7 @@ fn metaName(names: []const [*c]const u8) [:0]u8 {
     return out.toOwnedSliceSentinel(allocator, 0) catch oom();
 }
 
-/// Ports `ggml_backend_meta_split_axis_name` (ggml-backend-meta.cpp:27 @8642541b2).
+/// Ports `ggml_backend_meta_split_axis_name` (ggml-backend-meta.cpp:27 @cd959bae9).
 ///
 /// Return: a static string; aborts on a value outside the enum.
 pub export fn ggml_backend_meta_split_axis_name(split_axis: c.enum_ggml_backend_meta_split_axis) callconv(.c) [*c]const u8 {
@@ -185,7 +185,7 @@ pub export fn ggml_backend_meta_split_axis_name(split_axis: c.enum_ggml_backend_
 // -----------------------------------------------------------------------------
 // Meta backend device
 
-/// Ports `struct ggml_backend_meta_device_context` (ggml-backend-meta.cpp:54 @8642541b2).
+/// Ports `struct ggml_backend_meta_device_context` (ggml-backend-meta.cpp:54 @cd959bae9).
 const DeviceContext = struct {
     simple_devs: []c.ggml_backend_dev_t,
     get_split_state: c.ggml_backend_meta_get_split_state_t,
@@ -194,7 +194,7 @@ const DeviceContext = struct {
     name: [:0]u8,
     description: [:0]u8,
 
-    /// Ports the `ggml_backend_meta_device_context` constructor (ggml-backend-meta.cpp:62 @8642541b2).
+    /// Ports the `ggml_backend_meta_device_context` constructor (ggml-backend-meta.cpp:62 @cd959bae9).
     ///
     /// **The name loop runs zero times.** The C++ initialises the member
     /// `simple_devs` by moving from the parameter of the same name, and the
@@ -224,7 +224,7 @@ const DeviceContext = struct {
     }
 
     /// Equivalence under the operator< of `ggml_backend_meta_device_context`
-    /// (ggml-backend-meta.cpp:79 @8642541b2), which compares the tuple
+    /// (ggml-backend-meta.cpp:79 @cd959bae9), which compares the tuple
     /// `(simple_devs, get_split_state, get_split_state_ud)`.
     fn eql(self: *const DeviceContext, other: *const DeviceContext) bool {
         if (self.simple_devs.len != other.simple_devs.len) return false;
@@ -239,19 +239,19 @@ inline fn deviceCtx(dev: c.ggml_backend_dev_t) *DeviceContext {
     return @ptrCast(@alignCast(dev.*.context));
 }
 
-/// Ports `ggml_backend_meta_device_get_name` (ggml-backend-meta.cpp:87 @8642541b2).
+/// Ports `ggml_backend_meta_device_get_name` (ggml-backend-meta.cpp:87 @cd959bae9).
 fn deviceGetName(dev: c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
     impl.assert(devIsMeta(dev), "ggml_backend_dev_is_meta(dev)");
     return deviceCtx(dev).name.ptr;
 }
 
-/// Ports `ggml_backend_meta_device_get_description` (ggml-backend-meta.cpp:93 @8642541b2).
+/// Ports `ggml_backend_meta_device_get_description` (ggml-backend-meta.cpp:93 @cd959bae9).
 fn deviceGetDescription(dev: c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
     impl.assert(devIsMeta(dev), "ggml_backend_dev_is_meta(dev)");
     return deviceCtx(dev).description.ptr;
 }
 
-/// Ports `ggml_backend_meta_device_get_memory` (ggml-backend-meta.cpp:99 @8642541b2).
+/// Ports `ggml_backend_meta_device_get_memory` (ggml-backend-meta.cpp:99 @cd959bae9).
 ///
 /// The sum over the simple devices — of the same physical device, when one is
 /// listed twice, which counts its memory twice. The C++ does the same.
@@ -269,13 +269,13 @@ fn deviceGetMemory(dev: c.ggml_backend_dev_t, free: [*c]usize, total: [*c]usize)
     }
 }
 
-/// Ports `ggml_backend_meta_device_get_type` (ggml-backend-meta.cpp:112 @8642541b2).
+/// Ports `ggml_backend_meta_device_get_type` (ggml-backend-meta.cpp:112 @cd959bae9).
 fn deviceGetType(dev: c.ggml_backend_dev_t) callconv(.c) c.enum_ggml_backend_dev_type {
     _ = dev;
     return c.GGML_BACKEND_DEVICE_TYPE_META;
 }
 
-/// Ports `ggml_backend_meta_device_get_props` (ggml-backend-meta.cpp:118 @8642541b2).
+/// Ports `ggml_backend_meta_device_get_props` (ggml-backend-meta.cpp:118 @cd959bae9).
 ///
 /// The capabilities start from the C++'s placeholders — async and mmap on,
 /// host buffers, host pointers and events off ("Not implemented") — and are
@@ -311,7 +311,7 @@ fn deviceGetProps(dev: c.ggml_backend_dev_t, props_: [*c]c.struct_ggml_backend_d
     }
 }
 
-/// Ports `ggml_backend_meta_device_supports_op` (ggml-backend-meta.cpp:154 @8642541b2).
+/// Ports `ggml_backend_meta_device_supports_op` (ggml-backend-meta.cpp:154 @cd959bae9).
 ///
 /// Return: true when every simple device supports `op` (short-circuiting, as
 /// `std::all_of` does).
@@ -323,7 +323,7 @@ fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: [*c]const c.ggml_tensor) call
     return true;
 }
 
-/// Ports `ggml_backend_meta_device_supports_buft` (ggml-backend-meta.cpp:161 @8642541b2).
+/// Ports `ggml_backend_meta_device_supports_buft` (ggml-backend-meta.cpp:161 @cd959bae9).
 ///
 /// Return: true only for a meta buffer type over the same simple devices, in
 /// the same order.
@@ -344,7 +344,7 @@ fn deviceSupportsBuft(dev: c.ggml_backend_dev_t, buft: c.ggml_backend_buffer_typ
     return true;
 }
 
-/// Ports `ggml_backend_meta_device_iface` (ggml-backend-meta.cpp:180 @8642541b2).
+/// Ports `ggml_backend_meta_device_iface` (ggml-backend-meta.cpp:180 @cd959bae9).
 const device_iface: c.struct_ggml_backend_device_i = .{
     .get_name = &deviceGetName,
     .get_description = &deviceGetDescription,
@@ -363,7 +363,7 @@ const device_iface: c.struct_ggml_backend_device_i = .{
     .event_synchronize = null,
 };
 
-/// Ports `ggml_backend_dev_is_meta` (ggml-backend-meta.cpp:198 @8642541b2).
+/// Ports `ggml_backend_dev_is_meta` (ggml-backend-meta.cpp:198 @cd959bae9).
 ///
 /// Identity is the `get_name` function's address, so a device made by another
 /// implementation of this file (the reference, in `scripts/meta-diff`) is not
@@ -372,13 +372,13 @@ fn devIsMeta(dev: c.ggml_backend_dev_t) bool {
     return dev != null and dev.*.iface.get_name == device_iface.get_name;
 }
 
-/// Ports `ggml_backend_meta_dev_n_devs` (ggml-backend-meta.cpp:202 @8642541b2).
+/// Ports `ggml_backend_meta_dev_n_devs` (ggml-backend-meta.cpp:202 @cd959bae9).
 fn devNDevs(meta_dev: c.ggml_backend_dev_t) usize {
     impl.assert(devIsMeta(meta_dev), "ggml_backend_dev_is_meta(meta_dev)");
     return deviceCtx(meta_dev).simple_devs.len;
 }
 
-/// Ports `ggml_backend_meta_dev_simple_dev` (ggml-backend-meta.cpp:208 @8642541b2).
+/// Ports `ggml_backend_meta_dev_simple_dev` (ggml-backend-meta.cpp:208 @cd959bae9).
 fn devSimpleDev(meta_dev: c.ggml_backend_dev_t, index: usize) c.ggml_backend_dev_t {
     impl.assert(devIsMeta(meta_dev), "ggml_backend_dev_is_meta(meta_dev)");
     const meta_dev_ctx = deviceCtx(meta_dev);
@@ -399,7 +399,7 @@ const DeviceEntry = struct {
 /// in for the `std::map`.
 var meta_devs: std.ArrayList(*DeviceEntry) = .empty;
 
-/// Ports `ggml_backend_meta_device` (ggml-backend-meta.cpp:215 @8642541b2).
+/// Ports `ggml_backend_meta_device` (ggml-backend-meta.cpp:215 @cd959bae9).
 ///
 /// Interned: the same devices, callback and user data give back the same
 /// device pointer, for the life of the process.
@@ -446,13 +446,13 @@ pub export fn ggml_backend_meta_device(
 // -----------------------------------------------------------------------------
 // Meta backend buffer type
 
-/// Ports `struct ggml_backend_meta_buffer_type_context` (ggml-backend-meta.cpp:251 @8642541b2).
+/// Ports `struct ggml_backend_meta_buffer_type_context` (ggml-backend-meta.cpp:251 @cd959bae9).
 const BufferTypeContext = struct {
     simple_bufts: []c.ggml_backend_buffer_type_t,
 
     name: [:0]u8,
 
-    /// Ports the `ggml_backend_meta_buffer_type_context` constructor (ggml-backend-meta.cpp:256 @8642541b2).
+    /// Ports the `ggml_backend_meta_buffer_type_context` constructor (ggml-backend-meta.cpp:256 @cd959bae9).
     ///
     /// The same shadowed-parameter quirk as `DeviceContext.init`: the loop
     /// reads the moved-from argument, so the name is `Meta()`.
@@ -466,19 +466,19 @@ inline fn buftCtx(buft: c.ggml_backend_buffer_type_t) *BufferTypeContext {
     return @ptrCast(@alignCast(buft.*.context));
 }
 
-/// Ports `ggml_backend_meta_buft_n_bufts` (ggml-backend-meta.cpp:272 @8642541b2).
+/// Ports `ggml_backend_meta_buft_n_bufts` (ggml-backend-meta.cpp:272 @cd959bae9).
 fn buftNBufts(meta_buft: c.ggml_backend_buffer_type_t) usize {
     impl.assert(ggml_backend_buft_is_meta(meta_buft), "ggml_backend_buft_is_meta(meta_buft)");
     return buftCtx(meta_buft).simple_bufts.len;
 }
 
-/// Ports `ggml_backend_meta_buffer_type_get_name` (ggml-backend-meta.cpp:278 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_type_get_name` (ggml-backend-meta.cpp:278 @cd959bae9).
 fn buftGetName(buft: c.ggml_backend_buffer_type_t) callconv(.c) [*c]const u8 {
     impl.assert(ggml_backend_buft_is_meta(buft), "ggml_backend_buft_is_meta(buft)");
     return buftCtx(buft).name.ptr;
 }
 
-/// Ports `ggml_backend_meta_buft_simple_buft` (ggml-backend-meta.cpp:284 @8642541b2).
+/// Ports `ggml_backend_meta_buft_simple_buft` (ggml-backend-meta.cpp:284 @cd959bae9).
 fn buftSimpleBuft(meta_buft: c.ggml_backend_buffer_type_t, index: usize) c.ggml_backend_buffer_type_t {
     impl.assert(ggml_backend_buft_is_meta(meta_buft), "ggml_backend_buft_is_meta(meta_buft)");
     const meta_buft_ctx = buftCtx(meta_buft);
@@ -486,7 +486,7 @@ fn buftSimpleBuft(meta_buft: c.ggml_backend_buffer_type_t, index: usize) c.ggml_
     return meta_buft_ctx.simple_bufts[index];
 }
 
-/// Ports `ggml_backend_meta_buffer_type_get_alignment` (ggml-backend-meta.cpp:295 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_type_get_alignment` (ggml-backend-meta.cpp:295 @cd959bae9).
 ///
 /// Return: the largest simple alignment, which must be a multiple of every
 /// other one.
@@ -501,7 +501,7 @@ fn buftGetAlignment(buft: c.ggml_backend_buffer_type_t) callconv(.c) usize {
     return max_alignment;
 }
 
-/// Ports `ggml_backend_meta_buffer_type_get_max_size` (ggml-backend-meta.cpp:306 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_type_get_max_size` (ggml-backend-meta.cpp:306 @cd959bae9).
 fn buftGetMaxSize(buft: c.ggml_backend_buffer_type_t) callconv(.c) usize {
     const n_simple_bufts = buftNBufts(buft);
     var max_size: usize = std.math.maxInt(usize);
@@ -511,7 +511,7 @@ fn buftGetMaxSize(buft: c.ggml_backend_buffer_type_t) callconv(.c) usize {
     return max_size;
 }
 
-/// Ports `ggml_backend_meta_buffer_type_get_alloc_size` (ggml-backend-meta.cpp:315 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_type_get_alloc_size` (ggml-backend-meta.cpp:315 @cd959bae9).
 ///
 /// Asks each simple buffer type about the *whole* meta tensor and takes the
 /// largest answer — an over-estimate of what a slice needs, as in the C++.
@@ -525,7 +525,7 @@ fn buftGetAllocSize(buft: c.ggml_backend_buffer_type_t, tensor: [*c]const c.ggml
     return max_alloc_size;
 }
 
-/// Ports `ggml_backend_meta_buffer_type_is_host` (ggml-backend-meta.cpp:325 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_type_is_host` (ggml-backend-meta.cpp:325 @cd959bae9).
 fn buftIsHost(buft: c.ggml_backend_buffer_type_t) callconv(.c) bool {
     const n_simple_bufts = buftNBufts(buft);
     for (0..n_simple_bufts) |i| {
@@ -536,7 +536,7 @@ fn buftIsHost(buft: c.ggml_backend_buffer_type_t) callconv(.c) bool {
     return true;
 }
 
-/// Ports `ggml_backend_meta_buffer_type_iface` (ggml-backend-meta.cpp:335 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_type_iface` (ggml-backend-meta.cpp:335 @cd959bae9).
 ///
 /// The one buffer type with its own `alloc_buffer_n`; `get_alloc_size_n`
 /// takes the default.
@@ -551,7 +551,7 @@ const buffer_type_iface: c.struct_ggml_backend_buffer_type_i = .{
     .is_host = &buftIsHost,
 };
 
-/// Ports `ggml_backend_buft_is_meta` (ggml-backend-meta.cpp:346 @8642541b2).
+/// Ports `ggml_backend_buft_is_meta` (ggml-backend-meta.cpp:346 @cd959bae9).
 pub export fn ggml_backend_buft_is_meta(buft: c.ggml_backend_buffer_type_t) callconv(.c) bool {
     return buft != null and buft.*.iface.get_name == buffer_type_iface.get_name;
 }
@@ -565,7 +565,7 @@ const BuftEntry = struct {
 /// The C++'s function-local `std::map<dev, buffer_type>`; only searched by key.
 var meta_bufts: std.ArrayList(*BuftEntry) = .empty;
 
-/// Ports `ggml_backend_meta_device_get_buffer_type` (ggml-backend-meta.cpp:350 @8642541b2).
+/// Ports `ggml_backend_meta_device_get_buffer_type` (ggml-backend-meta.cpp:350 @cd959bae9).
 ///
 /// Return: the device's meta buffer type, created on first request and kept
 /// for the process.
@@ -596,7 +596,7 @@ fn deviceGetBufferType(dev: c.ggml_backend_dev_t) callconv(.c) c.ggml_backend_bu
     return &entry.buft;
 }
 
-/// Ports `ggml_backend_meta_device_get_host_buffer_type` (ggml-backend-meta.cpp:377 @8642541b2).
+/// Ports `ggml_backend_meta_device_get_host_buffer_type` (ggml-backend-meta.cpp:377 @cd959bae9).
 ///
 /// Return: the simple devices' shared host buffer type, or null when any of
 /// them has none or they disagree.
@@ -632,7 +632,7 @@ fn deviceGetHostBufferType(dev: c.ggml_backend_dev_t) callconv(.c) c.ggml_backen
 /// array does.
 const SimpleTensors = [max_devices]?*c.ggml_tensor;
 
-/// Ports `struct ggml_backend_meta_simple_tensor_container` (ggml-backend-meta.cpp:403 @8642541b2).
+/// Ports `struct ggml_backend_meta_simple_tensor_container` (ggml-backend-meta.cpp:403 @cd959bae9).
 ///
 /// The `std::map` is only ever looked up, assigned and cleared — never
 /// iterated — so a hash map stands in for it.
@@ -640,7 +640,7 @@ const SimpleTensorContainer = struct {
     ctxs: std.ArrayList(?*c.ggml_context) = .empty,
     simple_tensors: std.AutoHashMapUnmanaged(*const c.ggml_tensor, SimpleTensors) = .empty,
 
-    /// Ports the sized `ggml_backend_meta_simple_tensor_container` constructor (ggml-backend-meta.cpp:407 @8642541b2): one
+    /// Ports the sized `ggml_backend_meta_simple_tensor_container` constructor (ggml-backend-meta.cpp:407 @cd959bae9): one
     /// context per simple buffer. The default constructor (line 409), which
     /// makes none, is `.{}`.
     fn initCtxs(params: c.struct_ggml_init_params, n_simple: usize) SimpleTensorContainer {
@@ -665,7 +665,7 @@ const SimpleTensorContainer = struct {
     }
 };
 
-/// In `ggml_backend_meta_buffer_context`, ports `nbtc` (ggml-backend-meta.cpp:433 @8642541b2):
+/// In `ggml_backend_meta_buffer_context`, ports `nbtc` (ggml-backend-meta.cpp:433 @cd959bae9):
 /// the bytes of a tensor the split-state cache compares, everything but the
 /// trailing padding.
 const nbtc = @sizeOf(c.ggml_tensor) - @sizeOf(@FieldType(c.ggml_tensor, "padding"));
@@ -680,7 +680,7 @@ const CacheEntry = struct {
     bytes: [nbtc]u8,
 };
 
-/// Ports `struct ggml_backend_meta_buffer_context` (ggml-backend-meta.cpp:416 @8642541b2).
+/// Ports `struct ggml_backend_meta_buffer_context` (ggml-backend-meta.cpp:416 @cd959bae9).
 const BufferContext = struct {
     // FIXME
     // Most tensors can simply be stored statically in their own buffer.
@@ -703,7 +703,7 @@ const BufferContext = struct {
 
     debug: c_int,
 
-    /// Ports the `ggml_backend_meta_buffer_context` constructor (ggml-backend-meta.cpp:438 @8642541b2).
+    /// Ports the `ggml_backend_meta_buffer_context` constructor (ggml-backend-meta.cpp:438 @cd959bae9).
     ///
     /// Parameters:
     /// - the three containers, moved into the result.
@@ -745,7 +745,7 @@ const BufferContext = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `get_simple_tensor_container` (ggml-backend-meta.cpp:452 @8642541b2).
+    /// Ports `get_simple_tensor_container` (ggml-backend-meta.cpp:452 @cd959bae9).
     fn getSimpleTensorContainer(self: *BufferContext, tensor: *const c.ggml_tensor) *SimpleTensorContainer {
         if (self.stc_static.simple_tensors.contains(tensor)) {
             return &self.stc_static;
@@ -772,19 +772,19 @@ inline fn tensorBytes(tensor: *const c.ggml_tensor) *const [nbtc]u8 {
     return @ptrCast(tensor);
 }
 
-/// Ports `ggml_backend_meta_buffer_free_buffer` (ggml-backend-meta.cpp:460 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_free_buffer` (ggml-backend-meta.cpp:460 @cd959bae9).
 fn bufferFreeBuffer(buffer: c.ggml_backend_buffer_t) callconv(.c) void {
     impl.assert(ggml_backend_buffer_is_meta(buffer), "ggml_backend_buffer_is_meta(buffer)");
     bufferCtx(buffer).destroy();
 }
 
-/// Ports `ggml_backend_meta_buffer_n_bufs` (ggml-backend-meta.cpp:466 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_n_bufs` (ggml-backend-meta.cpp:466 @cd959bae9).
 fn bufferNBufs(meta_buf: c.ggml_backend_buffer_t) usize {
     impl.assert(ggml_backend_buffer_is_meta(meta_buf), "ggml_backend_buffer_is_meta(meta_buf)");
     return bufferCtx(meta_buf).bufs.items.len;
 }
 
-/// Ports `ggml_backend_meta_buffer_simple_buffer` (ggml-backend-meta.cpp:472 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_simple_buffer` (ggml-backend-meta.cpp:472 @cd959bae9).
 fn bufferSimpleBuffer(meta_buf: c.ggml_backend_buffer_t, index: usize) c.ggml_backend_buffer_t {
     impl.assert(ggml_backend_buffer_is_meta(meta_buf), "ggml_backend_buffer_is_meta(meta_buf)");
     const buf_ctx = bufferCtx(meta_buf);
@@ -792,7 +792,7 @@ fn bufferSimpleBuffer(meta_buf: c.ggml_backend_buffer_t, index: usize) c.ggml_ba
     return buf_ctx.bufs.items[index];
 }
 
-/// Ports `ggml_backend_meta_buffer_simple_tensor` (ggml-backend-meta.cpp:479 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_simple_tensor` (ggml-backend-meta.cpp:479 @cd959bae9).
 ///
 /// Return: the slice of `tensor` on device `index`, or null when the tensor
 /// has not been initialised in this buffer's current container.
@@ -814,7 +814,7 @@ const Propagate = struct {
     n_bufs: usize,
     assume_sync: bool,
 
-    /// Ports the `split_states_equal` lambda (ggml-backend-meta.cpp:502 @8642541b2):
+    /// Ports the `split_states_equal` lambda (ggml-backend-meta.cpp:528 @cd959bae9):
     /// same axis and the same total per device, segments and repeats folded.
     fn equal(p: *const Propagate, a: *const SplitState, b: *const SplitState) bool {
         if (a.axis != b.axis) {
@@ -836,7 +836,7 @@ const Propagate = struct {
         return true;
     }
 
-    /// Ports the `handle_generic` lambda (ggml-backend-meta.cpp:522 @8642541b2):
+    /// Ports the `handle_generic` lambda (ggml-backend-meta.cpp:548 @cd959bae9):
     /// every source must agree, and a `scalar_only` op cannot take a dimension
     /// split.
     fn generic(p: *const Propagate, src_ss: []const SplitState, scalar_only: bool) SplitState {
@@ -863,14 +863,14 @@ const Propagate = struct {
         return ret;
     }
 
-    /// Ports the `handle_per_row` lambda (ggml-backend-meta.cpp:546 @8642541b2).
+    /// Ports the `handle_per_row` lambda (ggml-backend-meta.cpp:572 @cd959bae9).
     fn perRow(p: *const Propagate, src_ss: []const SplitState) SplitState {
         _ = p;
         impl.assert(src_ss[0].axis != axis_0, "src_ss[0].axis != GGML_BACKEND_SPLIT_AXIS_0");
         return src_ss[0];
     }
 
-    /// Ports the `handle_bin_bcast` lambda (ggml-backend-meta.cpp:552 @8642541b2).
+    /// Ports the `handle_bin_bcast` lambda (ggml-backend-meta.cpp:578 @cd959bae9).
     fn binBcast(p: *const Propagate, src_ss: []const SplitState) SplitState {
         const tensor = p.tensor;
         if (isDim(src_ss[0].axis) and
@@ -887,7 +887,7 @@ const Propagate = struct {
         return p.generic(src_ss, false);
     }
 
-    /// Ports the `handle_concat` lambda (ggml-backend-meta.cpp:565 @8642541b2).
+    /// Ports the `handle_concat` lambda (ggml-backend-meta.cpp:591 @cd959bae9).
     fn concat(p: *const Propagate, src_ss: []const SplitState) SplitState {
         const concat_axis: Axis = @bitCast(impl.getOpParamsI32(p.tensor, 0));
         if (src_ss[0].axis == axis_mirrored and isDim(src_ss[1].axis)) {
@@ -904,7 +904,7 @@ const Propagate = struct {
         return p.generic(src_ss, true);
     }
 
-    /// Ports the `handle_mul_mat` lambda (ggml-backend-meta.cpp:581 @8642541b2).
+    /// Ports the `handle_mul_mat` lambda (ggml-backend-meta.cpp:607 @cd959bae9).
     ///
     /// A weight split along its rows (axis 1) against a mirrored activation
     /// gives an output split along axis 0; split along its columns (axis 0)
@@ -937,7 +937,7 @@ const Propagate = struct {
         if (src_ss[0].axis >= axis_2 and isDim(src_ss[0].axis) and src_ss[1].axis == axis_mirrored) {
             return src_ss[0];
         }
-        abortFmt(609, "unsupported mul_mat split states: node=%s src0=%s axis=%d src1=%s axis=%d", .{
+        abortFmt(635, "unsupported mul_mat split states: node=%s src0=%s axis=%d src1=%s axis=%d", .{
             @as([*c]const u8, &tensor.name),
             @as([*c]const u8, &srcOf(tensor, 0).name),
             axisInt(src_ss[0].axis),
@@ -946,7 +946,7 @@ const Propagate = struct {
         });
     }
 
-    /// Ports the `handle_reshape` lambda (ggml-backend-meta.cpp:614 @8642541b2).
+    /// Ports the `handle_reshape` lambda (ggml-backend-meta.cpp:640 @cd959bae9).
     ///
     /// A dimension split becomes a split along the first output dimension
     /// whose running element count is a multiple of the input's count up to
@@ -997,7 +997,7 @@ const Propagate = struct {
                         return ssMake(@intCast(d));
                     }
                 }
-                abortFmt(655, "shape mismatch for %s", .{c.ggml_op_name(tensor.op)});
+                abortFmt(681, "shape mismatch for %s", .{c.ggml_op_name(tensor.op)});
             },
             axis_mirrored, axis_partial => {
                 return src_ss[0];
@@ -1008,7 +1008,7 @@ const Propagate = struct {
         }
     }
 
-    /// Ports the `handle_cpy` lambda (ggml-backend-meta.cpp:668 @8642541b2).
+    /// Ports the `handle_cpy` lambda (ggml-backend-meta.cpp:694 @cd959bae9).
     fn cpy(p: *const Propagate, src_ss: []const SplitState) SplitState {
         if (isDim(src_ss[0].axis)) {
             return p.reshape(src_ss);
@@ -1053,7 +1053,7 @@ const Propagate = struct {
         impl.abort("view of permuted tensor not implemented");
     }
 
-    /// Ports the `handle_permute` lambda (ggml-backend-meta.cpp:710 @8642541b2).
+    /// Ports the `handle_permute` lambda (ggml-backend-meta.cpp:766 @cd959bae9).
     fn permute(p: *const Propagate, src_ss: []const SplitState) SplitState {
         switch (src_ss[0].axis) {
             axis_0, axis_1, axis_2, axis_3 => {
@@ -1071,7 +1071,7 @@ const Propagate = struct {
         }
     }
 
-    /// Ports the `handle_transpose` lambda (ggml-backend-meta.cpp:730 @8642541b2).
+    /// Ports the `handle_transpose` lambda (ggml-backend-meta.cpp:786 @cd959bae9).
     fn transpose(p: *const Propagate, src_ss: []const SplitState) SplitState {
         _ = p;
         switch (src_ss[0].axis) {
@@ -1090,7 +1090,7 @@ const Propagate = struct {
         }
     }
 
-    /// Ports the `handle_get_rows` lambda (ggml-backend-meta.cpp:750 @8642541b2).
+    /// Ports the `handle_get_rows` lambda (ggml-backend-meta.cpp:806 @cd959bae9).
     fn getRows(p: *const Propagate, src_ss: []const SplitState) SplitState {
         if (src_ss[0].axis == axis_0 and src_ss[1].axis == axis_mirrored) {
             return src_ss[0];
@@ -1098,7 +1098,7 @@ const Propagate = struct {
         return p.generic(src_ss, true);
     }
 
-    /// Ports the `handle_set_rows` lambda (ggml-backend-meta.cpp:757 @8642541b2).
+    /// Ports the `handle_set_rows` lambda (ggml-backend-meta.cpp:813 @cd959bae9).
     fn setRows(p: *const Propagate, src_ss: []const SplitState) SplitState {
         impl.assert(src_ss[0].axis != axis_1, "src_ss[0].axis != GGML_BACKEND_SPLIT_AXIS_1");
         impl.assert(src_ss[1].axis == axis_mirrored, "src_ss[1].axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED");
@@ -1106,14 +1106,14 @@ const Propagate = struct {
         return src_ss[0];
     }
 
-    /// Ports the `handle_rope` lambda (ggml-backend-meta.cpp:764 @8642541b2).
+    /// Ports the `handle_rope` lambda (ggml-backend-meta.cpp:820 @cd959bae9).
     fn rope(p: *const Propagate, src_ss: []const SplitState) SplitState {
         _ = p;
         impl.assert(src_ss[1].axis == axis_mirrored, "src_ss[1].axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED");
         return src_ss[0];
     }
 
-    /// Ports the `handle_pad` lambda (ggml-backend-meta.cpp:769 @8642541b2).
+    /// Ports the `handle_pad` lambda (ggml-backend-meta.cpp:825 @cd959bae9).
     fn pad(p: *const Propagate, src_ss: []const SplitState) SplitState {
         if (isDim(src_ss[0].axis)) {
             impl.assert(p.tensor.op_params[2 * src_ss[0].axis + 0] == 0, "tensor->op_params[2*src_ss[0].axis + 0] == 0");
@@ -1122,7 +1122,7 @@ const Propagate = struct {
         return src_ss[0];
     }
 
-    /// Ports the `handle_flash_attn_ext` lambda (ggml-backend-meta.cpp:777 @8642541b2).
+    /// Ports the `handle_flash_attn_ext` lambda (ggml-backend-meta.cpp:833 @cd959bae9).
     fn flashAttnExt(p: *const Propagate, src_ss: []const SplitState) SplitState {
         const tensor = p.tensor;
         impl.assert(srcOpt(tensor, 3) == null or src_ss[3].axis == axis_mirrored, "tensor->src[3] == nullptr || src_ss[3].axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED");
@@ -1142,7 +1142,7 @@ const Propagate = struct {
         return ssMake(axis_1);
     }
 
-    /// Ports the `handle_lightning_indexer` lambda (ggml-backend-meta.cpp:797 @8642541b2).
+    /// Ports the `handle_lightning_indexer` lambda (ggml-backend-meta.cpp:853 @cd959bae9).
     fn lightningIndexer(p: *const Propagate, src_ss: []const SplitState) SplitState {
         _ = p;
         for (0..4) |i| {
@@ -1151,7 +1151,7 @@ const Propagate = struct {
         return ssMake(axis_mirrored);
     }
 
-    /// Ports the `handle_ssm_conv` lambda (ggml-backend-meta.cpp:805 @8642541b2).
+    /// Ports the `handle_ssm_conv` lambda (ggml-backend-meta.cpp:861 @cd959bae9).
     fn ssmConv(p: *const Propagate, src_ss: []const SplitState) SplitState {
         if (src_ss[0].axis == src_ss[1].axis) {
             if (src_ss[0].axis == axis_0) {
@@ -1164,7 +1164,7 @@ const Propagate = struct {
         return p.generic(src_ss, false);
     }
 
-    /// Ports the `handle_gated_delta_net` lambda (ggml-backend-meta.cpp:817 @8642541b2).
+    /// Ports the `handle_gated_delta_net` lambda (ggml-backend-meta.cpp:873 @cd959bae9).
     fn gatedDeltaNet(p: *const Propagate, src_ss: []const SplitState) SplitState {
         _ = p;
         if (src_ss[0].axis == axis_mirrored and src_ss[1].axis == axis_mirrored and
@@ -1306,7 +1306,7 @@ const Propagate = struct {
             c.GGML_OP_MAP_CUSTOM1, c.GGML_OP_MAP_CUSTOM2, c.GGML_OP_MAP_CUSTOM3, c.GGML_OP_CUSTOM => p.generic(src_ss, true),
             c.GGML_OP_CROSS_ENTROPY_LOSS, c.GGML_OP_CROSS_ENTROPY_LOSS_BACK => p.perRow(src_ss),
             c.GGML_OP_OPT_STEP_ADAMW, c.GGML_OP_OPT_STEP_SGD, c.GGML_OP_GLU => p.generic(src_ss, false),
-            else => abortFmt(1072, "ggml op not implemented: %s", .{c.ggml_op_name(tensor.op)}),
+            else => abortFmt(1133, "ggml op not implemented: %s", .{c.ggml_op_name(tensor.op)}),
         };
         if (isDim(split_state.axis)) {
             var first_src_split_by_axis = true;
@@ -1452,12 +1452,12 @@ fn getSplitState(stc: *SimpleTensorContainer, tensor: *const c.ggml_tensor, assu
     return ret;
 }
 
-/// Ports `ggml_backend_meta_is_host_view` (ggml-backend-meta.cpp:1180 @8642541b2).
+/// Ports `ggml_backend_meta_is_host_view` (ggml-backend-meta.cpp:1241 @cd959bae9).
 fn isHostView(tensor: *const c.ggml_tensor) bool {
     return c.ggml_is_view(tensor) and c.ggml_backend_buffer_is_host(tensor.view_src.*.buffer);
 }
 
-/// Ports `ggml_backend_meta_get_split_state` (ggml-backend-meta.cpp:1184 @8642541b2),
+/// Ports `ggml_backend_meta_get_split_state` (ggml-backend-meta.cpp:1245 @cd959bae9),
 /// the two-argument overload: picks the tensor's own container.
 ///
 /// A tensor outside a meta buffer must be a view of host memory
@@ -1480,7 +1480,7 @@ fn getSplitStateAuto(tensor: *const c.ggml_tensor, assume_sync: bool) SplitState
     return getSplitState(buf_ctx.getSimpleTensorContainer(tensor), tensor, assume_sync);
 }
 
-/// Ports `ggml_backend_meta_buffer_get_base` (ggml-backend-meta.cpp:1200 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_get_base` (ggml-backend-meta.cpp:1261 @cd959bae9).
 ///
 /// A fixed, never-dereferenced address: the allocator only needs offsets from
 /// it, which `bufferInitTensorImpl` carries over to each simple buffer.
@@ -1489,7 +1489,7 @@ fn bufferGetBase(buffer: c.ggml_backend_buffer_t) callconv(.c) ?*anyopaque {
     return @ptrFromInt(0x1000000000000000); // FIXME
 }
 
-/// Ports `ggml_backend_meta_buffer_init_tensor_impl` (ggml-backend-meta.cpp:1205 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_init_tensor_impl` (ggml-backend-meta.cpp:1266 @cd959bae9).
 ///
 /// Builds the per-device simple tensors for `tensor`: its shape with the
 /// split axis cut to this device's share, strides rescaled to match, sources
@@ -1635,7 +1635,7 @@ fn bufferInitTensorImpl(stc: *SimpleTensorContainer, tensor: *c.ggml_tensor) c.e
     return c.GGML_STATUS_SUCCESS;
 }
 
-/// Ports `ggml_backend_meta_buffer_init_tensor` (ggml-backend-meta.cpp:1338 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_init_tensor` (ggml-backend-meta.cpp:1399 @cd959bae9).
 ///
 /// Makes the next compute container current first: `graph_compute` flips
 /// `stc_compute_index_next` when it rebuilds, and the flip takes effect on
@@ -1690,7 +1690,7 @@ fn checkSegmented(tensor: *const c.ggml_tensor, split_state: *const SplitState) 
     impl.assert(tensor.ne[3] == 1, "tensor->ne[3] == 1");
 }
 
-/// Ports `ggml_backend_meta_buffer_memset_tensor` (ggml-backend-meta.cpp:1345 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_memset_tensor` (ggml-backend-meta.cpp:1406 @cd959bae9).
 fn bufferMemsetTensor(buffer: c.ggml_backend_buffer_t, tensor_: [*c]c.ggml_tensor, value: u8, offset: usize, size: usize) callconv(.c) void {
     const tensor = impl.one(c.ggml_tensor, tensor_);
     const n_bufs = bufferNBufs(buffer);
@@ -1775,7 +1775,7 @@ fn bufferMemsetTensor(buffer: c.ggml_backend_buffer_t, tensor_: [*c]c.ggml_tenso
     }
 }
 
-/// Ports `ggml_backend_meta_buffer_set_tensor` (ggml-backend-meta.cpp:1447 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_set_tensor` (ggml-backend-meta.cpp:1508 @cd959bae9).
 ///
 /// Scatters host data over the simple tensors. A segmented split walks the
 /// segments and their repeats device by device; a plain dimension split
@@ -1894,7 +1894,7 @@ fn bufferSetTensor(buffer: c.ggml_backend_buffer_t, tensor_: [*c]c.ggml_tensor, 
     }
 }
 
-/// Ports `ggml_backend_meta_buffer_get_tensor` (ggml-backend-meta.cpp:1575 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_get_tensor` (ggml-backend-meta.cpp:1636 @cd959bae9).
 ///
 /// The gather that mirrors `bufferSetTensor`. A mirrored tensor is read from
 /// device 0; a partial one cannot be read at all and aborts.
@@ -1978,7 +1978,7 @@ fn bufferGetTensor(buffer: c.ggml_backend_buffer_t, tensor_: [*c]const c.ggml_te
     }
 }
 
-/// Ports `ggml_backend_meta_buffer_clear` (ggml-backend-meta.cpp:1675 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_clear` (ggml-backend-meta.cpp:1736 @cd959bae9).
 fn bufferClear(buffer: c.ggml_backend_buffer_t, value: u8) callconv(.c) void {
     const n_buffers = bufferNBufs(buffer);
     for (0..n_buffers) |i| {
@@ -1986,7 +1986,7 @@ fn bufferClear(buffer: c.ggml_backend_buffer_t, value: u8) callconv(.c) void {
     }
 }
 
-/// Ports `ggml_backend_meta_buffer_reset` (ggml-backend-meta.cpp:1682 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_reset` (ggml-backend-meta.cpp:1743 @cd959bae9).
 fn bufferReset(buffer: c.ggml_backend_buffer_t) callconv(.c) void {
     impl.assert(ggml_backend_buffer_is_meta(buffer), "ggml_backend_buffer_is_meta(buffer)");
     const buf_ctx = bufferCtx(buffer);
@@ -2010,12 +2010,12 @@ const buffer_iface: c.struct_ggml_backend_buffer_i = .{
     .reset = &bufferReset,
 };
 
-/// Ports `ggml_backend_buffer_is_meta` (ggml-backend-meta.cpp:1704 @8642541b2).
+/// Ports `ggml_backend_buffer_is_meta` (ggml-backend-meta.cpp:1768 @cd959bae9).
 pub export fn ggml_backend_buffer_is_meta(buf: c.ggml_backend_buffer_t) callconv(.c) bool {
     return buf != null and buf.*.iface.free_buffer == buffer_iface.free_buffer;
 }
 
-/// Ports `ggml_backend_meta_buffer_set_usage` (ggml-backend-meta.cpp:1708 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_set_usage` (ggml-backend-meta.cpp:1772 @cd959bae9).
 ///
 /// Forwards the usage to every simple buffer the meta buffer owns, as
 /// `ggml_backend_multi_buffer_set_usage` does for a multi-buffer.
@@ -2027,7 +2027,7 @@ pub export fn ggml_backend_meta_buffer_set_usage(buffer: c.ggml_backend_buffer_t
     }
 }
 
-/// Ports `ggml_backend_meta_buffer_type_alloc_buffer` (ggml-backend-meta.cpp:1718 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_type_alloc_buffer` (ggml-backend-meta.cpp:1782 @cd959bae9).
 ///
 /// One simple buffer of `size` bytes per device — the full size on each, not
 /// a share — plus two compute containers sized for a million tensors. A
@@ -2058,7 +2058,7 @@ fn buftAllocBuffer(buft: c.ggml_backend_buffer_type_t, size: usize) callconv(.c)
 }
 
 /// Ports `ggml_backend_meta_buffer_type_alloc_buffer_n`
-/// (ggml-backend-meta.cpp:1743 @8642541b2), the meta buffer type's
+/// (ggml-backend-meta.cpp:1807 @cd959bae9), the meta buffer type's
 /// `alloc_buffer_n`. At v0.5.0 it was `ggml_backend_meta_alloc_ctx_tensors_from_buft`,
 /// exported and called by `ggml_backend_alloc_ctx_tensors_from_buft` for a
 /// meta type; now the allocator's `ggml_backend_buft_alloc_buffer_n`
@@ -2143,15 +2143,15 @@ fn replaceBuffer(slot: *c.ggml_backend_buffer_t, new: c.ggml_backend_buffer_t) v
 // -----------------------------------------------------------------------------
 // Meta backend
 
-/// Ports the `guid` in `ggml_backend_meta_guid` (ggml-backend-meta.cpp:1802 @8642541b2).
+/// Ports the `guid` in `ggml_backend_meta_guid` (ggml-backend-meta.cpp:1866 @cd959bae9).
 var meta_guid: c.ggml_guid = .{ 0xf1, 0x0e, 0x34, 0xcf, 0x9c, 0x6f, 0x43, 0xcb, 0x96, 0x92, 0xbe, 0x8e, 0xbb, 0x71, 0x3f, 0xda };
 
-/// Ports `ggml_backend_meta_guid` (ggml-backend-meta.cpp:1802 @8642541b2).
+/// Ports `ggml_backend_meta_guid` (ggml-backend-meta.cpp:1866 @cd959bae9).
 fn backendGuid() c.ggml_guid_t {
     return &meta_guid;
 }
 
-/// In `ggml_backend_meta_context`, ports `cgraph_config` (ggml-backend-meta.cpp:1808 @8642541b2).
+/// In `ggml_backend_meta_context`, ports `cgraph_config` (ggml-backend-meta.cpp:1872 @cd959bae9).
 ///
 /// The C++'s per-config `cgraphs_aux` vector is never used; it is dropped.
 const CgraphConfig = struct {
@@ -2159,7 +2159,7 @@ const CgraphConfig = struct {
     offset: c_int = 0, // Node offset vs. original graph
 };
 
-/// In `ggml_backend_meta_context`, ports `backend_config` (ggml-backend-meta.cpp:1814 @8642541b2).
+/// In `ggml_backend_meta_context`, ports `backend_config` (ggml-backend-meta.cpp:1878 @cd959bae9).
 const BackendConfig = struct {
     backend: c.ggml_backend_t,
 
@@ -2187,7 +2187,7 @@ const BackendConfig = struct {
     }
 };
 
-/// Ports `struct ggml_backend_meta_context` (ggml-backend-meta.cpp:1807 @8642541b2).
+/// Ports `struct ggml_backend_meta_context` (ggml-backend-meta.cpp:1871 @cd959bae9).
 const BackendContext = struct {
     name: [:0]u8,
     backend_configs: std.ArrayList(BackendConfig) = .empty,
@@ -2205,7 +2205,7 @@ const BackendContext = struct {
     comm_ctx: ?*anyopaque = null,
     comm_allreduce: c.ggml_backend_comm_allreduce_tensor_t = null,
 
-    /// Ports the `ggml_backend_meta_context` constructor (ggml-backend-meta.cpp:1840 @8642541b2).
+    /// Ports the `ggml_backend_meta_context` constructor (ggml-backend-meta.cpp:1904 @cd959bae9).
     ///
     /// Initialises one simple backend per device, and asks the first one's
     /// registry for a communicator. **Ungated on this machine (one GPU)**: no
@@ -2249,7 +2249,7 @@ const BackendContext = struct {
         return self;
     }
 
-    /// Ports the `ggml_backend_meta_context` destructor (ggml-backend-meta.cpp:1873 @8642541b2).
+    /// Ports the `ggml_backend_meta_context` destructor (ggml-backend-meta.cpp:1937 @cd959bae9).
     ///
     /// The body frees the communicator and the simple backends; only then do
     /// the members go, so each config's scratch buffers outlive its backend.
@@ -2286,20 +2286,20 @@ inline fn backendCtx(backend: c.ggml_backend_t) *BackendContext {
     return @ptrCast(@alignCast(backend.*.context));
 }
 
-/// Ports `ggml_backend_meta_get_name` (ggml-backend-meta.cpp:1886 @8642541b2).
+/// Ports `ggml_backend_meta_get_name` (ggml-backend-meta.cpp:1950 @cd959bae9).
 fn backendGetName(backend: c.ggml_backend_t) callconv(.c) [*c]const u8 {
     impl.assert(ggml_backend_is_meta(backend), "ggml_backend_is_meta(backend)");
     return backendCtx(backend).name.ptr;
 }
 
-/// Ports `ggml_backend_meta_free` (ggml-backend-meta.cpp:1892 @8642541b2).
+/// Ports `ggml_backend_meta_free` (ggml-backend-meta.cpp:1956 @cd959bae9).
 fn backendFree(backend: c.ggml_backend_t) callconv(.c) void {
     impl.assert(ggml_backend_is_meta(backend), "ggml_backend_is_meta(backend)");
     backendCtx(backend).destroy();
     allocator.destroy(impl.one(c.struct_ggml_backend, backend));
 }
 
-/// Ports `ggml_backend_meta_set_tensor_async` (ggml-backend-meta.cpp:1899 @8642541b2).
+/// Ports `ggml_backend_meta_set_tensor_async` (ggml-backend-meta.cpp:1963 @cd959bae9).
 ///
 /// Whole contiguous tensors only (`offset == 0`), one segment. Each device's
 /// copy is written at `offset` — always 0 — rather than at the chunk start
@@ -2343,7 +2343,7 @@ fn backendSetTensorAsync(backend: c.ggml_backend_t, tensor_: [*c]c.ggml_tensor, 
     }
 }
 
-/// Ports `ggml_backend_meta_get_tensor_async` (ggml-backend-meta.cpp:1944 @8642541b2).
+/// Ports `ggml_backend_meta_get_tensor_async` (ggml-backend-meta.cpp:2008 @cd959bae9).
 fn backendGetTensorAsync(backend: c.ggml_backend_t, tensor_: [*c]const c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize) callconv(.c) void {
     const tensor: *const c.ggml_tensor = @ptrCast(tensor_);
     const bytes: [*]u8 = @ptrCast(data);
@@ -2384,7 +2384,7 @@ fn backendGetTensorAsync(backend: c.ggml_backend_t, tensor_: [*c]const c.ggml_te
     }
 }
 
-/// Ports `ggml_backend_meta_synchronize` (ggml-backend-meta.cpp:1989 @8642541b2).
+/// Ports `ggml_backend_meta_synchronize` (ggml-backend-meta.cpp:2053 @cd959bae9).
 fn backendSynchronize(backend: c.ggml_backend_t) callconv(.c) void {
     const n_backends = ggml_backend_meta_n_backends(backend);
     for (0..n_backends) |i| {
@@ -2392,7 +2392,7 @@ fn backendSynchronize(backend: c.ggml_backend_t) callconv(.c) void {
     }
 }
 
-/// Ports `ggml_node_get_use_count` (ggml-impl.h:641 @8642541b2).
+/// Ports `ggml_node_get_use_count` (ggml-impl.h:699 @cd959bae9).
 fn nodeGetUseCount(cgraph: *const impl.CGraph, node_idx: c_int) i32 {
     const node = cgraph.nodes[@intCast(node_idx)].?;
     const hash_pos = impl.hashFind(&cgraph.visited_hash_set, node);
@@ -2403,8 +2403,8 @@ fn nodeGetUseCount(cgraph: *const impl.CGraph, node_idx: c_int) i32 {
 }
 
 /// The lambdas that decide how far an all-reduce can be put off,
-/// `get_i_delayed_branch` (ggml-backend-meta.cpp:2060 @8642541b2) and
-/// `get_i_delayed` (ggml-backend-meta.cpp:2161 @8642541b2), with what they
+/// `get_i_delayed_branch` (ggml-backend-meta.cpp:2124 @cd959bae9) and
+/// `get_i_delayed` (ggml-backend-meta.cpp:2225 @cd959bae9), with what they
 /// capture.
 const Delay = struct {
     cgraph: *impl.CGraph,
@@ -2415,7 +2415,7 @@ const Delay = struct {
         return d.cgraph.nodes[@intCast(i)].?;
     }
 
-    /// Ports the `get_i_delayed_branch` lambda (ggml-backend-meta.cpp:2060 @8642541b2).
+    /// Ports the `get_i_delayed_branch` lambda (ggml-backend-meta.cpp:2124 @cd959bae9).
     ///
     /// For MoE models it may make sense to delay the AllReduce in order to
     /// reduce I/O: follows an `ADD_ID` bias, then a chain of `MUL`s by
@@ -2532,7 +2532,7 @@ const Delay = struct {
         return idr;
     }
 
-    /// Ports the `get_i_delayed` lambda (ggml-backend-meta.cpp:2161 @8642541b2).
+    /// Ports the `get_i_delayed` lambda (ggml-backend-meta.cpp:2225 @cd959bae9).
     ///
     /// AllReduce(a) + AllReduce(b) == AllReduce(a + b) for independent partial
     /// branches: when the next partial node's branch ends in an `ADD` of the
@@ -2617,7 +2617,7 @@ fn resizeFill(comptime T: type, list: *std.ArrayList(T), n: usize, value: T) voi
 }
 
 /// The per-call state of the helper lambdas `get_node_aux`
-/// (ggml-backend-meta.cpp:2325 @8642541b2), `set_tmp_data` and
+/// (ggml-backend-meta.cpp:2389 @cd959bae9), `set_tmp_data` and
 /// `get_cgraph_aux` in `ggml_backend_meta_graph_compute`: the auxiliary node
 /// and graph cursors.
 const Aux = struct {
@@ -2625,7 +2625,7 @@ const Aux = struct {
     iga: usize = 0, // i graph aux
     ina: usize = 0, // i node aux
 
-    /// Ports the `get_node_aux` lambda (ggml-backend-meta.cpp:2325 @8642541b2):
+    /// Ports the `get_node_aux` lambda (ggml-backend-meta.cpp:2389 @cd959bae9):
     /// the next preallocated scratch tensor, cleared and shaped like `t`.
     fn getNodeAux(a: *Aux, t: *const c.ggml_tensor) *c.ggml_tensor {
         const ret = a.backend_ctx.nodes_aux.items[a.ina].?;
@@ -2640,7 +2640,7 @@ const Aux = struct {
         return ret;
     }
 
-    /// Ports the `set_tmp_data` lambda (ggml-backend-meta.cpp:2336 @8642541b2):
+    /// Ports the `set_tmp_data` lambda (ggml-backend-meta.cpp:2400 @cd959bae9):
     /// points `tensor` at device `j`'s scratch buffer for step `i_buf`,
     /// growing it to `max_tmp_size` first if it is missing or too small.
     fn setTmpData(a: *Aux, tensor: *c.ggml_tensor, j: usize, i_buf: usize) void {
@@ -2654,7 +2654,7 @@ const Aux = struct {
     }
 
     // FIXME usage_counts
-    /// Ports the `get_cgraph_aux` lambda (ggml-backend-meta.cpp:2346 @8642541b2).
+    /// Ports the `get_cgraph_aux` lambda (ggml-backend-meta.cpp:2410 @cd959bae9).
     fn getCgraphAux(a: *Aux) *impl.CGraph {
         const ret = a.backend_ctx.cgraphs_aux.items[a.iga].?;
         a.iga += 1;
@@ -2672,7 +2672,7 @@ inline fn computeAsync(backend: c.ggml_backend_t, cgraph: *impl.CGraph) c.enum_g
     return c.ggml_backend_graph_compute_async(backend, @ptrCast(cgraph));
 }
 
-/// Ports the `allreduce_fallback` lambda (ggml-backend-meta.cpp:2352 @8642541b2).
+/// Ports the `allreduce_fallback` lambda (ggml-backend-meta.cpp:2416 @cd959bae9).
 ///
 /// The generic all-reduce of subgraph `i`'s last node, for backends with no
 /// collective of their own: zero the slices of devices whose compute flag
@@ -2718,7 +2718,7 @@ fn allreduceFallback(aux: *Aux, n_backends: usize, i: usize) c.enum_ggml_status 
     @memset(&step_cgraphs, null);
 
     const pushData = struct {
-        /// Ports the `push_data` lambda (ggml-backend-meta.cpp:2382 @8642541b2):
+        /// Ports the `push_data` lambda (ggml-backend-meta.cpp:2446 @cd959bae9):
         /// copy `j_src`'s partial into `j_dst`'s scratch, and queue an `ADD`
         /// of it into `j_dst`'s partial in place.
         fn f(ax: *Aux, steps: *[max_devices]?*impl.CGraph, ii: usize, j_src: usize, j_dst: usize, i_buf: usize) void {
@@ -2809,7 +2809,7 @@ fn allreduceFallback(aux: *Aux, n_backends: usize, i: usize) c.enum_ggml_status 
     return c.GGML_STATUS_SUCCESS;
 }
 
-/// Ports `ggml_backend_meta_graph_compute` (ggml-backend-meta.cpp:1996 @8642541b2).
+/// Ports `ggml_backend_meta_graph_compute` (ggml-backend-meta.cpp:2060 @cd959bae9).
 ///
 /// Unless the graph's `uid` matches the last one, rebuilds: flips every used
 /// buffer to its other compute container, maps each node to its per-device
@@ -3033,7 +3033,7 @@ fn backendGraphCompute(backend: c.ggml_backend_t, cgraph_: ?*c.struct_ggml_cgrap
     return c.GGML_STATUS_SUCCESS;
 }
 
-/// Ports `ggml_backend_meta_i` (ggml-backend-meta.cpp:2503 @8642541b2).
+/// Ports `ggml_backend_meta_i` (ggml-backend-meta.cpp:2567 @cd959bae9).
 const backend_iface: c.struct_ggml_backend_i = .{
     .get_name = &backendGetName,
     .free = &backendFree,
@@ -3053,12 +3053,12 @@ const backend_iface: c.struct_ggml_backend_i = .{
     .graph_optimize = null,
 };
 
-/// Ports `ggml_backend_is_meta` (ggml-backend-meta.cpp:2522 @8642541b2).
+/// Ports `ggml_backend_is_meta` (ggml-backend-meta.cpp:2586 @cd959bae9).
 pub export fn ggml_backend_is_meta(backend: c.ggml_backend_t) callconv(.c) bool {
     return backend != null and backend.*.iface.get_name == backend_iface.get_name;
 }
 
-/// Ports `ggml_backend_meta_device_init_backend` (ggml-backend-meta.cpp:2526 @8642541b2).
+/// Ports `ggml_backend_meta_device_init_backend` (ggml-backend-meta.cpp:2590 @cd959bae9).
 ///
 /// Return: a meta backend owning one simple backend per device, released
 /// with `ggml_backend_free`.
@@ -3073,13 +3073,13 @@ fn deviceInitBackend(dev: c.ggml_backend_dev_t, params: [*c]const u8) callconv(.
     return backend;
 }
 
-/// Ports `ggml_backend_meta_n_backends` (ggml-backend-meta.cpp:2537 @8642541b2).
+/// Ports `ggml_backend_meta_n_backends` (ggml-backend-meta.cpp:2601 @cd959bae9).
 pub export fn ggml_backend_meta_n_backends(meta_backend: c.ggml_backend_t) callconv(.c) usize {
     impl.assert(ggml_backend_is_meta(meta_backend), "ggml_backend_is_meta(meta_backend)");
     return backendCtx(meta_backend).backend_configs.items.len;
 }
 
-/// Ports `ggml_backend_meta_simple_backend` (ggml-backend-meta.cpp:2543 @8642541b2).
+/// Ports `ggml_backend_meta_simple_backend` (ggml-backend-meta.cpp:2607 @cd959bae9).
 ///
 /// `index` is unchecked, as `std::vector::operator[]` is.
 pub export fn ggml_backend_meta_simple_backend(meta_backend: c.ggml_backend_t, index: usize) callconv(.c) c.ggml_backend_t {

@@ -12,7 +12,7 @@
 const std = @import("std");
 const cparams = @import("../cparams.zig");
 
-/// Ports `llama_max_parallel_sequences` (llama-cparams.cpp:3 @8642541b2).
+/// Ports `llama_max_parallel_sequences` (llama-cparams.cpp:3 @cd959bae9).
 pub fn llama_max_parallel_sequences() callconv(.c) usize {
     return cparams.maxParallelSequences();
 }

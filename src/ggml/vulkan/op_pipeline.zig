@@ -28,7 +28,7 @@ fn isF16(t: *const Tensor) usize {
     return @intFromBool(t.type == c.GGML_TYPE_F16);
 }
 
-/// Ports `ggml_vk_concat_unit_size` (ggml-vulkan.cpp:297 @8642541b2): the
+/// Ports `ggml_vk_concat_unit_size` (ggml-vulkan.cpp:297 @cd959bae9): the
 /// widest copy unit, for a quantized type the widest that divides a block.
 pub fn concatUnitSize(ty: c.ggml_type) u32 {
     const type_size: u32 = @intCast(c.ggml_type_size(ty));
@@ -39,7 +39,7 @@ pub fn concatUnitSize(ty: c.ggml_type) u32 {
     return 1;
 }
 
-/// Ports `ggml_vk_concat_supported` (ggml-vulkan.cpp:316 @8642541b2).
+/// Ports `ggml_vk_concat_supported` (ggml-vulkan.cpp:316 @cd959bae9).
 pub fn concatSupported(src0: *const Tensor, src1: *const Tensor, dst: *const Tensor) bool {
     if (src0.type != src1.type or src0.type != dst.type) return false;
     if (!c.ggml_is_quantized(src0.type)) {
@@ -50,14 +50,14 @@ pub fn concatSupported(src0: *const Tensor, src1: *const Tensor, dst: *const Ten
     return c.ggml_is_contiguous_rows(src0) and c.ggml_is_contiguous_rows(src1) and c.ggml_is_contiguous_rows(dst);
 }
 
-/// Ports `ggml_vk_dim01_contiguous` (ggml-vulkan.cpp:6126 @8642541b2).
+/// Ports `ggml_vk_dim01_contiguous` (ggml-vulkan.cpp:6150 @cd959bae9).
 pub fn dim01Contiguous(t: *const Tensor) bool {
     return t.nb[0] == c.ggml_type_size(t.type) and
         t.nb[1] == (t.nb[0] * @as(usize, @intCast(t.ne[0]))) / @as(usize, @intCast(c.ggml_blck_size(t.type))) and
         (t.ne[3] == 1 or t.nb[3] == t.nb[2] * @as(usize, @intCast(t.ne[2])));
 }
 
-/// Ports `ggml_vk_get_cpy_pipeline` (ggml-vulkan.cpp:6138 @8642541b2): a
+/// Ports `ggml_vk_get_cpy_pipeline` (ggml-vulkan.cpp:6162 @cd959bae9): a
 /// copy from `src`'s type to `to`, the contiguous variant when both sides
 /// are, the transposing ones when a swap puts the innermost dimension
 /// elsewhere.
@@ -114,7 +114,7 @@ pub fn getCpyPipeline(ctx: *BackendCtx, src: *const Tensor, dst: ?*const Tensor,
     impl.abort("fatal error");
 }
 
-/// Ports `ggml_vk_conv_select_shape` (ggml-vulkan.cpp:8704 @8642541b2):
+/// Ports `ggml_vk_conv_select_shape` (ggml-vulkan.cpp:8728 @cd959bae9):
 /// the largest tile that still gives every shader core two tiles.
 pub fn convSelectShape(ctx: *const BackendCtx, K: u32, NPQ: u32) ConvShape {
     const nTiles = struct {
@@ -138,7 +138,7 @@ pub fn convSelectShape(ctx: *const BackendCtx, K: u32, NPQ: u32) ConvShape {
     return .@"64x32";
 }
 
-/// Ports `ggml_vk_conv3d_select_shape` (ggml-vulkan.cpp:8736 @8642541b2):
+/// Ports `ggml_vk_conv3d_select_shape` (ggml-vulkan.cpp:8760 @cd959bae9):
 /// the 256x128 coopmat2 tile, which reuses each loaded input across 256
 /// output channels instead of 128, when `K` fills whole channel tiles and
 /// there are at least as many workgroups as GPU cores; otherwise
@@ -163,7 +163,7 @@ pub fn conv3dSelectShape(ctx: *const BackendCtx, K: u32, NPQ: u32) ConvShape {
     return convSelectShape(ctx, K, NPQ);
 }
 
-/// Ports `ggml_vk_rms_norm_pipeline` (ggml-vulkan.cpp:8756 @8642541b2): the
+/// Ports `ggml_vk_rms_norm_pipeline` (ggml-vulkan.cpp:8780 @cd959bae9): the
 /// 128, 256 or 512 block size, by row length.
 ///
 /// Return: the pipeline, borrowed from the device.
@@ -188,7 +188,7 @@ fn opI32(t: *const Tensor, i: usize) u32 {
     return @bitCast(t.op_params[i]);
 }
 
-/// Ports `ggml_vk_op_get_pipeline` (ggml-vulkan.cpp:8766 @8642541b2).
+/// Ports `ggml_vk_op_get_pipeline` (ggml-vulkan.cpp:8790 @cd959bae9).
 ///
 /// Return: the pipeline, or null where the op has none for these types.
 pub fn getPipeline(ctx: *BackendCtx, src0_: ?*const Tensor, src1_: ?*const Tensor, src2_: ?*const Tensor, dst: *const Tensor, op: c.enum_ggml_op) ?*Pipeline {

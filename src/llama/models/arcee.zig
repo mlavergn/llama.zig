@@ -19,7 +19,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_arcee`'s `load_arch_hparams` (models/arcee.cpp:3 @8642541b2).
+/// Ports `llama_model_arcee`'s `load_arch_hparams` (models/arcee.cpp:3 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
@@ -31,7 +31,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_arcee`'s `load_arch_tensors` (models/arcee.cpp:13 @8642541b2).
+/// Ports `llama_model_arcee`'s `load_arch_tensors` (models/arcee.cpp:13 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -68,8 +68,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_arcee`'s `build_arch_graph` (models/arcee.cpp:44
-/// @8642541b2) and the constructor of its `graph` (models/arcee.cpp:48
-/// @8642541b2).
+/// @cd959bae9) and the constructor of its `graph` (models/arcee.cpp:48
+/// @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

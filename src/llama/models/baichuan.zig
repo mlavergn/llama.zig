@@ -20,7 +20,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_baichuan`'s `load_arch_hparams` (models/baichuan.cpp:3 @8642541b2).
+/// Ports `llama_model_baichuan`'s `load_arch_hparams` (models/baichuan.cpp:3 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
@@ -36,7 +36,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     }
 }
 
-/// Ports `llama_model_baichuan`'s `load_arch_tensors` (models/baichuan.cpp:17 @8642541b2).
+/// Ports `llama_model_baichuan`'s `load_arch_tensors` (models/baichuan.cpp:17 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
 
@@ -64,8 +64,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_baichuan`'s `build_arch_graph` (models/baichuan.cpp:42
-/// @8642541b2) and the constructor of its `graph` (models/baichuan.cpp:46
-/// @8642541b2).
+/// @cd959bae9) and the constructor of its `graph` (models/baichuan.cpp:46
+/// @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

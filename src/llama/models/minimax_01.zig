@@ -27,7 +27,7 @@ const Hparams = hparams_mod.Hparams;
 const Ubatch = batch.Ubatch;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_minimax_01`'s `load_arch_hparams` (models/minimax-01.cpp:4 @8642541b2).
+/// Ports `llama_model_minimax_01`'s `load_arch_hparams` (models/minimax-01.cpp:4 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -53,7 +53,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_minimax_01`'s `load_arch_tensors` (models/minimax-01.cpp:26 @8642541b2).
+/// Ports `llama_model_minimax_01`'s `load_arch_tensors` (models/minimax-01.cpp:26 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -94,12 +94,12 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_minimax_01`'s `build_arch_graph` (models/minimax-01.cpp:63 @8642541b2).
+/// Ports `llama_model_minimax_01`'s `build_arch_graph` (models/minimax-01.cpp:63 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
-/// Ports `llm_graph_input_la` (models/minimax-01.cpp:67 @8642541b2): the
+/// Ports `llm_graph_input_la` (models/minimax-01.cpp:67 @cd959bae9): the
 /// lightning attention's per-head slopes and its decays relative to each
 /// sequence's first position -- since v0.4.0 for every batch, one token
 /// per sequence included, which no longer takes a path of its own.
@@ -118,7 +118,7 @@ pub const InpLa = struct {
     inp_diag_decay: ?*Tensor = null,
 
     /// Ports `llm_graph_input_la`'s `set_input` (models/minimax-01.cpp:71
-    /// @8642541b2). It assumes an equal ubatch split.
+    /// @cd959bae9). It assumes an equal ubatch split.
     pub fn setInput(self: *InpLa, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         const n_head: i64 = self.hparams.nHead(0);
@@ -237,7 +237,7 @@ pub const InpLa = struct {
     }
 
     /// Ports `llm_graph_input_la`'s `can_reuse` (models/minimax-01.cpp:174
-    /// @8642541b2): the decays' token counts are checked.
+    /// @cd959bae9): the decays' token counts are checked.
     pub fn canReuse(self: *InpLa, params: *const graph.Params) bool {
         var res = true;
 
@@ -251,7 +251,7 @@ pub const InpLa = struct {
 };
 
 /// Ports the constructor of `llama_model_minimax_01`'s `graph`
-/// (models/minimax-01.cpp:192 @8642541b2).
+/// (models/minimax-01.cpp:192 @cd959bae9).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

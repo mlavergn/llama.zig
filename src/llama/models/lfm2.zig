@@ -46,11 +46,11 @@ fn oom() noreturn {
     impl.abort("models/lfm2.cpp", 0, "out of memory");
 }
 
-/// Ports `N_DECISION_TYPES` (models/lfm2.cpp:8 @8642541b2): the question
+/// Ports `N_DECISION_TYPES` (models/lfm2.cpp:8 @cd959bae9): the question
 /// types of a decision model -- choice, score, noul.
 const n_decision_types: u32 = 3;
 
-/// Ports `llama_model_lfm2`'s `load_arch_hparams` (models/lfm2.cpp:10 @8642541b2).
+/// Ports `llama_model_lfm2`'s `load_arch_hparams` (models/lfm2.cpp:10 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -95,7 +95,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_lfm2`'s `load_arch_tensors` (models/lfm2.cpp:46
-/// @8642541b2); LFM2-MoE's (models/lfm2moe.cpp:23 @8642541b2) is the same
+/// @cd959bae9); LFM2-MoE's (models/lfm2moe.cpp:23 @cd959bae9) is the same
 /// body without the decision head, which it never reaches: LFM2-MoE reads
 /// no decision block count, so its `n_layer_decision` is 0.
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
@@ -203,7 +203,7 @@ pub fn loadTensors(self: *Model, comptime file: [:0]const u8, comptime line_moe:
 }
 
 /// Ports `llama_model_lfm2`'s `build_arch_graph` (models/lfm2.cpp:137
-/// @8642541b2); LFM2-MoE's (models/lfm2moe.cpp:78 @8642541b2) is the same
+/// @cd959bae9); LFM2-MoE's (models/lfm2moe.cpp:78 @cd959bae9) is the same
 /// without the decision graph, which its `n_layer_decision` of 0 never
 /// takes.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
@@ -220,7 +220,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// The constructor's `build_attn_block` lambda (models/lfm2.cpp:155
-/// @8642541b2): Q/K norms, RoPE and attention.
+/// @cd959bae9): Q/K norms, RoPE and attention.
 fn buildAttnBlock(model: *const Model, b: *const graph.Builder, cur_: *Tensor, inp_pos: *Tensor, inp_attn: anytype, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -252,7 +252,7 @@ fn buildAttnBlock(model: *const Model, b: *const graph.Builder, cur_: *Tensor, i
 }
 
 /// Ports the constructor of `llama_model_lfm2`'s `graph<iswa>`
-/// (models/lfm2.cpp:149 @8642541b2).
+/// (models/lfm2.cpp:149 @cd959bae9).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -321,7 +321,7 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
 // -----------------------------------------------------------------------------
 // The decision model
 
-/// Ports `lfm2_is_media` (models/lfm2.cpp:251 @8642541b2): a media entry
+/// Ports `lfm2_is_media` (models/lfm2.cpp:251 @cd959bae9): a media entry
 /// (an image or audio prefix) is an embedding, a text entry a token.
 fn isMedia(ubatch: *const Ubatch, i: usize) bool {
     return if (ubatch.isMixed()) ubatch.type[i] != 0 else ubatch.token == null;
@@ -373,7 +373,7 @@ const InpAttnMedia = struct {
     }
 };
 
-/// Ports `llm_graph_input_conv_mask` (models/lfm2.cpp:297 @8642541b2): 1
+/// Ports `llm_graph_input_conv_mask` (models/lfm2.cpp:297 @cd959bae9): 1
 /// where the previous (next) token is the left (right) neighbour in the
 /// same sequence; the last media entry does not read the text on its
 /// right.
@@ -384,7 +384,7 @@ const InpConvMask = struct {
     right: ?*Tensor = null,
 
     /// Ports `llm_graph_input_conv_mask`'s `set_input` (models/lfm2.cpp:299
-    /// @8642541b2).
+    /// @cd959bae9).
     pub fn setInput(self: *InpConvMask, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         const n_tokens: usize = ubatch.n_tokens;
@@ -411,7 +411,7 @@ const InpConvMask = struct {
 /// memory, then the decision head. The trunk's short convolution is a
 /// centred three-tap one over the batch, a tap outside the sequence
 /// reading 0. `llama_model_lfm2` declares it as `graph_decision`
-/// (src/models/models.h:2415 @8642541b2).
+/// (src/models/models.h:2479 @cd959bae9).
 fn buildGraphDecision(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -472,7 +472,7 @@ fn buildGraphDecision(model: *const Model, b: *const graph.Builder) void {
             const prv: *Tensor = c.ggml_view_2d(ctx, bxp, n_embd, n_tokens, bxp.nb[1], 0);
             const nxt: *Tensor = c.ggml_view_2d(ctx, bxp, n_embd, n_tokens, bxp.nb[1], 2 * bxp.nb[1]);
 
-            impl.assert(hp.n_shortconv_l_cache == 3, "models/lfm2.cpp", 369, "hparams.n_shortconv_l_cache == 3");
+            impl.assert(hp.n_shortconv_l_cache == 3, "models/lfm2.cpp", 368, "hparams.n_shortconv_l_cache == 3");
             const taps: *Tensor = c.ggml_cont(ctx, c.ggml_transpose(ctx, layer.shortconv.conv));
             const tap0: *Tensor = c.ggml_view_1d(ctx, taps, n_embd, 0 * taps.nb[1]);
             const tap1: *Tensor = c.ggml_view_1d(ctx, taps, n_embd, 1 * taps.nb[1]);
@@ -519,7 +519,7 @@ fn buildGraphDecision(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_lfm2::graph_decision`'s `build_decision_head`
-/// (models/lfm2.cpp:422 @8642541b2): ModernBERT's
+/// (models/lfm2.cpp:421 @cd959bae9): ModernBERT's
 /// (`modern_bert.zig`'s `buildDecisionHead`) with the head counts of the
 /// head layers. The question type is not a graph input, so the head is
 /// evaluated once per type: `[n_decision_types, n_outputs]`.

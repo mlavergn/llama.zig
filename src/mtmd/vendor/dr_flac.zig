@@ -67,7 +67,7 @@ const assignment_mid_side = 10;
 // -----------------------------------------------------------------------------
 // The byte source: the memory stream, or the Ogg layer over it
 
-/// `ma_dr_flac_oggbs` (miniaudio.h:89310 @8642541b2).
+/// `ma_dr_flac_oggbs` (miniaudio.h:90027 @cd959bae9).
 const OggBs = struct {
     current_byte_pos: u64 = 0,
     first_byte_pos: u64 = 0,
@@ -85,7 +85,7 @@ const PageHeader = struct {
     segment_count: u8 = 0,
     segment_table: [255]u8 = undefined,
 
-    /// Ports `ma_dr_flac_ogg__get_page_body_size` (miniaudio.h:89218 @8642541b2).
+    /// Ports `ma_dr_flac_ogg__get_page_body_size` (miniaudio.h:89935 @cd959bae9).
     fn bodySize(h: *const PageHeader) u32 {
         var n: u32 = 0;
         for (h.segment_table[0..h.segment_count]) |s| n += s;
@@ -110,12 +110,12 @@ const Stream = struct {
     }
 };
 
-/// Ports `ma_dr_flac_crc32_byte` (miniaudio.h:89177 @8642541b2).
+/// Ports `ma_dr_flac_crc32_byte` (miniaudio.h:89894 @cd959bae9).
 fn crc32Byte(crc: u32, data: u8) u32 {
     return (crc << 8) ^ crc32_table[@as(u8, @truncate(crc >> 24)) ^ data];
 }
 
-/// Ports `ma_dr_flac_ogg__read_page_header_after_capture_pattern` (miniaudio.h:89227 @8642541b2).
+/// Ports `ma_dr_flac_ogg__read_page_header_after_capture_pattern` (miniaudio.h:89944 @cd959bae9).
 fn readPageHeaderAfterCapture(io: *Io, h: *PageHeader, bytes_read: *u32, crc: *u32) bool {
     var data: [23]u8 = undefined;
     if (io.read(&data) != 23) return false;
@@ -132,7 +132,7 @@ fn readPageHeaderAfterCapture(io: *Io, h: *PageHeader, bytes_read: *u32, crc: *u
     return true;
 }
 
-/// Ports `ma_dr_flac_ogg__read_page_header` (miniaudio.h:89263 @8642541b2):
+/// Ports `ma_dr_flac_ogg__read_page_header` (miniaudio.h:89980 @cd959bae9):
 /// scan byte by byte for the capture pattern.
 fn readPageHeader(io: *Io, h: *PageHeader, bytes_read: *u32, crc: *u32) bool {
     var id: [4]u8 = undefined;
@@ -152,7 +152,7 @@ fn readPageHeader(io: *Io, h: *PageHeader, bytes_read: *u32, crc: *u32) bool {
     }
 }
 
-/// Ports `ma_dr_flac_oggbs__seek_physical` (miniaudio.h:89317 @8642541b2).
+/// Ports `ma_dr_flac_oggbs__seek_physical` (miniaudio.h:90034 @cd959bae9).
 fn seekPhysical(s: *Stream, o: *OggBs, offset_in: u64, origin: Origin) bool {
     var offset = offset_in;
     if (origin == .set) {
@@ -175,7 +175,7 @@ fn seekPhysical(s: *Stream, o: *OggBs, offset_in: u64, origin: Origin) bool {
     return true;
 }
 
-/// Ports `ma_dr_flac_oggbs__goto_next_page` (miniaudio.h:89348 @8642541b2).
+/// Ports `ma_dr_flac_oggbs__goto_next_page` (miniaudio.h:90065 @cd959bae9).
 fn gotoNextPage(s: *Stream, o: *OggBs, recover: bool) bool {
     var h: PageHeader = .{};
     while (true) {
@@ -205,7 +205,7 @@ fn gotoNextPage(s: *Stream, o: *OggBs, recover: bool) bool {
     }
 }
 
-/// Ports `ma_dr_flac__on_read_ogg` (miniaudio.h:89448 @8642541b2).
+/// Ports `ma_dr_flac__on_read_ogg` (miniaudio.h:90165 @cd959bae9).
 fn onReadOgg(s: *Stream, o: *OggBs, buf: []u8) usize {
     var read: usize = 0;
     while (read < buf.len) {
@@ -227,7 +227,7 @@ fn onReadOgg(s: *Stream, o: *OggBs, buf: []u8) usize {
     return read;
 }
 
-/// Ports `ma_dr_flac__on_seek_ogg` (miniaudio.h:89476 @8642541b2).
+/// Ports `ma_dr_flac__on_seek_ogg` (miniaudio.h:90193 @cd959bae9).
 fn onSeekOgg(s: *Stream, o: *OggBs, offset: i32, origin: Origin) bool {
     switch (origin) {
         .set => {
@@ -302,7 +302,7 @@ fn shl64(x: u64, n: u32) u64 {
     return if (n >= 64) 0 else x << @intCast(n);
 }
 
-/// Ports `ma_dr_flac_crc8` (miniaudio.h:85336 @8642541b2).
+/// Ports `ma_dr_flac_crc8` (miniaudio.h:85694 @cd959bae9).
 fn crc8(crc_in: u8, data: u32, count: u32) u8 {
     var crc = crc_in;
     const whole = count >> 3;
@@ -317,7 +317,7 @@ fn crc8(crc_in: u8, data: u32, count: u32) u8 {
     return crc;
 }
 
-/// Ports `ma_dr_flac_crc16_byte` and `ma_dr_flac_crc16_bytes` (miniaudio.h:85377, 85395 @8642541b2).
+/// Ports `ma_dr_flac_crc16_byte` and `ma_dr_flac_crc16_bytes` (miniaudio.h:85735, 85753 @cd959bae9).
 fn crc16Bytes(crc_in: u16, data: u64, count: u32) u16 {
     var crc = crc_in;
     if (count == 0 or count > 8) return crc;
@@ -329,13 +329,13 @@ fn crc16Bytes(crc_in: u16, data: u64, count: u32) u16 {
     return crc;
 }
 
-/// Ports `ma_dr_flac__reset_crc16` (miniaudio.h:85514 @8642541b2).
+/// Ports `ma_dr_flac__reset_crc16` (miniaudio.h:85872 @cd959bae9).
 fn resetCrc16(bs: *Bs) void {
     bs.crc16 = 0;
     bs.crc16_cache_ignored_bytes = bs.consumed_bits >> 3;
 }
 
-/// Ports `ma_dr_flac__update_crc16` (miniaudio.h:85519 @8642541b2).
+/// Ports `ma_dr_flac__update_crc16` (miniaudio.h:85877 @cd959bae9).
 fn updateCrc16(bs: *Bs) void {
     if (bs.crc16_cache_ignored_bytes == 0) {
         bs.crc16 = crc16Bytes(bs.crc16, bs.crc16_cache, 8);
@@ -345,7 +345,7 @@ fn updateCrc16(bs: *Bs) void {
     }
 }
 
-/// Ports `ma_dr_flac__flush_crc16` (miniaudio.h:85528 @8642541b2).
+/// Ports `ma_dr_flac__flush_crc16` (miniaudio.h:85886 @cd959bae9).
 fn flushCrc16(bs: *Bs) u16 {
     if (bs.remaining() == 0) {
         updateCrc16(bs);
@@ -356,7 +356,7 @@ fn flushCrc16(bs: *Bs) u16 {
     return bs.crc16;
 }
 
-/// Ports `ma_dr_flac__reload_l1_cache_from_l2` (miniaudio.h:85540 @8642541b2):
+/// Ports `ma_dr_flac__reload_l1_cache_from_l2` (miniaudio.h:85898 @cd959bae9):
 /// `bs.cache` is left raw, as the C leaves it.
 fn reloadL1FromL2(bs: *Bs) bool {
     if (bs.next_l2_line < l2_line_count) {
@@ -393,7 +393,7 @@ fn be2host(raw: u64) u64 {
     return std.mem.bigToNative(u64, raw);
 }
 
-/// Ports `ma_dr_flac__reload_cache` (miniaudio.h:85576 @8642541b2).
+/// Ports `ma_dr_flac__reload_cache` (miniaudio.h:85934 @cd959bae9).
 fn reloadCache(bs: *Bs) bool {
     updateCrc16(bs);
     if (reloadL1FromL2(bs)) {
@@ -416,7 +416,7 @@ fn reloadCache(bs: *Bs) bool {
     return true;
 }
 
-/// Ports `ma_dr_flac__reset_cache` (miniaudio.h:85606 @8642541b2).
+/// Ports `ma_dr_flac__reset_cache` (miniaudio.h:85964 @cd959bae9).
 fn resetCache(bs: *Bs) void {
     bs.next_l2_line = l2_line_count;
     bs.consumed_bits = cache_bits;
@@ -427,7 +427,7 @@ fn resetCache(bs: *Bs) void {
     bs.crc16_cache_ignored_bytes = 0;
 }
 
-/// Ports `ma_dr_flac__read_uint32` (miniaudio.h:85618 @8642541b2), the
+/// Ports `ma_dr_flac__read_uint32` (miniaudio.h:85976 @cd959bae9), the
 /// 64-bit arm.
 fn readU32(bs: *Bs, bit_count: u32) ?u32 {
     if (bs.consumed_bits == cache_bits) {
@@ -450,7 +450,7 @@ fn readU32(bs: *Bs, bit_count: u32) ?u32 {
     return r;
 }
 
-/// Ports `ma_dr_flac__read_int32` (miniaudio.h:85665 @8642541b2).
+/// Ports `ma_dr_flac__read_int32` (miniaudio.h:86023 @cd959bae9).
 fn readI32(bs: *Bs, bit_count: u32) ?i32 {
     var r = readU32(bs, bit_count) orelse return null;
     if (bit_count < 32) {
@@ -469,12 +469,12 @@ fn readU64(bs: *Bs, bit_count: u32) ?u64 {
 }
 
 /// Ports `ma_dr_flac__read_uint16` and `ma_dr_flac__read_uint8`
-/// (miniaudio.h:85715, 85743 @8642541b2).
+/// (miniaudio.h:86079, 86107 @cd959bae9).
 fn readU8(bs: *Bs, bit_count: u32) ?u8 {
     return @truncate(readU32(bs, bit_count) orelse return null);
 }
 
-/// Ports `ma_dr_flac__seek_bits` (miniaudio.h:85769 @8642541b2).
+/// Ports `ma_dr_flac__seek_bits` (miniaudio.h:86133 @cd959bae9).
 fn seekBits(bs: *Bs, bits_in: usize) bool {
     var bits = bits_in;
     if (bits <= bs.remaining()) {
@@ -511,7 +511,7 @@ fn findAndSeekToNextSyncCode(bs: *Bs) bool {
     }
 }
 
-/// Ports `ma_dr_flac__seek_past_next_set_bit` (miniaudio.h:86008 @8642541b2).
+/// Ports `ma_dr_flac__seek_past_next_set_bit` (miniaudio.h:86381 @cd959bae9).
 fn seekPastNextSetBit(bs: *Bs) ?u32 {
     var zero_counter: u32 = 0;
     while (bs.cache == 0) {
@@ -532,7 +532,7 @@ fn seekPastNextSetBit(bs: *Bs) ?u32 {
 
 const Utf8 = union(enum) { ok: u64, at_end, bad };
 
-/// Ports `ma_dr_flac__read_utf8_coded_number` (miniaudio.h:86064 @8642541b2).
+/// Ports `ma_dr_flac__read_utf8_coded_number` (miniaudio.h:86436 @cd959bae9).
 fn readUtf8CodedNumber(bs: *Bs, crc_out: *u8) Utf8 {
     var crc = crc_out.*;
     const b0 = readU8(bs, 8) orelse return .at_end;
@@ -556,7 +556,7 @@ fn readUtf8CodedNumber(bs: *Bs, crc_out: *u8) Utf8 {
 // Residuals and subframes
 
 /// Ports `ma_dr_flac__ilog2_u32` and `ma_dr_flac__use_64_bit_prediction`
-/// (miniaudio.h:86115, 86126 @8642541b2).
+/// (miniaudio.h:86487, 86498 @cd959bae9).
 fn use64BitPrediction(bps: u32, order: u32, precision: u32) bool {
     const ilog2: u32 = 32 - @as(u32, @clz(order));
     return bps +% precision +% ilog2 > 32;
@@ -579,7 +579,7 @@ fn prediction64(order: u32, shift: i32, coefficients: []const i32, s: []const i3
     return @truncate(p >> @intCast(shift));
 }
 
-/// Ports `ma_dr_flac__read_rice_parts_x1` (miniaudio.h:86470 @8642541b2).
+/// Ports `ma_dr_flac__read_rice_parts_x1` (miniaudio.h:86842 @cd959bae9).
 fn readRiceParts(bs: *Bs, rice_param: u8, zero_out: *u32, part_out: *u32) bool {
     const plus1: u32 = @as(u32, rice_param) + 1;
     const plus1_shift: u32 = cache_bits - plus1;
@@ -835,7 +835,7 @@ fn readNextFrameHeader(bs: *Bs, streaminfo_bps: u8, header: *FrameHeader) bool {
     }
 }
 
-/// Ports `ma_dr_flac__read_subframe_header` (miniaudio.h:87861 @8642541b2).
+/// Ports `ma_dr_flac__read_subframe_header` (miniaudio.h:88369 @cd959bae9).
 fn readSubframeHeader(bs: *Bs, sf: *Subframe) bool {
     const header = readU8(bs, 8) orelse return false;
     if (header & 0x80 != 0) return false;
@@ -935,8 +935,8 @@ pub const Flac = struct {
     /// `pDecodedSamples`: one block per channel, zeroed at open.
     decoded: []i32 = &.{},
 
-    /// Ports `ma_dr_flac_open_memory` (miniaudio.h:90113 @8642541b2) for a
-    /// `dr_flac` stream, and `ma_dr_flac_open` (miniaudio.h:90163 @8642541b2)
+    /// Ports `ma_dr_flac_open_memory` (miniaudio.h:90873 @cd959bae9) for a
+    /// `dr_flac` stream, and `ma_dr_flac_open` (miniaudio.h:90923 @cd959bae9)
     /// over the decoder's callbacks for a `decoder` one: both reach
     /// `ma_dr_flac_open_with_metadata_private` (miniaudio.h:89802 @8642541b2)
     /// with no metadata callback and an unknown container.
@@ -976,7 +976,7 @@ pub const Flac = struct {
             if (io.read(&header) != 6) return false;
             running_file_pos += 6;
             const x = std.mem.readInt(u32, header[2..6], .big);
-            // `ma_dr_flac__unsynchsafe_32` (miniaudio.h:85271 @8642541b2)
+            // `ma_dr_flac__unsynchsafe_32` (miniaudio.h:85629 @cd959bae9)
             var size: u32 = ((x & 0x7F000000) >> 3) | ((x & 0x007F0000) >> 2) | ((x & 0x00007F00) >> 1) | (x & 0x7F);
             if (header[1] & 0x10 != 0) size += 10;
             if (!io.seek(@as(i32, @bitCast(size)), .cur)) return false;
@@ -1033,7 +1033,7 @@ pub const Flac = struct {
 
     const BlockHeader = struct { is_last: bool, block_type: u8, size: u32 };
 
-    /// Ports `ma_dr_flac__read_and_decode_block_header` (miniaudio.h:88563 @8642541b2).
+    /// Ports `ma_dr_flac__read_and_decode_block_header` (miniaudio.h:89177 @cd959bae9).
     fn readBlockHeader(src: anytype) ?BlockHeader {
         var b: [4]u8 = undefined;
         if (src.read(&b) != 4) return null;
@@ -1041,7 +1041,7 @@ pub const Flac = struct {
         return .{ .is_last = v & 0x80000000 != 0, .block_type = @truncate((v & 0x7F000000) >> 24), .size = v & 0x00FFFFFF };
     }
 
-    /// Ports `ma_dr_flac__read_streaminfo` (miniaudio.h:88573 @8642541b2):
+    /// Ports `ma_dr_flac__read_streaminfo` (miniaudio.h:89187 @cd959bae9):
     /// the four reads, each of which must be whole.
     fn readStreaminfo(f: *Flac, io: *Io) bool {
         var block_sizes: [4]u8 = undefined;
@@ -1062,7 +1062,7 @@ pub const Flac = struct {
         return true;
     }
 
-    /// Ports `ma_dr_flac__init_private__ogg` (miniaudio.h:89611 @8642541b2).
+    /// Ports `ma_dr_flac__init_private__ogg` (miniaudio.h:90331 @cd959bae9).
     fn initOgg(f: *Flac, running_file_pos: *u64, first_byte_pos: *u64, serial: *u32) bool {
         const io = &f.stream.io;
         var h: PageHeader = .{};
@@ -1228,7 +1228,7 @@ pub const Flac = struct {
     }
 };
 
-/// Ports `ma_dr_flac__get_channel_count_from_channel_assignment` (miniaudio.h:88026 @8642541b2).
+/// Ports `ma_dr_flac__get_channel_count_from_channel_assignment` (miniaudio.h:88550 @cd959bae9).
 fn channelCount(assignment: u8) u32 {
     const lookup = [11]u32{ 1, 2, 3, 4, 5, 6, 7, 8, 2, 2, 2 };
     return lookup[assignment];
@@ -1345,7 +1345,7 @@ fn claimsOver(io_in: Io) bool {
 // -----------------------------------------------------------------------------
 // tables
 
-/// `ma_dr_flac__crc8_table` (miniaudio/miniaudio.h:85280 @8642541b2).
+/// `ma_dr_flac__crc8_table` (miniaudio/miniaudio.h:85638 @cd959bae9).
 const crc8_table = [256]u8{
     0x00, 0x07, 0x0E, 0x09, 0x1C, 0x1B, 0x12, 0x15,
     0x38, 0x3F, 0x36, 0x31, 0x24, 0x23, 0x2A, 0x2D,
@@ -1381,7 +1381,7 @@ const crc8_table = [256]u8{
     0xE6, 0xE1, 0xE8, 0xEF, 0xFA, 0xFD, 0xF4, 0xF3,
 };
 
-/// `ma_dr_flac__crc16_table` (miniaudio/miniaudio.h:85298 @8642541b2).
+/// `ma_dr_flac__crc16_table` (miniaudio/miniaudio.h:85656 @cd959bae9).
 const crc16_table = [256]u16{
     0x0000, 0x8005, 0x800F, 0x000A, 0x801B, 0x001E, 0x0014, 0x8011,
     0x8033, 0x0036, 0x003C, 0x8039, 0x0028, 0x802D, 0x8027, 0x0022,
@@ -1417,7 +1417,7 @@ const crc16_table = [256]u16{
     0x8213, 0x0216, 0x021C, 0x8219, 0x0208, 0x820D, 0x8207, 0x0202,
 };
 
-/// `ma_dr_flac__crc32_table` (miniaudio/miniaudio.h:89110 @8642541b2).
+/// `ma_dr_flac__crc32_table` (miniaudio/miniaudio.h:89827 @cd959bae9).
 const crc32_table = [256]u32{
     0x00000000, 0x04C11DB7, 0x09823B6E, 0x0D4326D9, 0x130476DC, 0x17C56B6B, 0x1A864DB2, 0x1E475005,
     0x2608EDB8, 0x22C9F00F, 0x2F8AD6D6, 0x2B4BCB61, 0x350C9B64, 0x31CD86D3, 0x3C8EA00A, 0x384FBDBD,

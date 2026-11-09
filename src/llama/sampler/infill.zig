@@ -31,7 +31,7 @@ const SamplerI = core.SamplerI;
 const TokenDataArray = core.TokenDataArray;
 const src = core.src;
 
-/// Ports `llama_sampler_infill` (llama-sampler.cpp:4100 @8642541b2).
+/// Ports `llama_sampler_infill` (llama-sampler.cpp:4100 @cd959bae9).
 const Infill = struct {
     vocab: ?*const c.struct_llama_vocab,
 
@@ -39,7 +39,7 @@ const Infill = struct {
     buf1: [512]u8,
 };
 
-/// Ports `llama_sampler_infill_name` (llama-sampler.cpp:4107 @8642541b2).
+/// Ports `llama_sampler_infill_name` (llama-sampler.cpp:4107 @cd959bae9).
 fn infillName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
     _ = smpl;
     return "infill";
@@ -55,7 +55,7 @@ fn pieceInto(vocab: ?*const c.struct_llama_vocab, id: c.llama_token, buf: []u8) 
     return @intCast(len);
 }
 
-/// Ports `llama_sampler_infill_apply` (llama-sampler.cpp:4111 @8642541b2).
+/// Ports `llama_sampler_infill_apply` (llama-sampler.cpp:4111 @cd959bae9).
 ///
 /// Picks end-of-generation when its mass is high enough; otherwise merges
 /// each candidate into any it is a text prefix of, then drops the weak ones
@@ -182,17 +182,17 @@ fn infillApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
     for (core.items(cur_p)) |*d| d.p /= p_sum;
 }
 
-/// Ports `llama_sampler_infill_clone` (llama-sampler.cpp:4294 @8642541b2).
+/// Ports `llama_sampler_infill_clone` (llama-sampler.cpp:4294 @cd959bae9).
 fn infillClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
     return llama_sampler_init_infill(core.ctxOf(Infill, smpl).vocab);
 }
 
-/// Ports `llama_sampler_infill_free` (llama-sampler.cpp:4299 @8642541b2).
+/// Ports `llama_sampler_infill_free` (llama-sampler.cpp:4299 @cd959bae9).
 fn infillFree(smpl: [*c]Sampler) callconv(.c) void {
     core.destroy(Infill, core.ctxOf(Infill, smpl));
 }
 
-/// Ports `llama_sampler_infill_i` (llama-sampler.cpp:4303 @8642541b2).
+/// Ports `llama_sampler_infill_i` (llama-sampler.cpp:4303 @cd959bae9).
 var infill_iface: SamplerI = .{
     .name = infillName,
     .accept = null,
@@ -202,7 +202,7 @@ var infill_iface: SamplerI = .{
     .free = infillFree,
 };
 
-/// Ports `llama_sampler_init_infill` (llama-sampler.cpp:4318 @8642541b2).
+/// Ports `llama_sampler_init_infill` (llama-sampler.cpp:4318 @cd959bae9).
 ///
 /// Parameters:
 /// - `vocab`: the vocabulary; borrowed for the sampler's lifetime.

@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_mellum`'s `load_arch_hparams` (models/mellum.cpp:3 @8642541b2).
+/// Ports `llama_model_mellum`'s `load_arch_hparams` (models/mellum.cpp:3 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -57,7 +57,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// One decoder block's tensors, the constructor's `load_block` lambda
-/// (models/mellum.cpp:52 @8642541b2).
+/// (models/mellum.cpp:52 @cd959bae9).
 fn loadBlock(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const layer = &self.layers[@intCast(i)];
@@ -81,7 +81,7 @@ fn loadBlock(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc: *Exc
     layer.ffn_up_exps = try self.createTensor(.{ .tensor = .ffn_up_exps, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_ff_exp, l.n_expert }, flags, exc);
 }
 
-/// Ports `llama_model_mellum`'s `load_arch_tensors` (models/mellum.cpp:32 @8642541b2).
+/// Ports `llama_model_mellum`'s `load_arch_tensors` (models/mellum.cpp:32 @cd959bae9).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
 
@@ -122,7 +122,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports `llama_model_mellum`'s `build_arch_graph` (models/mellum.cpp:91 @8642541b2).
+/// Ports `llama_model_mellum`'s `build_arch_graph` (models/mellum.cpp:91 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     const iswa = @as(hparams_mod.SwaType, @fromBackingInt(@intCast(model.hparams.swa_type))) == .standard;
 
@@ -140,7 +140,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports the constructor of `llama_model_mellum`'s `graph<iswa>`
-/// (models/mellum.cpp:108 @8642541b2).
+/// (models/mellum.cpp:108 @cd959bae9).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -261,7 +261,7 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
 }
 
 /// Ports the constructor of `llama_model_mellum`'s `graph_mtp<iswa>`
-/// (models/mellum.cpp:249 @8642541b2): the NextN draft head.
+/// (models/mellum.cpp:249 @cd959bae9): the NextN draft head.
 fn buildGraphMtp(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

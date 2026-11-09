@@ -95,7 +95,7 @@ pub fn contains(s: []const u8, needle: []const u8) bool {
     return std.mem.indexOf(u8, s, needle) != null;
 }
 
-/// Ports `string_replace_all` (common/common.cpp:511 @8642541b2): every
+/// Ports `string_replace_all` (common/common.cpp:528 @cd959bae9): every
 /// occurrence of `search`, left to right, never rescanning a replacement;
 /// an empty `search` changes nothing.
 ///

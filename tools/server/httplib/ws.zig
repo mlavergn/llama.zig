@@ -28,16 +28,16 @@ const message = @import("message.zig");
 const SocketStream = socket.SocketStream;
 const Headers = detail.Headers;
 
-/// `CPPHTTPLIB_WEBSOCKET_MAX_PAYLOAD_LENGTH` (httplib.h:241 @8642541b2).
+/// `CPPHTTPLIB_WEBSOCKET_MAX_PAYLOAD_LENGTH` (httplib.h:247 @cd959bae9).
 const max_payload_length: usize = 16777216;
-/// `CPPHTTPLIB_WEBSOCKET_SERVER_READ_TIMEOUT_SECOND` (httplib.h:273 @8642541b2).
+/// `CPPHTTPLIB_WEBSOCKET_SERVER_READ_TIMEOUT_SECOND` (httplib.h:279 @cd959bae9).
 pub const server_read_timeout_second: i64 = 300;
-/// `CPPHTTPLIB_WEBSOCKET_CLOSE_TIMEOUT_SECOND` (httplib.h:277 @8642541b2).
+/// `CPPHTTPLIB_WEBSOCKET_CLOSE_TIMEOUT_SECOND` (httplib.h:283 @cd959bae9).
 const close_timeout_second: i64 = 5;
-/// `CPPHTTPLIB_WEBSOCKET_PING_INTERVAL_SECOND` (httplib.h:281 @8642541b2).
+/// `CPPHTTPLIB_WEBSOCKET_PING_INTERVAL_SECOND` (httplib.h:287 @cd959bae9).
 const ping_interval_second: i64 = 30;
 
-/// Ports `Opcode` (httplib.h:4519 @8642541b2). Any four bits are read off
+/// Ports `Opcode` (httplib.h:4572 @cd959bae9). Any four bits are read off
 /// the wire, as the C's cast takes them.
 pub const Opcode = enum(u8) {
     continuation = 0x0,
@@ -49,7 +49,7 @@ pub const Opcode = enum(u8) {
     _,
 };
 
-/// Ports `CloseStatus` (httplib.h:4528 @8642541b2), the codes used here.
+/// Ports `CloseStatus` (httplib.h:4581 @cd959bae9), the codes used here.
 pub const CloseStatus = enum(u16) {
     normal = 1000,
     going_away = 1001,
@@ -57,14 +57,14 @@ pub const CloseStatus = enum(u16) {
     invalid_payload = 1007,
 };
 
-/// Ports `ReadResult` (httplib.h:4546 @8642541b2). `Timeout` is out of reach:
+/// Ports `ReadResult` (httplib.h:4599 @cd959bae9). `Timeout` is out of reach:
 /// nothing here asks for a read timeout.
 pub const ReadResult = enum(c_int) { fail = 0, text = 1, binary = 2 };
 
-/// Ports `FrameRead` (httplib.h:4843 @8642541b2).
+/// Ports `FrameRead` (httplib.h:4914 @cd959bae9).
 const FrameRead = enum { ok, fail, timeout };
 
-/// Ports `fill_random_bytes` (httplib.cpp:909 @8642541b2): unpredictable
+/// Ports `fill_random_bytes` (httplib.cpp:915 @cd959bae9): unpredictable
 /// bytes for masking keys (RFC 6455 Section 5.3) and nonces.
 pub fn fillRandomBytes(out: []u8) void {
     if (comptime builtin.os.tag.isDarwin()) {
@@ -78,7 +78,7 @@ pub fn fillRandomBytes(out: []u8) void {
     }
 }
 
-/// Ports `is_valid_utf8` (httplib.cpp:703 @8642541b2).
+/// Ports `is_valid_utf8` (httplib.cpp:709 @cd959bae9).
 fn isValidUtf8(s: []const u8) bool {
     var i: usize = 0;
     const n = s.len;
@@ -119,7 +119,7 @@ fn isValidUtf8(s: []const u8) bool {
     return true;
 }
 
-/// Ports `is_valid_close_payload` (httplib.cpp:1091 @8642541b2): RFC 6455
+/// Ports `is_valid_close_payload` (httplib.cpp:1105 @cd959bae9): RFC 6455
 /// §5.5.1, §7.4: a Close payload is empty, or a status code that may be sent
 /// followed by a UTF-8 reason.
 fn isValidClosePayload(payload: []const u8) bool {
@@ -132,7 +132,7 @@ fn isValidClosePayload(payload: []const u8) bool {
     return may_be_sent and isValidUtf8(payload[2..]);
 }
 
-/// Ports `read_exact` (httplib.cpp:993 @8642541b2): exactly `buf.len`
+/// Ports `read_exact` (httplib.cpp:1007 @cd959bae9): exactly `buf.len`
 /// bytes. A timeout is reported only when nothing at all was consumed: once a
 /// byte has been taken the stream sits mid-field and cannot be resumed.
 fn readExact(strm: *SocketStream, buf: []u8) FrameRead {
@@ -148,7 +148,7 @@ fn readExact(strm: *SocketStream, buf: []u8) FrameRead {
     return .ok;
 }
 
-/// Ports `read_websocket_frame` (httplib.cpp:1007 @8642541b2): one frame into
+/// Ports `read_websocket_frame` (httplib.cpp:1021 @cd959bae9): one frame into
 /// `payload`, cleared first and left unmasked.
 fn readWebsocketFrame(a: std.mem.Allocator, strm: *SocketStream, opcode: *Opcode, payload: *std.ArrayList(u8), fin: *bool, expect_masked: bool, max_len: usize) error{OutOfMemory}!FrameRead {
     // Read first 2 bytes. This is the only read that may report a timeout: it
@@ -269,7 +269,7 @@ fn writeWebsocketFrame(strm: *SocketStream, opcode: Opcode, data: []const u8, fi
     return true;
 }
 
-/// Ports `websocket_accept_key` (httplib.cpp:872 @8642541b2).
+/// Ports `websocket_accept_key` (httplib.cpp:878 @cd959bae9).
 ///
 /// Return: the Base64 of the SHA-1, in `out`.
 pub fn websocketAcceptKey(client_key: []const u8, out: *[28]u8) []const u8 {
@@ -284,7 +284,7 @@ pub fn websocketAcceptKey(client_key: []const u8, out: *[28]u8) []const u8 {
 /// `pthread_mutex_trylock`, which `std.c` does not name: 0 when taken.
 extern "c" fn pthread_mutex_trylock(mutex: *std.c.pthread_mutex_t) c_int;
 
-/// Ports `WebSocket` (httplib.h:4593 @8642541b2).
+/// Ports `WebSocket` (httplib.h:4646 @cd959bae9).
 pub const WebSocket = struct {
     a: std.mem.Allocator,
     strm: *SocketStream,
@@ -300,14 +300,14 @@ pub const WebSocket = struct {
     ping_mutex: std.c.pthread_mutex_t = .{},
     ping_cv: std.c.pthread_cond_t = .{},
 
-    /// Ports `WebSocket` (httplib.h:4623 @8642541b2), the constructor,
+    /// Ports `WebSocket` (httplib.h:4676 @cd959bae9), the constructor,
     /// into `self`, which its ping thread points at.
     pub fn init(self: *WebSocket, a: std.mem.Allocator, strm: *SocketStream, is_server: bool) void {
         self.* = .{ .a = a, .strm = strm, .is_server = is_server };
         self.startHeartbeat();
     }
 
-    /// Ports the destructor of `WebSocket` (httplib.cpp:18628 @8642541b2).
+    /// Ports the destructor of `WebSocket` (httplib.cpp:18843 @cd959bae9).
     pub fn deinit(self: *WebSocket) void {
         {
             _ = std.c.pthread_mutex_lock(&self.ping_mutex);
@@ -321,7 +321,7 @@ pub const WebSocket = struct {
         self.strm.setReadInterrupt(null);
     }
 
-    /// Ports `send_frame` (httplib.cpp:18448 @8642541b2), a member of
+    /// Ports `send_frame` (httplib.cpp:18663 @cd959bae9), a member of
     /// `WebSocket`.
     fn sendFrame(self: *WebSocket, op: Opcode, data: []const u8) bool {
         _ = std.c.pthread_mutex_lock(&self.write_mutex);
@@ -363,7 +363,7 @@ pub const WebSocket = struct {
         }
     }
 
-    /// Ports `read` (httplib.cpp:18455 @8642541b2), a member of `WebSocket`:
+    /// Ports `read` (httplib.cpp:18670 @cd959bae9), a member of `WebSocket`:
     /// the next whole message into `msg`, answering the control frames in
     /// between.
     pub fn read(self: *WebSocket, a: std.mem.Allocator, msg: *std.ArrayList(u8)) error{OutOfMemory}!ReadResult {
@@ -444,19 +444,19 @@ pub const WebSocket = struct {
         return .fail;
     }
 
-    /// Ports `send` (httplib.cpp:18575 @8642541b2), a member of `WebSocket`:
+    /// Ports `send` (httplib.cpp:18790 @cd959bae9), a member of `WebSocket`:
     /// a text frame.
     pub fn send(self: *WebSocket, data: []const u8) bool {
         return self.sendFrame(.text, data);
     }
 
-    /// Ports `send` (httplib.cpp:18579 @8642541b2), the overload taking a
+    /// Ports `send` (httplib.cpp:18794 @cd959bae9), the overload taking a
     /// pointer and a length, a member of `WebSocket`: a binary frame.
     pub fn sendBinary(self: *WebSocket, data: []const u8) bool {
         return self.sendFrame(.binary, data);
     }
 
-    /// Ports `close` (httplib.cpp:18583 @8642541b2), a member of `WebSocket`.
+    /// Ports `close` (httplib.cpp:18798 @cd959bae9), a member of `WebSocket`.
     pub fn close(self: *WebSocket, status: CloseStatus, reason: []const u8) void {
         if (self.closed.swap(true, .seq_cst)) return;
         _ = std.c.pthread_cond_broadcast(&self.ping_cv);
@@ -501,13 +501,13 @@ pub const WebSocket = struct {
         }
     }
 
-    /// Ports `is_open` (httplib.cpp:18673 @8642541b2), a member of
+    /// Ports `is_open` (httplib.cpp:18888 @cd959bae9), a member of
     /// `WebSocket`.
     pub fn isOpen(self: *const WebSocket) bool {
         return !self.closed.load(.seq_cst);
     }
 
-    /// Ports `start_heartbeat` (httplib.cpp:18639 @8642541b2), a member of
+    /// Ports `start_heartbeat` (httplib.cpp:18854 @cd959bae9), a member of
     /// `WebSocket`: a ping every interval until the connection closes.
     fn startHeartbeat(self: *WebSocket) void {
         if (self.ping_interval_sec <= 0) return;
@@ -571,13 +571,13 @@ pub const WebSocketClient = struct {
         return self;
     }
 
-    /// Ports the destructor of `WebSocketClient` (httplib.cpp:18753
-    /// @8642541b2).
+    /// Ports the destructor of `WebSocketClient` (httplib.cpp:18968
+    /// @cd959bae9).
     pub fn deinit(self: *WebSocketClient) void {
         self.shutdownAndClose();
     }
 
-    /// Ports `shutdown_and_close` (httplib.cpp:18765 @8642541b2), a member
+    /// Ports `shutdown_and_close` (httplib.cpp:18980 @cd959bae9), a member
     /// of `WebSocketClient`.
     fn shutdownAndClose(self: *WebSocketClient) void {
         if (self.ws) |ws| {
@@ -597,7 +597,7 @@ pub const WebSocketClient = struct {
         }
     }
 
-    /// Ports `connect` (httplib.cpp:18865 @8642541b2), a member of
+    /// Ports `connect` (httplib.cpp:19083 @cd959bae9), a member of
     /// `WebSocketClient`: a socket, the upgrade request, and its answer
     /// checked. `create_stream`'s stream waits without bound, the read
     /// timeout being unset.
@@ -642,8 +642,8 @@ pub const WebSocketClient = struct {
         return true;
     }
 
-    /// Ports `perform_websocket_handshake` (httplib.cpp:5780 @8642541b2) and
-    /// `read_websocket_upgrade_response` (httplib.cpp:3697 @8642541b2), with
+    /// Ports `perform_websocket_handshake` (httplib.cpp:5772 @cd959bae9) and
+    /// `read_websocket_upgrade_response` (httplib.cpp:3705 @cd959bae9), with
     /// `prepare_default_headers` (httplib.cpp:18850 @8642541b2) before them.
     fn performHandshake(self: *WebSocketClient, strm: *SocketStream) error{OutOfMemory}!bool {
         const a = self.a;
@@ -671,7 +671,7 @@ pub const WebSocketClient = struct {
         _ = try headers.emplace(ar, "Sec-WebSocket-Key", client_key);
         _ = try headers.emplace(ar, "Sec-WebSocket-Version", "13");
 
-        // `write_request_head` (httplib.cpp:5763 @8642541b2): built in memory
+        // `write_request_head` (httplib.cpp:5755 @cd959bae9): built in memory
         // first, so a rejected header never leaves a partial request on the wire
         var bstrm: socket.BufferStream = .{ .a = ar };
         if (!detail.isRequestTarget(self.path)) return false;
@@ -686,7 +686,7 @@ pub const WebSocketClient = struct {
         var accept_buf: [28]u8 = undefined;
         const expected_accept = websocketAcceptKey(client_key, &accept_buf);
 
-        // `read_response_head` (httplib.cpp:3682 @8642541b2)
+        // `read_response_head` (httplib.cpp:3690 @cd959bae9)
         var buf: [2048]u8 = undefined;
         var lr = socket.LineReader.init(ar, strm, &buf);
         if (!try lr.getline()) return false;
@@ -710,28 +710,28 @@ pub const WebSocketClient = struct {
         return true;
     }
 
-    /// Ports `read` (httplib.cpp:18917 @8642541b2), a member of
+    /// Ports `read` (httplib.cpp:19135 @cd959bae9), a member of
     /// `WebSocketClient`.
     pub fn read(self: *WebSocketClient, a: std.mem.Allocator, msg: *std.ArrayList(u8)) error{OutOfMemory}!ReadResult {
         const ws = self.ws orelse return .fail;
         return ws.read(a, msg);
     }
 
-    /// Ports `send` (httplib.cpp:18922 @8642541b2), a member of
+    /// Ports `send` (httplib.cpp:19140 @cd959bae9), a member of
     /// `WebSocketClient`.
     pub fn send(self: *WebSocketClient, data: []const u8) bool {
         const ws = self.ws orelse return false;
         return ws.send(data);
     }
 
-    /// Ports `send` (httplib.cpp:18927 @8642541b2), the overload taking a
+    /// Ports `send` (httplib.cpp:19145 @cd959bae9), the overload taking a
     /// pointer and a length, a member of `WebSocketClient`.
     pub fn sendBinary(self: *WebSocketClient, data: []const u8) bool {
         const ws = self.ws orelse return false;
         return ws.sendBinary(data);
     }
 
-    /// Ports `close` (httplib.cpp:18932 @8642541b2), a member of
+    /// Ports `close` (httplib.cpp:19150 @cd959bae9), a member of
     /// `WebSocketClient`.
     pub fn close(self: *WebSocketClient) void {
         if (self.ws) |ws| ws.close(.normal, "");

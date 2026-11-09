@@ -16,7 +16,7 @@ const c = impl.c;
 const ne = graph.ne;
 const nb = graph.nb;
 
-/// Ports `build` (conformer.cpp:3 @8642541b2), a member of
+/// Ports `build` (conformer.cpp:3 @cd959bae9), a member of
 /// `clip_graph_conformer`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;

@@ -20,7 +20,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_minimax_m2`'s `load_arch_hparams` (models/minimax-m2.cpp:3 @8642541b2).
+/// Ports `llama_model_minimax_m2`'s `load_arch_hparams` (models/minimax-m2.cpp:3 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -35,7 +35,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_minimax_m2`'s `load_arch_tensors` (models/minimax-m2.cpp:14 @8642541b2).
+/// Ports `llama_model_minimax_m2`'s `load_arch_tensors` (models/minimax-m2.cpp:14 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
 
@@ -66,13 +66,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_minimax_m2`'s `build_arch_graph` (models/minimax-m2.cpp:43 @8642541b2).
+/// Ports `llama_model_minimax_m2`'s `build_arch_graph` (models/minimax-m2.cpp:43 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_minimax_m2`'s `graph`
-/// (models/minimax-m2.cpp:47 @8642541b2). Unlike most, it does not assert
+/// (models/minimax-m2.cpp:47 @cd959bae9). Unlike most, it does not assert
 /// that the head size is `n_rot`: MiniMax rotates 64 of its 128 dimensions.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;

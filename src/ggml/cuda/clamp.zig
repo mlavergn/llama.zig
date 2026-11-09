@@ -19,7 +19,7 @@ const cu = common.cu;
 const Tensor = c.ggml_tensor;
 const half = kernels.half;
 
-/// Ports `CUDA_CLAMP_BLOCK_SIZE` (clamp.cuh:3 @8642541b2).
+/// Ports `CUDA_CLAMP_BLOCK_SIZE` (clamp.cuh:3 @cd959bae9).
 const block_size = 256;
 
 /// `(half) x`.
@@ -32,7 +32,7 @@ fn u32Of(x: usize) u32 {
     return @truncate(x);
 }
 
-/// Ports `clamp_cuda` (clamp.cu:30 @8642541b2), which launches with `<<<>>>`.
+/// Ports `clamp_cuda` (clamp.cu:30 @cd959bae9), which launches with `<<<>>>`.
 /// Since v0.7.0 `src0` and `dst` may be views: rows are contiguous, dims
 /// 1..3 follow the strides, in elements, and the kernel divides the flat
 /// index with `fast_div_modulo`.
@@ -56,7 +56,7 @@ fn clampCuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, min: T, m
     });
 }
 
-/// Ports `ggml_cuda_op_clamp` (clamp.cu:46 @8642541b2).
+/// Ports `ggml_cuda_op_clamp` (clamp.cu:46 @cd959bae9).
 pub fn opClamp(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;

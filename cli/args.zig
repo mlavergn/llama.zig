@@ -68,7 +68,7 @@ pub const Args = struct {
     /// `-fitc, --fit-ctx N`: the least context `--fit` shrinks to. An
     /// explicit `-c 0` sets it to `maxInt(u32)`, which forbids shrinking:
     /// upstream's `-c` handler sets `fit_params_min_ctx` so
-    /// (common/arg.cpp:1656 @8642541b2). The later of the two flags wins.
+    /// (common/arg.cpp:1595 @cd959bae9). The later of the two flags wins.
     fit_min_ctx: u32 = 4096,
     /// `-t, --threads`. 0 lets llama.cpp pick.
     n_threads: i32 = 0,
@@ -137,7 +137,7 @@ pub const Args = struct {
     /// `--grammar`, `--grammar-file`, `-j, --json-schema` and
     /// `-jf, --json-schema-file`: where the grammar constraining generation
     /// comes from. Each sets upstream's `params.sampling.grammar` outright
-    /// in its handler in `common_params_parser_init` (common/arg.cpp:1405 @8642541b2),
+    /// in its handler in `common_params_parser_init` (common/arg.cpp:1344 @cd959bae9),
     /// so the last one given wins.
     grammar_source: GrammarSource = .none,
     /// The GBNF `grammar_source` resolves to, filled in by `main.zig` before
@@ -679,21 +679,21 @@ fn writeWhat(w: *std.Io.Writer, flag: []const u8, v: []const u8) !void {
     }
 }
 
-/// `llama_max_devices` (src/llama.cpp:86 @8642541b2), which sizes upstream's
+/// `llama_max_devices` (src/llama.cpp:86 @cd959bae9), which sizes upstream's
 /// `fit_params_target`.
 pub const max_devices = 16;
 
-/// Ports `is_truthy` (arg.cpp:1345 @8642541b2), in `common_arg_utils`.
+/// Ports `is_truthy` (arg.cpp:1284 @cd959bae9), in `common_arg_utils`.
 fn isTruthy(v: []const u8) bool {
     return eq(v, &.{ "on", "enabled", "true", "1" });
 }
 
-/// Ports `is_falsey` (arg.cpp:1349 @8642541b2), in `common_arg_utils`.
+/// Ports `is_falsey` (arg.cpp:1288 @cd959bae9), in `common_arg_utils`.
 fn isFalsey(v: []const u8) bool {
     return eq(v, &.{ "off", "disabled", "false", "0" });
 }
 
-/// Ports `is_autoy` (arg.cpp:1353 @8642541b2), in `common_arg_utils`.
+/// Ports `is_autoy` (arg.cpp:1292 @cd959bae9), in `common_arg_utils`.
 fn isAutoy(v: []const u8) bool {
     return eq(v, &.{ "auto", "-1" });
 }

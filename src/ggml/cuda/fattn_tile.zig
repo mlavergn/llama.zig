@@ -22,7 +22,7 @@ const c = impl.c;
 const Tensor = c.ggml_tensor;
 
 /// The packed configuration of one table entry, as
-/// `GGML_CUDA_FATTN_TILE_CONFIG_CASE` (fattn-tile.cuh:12 @8642541b2) returns it.
+/// `GGML_CUDA_FATTN_TILE_CONFIG_CASE` (fattn-tile.cuh:12 @cd959bae9) returns it.
 fn pack(e: table.TileCase) u32 {
     return (e.nthreads << 0) | (e.occupancy << 10) | (e.nbatch_fa << 14) | (e.nbatch_K << 23);
 }
@@ -35,7 +35,7 @@ fn lookup(cases: []const table.TileCase, DKQ: c_int, DV: c_int, ncols: c_int) u3
     return 0;
 }
 
-/// Ports the host `ggml_cuda_fattn_tile_get_config` (fattn-tile.cuh:315 @8642541b2).
+/// Ports the host `ggml_cuda_fattn_tile_get_config` (fattn-tile.cuh:315 @cd959bae9).
 /// The AMD arm picks the `amd` or `amd_rdna` table for an AMD compute
 /// capability, which a CUDA device never has; those tables are not
 /// generated, and that arm aborts instead.
@@ -49,23 +49,23 @@ fn getConfig(DKQ: c_int, DV: c_int, ncols: c_int, cc: c_int) u32 {
     return lookup(&table.tile_nvidia_fp32, DKQ, DV, ncols);
 }
 
-/// Ports the host `ggml_cuda_fattn_tile_get_nthreads` (fattn-tile.cuh:344 @8642541b2).
+/// Ports the host `ggml_cuda_fattn_tile_get_nthreads` (fattn-tile.cuh:344 @cd959bae9).
 fn getNthreads(DKQ: c_int, DV: c_int, ncols: c_int, cc: c_int) c_int {
     return @intCast((getConfig(DKQ, DV, ncols, cc) >> 0) & ((1 << 10) - 1));
 }
 
-/// Ports the host `ggml_cuda_fattn_tile_get_occupancy` (fattn-tile.cuh:352 @8642541b2).
+/// Ports the host `ggml_cuda_fattn_tile_get_occupancy` (fattn-tile.cuh:352 @cd959bae9).
 /// The kernel reads its own copy; the host has no caller, as in the C.
 fn getOccupancy(DKQ: c_int, DV: c_int, ncols: c_int, cc: c_int) c_int {
     return @intCast((getConfig(DKQ, DV, ncols, cc) >> 10) & ((1 << 4) - 1));
 }
 
-/// Ports the host `ggml_cuda_fattn_tile_get_nbatch_fa` (fattn-tile.cuh:360 @8642541b2).
+/// Ports the host `ggml_cuda_fattn_tile_get_nbatch_fa` (fattn-tile.cuh:360 @cd959bae9).
 fn getNbatchFa(DKQ: c_int, DV: c_int, ncols: c_int, cc: c_int) c_int {
     return @intCast((getConfig(DKQ, DV, ncols, cc) >> 14) & ((1 << 9) - 1));
 }
 
-/// Ports the host `ggml_cuda_fattn_tile_get_nbatch_K` (fattn-tile.cuh:368 @8642541b2).
+/// Ports the host `ggml_cuda_fattn_tile_get_nbatch_K` (fattn-tile.cuh:368 @cd959bae9).
 /// The kernel reads its own copy; the host has no caller, as in the C.
 fn getNbatchK(DKQ: c_int, DV: c_int, ncols: c_int, cc: c_int) c_int {
     return @intCast((getConfig(DKQ, DV, ncols, cc) >> 23) & ((1 << 9) - 1));
@@ -103,7 +103,7 @@ fn launchCols(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime nc
     });
 }
 
-/// Ports `launch_fattn_tile_switch_ncols1` (fattn-tile.cuh:1149 @8642541b2),
+/// Ports `launch_fattn_tile_switch_ncols1` (fattn-tile.cuh:1151 @cd959bae9),
 /// the non-HIP arm: no 64-column variant.
 fn switchNcols1(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols2: comptime_int, comptime use_logit_softcap: bool, ctx: *common.Context, dst: *Tensor) void {
     const Q = impl.one(Tensor, dst.src[0]);
@@ -148,7 +148,7 @@ fn switchNcols1(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime 
     impl.abort("fatal error");
 }
 
-/// Ports `launch_fattn_tile_switch_ncols2` (fattn-tile.cuh:1237 @8642541b2),
+/// Ports `launch_fattn_tile_switch_ncols2` (fattn-tile.cuh:1239 @cd959bae9),
 /// the non-HIP arm.
 fn switchNcols2(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime use_logit_softcap: bool, ctx: *common.Context, dst: *Tensor) void {
     const KQV = dst;
@@ -227,7 +227,7 @@ fn switchNcols2(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime 
     impl.abort("fatal error");
 }
 
-/// Ports `ggml_cuda_flash_attn_ext_tile_case` (fattn-tile.cuh:1323 @8642541b2).
+/// Ports `ggml_cuda_flash_attn_ext_tile_case` (fattn-tile.cuh:1325 @cd959bae9).
 fn tileCase(comptime DKQ: comptime_int, comptime DV: comptime_int, ctx: *common.Context, dst: *Tensor) void {
     const KQV = dst;
 
@@ -242,7 +242,7 @@ fn tileCase(comptime DKQ: comptime_int, comptime DV: comptime_int, ctx: *common.
     }
 }
 
-/// Ports `ggml_cuda_flash_attn_ext_tile` (fattn-tile.cu:4 @8642541b2).
+/// Ports `ggml_cuda_flash_attn_ext_tile` (fattn-tile.cu:4 @cd959bae9).
 pub fn flashAttnExtTile(ctx: *common.Context, dst: *Tensor) void {
     const K = impl.one(Tensor, dst.src[1]);
     const V = impl.one(Tensor, dst.src[2]);

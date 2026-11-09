@@ -19,13 +19,13 @@ const gpa = impl.gpa;
 const ne = graph.ne;
 const nb = graph.nb;
 
-/// `upscale` (mtmd/models/models.h:438 @8642541b2), a member of `clip_graph_soprano`:
+/// `upscale` (mtmd/models/models.h:501 @cd959bae9), a member of `clip_graph_soprano`:
 /// the SopranoDecoder default.
 const upscale: c_int = 4;
 
-/// Ports `build` (soprano.cpp:5 @8642541b2), a member of `clip_graph_soprano`,
+/// Ports `build` (soprano.cpp:5 @cd959bae9), a member of `clip_graph_soprano`,
 /// with `n_frames` derived as clip_get_graph_builder's `PROJECTOR_TYPE_SOPRANO`
-/// arm does (mtmd/clip.cpp:1228 @8642541b2).
+/// arm does (mtmd/clip.cpp:1247 @cd959bae9).
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     const ctx0 = g.ctx0;
     const hparams = g.hparams;
@@ -90,7 +90,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     return g.gf;
 }
 
-/// Ports `decode_spectrum` (soprano.cpp:62 @8642541b2), a member of
+/// Ports `decode_spectrum` (soprano.cpp:62 @cd959bae9), a member of
 /// `clip_graph_soprano`: the graph's STFT frames to PCM, on the host.
 pub fn decodeSpectrum(model: *const model_mod.Model, spectrum: []const f32, pcm: *std.ArrayList(f32)) clip.Error!void {
     const n_frame_vals: usize = @intCast(ne(model.vocos.output_w, 1));

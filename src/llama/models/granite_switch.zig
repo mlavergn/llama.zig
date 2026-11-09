@@ -39,7 +39,7 @@ fn oom() noreturn {
 }
 
 /// Ports `llama_model_granite_switch`'s `load_arch_hparams`
-/// (models/granite-switch.cpp:5 @8642541b2).
+/// (models/granite-switch.cpp:5 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -117,7 +117,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_granite_switch`'s `load_arch_tensors`
-/// (models/granite-switch.cpp:74 @8642541b2).
+/// (models/granite-switch.cpp:74 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const gs = &self.granite_switch;
@@ -185,7 +185,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llm_graph_input_switch` (models/granite-switch.cpp:134
-/// @8642541b2): the substituted token ids and the router's three signals,
+/// @cd959bae9): the substituted token ids and the router's three signals,
 /// set from the batch's tokens.
 const InpSwitch = struct {
     /// I32 `[n_tokens]`: the adapter-substituted token ids.
@@ -200,7 +200,7 @@ const InpSwitch = struct {
     smodel: *const Model,
 
     /// Ports `llm_graph_input_switch`'s `set_input`
-    /// (models/granite-switch.cpp:151 @8642541b2). K's dimension 0 is
+    /// (models/granite-switch.cpp:151 @cd959bae9). K's dimension 0 is
     /// `+gain` for an adapter token and `-gain` otherwise; the causal
     /// softmax then lets a single visible adapter token dominate, so the
     /// readback recovers its slot.
@@ -244,13 +244,13 @@ const InpSwitch = struct {
 };
 
 /// Ports `llama_model_granite_switch`'s `build_arch_graph`
-/// (models/granite-switch.cpp:188 @8642541b2).
+/// (models/granite-switch.cpp:188 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports `llama_model_granite_switch`'s `graph`'s
-/// `build_switched_lora_delta` (models/granite-switch.cpp:194 @8642541b2):
+/// `build_switched_lora_delta` (models/granite-switch.cpp:194 @cd959bae9):
 /// the per-token switched LoRA delta `B_a*(A_a*x)`, the adapter chosen per
 /// token by `ids`. `cur` is `{n_in, n_tokens}` and `ids` `{n_tokens}`; the
 /// result is `{n_out, n_tokens}`.
@@ -271,7 +271,7 @@ fn buildSwitchedLoraDelta(b: *const graph.Builder, lora_a: *Tensor, lora_b: *Ten
 }
 
 /// Ports `llama_model_granite_switch`'s `graph`'s `build_switched_lora_mm`
-/// (models/granite-switch.cpp:211 @8642541b2): the base projection plus the
+/// (models/granite-switch.cpp:211 @cd959bae9): the base projection plus the
 /// switched delta.
 fn buildSwitchedLoraMm(b: *const graph.Builder, w: *Tensor, lora_a: *Tensor, lora_b: *Tensor, cur: *Tensor, ids: *Tensor) *Tensor {
     const base: *Tensor = c.ggml_mul_mat(b.ctx0, w, cur);
@@ -287,7 +287,7 @@ fn routerLane(b: *const graph.Builder, sig1d: *Tensor, n_embd_head: i64) *Tensor
 }
 
 /// Ports the constructor of `llama_model_granite_switch`'s `graph`
-/// (models/granite-switch.cpp:222 @8642541b2).
+/// (models/granite-switch.cpp:222 @cd959bae9).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -395,7 +395,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_granite_switch`'s `graph`'s `build_attention_layer`
-/// (models/granite-switch.cpp:333 @8642541b2): the fused QKV sliced, each
+/// (models/granite-switch.cpp:333 @cd959bae9): the fused QKV sliced, each
 /// part plus its switched delta, and the output projection switched too.
 fn buildAttentionLayer(
     b: *const graph.Builder,
@@ -459,7 +459,7 @@ fn buildAttentionLayer(
 }
 
 /// Ports `llama_model_granite_switch`'s `graph`'s `build_layer_ffn`
-/// (models/granite-switch.cpp:394 @8642541b2): Granite's scaled residuals
+/// (models/granite-switch.cpp:394 @cd959bae9): Granite's scaled residuals
 /// around a SwiGLU whose three projections are all switched.
 fn buildLayerFfn(b: *const graph.Builder, cur_: *Tensor, inpSA: *Tensor, adapter_ids: *Tensor, model: *const Model, il: c_int) *Tensor {
     const ctx = b.ctx0;

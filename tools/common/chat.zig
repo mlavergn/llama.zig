@@ -27,7 +27,7 @@ const log = @import("log.zig");
 const common = @import("common.zig");
 const io = @import("io.zig");
 
-/// `CHATML_TEMPLATE_SRC` (chat.cpp:791 @8642541b2).
+/// `CHATML_TEMPLATE_SRC` (chat.cpp:791 @cd959bae9).
 const chatml_template_src =
     "{%- for message in messages -%}\n" ++
     "  {{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>\n' -}}\n" ++
@@ -36,7 +36,7 @@ const chatml_template_src =
     "  {{- '<|im_start|>assistant\n' -}}\n" ++
     "{%- endif -%}";
 
-/// Ports `common_chat_msg` (chat.h:90 @8642541b2) as far as these paths read
+/// Ports `common_chat_msg` (chat.h:90 @cd959bae9) as far as these paths read
 /// it: a role and its text.
 pub const Msg = struct {
     role: []const u8,
@@ -50,7 +50,7 @@ fn terminate(what: [*:0]const u8) noreturn {
     std.process.abort();
 }
 
-/// Ports the normalization of `tokenize` (lexer.cpp:34 @8642541b2), a
+/// Ports the normalization of `tokenize` (lexer.cpp:34 @cd959bae9), a
 /// member of `jinja::lexer`:
 /// `\r\n` and `\r` become `\n`, and one trailing newline of the original is
 /// dropped. The caller owns the result.
@@ -71,7 +71,7 @@ fn lexerSource(a: std.mem.Allocator, source: []const u8) ![]u8 {
     return src.toOwnedSlice(a);
 }
 
-/// Ports `common_chat_templates` (chat.cpp:313 @8642541b2).
+/// Ports `common_chat_templates` (chat.cpp:313 @cd959bae9).
 pub const Templates = struct {
     add_bos: bool,
     add_eos: bool,
@@ -83,7 +83,7 @@ pub const Templates = struct {
     bos_tok: []const u8,
     eos_tok: []const u8,
 
-    /// Ports `common_chat_templates_init` (chat.cpp:884 @8642541b2).
+    /// Ports `common_chat_templates_init` (chat.cpp:884 @cd959bae9).
     ///
     /// Return: the templates, every string `a`'s.
     pub fn init(a: std.mem.Allocator, model: ?*const c.llama_model, chat_template_override: []const u8) !Templates {
@@ -154,7 +154,7 @@ pub const Templates = struct {
     }
 
     /// The lambda of `common_chat_templates_init` named `get_token` (chat.cpp:944
-    /// @8642541b2).
+    /// @cd959bae9).
     fn getToken(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, token: c.llama_token, comptime name: [*:0]const u8, jinja_variable_name: []const u8, default_src: []const u8, tool_use_src: []const u8) ![]const u8 {
         if (token == c.LLAMA_TOKEN_NULL) {
             if (std.mem.indexOf(u8, default_src, jinja_variable_name) != null or
@@ -168,7 +168,7 @@ pub const Templates = struct {
         return common.tokenToPiece(a, vocab, token, true);
     }
 
-    /// Ports `common_chat_templates_apply_legacy` (chat.cpp:1613 @8642541b2):
+    /// Ports `common_chat_templates_apply_legacy` (chat.cpp:1613 @cd959bae9):
     /// the conversation through `llama_chat_apply_template`.
     ///
     /// Return: the prompt, `a`'s.
@@ -210,13 +210,13 @@ pub const Templates = struct {
         return buf[0..@intCast(res)];
     }
 
-    /// Ports `common_chat_templates_apply` (chat.cpp:1678 @8642541b2).
+    /// Ports `common_chat_templates_apply` (chat.cpp:1678 @cd959bae9).
     fn apply(self: *const Templates, a: std.mem.Allocator, messages: []const Msg, add_generation_prompt: bool, use_jinja: bool) ![]const u8 {
         if (use_jinja) terminate("--jinja is not supported by this port of llama-mtmd-cli");
         return self.applyLegacy(a, messages, add_generation_prompt);
     }
 
-    /// Ports `common_chat_format_single` (chat.cpp:740 @8642541b2): the text
+    /// Ports `common_chat_format_single` (chat.cpp:740 @cd959bae9): the text
     /// `new_msg` adds to the rendered history.
     ///
     /// Return: the new text, `a`'s.
@@ -240,7 +240,7 @@ pub const Templates = struct {
         return ss.toOwnedSlice(a);
     }
 
-    /// Ports `common_chat_format_example` (chat.cpp:770 @8642541b2): a short
+    /// Ports `common_chat_format_example` (chat.cpp:770 @cd959bae9): a short
     /// conversation rendered, to show the template.
     pub fn formatExample(self: *const Templates, a: std.mem.Allocator, use_jinja: bool) ![]const u8 {
         const msgs = [_]Msg{
@@ -263,7 +263,7 @@ fn substr(s: []const u8, pos: usize, count: usize) []const u8 {
     return s[pos..][0..@min(count, s.len - pos)];
 }
 
-/// Ports `string_replace_all` (common/common.cpp:511 @8642541b2): every `search`
+/// Ports `string_replace_all` (common/common.cpp:528 @cd959bae9): every `search`
 /// replaced. The caller owns the result.
 fn replaceAll(a: std.mem.Allocator, s: []const u8, search: []const u8, replace: []const u8) ![]const u8 {
     if (search.len == 0) return s;

@@ -13,7 +13,7 @@ const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
 const c = impl.c;
 
-/// Ports `build` (gemma4ua.cpp:4 @8642541b2), a member of
+/// Ports `build` (gemma4ua.cpp:4 @cd959bae9), a member of
 /// `clip_graph_gemma4ua`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;

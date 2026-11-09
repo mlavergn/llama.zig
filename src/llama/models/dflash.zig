@@ -443,7 +443,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
                 buildGraphDec(false, model, b);
             }
         },
-        else => impl.abort("models/dflash.cpp", 1546, "invalid graph type"),
+        else => impl.abort("models/dflash.cpp", 1849, "invalid graph type"),
     }
 }
 
@@ -455,7 +455,7 @@ fn otherModel(b: *const graph.Builder) *const Model {
 }
 
 /// Ports `llama_model_dflash`'s `graph<true>`'s `build_inp_embd_enc`
-/// (models/dflash.cpp:347 @8642541b2): the target model's features, its
+/// (models/dflash.cpp:405 @cd959bae9): the target model's features, its
 /// chosen layers concatenated, given as the batch's embeddings.
 fn buildInpEmbdEnc(b: *const graph.Builder) *Tensor {
     const hp = b.hparams;
@@ -476,7 +476,7 @@ fn buildInpEmbdEnc(b: *const graph.Builder) *Tensor {
 }
 
 /// Ports the constructor of `llama_model_dflash`'s `graph<true>`
-/// (models/dflash.cpp:364 @8642541b2): the encoder, the target model's
+/// (models/dflash.cpp:422 @cd959bae9): the encoder, the target model's
 /// features through the fusion layer and its norm.
 fn buildGraphEnc(model: *const Model, b: *const graph.Builder) void {
     var cur = buildInpEmbdEnc(b);
@@ -501,10 +501,10 @@ fn stoi(s: [:0]const u8) i64 {
     // strtol saturates at LONG_MIN and LONG_MAX, both past int's range.
     const v = strtol(s.ptr, &end, 10);
     if (@intFromPtr(end) == @intFromPtr(s.ptr)) {
-        c.ggml_abort("models/dflash.cpp", 397, "terminating due to uncaught exception of type std::invalid_argument: stoi: no conversion");
+        c.ggml_abort("models/dflash.cpp", 476, "terminating due to uncaught exception of type std::invalid_argument: stoi: no conversion");
     }
     if (v < std.math.minInt(c_int) or v > std.math.maxInt(c_int)) {
-        c.ggml_abort("models/dflash.cpp", 397, "terminating due to uncaught exception of type std::out_of_range: stoi: out of range");
+        c.ggml_abort("models/dflash.cpp", 476, "terminating due to uncaught exception of type std::out_of_range: stoi: out of range");
     }
     return v;
 }
@@ -520,7 +520,7 @@ fn buildDsparkMarkovHead(b: *const graph.Builder, model: *const Model, tokens: *
 
     const w1 = model.dspark_markov_w1;
     const w2 = model.dspark_markov_w2;
-    impl.assert(w1 != null and w2 != null, "models/dflash.cpp", 386, "w1 && w2 && \"DSpark markov weights not loaded\"");
+    impl.assert(w1 != null and w2 != null, "models/dflash.cpp", 461, "w1 && w2 && \"DSpark markov weights not loaded\"");
 
     // The confidence head is optional.
     const has_conf = model.dspark_conf_proj != null;
@@ -531,9 +531,9 @@ fn buildDsparkMarkovHead(b: *const graph.Builder, model: *const Model, tokens: *
     const n_tok = base.ne[1];
 
     const it = model.gguf_kv.get("dflash.block_size");
-    impl.assert(it != null, "models/dflash.cpp", 396, "it != model.gguf_kv.end() && \"DSpark draft requires 'dflash.block_size' in GGUF metadata\"");
+    impl.assert(it != null, "models/dflash.cpp", 475, "it != model.gguf_kv.end() && \"DSpark draft requires 'dflash.block_size' in GGUF metadata\"");
     const block_size = stoi(it.?.*);
-    impl.assert(block_size > 0, "models/dflash.cpp", 398, "block_size > 0");
+    impl.assert(block_size > 0, "models/dflash.cpp", 477, "block_size > 0");
 
     // The bonus anchor of SpecForge's exports: slot 0 is a bonus token, not
     // a prediction slot.
@@ -542,7 +542,7 @@ fn buildDsparkMarkovHead(b: *const graph.Builder, model: *const Model, tokens: *
     const i_draft_beg: i64 = if (sample_from_anchor) 0 else 1;
 
     const n_blocks: i64 = b.ubatch.n_seqs_unq;
-    impl.assert(n_blocks > 0 and @rem(n_tok, n_blocks) == 0, "models/dflash.cpp", 406, "n_blocks > 0 && n_tok % n_blocks == 0 && \"DSpark markov head requires equal-size blocks\"");
+    impl.assert(n_blocks > 0 and @rem(n_tok, n_blocks) == 0, "models/dflash.cpp", 485, "n_blocks > 0 && n_tok % n_blocks == 0 && \"DSpark markov head requires equal-size blocks\"");
     // The tokens per block in this ubatch at run time (the anchor and the
     // drafted positions), bounded by the training block_size.
     const block_drafts = @divTrunc(n_tok, n_blocks);
@@ -638,7 +638,7 @@ fn buildDsparkMarkovHead(b: *const graph.Builder, model: *const Model, tokens: *
     c.ggml_build_forward_expand(b.gf, out);
 }
 
-/// Ports `build_dflash2_conv` (models/dflash.cpp:493 @8642541b2): DFlash2's
+/// Ports `build_dflash2_conv` (models/dflash.cpp:598 @cd959bae9): DFlash2's
 /// causal convolution within each block, its `kernel_size` taps weighted by
 /// a static base plus the token's own dynamic coefficients, one weight per
 /// group of `group_size` channels. `side` picks the input (0) or output (1)
@@ -653,8 +653,8 @@ fn buildDflash2Conv(b: *const graph.Builder, hidden_: *Tensor, dynamic_: ?*Tenso
     const group_size: i64 = hp.dflash_conv_group_size;
     const n_groups = @divTrunc(hidden_size, group_size);
 
-    impl.assert(n_blocks > 0 and @rem(n_tokens, n_blocks) == 0, "models/dflash.cpp", 507, "n_blocks > 0 && n_tokens % n_blocks == 0");
-    impl.assert(dynamic_ != null and base_ != null and side >= 0 and side < 2, "models/dflash.cpp", 508, "dynamic && base && side >= 0 && side < 2");
+    impl.assert(n_blocks > 0 and @rem(n_tokens, n_blocks) == 0, "models/dflash.cpp", 612, "n_blocks > 0 && n_tokens % n_blocks == 0");
+    impl.assert(dynamic_ != null and base_ != null and side >= 0 and side < 2, "models/dflash.cpp", 613, "dynamic && base && side >= 0 && side < 2");
     var dynamic = dynamic_.?;
     const base = base_.?;
 
@@ -704,7 +704,7 @@ fn buildDflash2Conv(b: *const graph.Builder, hidden_: *Tensor, dynamic_: ?*Tenso
     return result.?;
 }
 
-/// Ports `build_dflash2_selector` (models/dflash.cpp:560 @8642541b2):
+/// Ports `build_dflash2_selector` (models/dflash.cpp:665 @cd959bae9):
 /// DFlash2's selector, the top-k candidates at every block position and
 /// the pairwise transition scores between neighbouring positions' sets,
 /// packed into the nextn output slot for the walk on the CPU.
@@ -719,8 +719,8 @@ fn buildDflash2Selector(b: *const graph.Builder, model: *const Model, tokens_: ?
     const top_k: i64 = hp.dflash_selector_top_k;
     const rank: i64 = hp.dflash_selector_rank;
     const n_blocks: i64 = b.ubatch.n_seqs_unq;
-    impl.assert(n_blocks > 0 and @rem(n_tokens, n_blocks) == 0, "models/dflash.cpp", 571, "n_blocks > 0 && n_tokens % n_blocks == 0");
-    impl.assert(res.t_logits.?.ne[1] == n_tokens, "models/dflash.cpp", 572, "res->t_logits->ne[1] == n_tokens");
+    impl.assert(n_blocks > 0 and @rem(n_tokens, n_blocks) == 0, "models/dflash.cpp", 676, "n_blocks > 0 && n_tokens % n_blocks == 0");
+    impl.assert(res.t_logits.?.ne[1] == n_tokens, "models/dflash.cpp", 677, "res->t_logits->ne[1] == n_tokens");
     const tokens = tokens_ orelse return;
 
     const t_logits = res.t_logits.?;
@@ -781,8 +781,8 @@ const Selector = struct {
     unary_blk: *Tensor,
     gate_blk: *Tensor,
 
-    /// Ports `build_dflash2_selector`'s `score_run` (models/dflash.cpp:595
-    /// @8642541b2): a position's score reads only the candidate sets at
+    /// Ports `build_dflash2_selector`'s `score_run` (models/dflash.cpp:700
+    /// @cd959bae9): a position's score reads only the candidate sets at
     /// pos - 1 and pos, so a run of positions has no internal dependency
     /// and scores in one batched matmul.
     fn scoreRun(self: *const Selector, beg_pos: i64, n_pos: i64, pred_ids: *Tensor) *Tensor {
@@ -818,7 +818,7 @@ const Selector = struct {
     }
 };
 
-/// Ports `build_lilicorr_scores` (models/dflash.cpp:651 @8642541b2):
+/// Ports `build_lilicorr_scores` (models/dflash.cpp:756 @cd959bae9):
 /// LiliCorr's lattice. Every drafted position's top-k candidates, ordered by
 /// logit, become nodes -- their token embeddings, the position's hidden
 /// state, five rank features and a slot and rank embedding -- which a small
@@ -838,9 +838,9 @@ fn buildLilicorrScores(b: *const graph.Builder, model: *const Model, tok_embd: *
     const top_k: i64 = hp.lilicorr_candidate_topk;
     const heads: i64 = hp.lilicorr_num_heads;
     const n_blocks: i64 = b.ubatch.n_seqs_unq;
-    impl.assert(n_blocks > 0 and @rem(n_tokens, n_blocks) == 0, "models/dflash.cpp", 664, "n_blocks > 0 && n_tokens % n_blocks == 0");
-    impl.assert(res.t_logits.?.ne[1] == n_tokens, "models/dflash.cpp", 665, "res->t_logits->ne[1] == n_tokens");
-    impl.assert(anchors_ != null, "models/dflash.cpp", 666, "anchors && tok_embd");
+    impl.assert(n_blocks > 0 and @rem(n_tokens, n_blocks) == 0, "models/dflash.cpp", 769, "n_blocks > 0 && n_tokens % n_blocks == 0");
+    impl.assert(res.t_logits.?.ne[1] == n_tokens, "models/dflash.cpp", 770, "res->t_logits->ne[1] == n_tokens");
+    impl.assert(anchors_ != null, "models/dflash.cpp", 771, "anchors && tok_embd");
     const anchors = anchors_.?;
 
     const t_logits = res.t_logits.?;
@@ -850,7 +850,7 @@ fn buildLilicorrScores(b: *const graph.Builder, model: *const Model, tok_embd: *
     const slots = block_size - 1;
     const nodes = slots * top_k;
     const factor_dim: i64 = model.lilicorr_out_head.?.ne[1];
-    impl.assert(tokens_per_block == block_size, "models/dflash.cpp", 674, "tokens_per_block == block_size");
+    impl.assert(tokens_per_block == block_size, "models/dflash.cpp", 779, "tokens_per_block == block_size");
 
     var candidates: *Tensor = c.ggml_top_k(ctx, t_logits, @intCast(top_k));
     const logits_rows: *Tensor = c.ggml_reshape_3d(ctx, t_logits, 1, t_logits.ne[0], n_tokens);
@@ -973,7 +973,7 @@ fn buildLilicorrScores(b: *const graph.Builder, model: *const Model, tok_embd: *
     c.ggml_build_forward_expand(b.gf, packed_);
 }
 
-/// `graph<false>`'s `build_rope` lambda (models/dflash.cpp:842 @8642541b2):
+/// `graph<false>`'s `build_rope` lambda (models/dflash.cpp:947 @cd959bae9):
 /// drafts for M-RoPE targets use the degenerate sections, the temporal
 /// dimension only; the others take the first layer's `rope_freqs`, if any.
 fn buildRope(model: *const Model, b: *const graph.Builder, sections: *[4]c_int, cur: *Tensor, pos: *Tensor) *Tensor {
@@ -996,7 +996,7 @@ fn buildGraphDec(comptime iswa: bool, model: *const Model, b: *const graph.Build
     const n_embd_inp: i64 = hp.nEmbdInpEnc();
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/dflash.cpp", 821, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/dflash.cpp", 926, "n_embd_head == hparams.n_embd_head_k()");
 
     const inp_pos = b.buildInpPos();
 
@@ -1011,7 +1011,7 @@ fn buildGraphDec(comptime iswa: bool, model: *const Model, b: *const graph.Build
     @memcpy(&sections, hp.rope_sections[0..4]);
 
     // KV cache injection.
-    b.ubatch.assertEmbdOrToken("models/dflash.cpp", 853);
+    b.ubatch.assertEmbdOrToken("models/dflash.cpp", 958);
     if (b.ubatch.embd != null) {
         const inp = allocator.create(graph.InpEmbd) catch oom();
         inp.* = .{ .n_embd = n_embd_inp };
@@ -1093,10 +1093,10 @@ fn buildGraphDec(comptime iswa: bool, model: *const Model, b: *const graph.Build
     // (shared through ctx_other).
     var tok_embd = model.tok_embd;
     if (tok_embd == null) {
-        impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 931, "cparams.ctx_other != nullptr");
+        impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 1033, "cparams.ctx_other != nullptr");
         const model_other = otherModel(b);
 
-        impl.assert(model_other.tok_embd != null, "models/dflash.cpp", 934, "model_other->tok_embd != nullptr && \"DFlash decoder requires the target model's token embeddings\"");
+        impl.assert(model_other.tok_embd != null, "models/dflash.cpp", 1036, "model_other->tok_embd != nullptr && \"DFlash decoder requires the target model's token embeddings\"");
         tok_embd = model_other.tok_embd;
     }
 
@@ -1227,9 +1227,9 @@ fn buildGraphDec(comptime iswa: bool, model: *const Model, b: *const graph.Build
     var output = model.output;
     var output_s = model.output_s;
     if (output == null) {
-        impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 1066, "cparams.ctx_other != nullptr");
+        impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 1168, "cparams.ctx_other != nullptr");
         const model_other = otherModel(b);
-        impl.assert(model_other.output != null, "models/dflash.cpp", 1068, "model_other->output != nullptr && \"DFlash decoder requires the target model's output projection\"");
+        impl.assert(model_other.output != null, "models/dflash.cpp", 1170, "model_other->output != nullptr && \"DFlash decoder requires the target model's output projection\"");
         output = model_other.output;
         output_s = model_other.output_s;
     }
@@ -1257,8 +1257,8 @@ fn buildGraphDec(comptime iswa: bool, model: *const Model, b: *const graph.Build
         const n_outputs = cur.ne[1];
         const n_vocab: i64 = model.vocab.nTokens();
 
-        impl.assert(d2t.type == c.GGML_TYPE_I64, "models/dflash.cpp", 1094, "model.d2t->type == GGML_TYPE_I64");
-        impl.assert(d2t.ne[0] == n_draft_vocab, "models/dflash.cpp", 1095, "model.d2t->ne[0] == n_draft_vocab");
+        impl.assert(d2t.type == c.GGML_TYPE_I64, "models/dflash.cpp", 1196, "model.d2t->type == GGML_TYPE_I64");
+        impl.assert(d2t.ne[0] == n_draft_vocab, "models/dflash.cpp", 1197, "model.d2t->ne[0] == n_draft_vocab");
 
         const logits: *Tensor = c.ggml_fill(ctx, c.ggml_new_tensor_3d(ctx, c.GGML_TYPE_F32, 1, n_vocab, n_outputs), -std.math.inf(f32));
         cur = c.ggml_set_rows(ctx, logits, c.ggml_reshape_3d(ctx, cur, 1, n_draft_vocab, n_outputs), c.ggml_reshape_3d(ctx, d2t, n_draft_vocab, 1, 1));
@@ -1280,8 +1280,8 @@ fn buildGraphDec(comptime iswa: bool, model: *const Model, b: *const graph.Build
 }
 
 /// `graph<false>`'s LiliCorr condition, tested where it sets `inp_anchor`
-/// (models/dflash.cpp:942 @8642541b2) and again before calling
-/// `build_lilicorr_scores` (models/dflash.cpp:1114 @8642541b2): a LiliCorr
+/// (models/dflash.cpp:1044 @cd959bae9) and again before calling
+/// `build_lilicorr_scores` (models/dflash.cpp:1216 @cd959bae9): a LiliCorr
 /// draft, a token batch carrying state embeddings, and exactly one block
 /// per sequence.
 fn isLilicorrBlock(model: *const Model, b: *const graph.Builder) bool {
@@ -1293,10 +1293,10 @@ fn isLilicorrBlock(model: *const Model, b: *const graph.Builder) bool {
 /// the token embeddings for `graph_dsv4`.
 fn dsv4TokEmbd(model: *const Model, b: *const graph.Builder) *Tensor {
     if (model.tok_embd) |t| return t;
-    impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 1179, "cparams.ctx_other != nullptr");
+    impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 1278, "cparams.ctx_other != nullptr");
     const model_other = otherModel(b);
 
-    impl.assert(model_other.tok_embd != null, "models/dflash.cpp", 1182, "model_other->tok_embd != nullptr && \"DSpark decoder requires the target model's token embeddings\"");
+    impl.assert(model_other.tok_embd != null, "models/dflash.cpp", 1281, "model_other->tok_embd != nullptr && \"DSpark decoder requires the target model's token embeddings\"");
     return model_other.tok_embd.?;
 }
 
@@ -1322,7 +1322,7 @@ fn buildGraphDsv4(model: *const Model, b: *const graph.Builder) void {
     const inp_attn = b.buildAttnInpKIswa();
 
     // KV cache injection: the fused target features from the encoder.
-    b.ubatch.assertEmbdOrToken("models/dflash.cpp", 1133);
+    b.ubatch.assertEmbdOrToken("models/dflash.cpp", 1235);
     if (b.ubatch.embd != null) {
         const inp = allocator.create(graph.InpEmbd) catch oom();
         inp.* = .{ .n_embd = n_embd_inp };
@@ -1454,9 +1454,9 @@ fn buildGraphDsv4(model: *const Model, b: *const graph.Builder) void {
     var output = model.output;
     var output_s = model.output_s;
     if (output == null) {
-        impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 1275, "cparams.ctx_other != nullptr");
+        impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 1374, "cparams.ctx_other != nullptr");
         const model_other = otherModel(b);
-        impl.assert(model_other.output != null, "models/dflash.cpp", 1277, "model_other->output != nullptr && \"DSpark decoder requires the target model's output projection\"");
+        impl.assert(model_other.output != null, "models/dflash.cpp", 1376, "model_other->output != nullptr && \"DSpark decoder requires the target model's output projection\"");
         output = model_other.output;
         output_s = model_other.output_s;
     }
@@ -1491,13 +1491,13 @@ fn buildGraphDsv41(model: *const Model, b: *const graph.Builder) void {
     const n_embd_head_rope: i64 = hp.nRot(0);
     const n_embd_head_nope = n_embd_head - n_embd_head_rope;
 
-    impl.assert(hp.dsv4_hc_single_pass, "models/dflash.cpp", 1301, "hparams.dsv4_hc_single_pass");
+    impl.assert(hp.dsv4_hc_single_pass, "models/dflash.cpp", 1402, "hparams.dsv4_hc_single_pass");
 
     const inp_pos = b.buildInpPos();
 
     const inp_attn = b.buildAttnInpKIswa();
 
-    b.ubatch.assertEmbdOrToken("models/dflash.cpp", 1314);
+    b.ubatch.assertEmbdOrToken("models/dflash.cpp", 1415);
     if (b.ubatch.embd != null) {
         const inp = allocator.create(graph.InpEmbd) catch oom();
         inp.* = .{ .n_embd = n_embd_inp };
@@ -1538,9 +1538,9 @@ fn buildGraphDsv41(model: *const Model, b: *const graph.Builder) void {
 
     var tok_embd = model.tok_embd;
     if (tok_embd == null) {
-        impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 1353, "cparams.ctx_other != nullptr");
+        impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 1451, "cparams.ctx_other != nullptr");
         const model_other = otherModel(b);
-        impl.assert(model_other.tok_embd != null, "models/dflash.cpp", 1355, "model_other->tok_embd != nullptr && \"DSpark decoder requires the target model's token embeddings\"");
+        impl.assert(model_other.tok_embd != null, "models/dflash.cpp", 1453, "model_other->tok_embd != nullptr && \"DSpark decoder requires the target model's token embeddings\"");
         tok_embd = model_other.tok_embd;
     }
 
@@ -1564,8 +1564,8 @@ fn buildGraphDsv41(model: *const Model, b: *const graph.Builder) void {
     const o_group_dim = n_heads_group * n_embd_head;
     const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head));
 
-    impl.assert(n_embd_head == b.n_embd_head_v, "models/dflash.cpp", 1378, "n_embd_head == n_embd_head_v");
-    impl.assert(@rem(b.n_head, n_groups) == 0, "models/dflash.cpp", 1379, "n_head % n_groups == 0");
+    impl.assert(n_embd_head == b.n_embd_head_v, "models/dflash.cpp", 1476, "n_embd_head == n_embd_head_v");
+    impl.assert(@rem(b.n_head, n_groups) == 0, "models/dflash.cpp", 1477, "n_head % n_groups == 0");
 
     inpL = c.ggml_reshape_3d(ctx, inpL, b.n_embd, 1, b.n_tokens);
     inpL = c.ggml_repeat_4d(ctx, inpL, b.n_embd, hc, b.n_tokens, 1);
@@ -1696,9 +1696,9 @@ fn buildGraphDsv41(model: *const Model, b: *const graph.Builder) void {
     var output = model.output;
     var output_s = model.output_s;
     if (output == null) {
-        impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 1516, "cparams.ctx_other != nullptr");
+        impl.assert(b.cparams.ctx_other != null, "models/dflash.cpp", 1603, "cparams.ctx_other != nullptr");
         const model_other = otherModel(b);
-        impl.assert(model_other.output != null, "models/dflash.cpp", 1518, "model_other->output != nullptr && \"DSpark decoder requires the target model's output projection\"");
+        impl.assert(model_other.output != null, "models/dflash.cpp", 1605, "model_other->output != nullptr && \"DSpark decoder requires the target model's output projection\"");
         output = model_other.output;
         output_s = model_other.output_s;
     }

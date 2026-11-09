@@ -34,7 +34,7 @@ comptime {
     // `VK_NV_cooperative_matrix_decode_vector`, `VK_KHR_shader_bfloat16`,
     // `VK_VALVE_shader_mixed_float_dot_product`,
     // `VK_EXT_shader_ocp_microscaling_types` and `VK_EXT_shader_float8`
-    // (ggml-vulkan-types.h:28, 97, 114, 129, 144 @8642541b2). The pinned SDK has
+    // (ggml-vulkan-types.h:28, 97, 114, 129, 144 @cd959bae9). The pinned SDK has
     // all of them (PLAN.md, Decision 59), so the port needs none.
     for (.{
         "VK_NV_cooperative_matrix_decode_vector",  "VK_KHR_shader_bfloat16",
@@ -60,7 +60,7 @@ pub const glslc = struct {
 // -----------------------------------------------------------------------------
 // Architecture
 
-/// Ports `vk_device_architecture` (ggml-vulkan-types.h:366 @8642541b2).
+/// Ports `vk_device_architecture` (ggml-vulkan-types.h:366 @cd959bae9).
 /// The ordinals are the C's: the cm1 integer-dot matmul passes one to its
 /// shader as the `DEVICE_ARCH` specialization constant.
 pub const Architecture = enum(u32) {
@@ -77,7 +77,7 @@ pub const Architecture = enum(u32) {
     qualcomm_adreno,
 };
 
-/// Ports `get_device_architecture` (ggml-vulkan.cpp:3 @8642541b2).
+/// Ports `get_device_architecture` (ggml-vulkan.cpp:3 @cd959bae9).
 pub fn getDeviceArchitecture(device: vk.VkPhysicalDevice) common.VkError!Architecture {
     const props = common.getProperties(device);
 
@@ -156,32 +156,32 @@ pub fn getDeviceArchitecture(device: vk.VkPhysicalDevice) common.VkError!Archite
     return .other;
 }
 
-/// One entry of `GpuPipelineConfig` (ggml-vulkan-types.h:1374 @8642541b2): a
+/// One entry of `GpuPipelineConfig` (ggml-vulkan-types.h:1379 @cd959bae9): a
 /// pipeline name and its subgroup size.
 const PipelineSubgroupSize = struct { []const u8, u32 };
 
-/// Ports `rdna1_pipelines` (ggml-vulkan.cpp:1602 @8642541b2).
+/// Ports `rdna1_pipelines` (ggml-vulkan.cpp:1609 @cd959bae9).
 const rdna1_pipelines = [_]PipelineSubgroupSize{
     .{ "soft_max", 64 },        .{ "im2col", 64 },
     .{ "argmax", 64 },          .{ "mul_mat_vec", 64 },
     .{ "mul_mat_vec_f16", 32 }, .{ "mul_mat_vec_f32_f16", 32 },
 };
 
-/// Ports `rdna2_pipelines` (ggml-vulkan.cpp:1608 @8642541b2).
+/// Ports `rdna2_pipelines` (ggml-vulkan.cpp:1615 @cd959bae9).
 const rdna2_pipelines = [_]PipelineSubgroupSize{
     .{ "soft_max", 64 }, .{ "im2col", 64 },
 };
 
-/// Ports `RDNA_DEFAULT_SUBGROUP_SIZE` (ggml-vulkan-types.h:1388 @8642541b2).
+/// Ports `RDNA_DEFAULT_SUBGROUP_SIZE` (ggml-vulkan-types.h:1393 @cd959bae9).
 const rdna_default_subgroup_size = 32;
 
-/// Ports `gpu_pipeline_configs` (ggml-vulkan.cpp:1612 @8642541b2).
+/// Ports `gpu_pipeline_configs` (ggml-vulkan.cpp:1619 @cd959bae9).
 const gpu_pipeline_configs = [_]struct { arch: Architecture, pipelines: []const PipelineSubgroupSize, default_subgroup_size: u32 }{
     .{ .arch = .amd_rdna1, .pipelines = &rdna1_pipelines, .default_subgroup_size = rdna_default_subgroup_size },
     .{ .arch = .amd_rdna2, .pipelines = &rdna2_pipelines, .default_subgroup_size = rdna_default_subgroup_size },
 };
 
-/// Ports `get_subgroup_size` (ggml-vulkan.cpp:1629 @8642541b2).
+/// Ports `get_subgroup_size` (ggml-vulkan.cpp:1636 @cd959bae9).
 ///
 /// The C++ sorts the map's entries longest first and takes the first one
 /// contained in the name. `std::sort` is not stable, so entries of equal
@@ -205,7 +205,7 @@ pub fn getSubgroupSize(pipeline_name: []const u8, arch: Architecture) u32 {
     return 0; // If no matching configuration is found
 }
 
-/// Ports `ggml_vk_khr_cooperative_matrix_support` (ggml-vulkan.cpp:16432 @8642541b2).
+/// Ports `ggml_vk_khr_cooperative_matrix_support` (ggml-vulkan.cpp:16483 @cd959bae9).
 pub fn khrCooperativeMatrixSupport(props: *const vk.VkPhysicalDeviceProperties, driver_props: *const vk.VkPhysicalDeviceDriverProperties, arch: Architecture) bool {
     switch (props.vendorID) {
         common.vendor_id.intel => {
@@ -256,17 +256,17 @@ pub const Instance = struct {
     multi_device: bool = false,
 };
 
-/// Ports `vk_instance_initialized` (ggml-vulkan.cpp:329 @8642541b2).
+/// Ports `vk_instance_initialized` (ggml-vulkan.cpp:329 @cd959bae9).
 pub var initialized = false;
-/// Ports `vk_instance` (ggml-vulkan.cpp:331 @8642541b2).
+/// Ports `vk_instance` (ggml-vulkan.cpp:331 @cd959bae9).
 pub var instance: Instance = .{};
 
 /// The logger switches `ggml_vk_instance_init` reads from the environment.
-/// Ports `vk_memory_logger_enabled` (ggml-vulkan-debug.cpp:3 @8642541b2),
+/// Ports `vk_memory_logger_enabled` (ggml-vulkan-debug.cpp:3 @cd959bae9),
 /// `vk_perf_logger_enabled`, `vk_perf_logger_concurrent`,
-/// `vk_enable_sync_logger` (ggml-vulkan-debug.cpp:5, 7, 9 @8642541b2),
+/// `vk_enable_sync_logger` (ggml-vulkan-debug.cpp:5, 7, 9 @cd959bae9),
 /// `vk_perf_logger_frequency` and `vk_pipeline_stats_filter`
-/// (ggml-vulkan-debug.cpp:11, 13 @8642541b2).
+/// (ggml-vulkan-debug.cpp:11, 13 @cd959bae9).
 pub const loggers = struct {
     pub var memory_logger_enabled = false;
     pub var perf_logger_enabled = false;
@@ -279,7 +279,7 @@ pub const loggers = struct {
 /// What `instanceInit` can fail with, where the C++ throws.
 pub const InitError = common.VkError || error{ VulkanTooOld, InvalidDeviceIndex, InvalidNumber };
 
-/// Ports `ggml_vk_instance_layer_settings_available` (ggml-vulkan.cpp:16369 @8642541b2).
+/// Ports `ggml_vk_instance_layer_settings_available` (ggml-vulkan.cpp:16420 @cd959bae9).
 ///
 /// False: its body is all behind `GGML_VULKAN_VALIDATE`, which the reference
 /// build does not define.
@@ -288,21 +288,21 @@ fn layerSettingsAvailable() bool {
 }
 
 /// Ports `ggml_vk_instance_portability_enumeration_ext_available`
-/// (ggml-vulkan.cpp:16388 @8642541b2) and the `__APPLE__` arms that call it,
+/// (ggml-vulkan.cpp:16439 @cd959bae9) and the `__APPLE__` arms that call it,
 /// which this build -- Linux and Windows -- never compiles.
 fn portabilityEnumerationExtAvailable(instance_extensions: []const vk.VkExtensionProperties) bool {
     _ = instance_extensions;
     return false;
 }
 
-/// Ports `ggml_vk_instance_debug_utils_ext_available` (ggml-vulkan.cpp:16403 @8642541b2).
+/// Ports `ggml_vk_instance_debug_utils_ext_available` (ggml-vulkan.cpp:16454 @cd959bae9).
 fn debugUtilsExtAvailable(instance_extensions: []const vk.VkExtensionProperties) bool {
     if (common.hasExtension(instance_extensions, "VK_EXT_debug_utils")) return true;
     impl.fprintfStderr("ggml_vulkan: WARNING: Instance extension VK_EXT_debug_utils not found.\n", .{});
     return false;
 }
 
-/// Ports `ggml_vk_device_is_supported` (ggml-vulkan.cpp:16418 @8642541b2).
+/// Ports `ggml_vk_device_is_supported` (ggml-vulkan.cpp:16469 @cd959bae9).
 fn deviceIsSupported(vkdev: vk.VkPhysicalDevice) bool {
     var device_features2 = common.structure(vk.VkPhysicalDeviceFeatures2, vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
     var vk11_features = common.structure(vk.VkPhysicalDeviceVulkan11Features, vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES);
@@ -630,7 +630,7 @@ pub fn instanceInitOrAbort() void {
     instanceInit() catch impl.abort("ggml_vulkan: instance initialisation failed");
 }
 
-/// Ports `ggml_vk_print_gpu_info` (ggml-vulkan.cpp:4956 @8642541b2).
+/// Ports `ggml_vk_print_gpu_info` (ggml-vulkan.cpp:4968 @cd959bae9).
 fn printGpuInfo(idx: usize) InitError!void {
     impl.assert(idx < instance.device_indices.items.len, "idx < vk_instance.device_indices.size()");
     const dev_num = instance.device_indices.items[idx];
@@ -791,7 +791,7 @@ fn chain(last: **vk.VkBaseOutStructure, next: anytype) void {
 // -----------------------------------------------------------------------------
 // Per-device queries
 
-/// Ports `ggml_vk_get_device_count` (ggml-vulkan.cpp:13078 @8642541b2).
+/// Ports `ggml_vk_get_device_count` (ggml-vulkan.cpp:13104 @cd959bae9).
 pub fn getDeviceCount() c_int {
     instanceInitOrAbort();
     return @intCast(instance.device_indices.items.len);
@@ -806,7 +806,7 @@ fn copyTruncated(description: [*]u8, description_size: usize, text: []const u8) 
     description[n] = 0;
 }
 
-/// Ports `ggml_vk_get_device_description` (ggml-vulkan.cpp:13084 @8642541b2).
+/// Ports `ggml_vk_get_device_description` (ggml-vulkan.cpp:13110 @cd959bae9).
 ///
 /// `device` indexes the *physical* devices, not the backend's.
 pub fn getPhysicalDeviceDescription(device: usize, description: [*]u8, description_size: usize) void {
@@ -825,7 +825,7 @@ pub fn physicalDevice(device: usize) vk.VkPhysicalDevice {
     return devices[instance.device_indices.items[device]];
 }
 
-/// Ports `ggml_backend_vk_get_device_memory` (ggml-vulkan.cpp:15366 @8642541b2).
+/// Ports `ggml_backend_vk_get_device_memory` (ggml-vulkan.cpp:15394 @cd959bae9).
 pub fn getDeviceMemory(device: c_int, free: *usize, total: *usize) void {
     impl.assert(device < @as(c_int, @intCast(instance.device_indices.items.len)), "device < (int) vk_instance.device_indices.size()");
     impl.assert(device < @as(c_int, @intCast(instance.device_supports_membudget.items.len)), "device < (int) vk_instance.device_supports_membudget.size()");
@@ -858,7 +858,7 @@ pub fn getDeviceMemory(device: c_int, free: *usize, total: *usize) void {
     }
 }
 
-/// Ports `ggml_backend_vk_get_device_type` (ggml-vulkan.cpp:15402 @8642541b2).
+/// Ports `ggml_backend_vk_get_device_type` (ggml-vulkan.cpp:15430 @cd959bae9).
 pub fn getDeviceType(device_idx: usize) vk.VkPhysicalDeviceType {
     impl.assert(device_idx < instance.device_indices.items.len, "device_idx >= 0 && device_idx < (int) vk_instance.device_indices.size()");
     const device = physicalDevice(device_idx);
@@ -867,7 +867,7 @@ pub fn getDeviceType(device_idx: usize) vk.VkPhysicalDeviceType {
     return props.properties.deviceType;
 }
 
-/// Ports `ggml_backend_vk_get_device_pci_id` (ggml-vulkan.cpp:15413 @8642541b2).
+/// Ports `ggml_backend_vk_get_device_pci_id` (ggml-vulkan.cpp:15441 @cd959bae9).
 ///
 /// Return: the bus id, `dddd:bb:dd.f`, or an empty string when the device
 /// lacks `VK_EXT_pci_bus_info`.
