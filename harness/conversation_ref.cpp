@@ -423,7 +423,7 @@ int main(int argc, char ** argv) {
         inputs.messages              = history;
         inputs.use_jinja             = true;
         inputs.add_generation_prompt = true;
-        inputs.parallel_tool_calls   = caps.at("supports_parallel_tool_calls");
+        inputs.parallel_tool_calls   = caps.at("supports_parallel_tool_calls").get<bool>();
         inputs.reasoning_format      = opts.reasoning_format;
         inputs.enable_thinking       = enable_thinking_default;
         inputs.chat_template_kwargs  = opts.kwargs;

@@ -3,16 +3,17 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.7.0 (`620d2225c`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.8.0 (`8642541b2`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # These are byte moves, typed only by width
 //!
 //! `repeat` sends F16, BF16 and I16 through its `_f16` kernel and F32 and I32
-//! through its `_f32` one; `concat` does the same and adds I8. Nothing is
-//! converted, so the element types below are chosen by width alone — `u16`
-//! where the C says `ggml_fp16_t`, `f32` where it says `float` — and a value
-//! is only ever loaded and stored.
+//! through its `_f32` one. Nothing is converted, so the element types below
+//! are chosen by width alone — `u16` where the C says `ggml_fp16_t`, `f32`
+//! where it says `float` — and a value is only ever loaded and stored.
+//! `concat` has had one body for every type since v0.8.0, which moves rows,
+//! or elements of a strided source, by `ggml_type_size`.
 //!
 //! # Loop index names
 //!
@@ -32,8 +33,8 @@ const ComputeParams = common.ComputeParams;
 /// Byte offset `i*nb`; see `common.byteOff`.
 const at = common.byteOff;
 
-/// Ports `ggml_compute_forward_repeat_f32` (ops.cpp:1698 @620d2225c) and
-/// `ggml_compute_forward_repeat_f16` (ops.cpp:1742 @620d2225c).
+/// Ports `ggml_compute_forward_repeat_f32` (ops.cpp:1716 @8642541b2) and
+/// `ggml_compute_forward_repeat_f16` (ops.cpp:1760 @8642541b2).
 ///
 /// The two are the same loop nest over a different element width; the `f16`
 /// one inlines the row copy where the `f32` one calls `ggml_vec_cpy_f32`. Both
@@ -93,7 +94,7 @@ fn repeatT(comptime T: type, params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_repeat` (ops.cpp:1789 @620d2225c).
+/// Ports `ggml_compute_forward_repeat` (ops.cpp:1807 @8642541b2).
 pub export fn ggml_compute_forward_repeat(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -104,7 +105,7 @@ pub export fn ggml_compute_forward_repeat(params: *const ComputeParams, dst: *Te
     }
 }
 
-/// Ports `ggml_compute_forward_repeat_back_f32` (ops.cpp:1822 @620d2225c).
+/// Ports `ggml_compute_forward_repeat_back_f32` (ops.cpp:1840 @8642541b2).
 fn repeatBackF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -171,7 +172,7 @@ fn repeatBackF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_repeat_back` (ops.cpp:1880 @620d2225c).
+/// Ports `ggml_compute_forward_repeat_back` (ops.cpp:1898 @8642541b2).
 pub export fn ggml_compute_forward_repeat_back(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -181,130 +182,106 @@ pub export fn ggml_compute_forward_repeat_back(params: *const ComputeParams, dst
     }
 }
 
-/// Ports `ggml_compute_forward_concat_any` (ops.cpp:1899 @620d2225c): whole
-/// rows by `memcpy`, for any type including quantized ones.
-fn concatAny(params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-    const src1 = impl.one(Tensor, dst.src[1]);
+/// Ports `GGML_CONCAT_TILE` (ops.cpp:1919 @8642541b2): rows of `dst` copied
+/// together, so that a strided source is read along neighboring rows.
+const concat_tile: i64 = 32;
 
-    const ith: i64 = params.ith;
-    const nth: i64 = params.nth;
-
-    const l = common.BinaryLocals.of(src0, src1, dst);
-
-    const dim = impl.getOpParamsI32(dst, 0);
-
-    impl.assert(dim >= 0 and dim < 4, "dim >= 0 && dim < 4");
-    impl.assert(c.ggml_is_contiguous_rows(src0), "ggml_is_contiguous_rows(src0)");
-    impl.assert(c.ggml_is_contiguous_rows(src1), "ggml_is_contiguous_rows(src1)");
-
-    var o = [4]i64{ 0, 0, 0, 0 };
-    const d: usize = @intCast(dim);
-
-    if (dim == 0) {
-        impl.assert(@rem(src0.ne[0], c.ggml_blck_size(src0.type)) == 0, "src0->ne[0] % ggml_blck_size(src0->type) == 0");
-        impl.assert(@rem(src1.ne[0], c.ggml_blck_size(src1.type)) == 0, "src1->ne[0] % ggml_blck_size(src1->type) == 0");
-
-        o[d] = @divTrunc(src0.ne[d], c.ggml_blck_size(src0.type));
-    } else {
-        o[d] = src0.ne[d];
-    }
-
-    const s0: [*]const u8 = @ptrCast(src0.data.?);
-    const s1: [*]const u8 = @ptrCast(src1.data.?);
-    const dd: [*]u8 = @ptrCast(dst.data.?);
-
-    // Region 1: copy rows from src0
-    const row0 = c.ggml_row_size(src0.type, l.ne00);
-    var j3: i64 = 0;
-    while (j3 < l.ne03) : (j3 += 1) {
-        var j2: i64 = ith;
-        while (j2 < l.ne02) : (j2 += nth) {
-            var j1: i64 = 0;
-            while (j1 < l.ne01) : (j1 += 1) {
-                const x = s0 + at(j1, l.nb01) + at(j2, l.nb02) + at(j3, l.nb03);
-                const y = dd + at(j1, l.nb1) + at(j2, l.nb2) + at(j3, l.nb3);
-                @memcpy(y[0..row0], x[0..row0]);
-            }
-        }
-    }
-
-    // Region 2: copy rows from src1, offset into dst by o[]
-    const row1 = c.ggml_row_size(src1.type, l.ne10);
-    j3 = 0;
-    while (j3 < l.ne13) : (j3 += 1) {
-        var j2: i64 = ith;
-        while (j2 < l.ne12) : (j2 += nth) {
-            var j1: i64 = 0;
-            while (j1 < l.ne11) : (j1 += 1) {
-                const x = s1 + at(j1, l.nb11) + at(j2, l.nb12) + at(j3, l.nb13);
-                const y = dd + at(j1 + o[1], l.nb1) + at(j2 + o[2], l.nb2) + at(j3 + o[3], l.nb3) + at(o[0], l.nb0);
-                @memcpy(y[0..row1], x[0..row1]);
-            }
+/// Ports `ggml_concat_copy_strided` (ops.cpp:1923 @8642541b2): `n_rows` rows
+/// of `n` elements of `es` bytes from a source with element stride `nb0`,
+/// element by element.
+fn concatCopyStrided(comptime es: usize, y: [*]u8, nby: usize, x: [*]const u8, nbx: usize, nb0: usize, n: i64, n_rows: i64) void {
+    var j0: i64 = 0;
+    while (j0 < n) : (j0 += 1) {
+        var r: i64 = 0;
+        while (r < n_rows) : (r += 1) {
+            const d = y + at(r, nby) + at(j0, es);
+            const s = x + at(r, nbx) + at(j0, nb0);
+            @memcpy(d[0..es], s[0..es]);
         }
     }
 }
 
-/// Ports `ggml_compute_forward_concat_i8` (ops.cpp:1951 @620d2225c),
-/// `ggml_compute_forward_concat_f16` (ops.cpp:1994 @620d2225c) and
-/// `ggml_compute_forward_concat_f32` (ops.cpp:2037 @620d2225c).
+/// Ports `ggml_concat_copy_rows` (ops.cpp:1932 @8642541b2): `n_rows` rows of
+/// `n` elements of `src` into `dst`, rows `nbx` bytes apart in `src` and
+/// `nby` bytes apart in `dst`.
+fn concatCopyRows(y: [*]u8, nby: usize, src: *const Tensor, x: [*]const u8, nbx: usize, n: i64, n_rows: i64) void {
+    const es = c.ggml_type_size(src.type);
+
+    if (src.nb[0] == es) {
+        const row_size = c.ggml_row_size(src.type, n);
+        var r: i64 = 0;
+        while (r < n_rows) : (r += 1) {
+            const d = y + at(r, nby);
+            const s = x + at(r, nbx);
+            @memcpy(d[0..row_size], s[0..row_size]);
+        }
+        return;
+    }
+
+    switch (es) {
+        1 => concatCopyStrided(1, y, nby, x, nbx, src.nb[0], n, n_rows),
+        2 => concatCopyStrided(2, y, nby, x, nbx, src.nb[0], n, n_rows),
+        4 => concatCopyStrided(4, y, nby, x, nbx, src.nb[0], n, n_rows),
+        8 => concatCopyStrided(8, y, nby, x, nbx, src.nb[0], n, n_rows),
+        else => impl.abort("unsupported element size"),
+    }
+}
+
+/// Ports `ggml_compute_forward_concat` (ops.cpp:1953 @8642541b2).
 ///
-/// Three copies of one element-at-a-time loop, differing only in the element
-/// width they assert and move.
-fn concatT(comptime T: type, params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-    const src1 = impl.one(Tensor, dst.src[1]);
-
-    impl.assert(c.ggml_type_size(src0.type) == @sizeOf(T), "ggml_type_size(src0->type) == sizeof(T)");
-
-    const ith: i64 = params.ith;
-    const nth: i64 = params.nth;
-
-    const l = common.BinaryLocals.of(src0, src1, dst);
-
-    const dim = impl.getOpParamsI32(dst, 0);
-
-    impl.assert(dim >= 0 and dim < 4, "dim >= 0 && dim < 4");
-
-    var o = [4]i64{ 0, 0, 0, 0 };
-    o[@intCast(dim)] = src0.ne[@intCast(dim)];
-
-    const s0: [*]const u8 = @ptrCast(src0.data.?);
-    const s1: [*]const u8 = @ptrCast(src1.data.?);
-    const dd: [*]u8 = @ptrCast(dst.data.?);
-
-    // TODO: smarter multi-theading
-    var j3: i64 = 0;
-    while (j3 < l.ne3) : (j3 += 1) {
-        var j2: i64 = ith;
-        while (j2 < l.ne2) : (j2 += nth) {
-            var j1: i64 = 0;
-            while (j1 < l.ne1) : (j1 += 1) {
-                var j0: i64 = 0;
-                while (j0 < l.ne0) : (j0 += 1) {
-                    const x: *const T = if (j0 < l.ne00 and j1 < l.ne01 and j2 < l.ne02 and j3 < l.ne03)
-                        @ptrCast(@alignCast(s0 + at(j0, l.nb00) + at(j1, l.nb01) + at(j2, l.nb02) + at(j3, l.nb03)))
-                    else
-                        @ptrCast(@alignCast(s1 + at(j0 - o[0], l.nb10) + at(j1 - o[1], l.nb11) + at(j2 - o[2], l.nb12) + at(j3 - o[3], l.nb13)));
-
-                    const y: *T = @ptrCast(@alignCast(dd + at(j0, l.nb0) + at(j1, l.nb1) + at(j2, l.nb2) + at(j3, l.nb3)));
-
-                    y.* = x.*;
-                }
-            }
-        }
-    }
-}
-
-/// Ports `ggml_compute_forward_concat` (ops.cpp:2080 @620d2225c).
+/// Each `dst` row comes from `src0` or `src1`, or for dim 0 from the row of
+/// `src0` followed by the row of `src1`. The rows of `dst` are split evenly
+/// across threads and walked in tiles of consecutive rows that share `i2`,
+/// `i3` and their source.
 pub export fn ggml_compute_forward_concat(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
+    const src1 = impl.one(Tensor, dst.src[1]);
 
-    switch (src0.type) {
-        c.GGML_TYPE_F16, c.GGML_TYPE_BF16, c.GGML_TYPE_I16 => concatT(c.ggml_fp16_t, params, dst),
-        c.GGML_TYPE_I8 => concatT(i8, params, dst),
-        c.GGML_TYPE_F32, c.GGML_TYPE_I32 => concatT(f32, params, dst),
-        else => concatAny(params, dst),
+    const l = common.BinaryLocals.of(src0, src1, dst);
+
+    const dim = impl.getOpParamsI32(dst, 0);
+
+    impl.assert(dim >= 0 and dim < 4, "dim >= 0 && dim < 4");
+    impl.assert(l.nb0 == c.ggml_type_size(dst.type), "nb0 == ggml_type_size(dst->type)");
+    impl.assert(!c.ggml_is_quantized(dst.type) or (l.nb00 == l.nb0 and l.nb10 == l.nb0), "!ggml_is_quantized(dst->type) || (nb00 == nb0 && nb10 == nb0)");
+    impl.assert(dim != 0 or (@rem(l.ne00, c.ggml_blck_size(dst.type)) == 0 and @rem(l.ne10, c.ggml_blck_size(dst.type)) == 0), "dim != 0 || (ne00 % ggml_blck_size(dst->type) == 0 && ne10 % ggml_blck_size(dst->type) == 0)");
+
+    const d: usize = @intCast(dim);
+
+    const y1: usize = if (dim == 0) c.ggml_row_size(dst.type, l.ne00) else 0;
+
+    const nr = l.ne1 * l.ne2 * l.ne3;
+    const dr = @divTrunc(nr + params.nth - 1, params.nth);
+
+    const ir0 = dr * params.ith;
+    const ir1 = @min(ir0 + dr, nr);
+
+    const s0: [*]const u8 = @ptrCast(src0.data.?);
+    const s1: [*]const u8 = @ptrCast(src1.data.?);
+    const dd: [*]u8 = @ptrCast(dst.data.?);
+
+    var ir = ir0;
+    while (ir < ir1) {
+        var i = [4]i64{ 0, @rem(ir, l.ne1), @rem(@divTrunc(ir, l.ne1), l.ne2), @divTrunc(ir, l.ne1 * l.ne2) };
+
+        // a tile of consecutive rows sharing i2, i3 and their source
+        var nt = @min(@min(ir1 - ir, l.ne1 - i[1]), concat_tile);
+        if (dim == 1 and i[1] < l.ne01) {
+            nt = @min(nt, l.ne01 - i[1]);
+        }
+
+        const y = dd + at(i[1], l.nb1) + at(i[2], l.nb2) + at(i[3], l.nb3);
+
+        if (dim == 0 or i[d] < src0.ne[d]) {
+            concatCopyRows(y, l.nb1, src0, s0 + at(i[1], l.nb01) + at(i[2], l.nb02) + at(i[3], l.nb03), l.nb01, l.ne00, nt);
+        }
+
+        if (dim == 0 or i[d] >= src0.ne[d]) {
+            i[d] -= src0.ne[d]; // i[0] does not address rows
+            concatCopyRows(y + y1, l.nb1, src1, s1 + at(i[1], l.nb11) + at(i[2], l.nb12) + at(i[3], l.nb13), l.nb11, l.ne10, nt);
+        }
+
+        ir += nt;
     }
 }
 

@@ -5,12 +5,13 @@
 //! Ported from, in the reference checkout:
 //!
 //! - `llama.cpp/src/llama-memory.h` -- `llama_memory_params`,
-//!   `llama_memory_status`, `llama_memory_context_i` and `llama_memory_i`
+//!   `llama_memory_bufs`, `llama_memory_status`, `llama_memory_context_i`
+//!   and `llama_memory_i`
 //! - `llama.cpp/src/llama-memory.cpp` -- `llama_memory_status_combine`,
-//!   `llama_memory_status_is_fail`, `llama_memory_buffers_writer` and
-//!   `llama_memory_get_buffers`
+//!   `llama_memory_status_is_fail`, `llama_memory_bufs`'s bodies,
+//!   `llama_memory_buffers_writer` and `llama_memory_get_buffers`
 //!
-//! All at v0.7.0 (`620d2225c`).
+//! All at v0.8.0 (`8642541b2`).
 //!
 //! # Interfaces, not classes
 //!
@@ -29,7 +30,11 @@ const c = impl.c;
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 
-/// Mirrors `llama_memory_params` (llama-memory.h:17 @620d2225c).
+fn oom() noreturn {
+    impl.abort("llama-memory.cpp", 0, "out of memory");
+}
+
+/// Mirrors `llama_memory_params` (llama-memory.h:18 @8642541b2).
 pub const Params = struct {
     type_k: c.enum_ggml_type,
     type_v: c.enum_ggml_type,
@@ -37,9 +42,87 @@ pub const Params = struct {
     ctx_type: c.enum_llama_context_type,
     /// `mem_other`: the memory this one shares cells with, or null.
     mem_other: ?Memory,
+    /// Only simulate the memory allocations.
+    no_alloc: bool,
 };
 
-/// Mirrors `llama_memory_status` (llama-memory.h:30 @620d2225c).
+/// Ports `llama_memory_bufs` (llama-memory.h:36 @8642541b2): the tensor
+/// contexts and backend buffers of a memory instance. With `no_alloc`, dummy
+/// buffers are attached instead of allocating the tensor data, so the memory
+/// use can still be measured.
+pub const Bufs = struct {
+    pub const Entry = struct { ctx: *c.ggml_context, buf: c.ggml_backend_buffer_t };
+
+    bufs: std.ArrayList(Entry) = .empty,
+    no_alloc: bool,
+
+    /// Ports `llama_memory_bufs`'s `alloc_buf` (llama-memory.cpp:73
+    /// @8642541b2): allocate a single context's buffer, for the memory
+    /// instances that keep their own buffer layout.
+    ///
+    /// Parameters:
+    /// - `name`: what the failure names.
+    /// - `exc`: receives the failure.
+    ///
+    /// Return: the buffer, the caller's; or `error.Thrown`.
+    pub fn allocBuf(ctx: *c.ggml_context, buft: c.ggml_backend_buffer_type_t, no_alloc: bool, name: [*:0]const u8, exc: *Exception) Thrown!c.ggml_backend_buffer_t {
+        var buf: c.ggml_backend_buffer_t = null;
+        if (no_alloc) {
+            buf = c.ggml_backend_buft_alloc_buffer(buft, 0); // dummy buffer
+            var t: ?*c.ggml_tensor = c.ggml_get_first_tensor(ctx);
+            // a dummy buffer, so that the backend scheduler won't try to
+            // allocate the tensors
+            while (t) |cur| : (t = c.ggml_get_next_tensor(ctx, cur)) cur.buffer = buf;
+        } else {
+            buf = c.ggml_backend_alloc_ctx_tensors_from_buft(ctx, buft); // real buffer
+        }
+        if (buf == null) return exc.throw(.runtime_error, "failed to allocate buffer for {s}", .{name});
+        return buf;
+    }
+
+    /// Ports `llama_memory_bufs`'s `emplace` (llama-memory.cpp:89
+    /// @8642541b2): allocate the tensors of `ctx` on `buft`, or attach a
+    /// dummy buffer if `no_alloc` is set. Takes `ctx` on success; on
+    /// `error.Thrown` it stays the caller's.
+    ///
+    /// Return: the buffer, for logging; borrowed.
+    pub fn emplace(self: *Bufs, ctx: *c.ggml_context, buft: c.ggml_backend_buffer_type_t, name: [*:0]const u8, exc: *Exception) Thrown!c.ggml_backend_buffer_t {
+        const buf = try allocBuf(ctx, buft, self.no_alloc, name, exc);
+
+        // initialize the buffer to avoid NaNs in the padding
+        c.ggml_backend_buffer_clear(buf, 0);
+
+        self.bufs.append(impl.allocator, .{ .ctx = ctx, .buf = buf }) catch oom();
+
+        return buf;
+    }
+
+    /// Ports `llama_memory_bufs`'s `memory_breakdown` (llama-memory.cpp:100
+    /// @8642541b2): the memory used by the tensors, the buffer sizes or the
+    /// simulated sizes if `no_alloc` is set.
+    pub fn memoryBreakdown(self: *const Bufs, out: *std.ArrayList(BuftSize)) void {
+        for (self.bufs.items) |e| {
+            const buft = c.ggml_backend_buffer_get_type(e.buf);
+            if (self.no_alloc) {
+                impl.assert(c.ggml_backend_buffer_get_base(e.buf) == null, "llama-memory.cpp", 106, "ggml_backend_buffer_get_base(buf.get()) == nullptr");
+                addBuftSize(out, buft, c.ggml_backend_alloc_ctx_tensors_from_buft_size(e.ctx, buft));
+            } else {
+                addBuftSize(out, buft, c.ggml_backend_buffer_get_size(e.buf));
+            }
+        }
+    }
+
+    /// Frees every buffer and context.
+    pub fn deinit(self: *Bufs) void {
+        for (self.bufs.items) |e| {
+            c.ggml_backend_buffer_free(e.buf);
+            c.ggml_free(e.ctx);
+        }
+        self.bufs.deinit(impl.allocator);
+    }
+};
+
+/// Mirrors `llama_memory_status` (llama-memory.h:61 @8642541b2).
 pub const Status = enum(c_int) {
     success = 0,
     no_update,
@@ -47,7 +130,7 @@ pub const Status = enum(c_int) {
     failed_compute,
 };
 
-/// Ports `llama_memory_status_combine` (llama-memory.cpp:9 @620d2225c): a
+/// Ports `llama_memory_status_combine` (llama-memory.cpp:11 @8642541b2): a
 /// failure wins, else an update in either is an update.
 pub fn statusCombine(s0: Status, s1: Status) Status {
     var has_update = false;
@@ -64,7 +147,7 @@ pub fn statusCombine(s0: Status, s1: Status) Status {
     return if (has_update) .success else .no_update;
 }
 
-/// Ports `llama_memory_status_is_fail` (llama-memory.cpp:50 @620d2225c).
+/// Ports `llama_memory_status_is_fail` (llama-memory.cpp:52 @8642541b2).
 pub fn statusIsFail(status: Status) bool {
     return switch (status) {
         .success, .no_update => false,
@@ -92,10 +175,10 @@ pub fn addBuftSize(list: *std.ArrayList(BuftSize), buft: c.ggml_backend_buffer_t
         }
         if (@intFromPtr(list.items[pos].buft) > @intFromPtr(buft)) break;
     }
-    list.insert(impl.allocator, pos, .{ .buft = buft, .size = size }) catch impl.abort("llama-memory.h", 120, "out of memory");
+    list.insert(impl.allocator, pos, .{ .buft = buft, .size = size }) catch impl.abort("llama-memory.h", 151, "out of memory");
 }
 
-/// Mirrors `llama_memory_context_i` (llama-memory.h:51 @620d2225c): the
+/// Mirrors `llama_memory_context_i` (llama-memory.h:82 @8642541b2): the
 /// memory's view for one batch -- its ubatches, in order, and the state
 /// each needs.
 pub const Context = struct {
@@ -145,7 +228,7 @@ pub const Context = struct {
     }
 };
 
-/// Mirrors `llama_memory_i` (llama-memory.h:73 @620d2225c).
+/// Mirrors `llama_memory_i` (llama-memory.h:104 @8642541b2).
 pub const Memory = struct {
     ptr: *anyopaque,
     vtable: *const VTable,
@@ -253,7 +336,7 @@ pub const LayerMap = struct {
     }
 };
 
-/// Ports `llama_memory_buffers_writer` (llama-memory.cpp:68 @620d2225c): a
+/// Ports `llama_memory_buffers_writer` (llama-memory.cpp:116 @8642541b2): a
 /// state sink that keeps no data, only the buffers of the tensors a state
 /// write visits.
 const BuffersWriter = struct {
@@ -285,9 +368,10 @@ const BuffersWriter = struct {
     const vtable: io.Writer.VTable = .{ .write = write, .writeTensor = writeTensor, .nBytes = nBytes };
 };
 
-/// Ports `llama_memory_get_buffers` (llama-memory.cpp:86 @620d2225c), from
+/// Ports `llama_memory_get_buffers` (llama-memory.cpp:134 @8642541b2), from
 /// `llama-ext.h`: the backend buffers a state write of this memory would
-/// touch; an empty cache reports none.
+/// touch; an empty cache reports none. The null memory the C++ answers with
+/// an empty list is `api/context.zig`'s to answer, `mem` being non-null here.
 ///
 /// Parameters:
 /// - `mem`: the memory.

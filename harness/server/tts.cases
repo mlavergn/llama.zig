@@ -1,0 +1,62 @@
+# POST /tts (v0.8.0): scripts/server-diff tts. The fixtures' Qwen3-TTS and
+# pocket-tts pipelines; the audio is noise and is compared by its bytes, which
+# the seed fixes; a stream's chunks are compared by what they add up to.
+# how often the idle loop logs is the scheduler's: it differs upstream against upstream
+!droplog update_slots: all slots are idle
+!server -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -c 2048 -np 1 --no-warmup --seed 42 -lv 4
+!fulllog
+POST /tts {"input": "hello", "n_predict": 4, "seed": 7}
+POST /tts {"input": "hello", "n_predict": 4, "seed": 7, "response_format": "pcm"}
+POST /tts {"prompt": "by the other name", "max_tokens": 3, "seed": 8}
+POST /tts {"input": "stream", "n_predict": 6, "seed": 9, "stream": true}
+POST /tts {"input": "stream pcm", "n_predict": 6, "seed": 9, "stream": true, "response_format": "pcm"}
+POST /tts {"input": "sampling", "n_predict": 3, "seed": 1, "top_k": 2, "top_p": 0.5, "repeat_penalty": 1.3}
+POST /tts {"input": "clamped", "n_predict": 3, "seed": 1, "top_k": -4, "top_p": 9}
+POST /tts {"input": "with language", "n_predict": 3, "seed": 1, "lang": "fr"}
+POST /tts {"input": "with voice", "n_predict": 3, "seed": 1, "voice": "alto"}
+POST /tts {"input": "ref", "n_predict": 3, "seed": 1, "speaker_ref_b64": "$WAV"}
+FORM /tts {"input": "form", "n_predict": "3", "seed": "5", "top_k": "2", "top_p": "0.5", "repeat_penalty": "1.2", "stream": "false", "speaker_ref": "@file:$DATA/tone.wav"}
+FORM /tts {"input": "form stream", "max_tokens": "3", "seed": "5", "stream": "true"}
+POST /tts {"input": ""}
+POST /tts {}
+POST /tts {"input": 5}
+POST /tts {"input": "x", "n_predict": -2}
+POST /tts {"input": "x", "n_predict": "many"}
+POST /tts {"input": "x", "top_k": "many"}
+FORM /tts {"input": "x", "n_predict": "many"}
+FORM /tts {"input": "x", "n_predict": "99999999999999999999999"}
+FORM /tts {"input": "x", "top_p": "wide"}
+FORM /tts {"input": "x", "top_p": "1e99"}
+POST /tts {"input": "x", "speaker_ref_b64": "!!!"}
+POST /tts {"input": "x", "speaker_ref_b64": "QUJD"}
+FORM /tts {"input": "x", "speaker_ref": "@file:$DATA/junk.bin"}
+POST /tts not json
+GET /props
+GET /v1/models
+GET /slots
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2}
+POST /completion {"prompt": "hi", "n_predict": 2}
+
+# a chat template makes the model a chat model too
+!server -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -c 2048 -np 1 --no-warmup --seed 42 --chat-template chatml -lv 4
+!fulllog
+GET /v1/models
+POST /tts {"input": "hello", "n_predict": 2, "seed": 7}
+
+!server -m $MM/text-pockettts.gguf -mm $MM/pockettts.gguf -c 2048 -np 1 --no-warmup --seed 42 -lv 4
+!fulllog
+POST /tts {"input": "hello", "n_predict": 4, "seed": 7}
+POST /tts {"input": "stream", "n_predict": 4, "seed": 7, "stream": true}
+POST /tts {"input": "ref", "n_predict": 3, "seed": 1, "speaker_ref_b64": "$WAV"}
+GET /v1/models
+
+# two requests: the second waits for the slot, its prompt re-evaluated whole
+!server -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -c 2048 -np 2 --no-warmup --seed 42 -lv 4
+POST /tts {"input": "one", "n_predict": 2, "seed": 1}
+POST /tts {"input": "one", "n_predict": 2, "seed": 1}
+
+# a model with no audio generation
+!server -m $QWEN3 -c 2048 -np 1
+POST /tts {"input": "x"}
+POST /tts {"input": ""}
+GET /v1/models

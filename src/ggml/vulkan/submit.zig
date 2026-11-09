@@ -6,8 +6,8 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-buffers.cpp`, and
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.7.0
-//! (`620d2225c`). Upstream split `ggml-vulkan.cpp` into those files at
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.8.0
+//! (`8642541b2`). Upstream split `ggml-vulkan.cpp` into those files at
 //! v0.5.0. A `vk_context` is a `std::shared_ptr` in the C++, kept alive
 //! either by the backend context's garbage list or by the one caller that
 //! made it ("temporary"); here the owner frees it explicitly.
@@ -26,16 +26,16 @@ const CommandBuffer = m.device.CommandBuffer;
 const CommandPool = m.device.CommandPool;
 const Buffer = m.buffer.Buffer;
 
-/// Ports `VK_DEVICE_DESCRIPTOR_POOL_SIZE` (ggml-vulkan-types.h:193 @620d2225c).
+/// Ports `VK_DEVICE_DESCRIPTOR_POOL_SIZE` (ggml-vulkan-types.h:193 @8642541b2).
 pub const descriptor_pool_size = 256;
 
-/// Ports `vk_semaphore` (ggml-vulkan-types.h:1068 @620d2225c).
+/// Ports `vk_semaphore` (ggml-vulkan-types.h:1070 @8642541b2).
 pub const Semaphore = struct {
     s: vk.VkSemaphore = null,
     value: u64 = 0,
 };
 
-/// Ports `vk_submission` (ggml-vulkan-types.h:1084 @620d2225c).
+/// Ports `vk_submission` (ggml-vulkan-types.h:1086 @8642541b2).
 pub const Submission = struct {
     buffer: ?*CommandBuffer = null,
     wait_semaphores: std.ArrayList(Semaphore) = .empty,
@@ -47,16 +47,16 @@ pub const Submission = struct {
     }
 };
 
-/// Ports `vk_sequence` (ggml-vulkan-types.h:1090 @620d2225c).
+/// Ports `vk_sequence` (ggml-vulkan-types.h:1092 @8642541b2).
 pub const Sequence = std.ArrayList(Submission);
 
-/// Ports `vk_staging_memcpy` (ggml-vulkan-types.h:1100 @620d2225c).
+/// Ports `vk_staging_memcpy` (ggml-vulkan-types.h:1102 @8642541b2).
 pub const StagingMemcpy = struct { dst: [*]u8, src: [*]const u8, n: usize };
 
-/// Ports `vk_staging_memset` (ggml-vulkan-types.h:1108 @620d2225c).
+/// Ports `vk_staging_memset` (ggml-vulkan-types.h:1110 @8642541b2).
 pub const StagingMemset = struct { dst: [*]u8, val: u32, n: usize };
 
-/// Ports `vk_context_struct` (ggml-vulkan-types.h:1116 @620d2225c).
+/// Ports `vk_context_struct` (ggml-vulkan-types.h:1118 @8642541b2).
 ///
 /// `s` points at the last submission of the last sequence; it is an index
 /// pair here, since the sequences' storage moves as they grow.
@@ -108,7 +108,7 @@ fn oom() noreturn {
     impl.abort("ggml_vulkan: out of memory");
 }
 
-/// Ports `ggml_vk_create_temporary_context` (ggml-vulkan.cpp:1078 @620d2225c):
+/// Ports `ggml_vk_create_temporary_context` (ggml-vulkan.cpp:1078 @8642541b2):
 /// a context the caller owns and frees with `Context.destroy`.
 pub fn createTemporaryContext(p: *CommandPool) *Context {
     const result = allocator.create(Context) catch oom();
@@ -116,7 +116,7 @@ pub fn createTemporaryContext(p: *CommandPool) *Context {
     return result;
 }
 
-/// Ports `ggml_vk_create_cmd_buffer` (ggml-vulkan.cpp:891 @620d2225c).
+/// Ports `ggml_vk_create_cmd_buffer` (ggml-vulkan.cpp:891 @8642541b2).
 fn createCmdBuffer(device: *Device, p: *CommandPool) *CommandBuffer {
     var info = common.structure(vk.VkCommandBufferAllocateInfo, vk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO);
     info.commandPool = p.pool;
@@ -130,7 +130,7 @@ fn createCmdBuffer(device: *Device, p: *CommandPool) *CommandBuffer {
     return cb;
 }
 
-/// Ports `ggml_vk_get_or_create_cmd_buffer` (ggml-vulkan.cpp:5743 @620d2225c).
+/// Ports `ggml_vk_get_or_create_cmd_buffer` (ggml-vulkan.cpp:5772 @8642541b2).
 pub fn getOrCreateCmdBuffer(device: *Device, pool: *CommandPool) *CommandBuffer {
     for (pool.cmd_buffers.items) |cb| {
         if (!cb.in_use) {
@@ -142,7 +142,7 @@ pub fn getOrCreateCmdBuffer(device: *Device, pool: *CommandPool) *CommandBuffer 
     return createCmdBuffer(device, pool);
 }
 
-/// Ports `ggml_vk_begin_submission` (ggml-vulkan.cpp:5754 @620d2225c).
+/// Ports `ggml_vk_begin_submission` (ggml-vulkan.cpp:5783 @8642541b2).
 pub fn beginSubmission(device: *Device, p: *CommandPool, one_time: bool) Submission {
     var sub: Submission = .{};
     sub.buffer = getOrCreateCmdBuffer(device, p);
@@ -152,7 +152,7 @@ pub fn beginSubmission(device: *Device, p: *CommandPool, one_time: bool) Submiss
     return sub;
 }
 
-/// Ports `ggml_vk_cmd_label_begin` (ggml-vulkan.cpp:5766 @620d2225c).
+/// Ports `ggml_vk_cmd_label_begin` (ggml-vulkan.cpp:5795 @8642541b2).
 fn cmdLabelBegin(buf: vk.VkCommandBuffer, name: [*:0]const u8) void {
     var label = common.structure(vk.VkDebugUtilsLabelEXT, vk.VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT);
     label.pLabelName = name;
@@ -160,7 +160,7 @@ fn cmdLabelBegin(buf: vk.VkCommandBuffer, name: [*:0]const u8) void {
     m.instance.instance.pfn_vkCmdBeginDebugUtilsLabelEXT.?(buf, &label);
 }
 
-/// Ports `ggml_vk_debug_label` (ggml-vulkan-types.h:1399 @620d2225c): a debug
+/// Ports `ggml_vk_debug_label` (ggml-vulkan-types.h:1403 @8642541b2): a debug
 /// region for GPU profilers, a no-op unless `GGML_VK_DEBUG_MARKERS` turned
 /// on `VK_EXT_debug_utils`. At most one of `subctx` and `qhandle` is set,
 /// depending on the scope the label was opened in; the C++'s destructor is
@@ -239,7 +239,7 @@ pub const DebugLabel = struct {
     }
 };
 
-/// Ports `ggml_vk_ctx_end` (ggml-vulkan.cpp:5773 @620d2225c).
+/// Ports `ggml_vk_ctx_end` (ggml-vulkan.cpp:5802 @8642541b2).
 pub fn ctxEnd(ctx: *Context) void {
     if (!ctx.has_s) return;
     // close open labels so this buffer is balanced; reopened in ggml_vk_ctx_begin
@@ -252,7 +252,7 @@ pub fn ctxEnd(ctx: *Context) void {
     ctx.has_s = false;
 }
 
-/// Ports `ggml_vk_ctx_begin` (ggml-vulkan.cpp:5792 @620d2225c): starts a new
+/// Ports `ggml_vk_ctx_begin` (ggml-vulkan.cpp:5821 @8642541b2): starts a new
 /// sequence of one submission.
 pub fn ctxBegin(device: *Device, subctx: *Context) void {
     if (subctx.has_s) ctxEnd(subctx);
@@ -274,7 +274,7 @@ pub fn ctxBegin(device: *Device, subctx: *Context) void {
 }
 
 /// The `submit` of `vk_queue_handle_synchronized` and
-/// `vk_queue_handle_unsynchronized` (ggml-vulkan-types.h:337, 345 @620d2225c): a
+/// `vk_queue_handle_unsynchronized` (ggml-vulkan-types.h:337, 345 @8642541b2): a
 /// queue submission, serialised by the handle's mutex unless the queue
 /// synchronises itself, and first by the device's submit mutex where the
 /// NVIDIA workaround set one. A lost device prints what is known about it
@@ -290,7 +290,7 @@ pub fn queueSubmit(h: *m.device.QueueHandle, submits: []const vk.VkSubmitInfo, f
     common.checkOrAbort(result, "vk::Queue::submit");
 }
 
-/// Ports `ggml_vk_submit` (ggml-vulkan.cpp:902 @620d2225c): submits every
+/// Ports `ggml_vk_submit` (ggml-vulkan.cpp:902 @8642541b2): submits every
 /// recorded sequence as timeline-semaphore submissions, then forgets them.
 pub fn submit(ctx: *Context, fence: vk.VkFence) void {
     const h = ctx.p.?.q.?.handle;
@@ -367,7 +367,7 @@ pub fn submit(ctx: *Context, fence: vk.VkFence) void {
     ctx.has_s = false;
 }
 
-/// `VK_CHECK` (ggml-vulkan-types.h:195 @620d2225c) around a wait: a lost device
+/// `VK_CHECK` (ggml-vulkan-types.h:195 @8642541b2) around a wait: a lost device
 /// prints what is known about it; any failure logs and throws, and nothing
 /// catches it.
 pub fn vkCheck(result: vk.VkResult, comptime msg: [:0]const u8, device: *Device) void {
@@ -384,7 +384,7 @@ pub fn waitAndResetFence(device: *Device, fence: vk.VkFence, comptime msg: [:0]c
     common.checkOrAbort(d.vkResetFences.?(device.device, 1, &fence), "vk::Device::resetFences");
 }
 
-/// Ports `ggml_vk_print_device_fault_info` (ggml-vulkan.cpp:149 @620d2225c).
+/// Ports `ggml_vk_print_device_fault_info` (ggml-vulkan.cpp:149 @8642541b2).
 pub fn printDeviceFaultInfo(device: *Device) void {
     const pfn = device.pfn_vkGetDeviceFaultInfoEXT orelse return;
     if (!device.device_fault) return;
@@ -420,7 +420,7 @@ pub fn printDeviceFaultInfo(device: *Device) void {
     }
 }
 
-/// Ports `ggml_vk_print_device_lost_info` (ggml-vulkan.cpp:248 @620d2225c).
+/// Ports `ggml_vk_print_device_lost_info` (ggml-vulkan.cpp:248 @8642541b2).
 pub fn printDeviceLostInfo(device: *Device) void {
     printDeviceFaultInfo(device);
     if (device.serialize_submissions and device.diag_cgraph != null and device.diag_prev_start >= 0) {
@@ -431,7 +431,7 @@ pub fn printDeviceLostInfo(device: *Device) void {
     }
 }
 
-/// Ports `ggml_vk_command_pool_cleanup` (ggml-vulkan.cpp:1114 @620d2225c):
+/// Ports `ggml_vk_command_pool_cleanup` (ggml-vulkan.cpp:1114 @8642541b2):
 /// resets the pool and marks its buffers reusable.
 pub fn commandPoolCleanup(device: *Device, p: *CommandPool) void {
     // Requires command buffers to be done
@@ -439,7 +439,7 @@ pub fn commandPoolCleanup(device: *Device, p: *CommandPool) void {
     for (p.cmd_buffers.items) |cb| cb.in_use = false;
 }
 
-/// Ports `ggml_vk_queue_command_pools_cleanup` (ggml-vulkan.cpp:1126 @620d2225c).
+/// Ports `ggml_vk_queue_command_pools_cleanup` (ggml-vulkan.cpp:1126 @8642541b2).
 pub fn queueCommandPoolsCleanup(device: *Device) void {
     // Arbitrary frequency to cleanup/reuse command buffers
     const cleanup_frequency = 10;
@@ -447,7 +447,7 @@ pub fn queueCommandPoolsCleanup(device: *Device) void {
     if (device.transfer_queue) |q| if (q.cmd_pool.buffersInUse() >= cleanup_frequency) commandPoolCleanup(device, &q.cmd_pool);
 }
 
-/// The memory barrier `ggml_vk_sync_buffers` records (ggml-vulkan.cpp:1144 @620d2225c),
+/// The memory barrier `ggml_vk_sync_buffers` records (ggml-vulkan.cpp:1144 @8642541b2),
 /// without the backend context's bookkeeping, which `context.syncBuffers`
 /// adds.
 pub fn syncBuffersBarrier(subctx: *Context) void {
@@ -462,24 +462,24 @@ pub fn syncBuffersBarrier(subctx: *Context) void {
     d.vkCmdPipelineBarrier.?(subctx.cmd(), q.stage_flags, q.stage_flags, 0, 1, &barrier, 0, null, 0, null);
 }
 
-/// Ports `ggml_vk_reset_event` (ggml-vulkan.cpp:1166 @620d2225c).
+/// Ports `ggml_vk_reset_event` (ggml-vulkan.cpp:1166 @8642541b2).
 pub fn resetEvent(ctx: *Context, event: vk.VkEvent) void {
     d.vkCmdResetEvent.?(ctx.cmd(), event, ctx.p.?.q.?.stage_flags);
 }
 
-/// Ports `ggml_vk_set_event` (ggml-vulkan.cpp:1175 @620d2225c).
+/// Ports `ggml_vk_set_event` (ggml-vulkan.cpp:1175 @8642541b2).
 pub fn setEvent(ctx: *Context, event: vk.VkEvent) void {
     d.vkCmdSetEvent.?(ctx.cmd(), event, ctx.p.?.q.?.stage_flags);
 }
 
-/// Ports `ggml_vk_wait_events` (ggml-vulkan.cpp:1184 @620d2225c).
+/// Ports `ggml_vk_wait_events` (ggml-vulkan.cpp:1184 @8642541b2).
 pub fn waitEvents(ctx: *Context, events: []const vk.VkEvent) void {
     if (events.len == 0) return;
     const stage = ctx.p.?.q.?.stage_flags;
     d.vkCmdWaitEvents.?(ctx.cmd(), @intCast(events.len), events.ptr, stage, stage, 0, null, 0, null, 0, null);
 }
 
-/// Ports `deferred_memcpy` (ggml-vulkan.cpp:5871 @620d2225c).
+/// Ports `deferred_memcpy` (ggml-vulkan.cpp:5900 @8642541b2).
 pub fn deferredMemcpy(dst: [*]u8, src: [*]const u8, size: usize, memcpys: ?*std.ArrayList(StagingMemcpy)) void {
     if (memcpys) |list| {
         list.append(allocator, .{ .dst = dst, .src = src, .n = size }) catch oom();
@@ -488,7 +488,7 @@ pub fn deferredMemcpy(dst: [*]u8, src: [*]const u8, size: usize, memcpys: ?*std.
     }
 }
 
-/// Ports `deferred_memset` (ggml-vulkan.cpp:5879 @620d2225c).
+/// Ports `deferred_memset` (ggml-vulkan.cpp:5908 @8642541b2).
 pub fn deferredMemset(dst: [*]u8, val: u32, size: usize, memsets: ?*std.ArrayList(StagingMemset)) void {
     if (memsets) |list| {
         list.append(allocator, .{ .dst = dst, .val = val, .n = size }) catch oom();
@@ -532,7 +532,7 @@ fn slices2d(src_off: usize, dst_off: usize, spitch: usize, dpitch: usize, width:
     return out;
 }
 
-/// Ports `ggml_vk_ensure_sync_staging_buffer` for a device (ggml-vulkan-buffers.cpp:389 @620d2225c).
+/// Ports `ggml_vk_ensure_sync_staging_buffer` for a device (ggml-vulkan-buffers.cpp:387 @8642541b2).
 pub fn ensureSyncStagingBuffer(device: *Device, size: usize) void {
     if (device.sync_staging == null or device.sync_staging.?.size < size) {
         m.buffer.logMemory("ggml_vk_ensure_sync_staging_buffer(%zu)", .{size});
@@ -541,7 +541,7 @@ pub fn ensureSyncStagingBuffer(device: *Device, size: usize) void {
     }
 }
 
-/// Ports `ggml_vk_buffer_write_2d_async` (ggml-vulkan-buffers.cpp:506 @620d2225c).
+/// Ports `ggml_vk_buffer_write_2d_async` (ggml-vulkan-buffers.cpp:504 @8642541b2).
 ///
 /// Return: false when `src` is not pinned and `sync_staging` is off -- the
 /// caller must fall back.
@@ -577,12 +577,12 @@ pub fn bufferWrite2dAsync(subctx: *Context, dst: *Buffer, offset: usize, src: [*
     return true;
 }
 
-/// Ports `ggml_vk_buffer_write_async` (ggml-vulkan-buffers.cpp:574 @620d2225c).
+/// Ports `ggml_vk_buffer_write_async` (ggml-vulkan-buffers.cpp:572 @8642541b2).
 pub fn bufferWriteAsync(subctx: *Context, dst: *Buffer, offset: usize, src: [*]const u8, size: usize, sync_staging: bool) bool {
     return bufferWrite2dAsync(subctx, dst, offset, src, size, size, size, 1, sync_staging);
 }
 
-/// Ports `ggml_vk_buffer_write_2d` (ggml-vulkan-buffers.cpp:579 @620d2225c).
+/// Ports `ggml_vk_buffer_write_2d` (ggml-vulkan-buffers.cpp:577 @8642541b2).
 pub fn bufferWrite2d(dst: *Buffer, offset: usize, src: [*]const u8, spitch: usize, dpitch: usize, width: usize, height: usize) void {
     // Buffer is already mapped
     if (dst.memory_property_flags & vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT != 0) {
@@ -614,12 +614,12 @@ pub fn bufferWrite2d(dst: *Buffer, offset: usize, src: [*]const u8, spitch: usiz
     queueCommandPoolsCleanup(device);
 }
 
-/// Ports `ggml_vk_buffer_write` (ggml-vulkan-buffers.cpp:616 @620d2225c).
+/// Ports `ggml_vk_buffer_write` (ggml-vulkan-buffers.cpp:614 @8642541b2).
 pub fn bufferWrite(dst: *Buffer, offset: usize, src: [*]const u8, size: usize) void {
     bufferWrite2d(dst, offset, src, size, size, size, 1);
 }
 
-/// Ports `ggml_vk_buffer_read_2d_async` (ggml-vulkan-buffers.cpp:621 @620d2225c).
+/// Ports `ggml_vk_buffer_read_2d_async` (ggml-vulkan-buffers.cpp:619 @8642541b2).
 pub fn bufferRead2dAsync(subctx: *Context, src: *Buffer, offset: usize, dst: [*]u8, spitch: usize, dpitch: usize, width: usize, height: usize, sync_staging: bool) bool {
     impl.assert(width > 0, "width > 0");
     impl.assert(height > 0, "height > 0");
@@ -657,12 +657,12 @@ pub fn bufferRead2dAsync(subctx: *Context, src: *Buffer, offset: usize, dst: [*]
     return true;
 }
 
-/// Ports `ggml_vk_buffer_read_async` (ggml-vulkan-buffers.cpp:696 @620d2225c).
+/// Ports `ggml_vk_buffer_read_async` (ggml-vulkan-buffers.cpp:694 @8642541b2).
 pub fn bufferReadAsync(subctx: *Context, src: *Buffer, offset: usize, dst: [*]u8, size: usize, sync_staging: bool) bool {
     return bufferRead2dAsync(subctx, src, offset, dst, size, size, size, 1, sync_staging);
 }
 
-/// Ports `ggml_vk_buffer_read_2d` (ggml-vulkan-buffers.cpp:700 @620d2225c).
+/// Ports `ggml_vk_buffer_read_2d` (ggml-vulkan-buffers.cpp:698 @8642541b2).
 pub fn bufferRead2d(src: *Buffer, offset: usize, dst: [*]u8, spitch: usize, dpitch: usize, width: usize, height: usize) void {
     const device = src.device;
     // AMD UMA: uncached host-visible memory is write-combined, CPU reads are slow
@@ -711,12 +711,12 @@ pub fn bufferRead2d(src: *Buffer, offset: usize, dst: [*]u8, spitch: usize, dpit
     runMemcpys(subctx.out_memcpys.items);
 }
 
-/// Ports `ggml_vk_buffer_read` (ggml-vulkan-buffers.cpp:756 @620d2225c).
+/// Ports `ggml_vk_buffer_read` (ggml-vulkan-buffers.cpp:754 @8642541b2).
 pub fn bufferRead(src: *Buffer, offset: usize, dst: [*]u8, size: usize) void {
     bufferRead2d(src, offset, dst, size, size, size, 1);
 }
 
-/// Ports `ggml_vk_buffer_copy_async` (ggml-vulkan-buffers.cpp:761 @620d2225c).
+/// Ports `ggml_vk_buffer_copy_async` (ggml-vulkan-buffers.cpp:759 @8642541b2).
 pub fn bufferCopyAsync(ctx: *Context, dst: *Buffer, dst_offset: usize, src: *Buffer, src_offset: usize, size: usize) void {
     // Make sure both buffers are on same device
     impl.assert(src.device == dst.device, "src->device == dst->device");
@@ -724,7 +724,7 @@ pub fn bufferCopyAsync(ctx: *Context, dst: *Buffer, dst_offset: usize, src: *Buf
     vkCmdCopyBuffer(ctx.cmd(), src.buffer, dst.buffer, 1, @ptrCast(&bc));
 }
 
-/// Ports `ggml_vk_buffer_copy` (ggml-vulkan-buffers.cpp:771 @620d2225c).
+/// Ports `ggml_vk_buffer_copy` (ggml-vulkan-buffers.cpp:769 @8642541b2).
 pub fn bufferCopy(dst: *Buffer, dst_offset: usize, src: *Buffer, src_offset: usize, size: usize) void {
     if (src.device == dst.device) {
         const device = src.device;
@@ -749,7 +749,7 @@ pub fn bufferCopy(dst: *Buffer, dst_offset: usize, src: *Buffer, src_offset: usi
     }
 }
 
-/// Ports `ggml_vk_buffer_memset_async` (ggml-vulkan-buffers.cpp:796 @620d2225c).
+/// Ports `ggml_vk_buffer_memset_async` (ggml-vulkan-buffers.cpp:794 @8642541b2).
 pub fn bufferMemsetAsync(ctx: *Context, dst: *Buffer, offset: usize, val: u32, size: usize) void {
     if (dst.memory_property_flags & vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT != 0 and dst.device.uma) {
         deferredMemset(@as([*]u8, @ptrCast(dst.ptr.?)) + offset, val, size, &ctx.memsets);
@@ -759,7 +759,7 @@ pub fn bufferMemsetAsync(ctx: *Context, dst: *Buffer, offset: usize, val: u32, s
     d.vkCmdFillBuffer.?(ctx.cmd(), dst.buffer, offset, size, val);
 }
 
-/// Ports `ggml_vk_buffer_memset` (ggml-vulkan-buffers.cpp:809 @620d2225c).
+/// Ports `ggml_vk_buffer_memset` (ggml-vulkan-buffers.cpp:807 @8642541b2).
 pub fn bufferMemset(dst: *Buffer, offset: usize, val: u32, size: usize) void {
     if (dst.memory_property_flags & vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT != 0 and dst.device.uma) {
         @memset((@as([*]u8, @ptrCast(dst.ptr.?)) + offset)[0..size], @truncate(val));

@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.7.0 (`620d2225c`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.8.0 (`8642541b2`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # `out_prod` accumulates through `ggml_vec_mad_f32`
@@ -48,7 +48,7 @@ fn zeroDstAndSync(params: *const ComputeParams, dst: *Tensor, l: common.BinaryLo
     threading.ggml_barrier(@ptrCast(@alignCast(params.threadpool.?)));
 }
 
-/// Ports `ggml_compute_forward_out_prod_f32` (ops.cpp:4625 @620d2225c), the
+/// Ports `ggml_compute_forward_out_prod_f32` (ops.cpp:4517 @8642541b2), the
 /// `GGML_VEC_MAD_UNROLL > 2` arm.
 fn outProdF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
@@ -154,8 +154,8 @@ fn outProdF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_out_prod_q_f32` (ops.cpp:4746 @620d2225c) and
-/// `ggml_compute_forward_out_prod_f16_f32` (ops.cpp:4835 @620d2225c).
+/// Ports `ggml_compute_forward_out_prod_q_f32` (ops.cpp:4638 @8642541b2) and
+/// `ggml_compute_forward_out_prod_f16_f32` (ops.cpp:4727 @8642541b2).
 ///
 /// The two differ in how a `src0` row is widened into the per-thread scratch
 /// row — the type's `to_float`, or `ggml_fp16_to_fp32_row` — and in their
@@ -251,7 +251,7 @@ fn outProdWiden(comptime is_f16: bool, params: *const ComputeParams, dst: *Tenso
     }
 }
 
-/// Ports `ggml_compute_forward_out_prod` (ops.cpp:4899 @620d2225c).
+/// Ports `ggml_compute_forward_out_prod` (ops.cpp:4791 @8642541b2).
 pub export fn ggml_compute_forward_out_prod(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -288,16 +288,16 @@ pub export fn ggml_compute_forward_out_prod(params: *const ComputeParams, dst: *
     }
 }
 
-/// Ports `ggml_compute_forward_scale_f32` (ops.cpp:4951 @620d2225c).
+/// Ports `ggml_compute_forward_scale_f32` (ops.cpp:4843 @8642541b2).
 ///
-/// The bias path reads `src0` at `i1*nb1` — `dst`'s row stride, where the
-/// scale-only path uses `nb01`. The two agree for the contiguous tensors the
-/// asserts require, so it is harmless, but it is the C's and is kept.
+/// Since v0.8.0 rows need only be contiguous within themselves, so each flat
+/// row index is split into `i1`, `i2`, `i3` and every row addressed through
+/// its tensor's own strides.
 fn scaleF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
-    impl.assert(c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
-    impl.assert(c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    impl.assert(c.ggml_is_contiguous_rows(src0), "ggml_is_contiguous_rows(src0)");
+    impl.assert(c.ggml_is_contiguous_rows(dst), "ggml_is_contiguous_rows(dst)");
     impl.assert(c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
 
     const s = impl.getOpParamsF32(dst, 0); // scale factor
@@ -309,6 +309,8 @@ fn scaleF32(params: *const ComputeParams, dst: *Tensor) void {
     const nc: c_int = @intCast(src0.ne[0]);
     const nr: c_int = @intCast(c.ggml_nrows(src0));
 
+    const l = common.UnaryLocals.of(src0, dst);
+
     // rows per thread
     const dr = @divTrunc(nr + nth - 1, nth);
 
@@ -316,39 +318,33 @@ fn scaleF32(params: *const ComputeParams, dst: *Tensor) void {
     const ir0 = dr * ith;
     const ir1 = @min(ir0 + dr, nr);
 
-    const nb01 = src0.nb[1];
-
-    const nb1 = dst.nb[1];
-
     const s0: [*]const u8 = @ptrCast(src0.data.?);
     const dd: [*]u8 = @ptrCast(dst.data.?);
 
-    if (b == 0.0) {
-        var j1 = ir0;
-        while (j1 < ir1) : (j1 += 1) {
+    var i = ir0;
+    while (i < ir1) : (i += 1) {
+        const j1 = @rem(@as(i64, i), l.ne01);
+        const j2 = @rem(@divTrunc(@as(i64, i), l.ne01), l.ne02);
+        const j3 = @divTrunc(@as(i64, i), l.ne01 * l.ne02);
+
+        const y = dd + at(j1, l.nb1) + at(j2, l.nb2) + at(j3, l.nb3);
+        const x = s0 + at(j1, l.nb01) + at(j2, l.nb02) + at(j3, l.nb03);
+
+        if (b == 0.0) {
             if (dst.data != src0.data) {
                 // src0 is same shape as dst => same indices
                 // TODO: add x parameter to ggml_vec_scale_f32 and remove this memcpy
                 const n = @as(usize, @intCast(nc)) * @sizeOf(f32);
-                @memcpy((dd + at(j1, nb1))[0..n], (s0 + at(j1, nb01))[0..n]);
+                @memcpy(y[0..n], x[0..n]);
             }
-            vec.scale_f32(nc, @ptrCast(@alignCast(dd + at(j1, nb1))), s);
-        }
-    } else {
-        var j1 = ir0;
-        while (j1 < ir1) : (j1 += 1) {
-            vec.mad1_f32(
-                nc,
-                @ptrCast(@alignCast(dd + at(j1, nb1))),
-                @ptrCast(@alignCast(s0 + at(j1, nb1))),
-                s,
-                b,
-            );
+            vec.scale_f32(nc, @ptrCast(@alignCast(y)), s);
+        } else {
+            vec.mad1_f32(nc, @ptrCast(@alignCast(y)), @ptrCast(@alignCast(x)), s, b);
         }
     }
 }
 
-/// Ports `ggml_compute_forward_scale_bf16` (ops.cpp:5003 @620d2225c), new
+/// Ports `ggml_compute_forward_scale_bf16` (ops.cpp:4895 @8642541b2), new
 /// at v0.6.0.
 ///
 /// Unlike `scaleF32` there is no `b == 0` split: every element is
@@ -361,8 +357,8 @@ fn scaleF32(params: *const ComputeParams, dst: *Tensor) void {
 fn scaleBf16(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
-    impl.assert(c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
-    impl.assert(c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    impl.assert(c.ggml_is_contiguous_rows(src0), "ggml_is_contiguous_rows(src0)");
+    impl.assert(c.ggml_is_contiguous_rows(dst), "ggml_is_contiguous_rows(dst)");
     impl.assert(c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
 
     const s = impl.getOpParamsF32(dst, 0); // scale factor
@@ -374,6 +370,8 @@ fn scaleBf16(params: *const ComputeParams, dst: *Tensor) void {
     const nc: c_int = @intCast(src0.ne[0]);
     const nr: c_int = @intCast(c.ggml_nrows(src0));
 
+    const l = common.UnaryLocals.of(src0, dst);
+
     // rows per thread
     const dr = @divTrunc(nr + nth - 1, nth);
 
@@ -384,17 +382,21 @@ fn scaleBf16(params: *const ComputeParams, dst: *Tensor) void {
     const s0: [*]const u8 = @ptrCast(src0.data.?);
     const dd: [*]u8 = @ptrCast(dst.data.?);
 
-    var j1 = ir0;
-    while (j1 < ir1) : (j1 += 1) {
-        const x: [*]const c.ggml_bf16_t = @ptrCast(@alignCast(s0 + at(j1, src0.nb[1])));
-        const y: [*]c.ggml_bf16_t = @ptrCast(@alignCast(dd + at(j1, dst.nb[1])));
+    var i = ir0;
+    while (i < ir1) : (i += 1) {
+        const j1 = @rem(@as(i64, i), l.ne01);
+        const j2 = @rem(@divTrunc(@as(i64, i), l.ne01), l.ne02);
+        const j3 = @divTrunc(@as(i64, i), l.ne01 * l.ne02);
+
+        const x: [*]const c.ggml_bf16_t = @ptrCast(@alignCast(s0 + at(j1, l.nb01) + at(j2, l.nb02) + at(j3, l.nb03)));
+        const y: [*]c.ggml_bf16_t = @ptrCast(@alignCast(dd + at(j1, l.nb1) + at(j2, l.nb2) + at(j3, l.nb3)));
         for (0..@intCast(nc)) |k| {
             y[k] = .{ .bits = impl.fp32ToBf16(@mulAdd(f32, s, impl.bf16ToFp32(x[k].bits), b)) };
         }
     }
 }
 
-/// Ports `ggml_compute_forward_scale` (ops.cpp:5041 @620d2225c).
+/// Ports `ggml_compute_forward_scale` (ops.cpp:4939 @8642541b2).
 pub export fn ggml_compute_forward_scale(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -405,8 +407,8 @@ pub export fn ggml_compute_forward_scale(params: *const ComputeParams, dst: *Ten
     }
 }
 
-/// Ports `ggml_compute_forward_set_f32` (ops.cpp:5065 @620d2225c) and
-/// `ggml_compute_forward_set_i32` (ops.cpp:5136 @620d2225c).
+/// Ports `ggml_compute_forward_set_f32` (ops.cpp:4963 @8642541b2) and
+/// `ggml_compute_forward_set_i32` (ops.cpp:5034 @8642541b2).
 ///
 /// Identical but for the element type and the `ggml_vec_cpy_*` they call.
 fn setT(comptime T: type, params: *const ComputeParams, dst: *Tensor) void {
@@ -488,7 +490,7 @@ fn setT(comptime T: type, params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_set` (ops.cpp:5207 @620d2225c).
+/// Ports `ggml_compute_forward_set` (ops.cpp:5105 @8642541b2).
 pub export fn ggml_compute_forward_set(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 

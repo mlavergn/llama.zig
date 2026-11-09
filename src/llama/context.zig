@@ -16,7 +16,7 @@
 //!   `graph_params`, `graph_compute`, `graph_get_cb`, the perf counters,
 //!   `llama_context_default_params` and `llama_init_from_model`
 //!
-//! All at v0.7.0 (`620d2225c`). Saving and restoring state is
+//! All at v0.8.0 (`8642541b2`). Saving and restoring state is
 //! `context_state.zig`'s; training is `context_opt.zig`'s.
 //!
 //! # What the reference compiles out
@@ -56,7 +56,7 @@ fn oom() noreturn {
     impl.abort("llama-context.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_verify_hadamard_graph` (llama-context.cpp:31 @620d2225c):
+/// Ports `llama_verify_hadamard_graph` (llama-context.cpp:31 @8642541b2):
 /// checks that each folded weight in the graph gets its Hadamard transform,
 /// and each latent lookup the inverse. Without it an architecture that
 /// skips the transform helpers loads and computes wrong results.
@@ -175,7 +175,7 @@ fn verifyHadamardGraph(
     }
 }
 
-/// Ports `ctx_type_to_graph_type` (llama-context.cpp:112 @620d2225c).
+/// Ports `ctx_type_to_graph_type` (llama-context.cpp:112 @8642541b2).
 fn ctxTypeToGraphType(ctx_type: c.enum_llama_context_type) graph.GraphType {
     return switch (ctx_type) {
         c.LLAMA_CONTEXT_TYPE_DEFAULT => .default,
@@ -184,7 +184,7 @@ fn ctxTypeToGraphType(ctx_type: c.enum_llama_context_type) graph.GraphType {
     };
 }
 
-/// Mirrors `llm_fused_op_probe` (llama-context.cpp:120 @620d2225c): a fused
+/// Mirrors `llm_fused_op_probe` (llama-context.cpp:120 @8642541b2): a fused
 /// op to check the device support of, and the ubatch to check it with.
 const FusedOpProbe = struct {
     op: graph.FusedOp,
@@ -195,7 +195,7 @@ const FusedOpProbe = struct {
 /// The probes, `llm_fused_op_flash_attn_probe`, `llm_fused_op_gdn_ar_probe`,
 /// `llm_fused_op_gdn_ch_probe`, `llm_fused_op_lid_probe`,
 /// `llm_fused_op_dsv4_hc_pre_probe`, `llm_fused_op_dsv4_hc_comb_probe` and
-/// `llm_fused_op_dsv4_hc_post_probe` (llama-context.cpp:126, 132, 138, 144, 150, 156, 162 @620d2225c).
+/// `llm_fused_op_dsv4_hc_post_probe`, `llm_fused_op_top_k_mask_probe` (llama-context.cpp:126, 132, 138, 144, 150, 156, 162, 168 @8642541b2).
 const probe_flash_attn: FusedOpProbe = .{ .op = .flash_attn, .name = "Flash Attention", .n_tokens_per_seq = 1 };
 const probe_gdn_ar: FusedOpProbe = .{ .op = .gdn_ar, .name = "fused Gated Delta Net (autoregressive)", .n_tokens_per_seq = 1 };
 const probe_gdn_ch: FusedOpProbe = .{ .op = .gdn_ch, .name = "fused Gated Delta Net (chunked)", .n_tokens_per_seq = 16 };
@@ -203,8 +203,9 @@ const probe_lid: FusedOpProbe = .{ .op = .lightning_indexer, .name = "Lightning 
 const probe_dsv4_hc_pre: FusedOpProbe = .{ .op = .dsv4_hc_pre, .name = "fused DeepSeek V4 HC pre", .n_tokens_per_seq = 1 };
 const probe_dsv4_hc_comb: FusedOpProbe = .{ .op = .dsv4_hc_comb, .name = "fused DeepSeek V4 HC comb", .n_tokens_per_seq = 1 };
 const probe_dsv4_hc_post: FusedOpProbe = .{ .op = .dsv4_hc_post, .name = "fused DeepSeek V4 HC post", .n_tokens_per_seq = 1 };
+const probe_top_k_mask: FusedOpProbe = .{ .op = .top_k_mask, .name = "fused top-k mask", .n_tokens_per_seq = 1 };
 
-/// `buffer_view` (llama-impl.h:90 @620d2225c).
+/// `buffer_view` (llama-impl.h:90 @8642541b2).
 pub fn BufferView(comptime T: type) type {
     return struct {
         data: ?[*]T = null,
@@ -225,7 +226,7 @@ pub const MemoryBreakdownEntry = struct {
     compute: usize = 0,
 };
 
-/// Ports `llama_context` (llama-context.h:45 @620d2225c).
+/// Ports `llama_context` (llama-context.h:45 @8642541b2).
 pub const Context = struct {
     model: *const Model,
     cparams: Cparams = .{},
@@ -333,7 +334,7 @@ pub const Context = struct {
 
     const SetNThreadsFn = *const fn (c.ggml_backend_t, c_int) callconv(.c) void;
 
-    /// `copy_experts_info` (llama-context.h:376 @620d2225c).
+    /// `copy_experts_info` (llama-context.h:376 @8642541b2).
     pub const CopyExpertsInfo = struct {
         ids: ?*const Tensor = null,
         ids_data: std.ArrayList(i32) = .empty,
@@ -351,7 +352,7 @@ pub const Context = struct {
         }
     };
 
-    /// `sampling_info` (llama-context.h:329 @620d2225c).
+    /// `sampling_info` (llama-context.h:329 @8642541b2).
     const Sampling = struct {
         samplers: graph.SamplerMap = .{},
         logits: BufferView(f32) = .{},
@@ -364,7 +365,7 @@ pub const Context = struct {
         token_ids_full_vocab: std.ArrayList(c.llama_token) = .empty,
     };
 
-    /// Ports the constructor of `llama_context` (llama-context.cpp:168 @620d2225c).
+    /// Ports the constructor of `llama_context` (llama-context.cpp:174 @8642541b2).
     ///
     /// Return: the context, the caller's to `destroy`, or `error.Thrown`.
     pub fn create(model: *const Model, params: c.llama_context_params, exc: *Exception) Thrown!*Context {
@@ -499,6 +500,10 @@ pub const Context = struct {
         cp.fused_dsv4_hc_post = true;
         cp.auto_fhc = true;
 
+        // only the indexer models build this mask, skip the probe for the others
+        cp.fused_top_k_mask = true;
+        cp.auto_ftkm = hparams.indexer_top_k > 0;
+
         // With causal attention, the batch is limited by the context.
         cp.n_batch = if (cp.causal_attn) @min(cp.n_ctx, params.n_batch) else params.n_batch;
         cp.n_ubatch = @min(cp.n_batch, if (params.n_ubatch == 0) params.n_batch else params.n_ubatch);
@@ -615,6 +620,7 @@ pub const Context = struct {
                 .swa_full = params.swa_full,
                 .ctx_type = cp.ctx_type,
                 .mem_other = if (other) |o| o.mem else null,
+                .no_alloc = model.noAlloc(),
             };
             self.mem = try model.createMemory(&params_mem, cp, exc);
         }
@@ -667,7 +673,7 @@ pub const Context = struct {
             if (cp.pipeline_parallel) impl.logInfo("%s: pipeline parallelism enabled\n", .{func});
 
             if (cp.moe_cache_size > 0) {
-                self.moe_cache = try moe_cache_mod.MoeCache.create(model, self.backend_ptrs.items, self.backend_buft.items, cp.moe_cache_size, exc);
+                self.moe_cache = try moe_cache_mod.MoeCache.create(model, model.noAlloc(), self.backend_ptrs.items, self.backend_buft.items, cp.moe_cache_size, exc);
             }
 
             try self.schedReserve(exc);
@@ -689,7 +695,7 @@ pub const Context = struct {
         return if (scale <= 1.0) 1.0 else (0.1 * mscale * impl.logf(scale) + 1.0);
     }
 
-    /// Ports the destructor of `llama_context` (llama-context.cpp:575 @620d2225c).
+    /// Ports the destructor of `llama_context` (llama-context.cpp:586 @8642541b2).
     ///
     /// Return: nothing.
     pub fn destroy(self: *Context) void {
@@ -698,7 +704,7 @@ pub const Context = struct {
 
         // Training allocates extra buffers through the scheduler, so the
         // sizes no longer match the expectation.
-        if (!self.model.hparams.no_alloc and self.opt_ctx == null and self.sched != null) {
+        if (!self.model.noAlloc() and self.opt_ctx == null and self.sched != null) {
             for (self.backend_ptrs.items, self.backend_buft.items, self.backend_buf_exp_size.items) |backend, buft, size_exp| {
                 const size_act = c.ggml_backend_sched_get_buffer_size(self.sched, backend);
                 if (size_exp == size_act) {
@@ -751,8 +757,8 @@ pub const Context = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `llama_context`'s `resolve_fused_ops` (llama-context.cpp:599
-    /// @620d2225c): enable a fused op only where its node lands on its
+    /// Ports `llama_context`'s `resolve_fused_ops` (llama-context.cpp:610
+    /// @8642541b2): enable a fused op only where its node lands on its
     /// layer's device.
     fn resolveFusedOps(self: *Context, mctx: ?memory.Context, n_seqs: u32, exc: *Exception) Thrown!void {
         const func = "resolve_fused_ops";
@@ -779,9 +785,14 @@ pub const Context = struct {
             try self.resolveProbe(&probe_dsv4_hc_post, &cp.fused_dsv4_hc_post, mctx, n_seqs, exc);
             cp.auto_fhc = false;
         }
+        if (cp.auto_ftkm) {
+            impl.logInfo("%s: resolving fused top-k mask support:\n", .{func});
+            try self.resolveProbe(&probe_top_k_mask, &cp.fused_top_k_mask, mctx, n_seqs, exc);
+            cp.auto_ftkm = false;
+        }
     }
 
-    /// The `resolve` lambda of `resolve_fused_ops` (llama-context.cpp:599 @620d2225c).
+    /// The `resolve` lambda of `resolve_fused_ops` (llama-context.cpp:610 @8642541b2).
     fn resolveProbe(self: *Context, probe: *const FusedOpProbe, enabled: *bool, mctx: ?memory.Context, n_seqs: u32, exc: *Exception) Thrown!void {
         const func = "resolve_fused_ops";
         if (!enabled.*) return;
@@ -792,7 +803,7 @@ pub const Context = struct {
         var device_mismatch = false;
         for (self.getGfResReserve().fused_nodes.items) |node| {
             if (node.op != probe.op) continue;
-            impl.assert(node.il >= 0, "llama-context.cpp", 619, "node.il >= 0");
+            impl.assert(node.il >= 0, "llama-context.cpp", 630, "node.il >= 0");
             const backend_fused = c.ggml_backend_sched_get_tensor_backend(self.sched, node.tensor);
             const device_fused = if (backend_fused != null) c.ggml_backend_get_device(backend_fused) else null;
             // model.dev_layer() keeps the current behavior, though it is
@@ -820,7 +831,7 @@ pub const Context = struct {
         }
     }
 
-    /// Ports `llama_graph_n_input_tensors` (llama-context.cpp:676 @620d2225c):
+    /// Ports `llama_graph_n_input_tensors` (llama-context.cpp:693 @8642541b2):
     /// the distinct tensors the graph marks as input, each logged with the
     /// nodes that read it; one that is not a plain `GGML_OP_NONE` leaf
     /// aborts.
@@ -862,7 +873,7 @@ pub const Context = struct {
         while (it.next()) |e| {
             const p: usize = std.mem.readInt(usize, e.key[0..@sizeOf(usize)], .little);
             const tensor: *const c.ggml_tensor = @ptrFromInt(p);
-            impl.assert(tensor.op == c.GGML_OP_NONE, "llama-context.cpp", 695, "tensor->op == GGML_OP_NONE");
+            impl.assert(tensor.op == c.GGML_OP_NONE, "llama-context.cpp", 712, "tensor->op == GGML_OP_NONE");
             for (e.value.items) |node| {
                 impl.logDebug("%s: input tensor '%32s' [%s, ne = { %5lld, %5lld, %5lld, %5lld }] is used by node '%s' (%s)\n", .{
                     func,                          c.ggml_get_name(tensor),       c.ggml_type_name(tensor.type),
@@ -875,7 +886,7 @@ pub const Context = struct {
         return @intCast(users.count());
     }
 
-    /// Ports `llama_context`'s `sched_new` (llama-context.cpp:707 @620d2225c):
+    /// Ports `llama_context`'s `sched_new` (llama-context.cpp:724 @8642541b2):
     /// a new backend scheduler for a graph of `max_nodes`, with the copy and
     /// realloc callbacks registered.
     ///
@@ -888,7 +899,7 @@ pub const Context = struct {
         c.ggml_backend_sched_set_realloc_callback(self.sched, schedGraphRealloc, self);
     }
 
-    /// Ports `llama_context`'s `sched_reserve` (llama-context.cpp:715 @620d2225c):
+    /// Ports `llama_context`'s `sched_reserve` (llama-context.cpp:732 @8642541b2):
     /// the worst-case graphs, so the compute buffers are allocated once.
     pub fn schedReserve(self: *Context, exc: *Exception) Thrown!void {
         const func = "sched_reserve";
@@ -932,7 +943,7 @@ pub const Context = struct {
 
         try self.resolveFusedOps(mctx, n_seqs, exc);
 
-        const no_alloc = self.model.hparams.no_alloc;
+        const no_alloc = self.model.noAlloc();
         const n_outputs_pp = @min(n_tokens, self.cparams.n_outputs_max);
 
         // The prompt-processing graph first, so buffers are allocated once.
@@ -1033,7 +1044,7 @@ pub const Context = struct {
         impl.logInfo("%s: reserve took %.2f ms, sched copies = %d\n", .{ func, @as(f64, @floatFromInt(t_end_us - t_start_us)) / 1000.0, c.ggml_backend_sched_get_n_copies(self.sched) });
     }
 
-    /// Ports `llama_context`'s `synchronize` (llama-context.cpp:871 @620d2225c):
+    /// Ports `llama_context`'s `synchronize` (llama-context.cpp:888 @8642541b2):
     /// wait for the backends, then account the time.
     pub fn synchronize(self: *Context) void {
         if (self.sched == null) return;
@@ -1059,17 +1070,17 @@ pub const Context = struct {
         self.t_compute_start_us = 0;
     }
 
-    /// Ports `llama_context`'s `get_model` (llama-context.cpp:905 @620d2225c).
+    /// Ports `llama_context`'s `get_model` (llama-context.cpp:922 @8642541b2).
     pub fn getModel(self: *const Context) *const Model {
         return self.model;
     }
 
-    /// Ports `llama_context`'s `get_cparams` (llama-context.cpp:909 @620d2225c).
+    /// Ports `llama_context`'s `get_cparams` (llama-context.cpp:926 @8642541b2).
     pub fn getCparams(self: *const Context) *const Cparams {
         return &self.cparams;
     }
 
-    /// Ports `llama_context`'s `get_sched` (llama-context.cpp:913 @620d2225c).
+    /// Ports `llama_context`'s `get_sched` (llama-context.cpp:930 @8642541b2).
     pub fn getSched(self: *const Context) c.ggml_backend_sched_t {
         return self.sched;
     }
@@ -1096,12 +1107,12 @@ pub const Context = struct {
         return @bitCast(self.cparams.n_threads_batch);
     }
 
-    /// Ports `llama_context`'s `get_memory` (llama-context.cpp:945 @620d2225c).
+    /// Ports `llama_context`'s `get_memory` (llama-context.cpp:962 @8642541b2).
     pub fn getMemory(self: *const Context) ?memory.Memory {
         return self.mem;
     }
 
-    /// Ports `llama_context`'s `memory_update` (llama-context.cpp:949 @620d2225c):
+    /// Ports `llama_context`'s `memory_update` (llama-context.cpp:966 @8642541b2):
     /// apply pending shifts and copies, then reserve a worst-case graph.
     ///
     /// Return: whether the memory updated.
@@ -1142,19 +1153,19 @@ pub const Context = struct {
         return true;
     }
 
-    /// Ports `llama_context`'s `pooling_type` (llama-context.cpp:1009 @620d2225c).
+    /// Ports `llama_context`'s `pooling_type` (llama-context.cpp:1026 @8642541b2).
     pub fn poolingType(self: *const Context) c.enum_llama_pooling_type {
         return self.cparams.pooling_type;
     }
 
-    /// Ports `llama_context`'s `get_logits` (llama-context.cpp:1013 @620d2225c).
+    /// Ports `llama_context`'s `get_logits` (llama-context.cpp:1030 @8642541b2).
     pub fn getLogits(self: *Context) ?[*]f32 {
         self.outputReorder();
         return self.logits.data;
     }
 
-    /// Ports `llama_context`'s `output_resolve_row` (llama-context.cpp:1019
-    /// @620d2225c): batch token `i` to its output row; a negative `i`
+    /// Ports `llama_context`'s `output_resolve_row` (llama-context.cpp:1036
+    /// @8642541b2): batch token `i` to its output row; a negative `i`
     /// counts from the last output.
     ///
     /// Return: the row, or `error.Thrown` with the C++'s message.
@@ -1181,7 +1192,7 @@ pub const Context = struct {
         impl.logError("%s: invalid " ++ what ++ " id %d, reason: %s\n", .{ func.ptr, i, @as([*:0]const u8, @ptrCast(&exc.buf)) });
     }
 
-    /// Ports `llama_context`'s `get_logits_ith` (llama-context.cpp:1048 @620d2225c).
+    /// Ports `llama_context`'s `get_logits_ith` (llama-context.cpp:1065 @8642541b2).
     pub fn getLogitsIth(self: *Context, i: i32) ?[*]f32 {
         self.outputReorder();
         var exc: Exception = .{};
@@ -1197,18 +1208,18 @@ pub const Context = struct {
         return data + @as(usize, @intCast(j)) * self.model.vocab.nTokens();
     }
 
-    /// Ports `llama_context`'s `get_embeddings` (llama-context.cpp:1068 @620d2225c).
+    /// Ports `llama_context`'s `get_embeddings` (llama-context.cpp:1085 @8642541b2).
     pub fn getEmbeddings(self: *Context) ?[*]f32 {
         self.outputReorder();
         return self.embd.data;
     }
 
-    /// Ports `llama_context`'s `get_sampled_tokens` (llama-context.cpp:1074 @620d2225c).
+    /// Ports `llama_context`'s `get_sampled_tokens` (llama-context.cpp:1091 @8642541b2).
     pub fn getSampledTokens(self: *const Context) ?[*]c.llama_token {
         return self.sampling.sampled.data;
     }
 
-    /// Ports `llama_context`'s `get_embeddings_ith` (llama-context.cpp:1078 @620d2225c).
+    /// Ports `llama_context`'s `get_embeddings_ith` (llama-context.cpp:1095 @8642541b2).
     pub fn getEmbeddingsIth(self: *Context, i: i32) ?[*]f32 {
         self.outputReorder();
         var exc: Exception = .{};
@@ -1224,19 +1235,19 @@ pub const Context = struct {
         return data + @as(usize, @intCast(j)) * self.model.hparams.nEmbdOut();
     }
 
-    /// Ports `llama_context`'s `get_embeddings_seq` (llama-context.cpp:1099 @620d2225c).
+    /// Ports `llama_context`'s `get_embeddings_seq` (llama-context.cpp:1116 @8642541b2).
     pub fn getEmbeddingsSeq(self: *Context, seq_id: i32) ?[*]f32 {
         for (self.embd_seq.items) |*e| if (e.seq_id == seq_id) return e.v.items.ptr;
         return null;
     }
 
-    /// Ports `llama_context`'s `get_embeddings_nextn` (llama-context.cpp:1108 @620d2225c).
+    /// Ports `llama_context`'s `get_embeddings_nextn` (llama-context.cpp:1125 @8642541b2).
     pub fn getEmbeddingsNextn(self: *Context) ?[*]f32 {
         self.outputReorder();
         return self.embd_nextn.data;
     }
 
-    /// Ports `llama_context`'s `get_embeddings_nextn_ith` (llama-context.cpp:1114 @620d2225c).
+    /// Ports `llama_context`'s `get_embeddings_nextn_ith` (llama-context.cpp:1131 @8642541b2).
     pub fn getEmbeddingsNextnIth(self: *Context, i: i32) ?[*]f32 {
         self.outputReorder();
         var exc: Exception = .{};
@@ -1262,14 +1273,14 @@ pub const Context = struct {
         return data + @as(usize, @intCast(j)) * n_embd;
     }
 
-    /// Ports `llama_context`'s `get_embeddings_layer_inp` (llama-context.cpp:1144 @620d2225c).
+    /// Ports `llama_context`'s `get_embeddings_layer_inp` (llama-context.cpp:1161 @8642541b2).
     pub fn getEmbeddingsLayerInp(self: *Context, lid: u32) ?[*]f32 {
         self.outputReorder();
-        impl.assert(lid < self.embd_layer_inp.len and self.embd_layer_inp[lid].hasData(), "llama-context.cpp", 1147, "lid < embd_layer_inp.size() && embd_layer_inp[lid].has_data()");
+        impl.assert(lid < self.embd_layer_inp.len and self.embd_layer_inp[lid].hasData(), "llama-context.cpp", 1164, "lid < embd_layer_inp.size() && embd_layer_inp[lid].has_data()");
         return self.embd_layer_inp[lid].data;
     }
 
-    /// Ports `llama_context`'s `get_sampled_token_ith` (llama-context.cpp:1152 @620d2225c).
+    /// Ports `llama_context`'s `get_sampled_token_ith` (llama-context.cpp:1169 @8642541b2).
     pub fn getSampledTokenIth(self: *Context, idx: i32) c.llama_token {
         self.outputReorder();
         if (!self.sampling.sampled.hasData()) return c.LLAMA_TOKEN_NULL;
@@ -1278,7 +1289,7 @@ pub const Context = struct {
             logBadIndex("get_sampled_token_ith", "backend sampled token", idx, &exc);
             return c.LLAMA_TOKEN_NULL;
         };
-        impl.assert(row < @as(i64, @intCast(self.sampling.sampled.size)), "llama-context.cpp", 1161, "row < (int64_t) sampling.sampled.size");
+        impl.assert(row < @as(i64, @intCast(self.sampling.sampled.size)), "llama-context.cpp", 1178, "row < (int64_t) sampling.sampled.size");
         return self.sampling.sampled.data.?[@intCast(row)];
     }
 
@@ -1294,18 +1305,18 @@ pub const Context = struct {
         return view.data.? + @as(usize, @intCast(row)) * self.model.vocab.nTokens();
     }
 
-    /// Ports `llama_context`'s `get_sampled_probs_ith` (llama-context.cpp:1169 @620d2225c).
+    /// Ports `llama_context`'s `get_sampled_probs_ith` (llama-context.cpp:1186 @8642541b2).
     pub fn getSampledProbsIth(self: *Context, idx: i32) ?[*]f32 {
         return self.sampledRows("backend sampled probs", "get_sampled_probs_ith", self.sampling.probs, self.sampling.probs_count.items, idx);
     }
 
-    /// Ports `llama_context`'s `get_sampled_logits_ith` (llama-context.cpp:1188 @620d2225c).
+    /// Ports `llama_context`'s `get_sampled_logits_ith` (llama-context.cpp:1205 @8642541b2).
     pub fn getSampledLogitsIth(self: *Context, idx: i32) ?[*]f32 {
         return self.sampledRows("backend sampled logits", "get_sampled_logits_ith", self.sampling.logits, self.sampling.logits_count.items, idx);
     }
 
-    /// Ports `llama_context`'s `get_sampled_candidates_ith` (llama-context.cpp:1207
-    /// @620d2225c): the full vocabulary when the row has no candidates.
+    /// Ports `llama_context`'s `get_sampled_candidates_ith` (llama-context.cpp:1224
+    /// @8642541b2): the full vocabulary when the row has no candidates.
     pub fn getSampledCandidatesIth(self: *Context, idx: i32) [*]const c.llama_token {
         self.outputReorder();
         var exc: Exception = .{};
@@ -1330,43 +1341,43 @@ pub const Context = struct {
         return counts[@intCast(row)];
     }
 
-    /// Ports `llama_context`'s `get_sampled_candidates_count` (llama-context.cpp:1225 @620d2225c).
+    /// Ports `llama_context`'s `get_sampled_candidates_count` (llama-context.cpp:1242 @8642541b2).
     pub fn getSampledCandidatesCount(self: *Context, idx: i32) usize {
         return self.sampledCount("backend sampled candidates count", "get_sampled_candidates_count", self.sampling.candidates.hasData(), self.sampling.candidates_count.items, idx, 0);
     }
 
-    /// Ports `llama_context`'s `get_sampled_logits_count` (llama-context.cpp:1244 @620d2225c).
+    /// Ports `llama_context`'s `get_sampled_logits_count` (llama-context.cpp:1261 @8642541b2).
     pub fn getSampledLogitsCount(self: *Context, idx: i32) usize {
         return self.sampledCount("backend sampled logits count", "get_sampled_logits_count", self.sampling.logits.hasData(), self.sampling.logits_count.items, idx, self.model.vocab.nTokens());
     }
 
-    /// Ports `llama_context`'s `get_sampled_probs_count` (llama-context.cpp:1263 @620d2225c).
+    /// Ports `llama_context`'s `get_sampled_probs_count` (llama-context.cpp:1280 @8642541b2).
     pub fn getSampledProbsCount(self: *Context, idx: i32) usize {
         return self.sampledCount("backend sampled probs count", "get_sampled_probs_count", self.sampling.probs.hasData(), self.sampling.probs_count.items, idx, 0);
     }
 
-    /// Ports `llama_context`'s `attach_threadpool` (llama-context.cpp:1283 @620d2225c).
+    /// Ports `llama_context`'s `attach_threadpool` (llama-context.cpp:1300 @8642541b2).
     pub fn attachThreadpool(self: *Context, threadpool: c.ggml_threadpool_t, threadpool_batch: c.ggml_threadpool_t) void {
         impl.logDebug("%s: call\n", .{"attach_threadpool"});
         self.threadpool = threadpool;
         self.threadpool_batch = if (threadpool_batch != null) threadpool_batch else threadpool;
     }
 
-    /// Ports `llama_context`'s `detach_threadpool` (llama-context.cpp:1292 @620d2225c).
+    /// Ports `llama_context`'s `detach_threadpool` (llama-context.cpp:1309 @8642541b2).
     pub fn detachThreadpool(self: *Context) void {
         impl.logDebug("%s: call\n", .{"detach_threadpool"});
         self.threadpool = null;
         self.threadpool_batch = null;
     }
 
-    /// Ports `llama_context`'s `set_n_threads` (llama-context.cpp:1299 @620d2225c).
+    /// Ports `llama_context`'s `set_n_threads` (llama-context.cpp:1316 @8642541b2).
     pub fn setNThreads(self: *Context, n_threads: i32, n_threads_batch: i32) void {
         impl.logDebug("%s: n_threads = %d, n_threads_batch = %d\n", .{ "set_n_threads", n_threads, n_threads_batch });
         self.cparams.n_threads = n_threads;
         self.cparams.n_threads_batch = n_threads_batch;
     }
 
-    /// Ports `llama_context`'s `set_abort_callback` (llama-context.cpp:1306 @620d2225c).
+    /// Ports `llama_context`'s `set_abort_callback` (llama-context.cpp:1323 @8642541b2).
     pub fn setAbortCallback(self: *Context, abort_callback: c.ggml_abort_callback, abort_callback_data: ?*anyopaque) void {
         impl.logDebug("%s: call\n", .{"set_abort_callback"});
         self.abort_callback = abort_callback;
@@ -1380,20 +1391,21 @@ pub const Context = struct {
         }
     }
 
-    /// Ports `llama_context`'s `set_embeddings` (llama-context.cpp:1323 @620d2225c).
+    /// Ports `llama_context`'s `set_embeddings` (llama-context.cpp:1340 @8642541b2).
     pub fn setEmbeddings(self: *Context, value: bool) void {
         impl.logDebug("%s: value = %d\n", .{ "set_embeddings", @as(c_int, @intFromBool(value)) });
 
-        // a pooled context computes the logits only without embeddings, so
-        // the toggle changes the graph shape
-        if (self.cparams.embeddings != value and self.cparams.pooling_type != c.LLAMA_POOLING_TYPE_NONE) {
+        // the toggle changes the graph shape (pooled: logits only; pooling
+        // NONE: the reserve graph outputs all tokens, which crashed
+        // ggml_gallocr on the first /completion), so re-reserve on every toggle
+        if (self.cparams.embeddings != value) {
             self.sched_need_reserve = true;
         }
 
         self.cparams.embeddings = value;
     }
 
-    /// Ports `llama_context`'s `set_embeddings_nextn` (llama-context.cpp:1334 @620d2225c).
+    /// Ports `llama_context`'s `set_embeddings_nextn` (llama-context.cpp:1352 @8642541b2).
     pub fn setEmbeddingsNextn(self: *Context, value: bool, masked: bool) void {
         impl.logDebug("%s: value = %d, masked = %d\n", .{ "set_embeddings_nextn", @as(c_int, @intFromBool(value)), @as(c_int, @intFromBool(masked)) });
 
@@ -1406,21 +1418,21 @@ pub const Context = struct {
         self.cparams.embeddings_nextn_masked = masked;
     }
 
-    /// Ports `llama_context`'s `set_embeddings_layer_inp` (llama-context.cpp:1346 @620d2225c).
+    /// Ports `llama_context`'s `set_embeddings_layer_inp` (llama-context.cpp:1364 @8642541b2).
     pub fn setEmbeddingsLayerInp(self: *Context, lid: u32, enable: bool) void {
         impl.logDebug("%s: lid = %d, enable = %d\n", .{ "set_embeddings_layer_inp", lid, @as(c_int, @intFromBool(enable)) });
-        impl.assert(lid <= self.model.hparams.nLayer(), "llama-context.cpp", 1349, "lid <= model.hparams.n_layer()");
+        impl.assert(lid <= self.model.hparams.nLayer(), "llama-context.cpp", 1367, "lid <= model.hparams.n_layer()");
         self.embeddings_layer_inp[lid] = enable;
         // Without this reserve the draft acceptance drops to zero.
         self.sched_need_reserve = true;
     }
 
-    /// Ports `llama_context`'s `set_nextn_layer_offset` (llama-context.cpp:1357 @620d2225c).
+    /// Ports `llama_context`'s `set_nextn_layer_offset` (llama-context.cpp:1375 @8642541b2).
     pub fn setNextnLayerOffset(self: *Context, offset: i32) void {
         self.cparams.nextn_layer_offset = offset;
     }
 
-    /// Ports `llama_context`'s `set_causal_attn` (llama-context.cpp:1361 @620d2225c).
+    /// Ports `llama_context`'s `set_causal_attn` (llama-context.cpp:1379 @8642541b2).
     /// No scheduler reserve: graph shapes must not depend on `causal_attn`,
     /// so a flip only rebuilds the graph.
     pub fn setCausalAttn(self: *Context, value: bool) void {
@@ -1429,14 +1441,14 @@ pub const Context = struct {
         self.cparams.causal_attn = value;
     }
 
-    /// Ports `llama_context`'s `get_causal_attn` (llama-context.cpp:1374 @620d2225c).
+    /// Ports `llama_context`'s `get_causal_attn` (llama-context.cpp:1392 @8642541b2).
     ///
     /// Return: whether the context uses causal attention now.
     pub fn getCausalAttn(self: *const Context) bool {
         return self.cparams.causal_attn;
     }
 
-    /// Ports `llama_context`'s `set_warmup` (llama-context.cpp:1378 @620d2225c).
+    /// Ports `llama_context`'s `set_warmup` (llama-context.cpp:1396 @8642541b2).
     pub fn setWarmup(self: *Context, value: bool) void {
         impl.logDebug("%s: value = %d\n", .{ "set_warmup", @as(c_int, @intFromBool(value)) });
         if (self.cparams.warmup == value) return;
@@ -1445,7 +1457,7 @@ pub const Context = struct {
 
     var warned_sm_tensor = false;
 
-    /// Ports `llama_context`'s `set_sampler` (llama-context.cpp:1391 @620d2225c):
+    /// Ports `llama_context`'s `set_sampler` (llama-context.cpp:1409 @8642541b2):
     /// offload a sampler chain to the backend, or remove one.
     ///
     /// Return: whether the sampler is now offloaded (or removed).
@@ -1489,8 +1501,8 @@ pub const Context = struct {
         return true;
     }
 
-    /// Ports `llama_context`'s `set_adapters_lora` (llama-context.cpp:1448
-    /// @620d2225c): replace the active LoRA adapters, those with a zero
+    /// Ports `llama_context`'s `set_adapters_lora` (llama-context.cpp:1466
+    /// @8642541b2): replace the active LoRA adapters, those with a zero
     /// scale left out, unless they are already the active ones.
     ///
     /// Parameters:
@@ -1517,8 +1529,8 @@ pub const Context = struct {
         self.sched_need_reserve = true;
     }
 
-    /// Ports `llama_context`'s `adapters_lora_are_same` (llama-context.cpp:1466
-    /// @620d2225c).
+    /// Ports `llama_context`'s `adapters_lora_are_same` (llama-context.cpp:1484
+    /// @8642541b2).
     ///
     /// Return: whether the adapters with a non-zero scale are exactly the
     /// active ones, at the same scales.
@@ -1536,8 +1548,8 @@ pub const Context = struct {
         return n_non_zero == self.loras.count();
     }
 
-    /// Ports `llama_context`'s `set_adapter_cvec` (llama-context.cpp:1492
-    /// @620d2225c).
+    /// Ports `llama_context`'s `set_adapter_cvec` (llama-context.cpp:1510
+    /// @8642541b2).
     ///
     /// Parameters: as `adapter.Cvec.apply`.
     ///
@@ -1549,8 +1561,8 @@ pub const Context = struct {
         return res;
     }
 
-    /// Ports `llama_context`'s `process_ubatch` (llama-context.cpp:1507
-    /// @620d2225c): build or reuse the graph, feed it, compute it.
+    /// Ports `llama_context`'s `process_ubatch` (llama-context.cpp:1525
+    /// @8642541b2): build or reuse the graph, feed it, compute it.
     ///
     /// Return: the graph's result, or null with `ret` saying why.
     pub fn processUbatch(self: *Context, ubatch: *const Ubatch, gtype: graph.GraphType, mctx: ?memory.Context, ret: *c.enum_ggml_status) ?*graph.Result {
@@ -1634,7 +1646,7 @@ pub const Context = struct {
     }
 
     /// Ports the constructor of `llama_batch_ext` from a context
-    /// (llama-batch.cpp:1157 @620d2225c): an empty extended batch sized by
+    /// (llama-batch.cpp:1157 @8642541b2): an empty extended batch sized by
     /// the context and its model.
     ///
     /// Return: the batch; free it with `destroy`.
@@ -1653,8 +1665,8 @@ pub const Context = struct {
         return b;
     }
 
-    /// Ports `llama_context`'s compat `encode` (llama-context.cpp:4601
-    /// @620d2225c): a `llama_batch` through `llama_batch_compat`, its
+    /// Ports `llama_context`'s compat `encode` (llama-context.cpp:4624
+    /// @8642541b2): a `llama_batch` through `llama_batch_compat`, its
     /// embedding rows at the encoder's input width.
     ///
     /// Return: as `encodeExt`.
@@ -1665,8 +1677,8 @@ pub const Context = struct {
         return self.encodeExt(b);
     }
 
-    /// Ports `llama_context`'s compat `decode` (llama-context.cpp:4606
-    /// @620d2225c).
+    /// Ports `llama_context`'s compat `decode` (llama-context.cpp:4629
+    /// @8642541b2).
     ///
     /// Return: as `decodeExt`.
     pub fn decode(self: *Context, batch_inp: c.llama_batch) c_int {
@@ -1676,7 +1688,7 @@ pub const Context = struct {
         return self.decodeExt(b);
     }
 
-    /// Ports `llama_context`'s `encode` (llama-context.cpp:1582 @620d2225c).
+    /// Ports `llama_context`'s `encode` (llama-context.cpp:1600 @8642541b2).
     ///
     /// Return: 0 on success, as `llama_encode` returns.
     pub fn encodeExt(self: *Context, batch_inp: *const batch.BatchExt) c_int {
@@ -1697,8 +1709,10 @@ pub const Context = struct {
         // eagle3/DFlash: features as the encoder's input.
         const n_vocab: usize = self.model.vocab.nTokens();
 
-        // An encode outputs every token and skips position continuity checks.
-        if (!self.balloc.initBatch(batch_inp, &self.model.vocab, true)) {
+        // An encode skips position continuity checks and outputs all tokens;
+        // a decoder without memory (see decode()) outputs the marked tokens,
+        // unless it extracts embeddings.
+        if (!self.balloc.initBatch(batch_inp, &self.model.vocab, self.mem != null or self.cparams.embeddings)) {
             impl.logError("%s: failed to initialize batch\n", .{func});
             return -1;
         }
@@ -1710,7 +1724,7 @@ pub const Context = struct {
         defer ubatch.release();
 
         // Non-causal encoding cannot be micro-batched.
-        impl.assert(self.cparams.n_ubatch >= n_tokens, "llama-context.cpp", 1612, "cparams.n_ubatch >= n_tokens && \"encoder requires n_ubatch >= n_tokens\"");
+        impl.assert(self.cparams.n_ubatch >= n_tokens, "llama-context.cpp", 1631, "cparams.n_ubatch >= n_tokens && \"encoder requires n_ubatch >= n_tokens\"");
 
         // Wait for in-flight copies into embd_seq before freeing it.
         if (self.embd_seq.items.len != 0) self.synchronize();
@@ -1719,16 +1733,19 @@ pub const Context = struct {
         if (self.t_compute_start_us == 0) self.t_compute_start_us = c.ggml_time_us();
 
         var exc: Exception = .{};
-        self.schedReserve(&exc) catch exc.terminate("llama-context.cpp", 1625);
+        self.schedReserve(&exc) catch exc.terminate("llama-context.cpp", 1644);
 
         self.n_queued_tokens += n_tokens;
 
-        if (self.outputReserve(@intCast(n_tokens)) < n_tokens) {
-            impl.logError("%s: could not reserve space for batch with %u outputs\n", .{ func, n_tokens });
+        const n_outputs_all = self.balloc.getNOutputs();
+
+        if (self.outputReserve(@intCast(n_outputs_all)) < n_outputs_all) {
+            impl.logError("%s: could not reserve space for batch with %u outputs\n", .{ func, n_outputs_all });
             return -2;
         }
-        for (0..n_tokens) |i| self.output_ids.items[i] = @intCast(i);
-        self.n_outputs = n_tokens;
+        const out_ids = self.balloc.getOutIds().items;
+        for (0..n_outputs_all) |i| self.output_ids.items[@intCast(out_ids[i])] = @intCast(i);
+        self.n_outputs = n_outputs_all;
 
         // Encoder graphs are always non-causal, for now.
         const causal_attn_org = self.cparams.causal_attn;
@@ -1748,19 +1765,19 @@ pub const Context = struct {
         // The logits.
         if (self.logits.data != null and t_logits != null) {
             const backend_res = c.ggml_backend_sched_get_tensor_backend(self.sched, t_logits);
-            impl.assert(backend_res != null, "llama-context.cpp", 1669, "backend_res != nullptr");
-            c.ggml_backend_tensor_get_async(backend_res, t_logits, self.logits.data, 0, n_tokens * n_vocab * @sizeOf(f32));
+            impl.assert(backend_res != null, "llama-context.cpp", 1691, "backend_res != nullptr");
+            c.ggml_backend_tensor_get_async(backend_res, t_logits, self.logits.data, 0, self.n_outputs * n_vocab * @sizeOf(f32));
         }
 
         // The embeddings.
         if (self.embd.data != null and t_embd != null) {
             const backend_embd = c.ggml_backend_sched_get_tensor_backend(self.sched, t_embd);
-            impl.assert(backend_embd != null, "llama-context.cpp", 1678, "backend_embd != nullptr");
+            impl.assert(backend_embd != null, "llama-context.cpp", 1700, "backend_embd != nullptr");
             switch (self.cparams.pooling_type) {
                 c.LLAMA_POOLING_TYPE_NONE => {
                     const n_embd_out: usize = hparams.nEmbdOut();
-                    impl.assert(n_tokens * n_embd_out <= self.embd.size, "llama-context.cpp", 1687, "n_tokens*n_embd_out <= (int64_t) embd.size");
-                    c.ggml_backend_tensor_get_async(backend_embd, t_embd, self.embd.data, 0, n_tokens * n_embd_out * @sizeOf(f32));
+                    impl.assert(self.n_outputs * n_embd_out <= self.embd.size, "llama-context.cpp", 1709, "n_outputs*n_embd_out <= (int64_t) embd.size");
+                    c.ggml_backend_tensor_get_async(backend_embd, t_embd, self.embd.data, 0, self.n_outputs * n_embd_out * @sizeOf(f32));
                 },
                 c.LLAMA_POOLING_TYPE_MEAN, c.LLAMA_POOLING_TYPE_CLS, c.LLAMA_POOLING_TYPE_LAST => {
                     // n_embd_out, not n_embd_inp: the pooled embedding has the
@@ -1768,17 +1785,17 @@ pub const Context = struct {
                     self.extractSeqEmbeddings(&ubatch, backend_embd, t_embd.?, hparams.nEmbdOut());
                 },
                 c.LLAMA_POOLING_TYPE_RANK => self.extractSeqEmbeddings(&ubatch, backend_embd, t_embd.?, hparams.n_cls_out),
-                else => impl.abort("llama-context.cpp", 1725, "unknown pooling type"),
+                else => impl.abort("llama-context.cpp", 1747, "unknown pooling type"),
             }
         }
 
         // The nextn embeddings, the hidden state before the output norm.
         if (self.embd_nextn.data != null and t_h_nextn != null and self.cparams.pooling_type == c.LLAMA_POOLING_TYPE_NONE) {
             const backend_h = c.ggml_backend_sched_get_tensor_backend(self.sched, t_h_nextn);
-            impl.assert(backend_h != null, "llama-context.cpp", 1733, "backend_h != nullptr");
+            impl.assert(backend_h != null, "llama-context.cpp", 1755, "backend_h != nullptr");
             const n_embd_out: usize = hparams.nEmbdOut();
-            impl.assert(n_tokens * n_embd_out <= self.embd_nextn.size, "llama-context.cpp", 1736, "n_tokens*n_embd <= (int64_t) embd_nextn.size");
-            c.ggml_backend_tensor_get_async(backend_h, t_h_nextn, self.embd_nextn.data, 0, n_tokens * n_embd_out * @sizeOf(f32));
+            impl.assert(self.n_outputs * n_embd_out <= self.embd_nextn.size, "llama-context.cpp", 1758, "n_outputs*n_embd <= (int64_t) embd_nextn.size");
+            c.ggml_backend_tensor_get_async(backend_h, t_h_nextn, self.embd_nextn.data, 0, self.n_outputs * n_embd_out * @sizeOf(f32));
         }
 
         // T5 keeps the encoder output for cross-attention; the C++'s TODO
@@ -1819,12 +1836,12 @@ pub const Context = struct {
             c.GGML_STATUS_ABORTED => 2,
             c.GGML_STATUS_ALLOC_FAILED => -2,
             c.GGML_STATUS_FAILED => -3,
-            c.GGML_STATUS_SUCCESS => impl.abort("llama-context.cpp", 1658, "should not happen"),
-            else => impl.abort("llama-context.cpp", 1656, "unknown status"),
+            c.GGML_STATUS_SUCCESS => impl.abort("llama-context.cpp", 1680, "should not happen"),
+            else => impl.abort("llama-context.cpp", 1678, "unknown status"),
         };
     }
 
-    /// Ports `llama_context`'s `decode` (llama-context.cpp:1821 @620d2225c).
+    /// Ports `llama_context`'s `decode` (llama-context.cpp:1843 @8642541b2).
     ///
     /// Return: 0 on success, as `llama_decode` returns.
     pub fn decodeExt(self: *Context, batch_inp: *const batch.BatchExt) c_int {
@@ -1888,8 +1905,8 @@ pub const Context = struct {
             return -1;
         }
 
-        impl.assert(n_tokens_all <= self.cparams.n_batch, "llama-context.cpp", 1896, "n_tokens_all <= cparams.n_batch");
-        impl.assert(self.cparams.causal_attn or self.cparams.n_ubatch >= n_tokens_all, "llama-context.cpp", 1898, "(cparams.causal_attn || cparams.n_ubatch >= n_tokens_all) && \"non-causal attention requires n_ubatch >= n_tokens\"");
+        impl.assert(n_tokens_all <= self.cparams.n_batch, "llama-context.cpp", 1918, "n_tokens_all <= cparams.n_batch");
+        impl.assert(self.cparams.causal_attn or self.cparams.n_ubatch >= n_tokens_all, "llama-context.cpp", 1920, "(cparams.causal_attn || cparams.n_ubatch >= n_tokens_all) && \"non-causal attention requires n_ubatch >= n_tokens\"");
 
         // Wait for in-flight copies into embd_seq before freeing it.
         if (self.embd_seq.items.len != 0) self.synchronize();
@@ -1902,7 +1919,7 @@ pub const Context = struct {
         self.embd_batch_idxs.clearRetainingCapacity();
 
         var exc: Exception = .{};
-        self.schedReserve(&exc) catch exc.terminate("llama-context.cpp", 1915);
+        self.schedReserve(&exc) catch exc.terminate("llama-context.cpp", 1937);
 
         var did_optimize = false;
 
@@ -1995,12 +2012,12 @@ pub const Context = struct {
             // The logits.
             if (self.logits.data != null and t_logits != null and n_outputs > 0 and needsRawLogits(ubatch, &self.sampling.samplers)) {
                 const backend_res = c.ggml_backend_sched_get_tensor_backend(self.sched, t_logits);
-                impl.assert(backend_res != null, "llama-context.cpp", 2051, "backend_res != nullptr");
-                impl.assert(self.logits.data != null, "llama-context.cpp", 2052, "logits.data != nullptr");
+                impl.assert(backend_res != null, "llama-context.cpp", 2073, "backend_res != nullptr");
+                impl.assert(self.logits.data != null, "llama-context.cpp", 2074, "logits.data != nullptr");
                 const logits_out = self.logits.data.? + n_outputs_prev * n_vocab;
                 if (n_outputs != 0) {
-                    impl.assert(n_outputs_prev + n_outputs <= n_outputs_all, "llama-context.cpp", 2057, "n_outputs_prev + n_outputs <= n_outputs_all");
-                    impl.assert((n_outputs_prev + n_outputs) * n_vocab <= self.logits.size, "llama-context.cpp", 2058, "(n_outputs_prev + n_outputs)*n_vocab <= (int64_t) logits.size");
+                    impl.assert(n_outputs_prev + n_outputs <= n_outputs_all, "llama-context.cpp", 2079, "n_outputs_prev + n_outputs <= n_outputs_all");
+                    impl.assert((n_outputs_prev + n_outputs) * n_vocab <= self.logits.size, "llama-context.cpp", 2080, "(n_outputs_prev + n_outputs)*n_vocab <= (int64_t) logits.size");
                     c.ggml_backend_tensor_get_async(backend_res, t_logits, logits_out, 0, n_outputs * n_vocab * @sizeOf(f32));
                 }
             }
@@ -2008,18 +2025,18 @@ pub const Context = struct {
             // The embeddings.
             if (self.embd.data != null and t_embd != null and n_outputs > 0) {
                 const backend_embd = c.ggml_backend_sched_get_tensor_backend(self.sched, t_embd);
-                impl.assert(backend_embd != null, "llama-context.cpp", 2066, "backend_embd != nullptr");
+                impl.assert(backend_embd != null, "llama-context.cpp", 2088, "backend_embd != nullptr");
                 switch (self.cparams.pooling_type) {
                     c.LLAMA_POOLING_TYPE_NONE => {
                         const n_embd_out: usize = hparams.nEmbdOut();
                         const embd_out = self.embd.data.? + n_outputs_prev * n_embd_out;
-                        impl.assert(n_outputs_prev + n_outputs <= n_outputs_all, "llama-context.cpp", 2057, "n_outputs_prev + n_outputs <= n_outputs_all");
-                        impl.assert((n_outputs_prev + n_outputs) * n_embd_out <= self.embd.size, "llama-context.cpp", 2078, "(n_outputs_prev + n_outputs)*n_embd_out <= (int64_t) embd.size");
+                        impl.assert(n_outputs_prev + n_outputs <= n_outputs_all, "llama-context.cpp", 2079, "n_outputs_prev + n_outputs <= n_outputs_all");
+                        impl.assert((n_outputs_prev + n_outputs) * n_embd_out <= self.embd.size, "llama-context.cpp", 2100, "(n_outputs_prev + n_outputs)*n_embd_out <= (int64_t) embd.size");
                         c.ggml_backend_tensor_get_async(backend_embd, t_embd, embd_out, 0, n_outputs * n_embd_out * @sizeOf(f32));
                     },
                     c.LLAMA_POOLING_TYPE_MEAN, c.LLAMA_POOLING_TYPE_CLS, c.LLAMA_POOLING_TYPE_LAST => self.extractSeqEmbeddings(ubatch, backend_embd, t_embd.?, hparams.nEmbdOut()),
                     c.LLAMA_POOLING_TYPE_RANK => self.extractSeqEmbeddings(ubatch, backend_embd, t_embd.?, hparams.n_cls_out),
-                    else => impl.abort("llama-context.cpp", 2118, "unknown pooling type"),
+                    else => impl.abort("llama-context.cpp", 2140, "unknown pooling type"),
                 }
             }
 
@@ -2033,18 +2050,18 @@ pub const Context = struct {
                 const offset: usize = if (masked) n_outputs_prev else n_tokens_prev;
                 if (self.embd_nextn.data != null and t_h_nextn != null and n_rows > 0 and self.cparams.pooling_type == c.LLAMA_POOLING_TYPE_NONE) {
                     const backend_h = c.ggml_backend_sched_get_tensor_backend(self.sched, t_h_nextn);
-                    impl.assert(backend_h != null, "llama-context.cpp", 2135, "backend_h != nullptr");
+                    impl.assert(backend_h != null, "llama-context.cpp", 2157, "backend_h != nullptr");
                     const n_embd_out: usize = hparams.nEmbdOut();
                     const embd_nextn_out = self.embd_nextn.data.? + offset * n_embd_out;
-                    impl.assert((offset + n_rows) * n_embd_out <= self.embd_nextn.size, "llama-context.cpp", 2140, "(offset + n_rows)*n_embd <= (int64_t) embd_nextn.size");
+                    impl.assert((offset + n_rows) * n_embd_out <= self.embd_nextn.size, "llama-context.cpp", 2162, "(offset + n_rows)*n_embd <= (int64_t) embd_nextn.size");
                     c.ggml_backend_tensor_get_async(backend_h, t_h_nextn, embd_nextn_out, 0, n_rows * n_embd_out * @sizeOf(f32));
                     extract_all_idxs = extract_all_idxs or !masked;
                 }
             }
 
             if (extract_all_idxs) {
-                impl.assert(ubatch.data != null and ubatch.data.?.batch_idxs.items.len == ubatch.n_tokens, "llama-context.cpp", 2147, "ubatch.data && ubatch.data->batch_idxs.size() == ubatch.n_tokens");
-                impl.assert(self.embd_batch_idxs.items.len == n_tokens_prev, "llama-context.cpp", 2148, "embd_batch_idxs.size() == (size_t) n_tokens_prev");
+                impl.assert(ubatch.data != null and ubatch.data.?.batch_idxs.items.len == ubatch.n_tokens, "llama-context.cpp", 2169, "ubatch.data && ubatch.data->batch_idxs.size() == ubatch.n_tokens");
+                impl.assert(self.embd_batch_idxs.items.len == n_tokens_prev, "llama-context.cpp", 2170, "embd_batch_idxs.size() == (size_t) n_tokens_prev");
                 self.embd_batch_idxs.appendSlice(allocator, ubatch.data.?.batch_idxs.items) catch oom();
             }
 
@@ -2070,7 +2087,7 @@ pub const Context = struct {
         if (self.n_outputs > 0) {
             var sorted_output = true;
             const out_ids = self.balloc.getOutIds();
-            impl.assert(out_ids.items.len == self.n_outputs, "llama-context.cpp", 2176, "out_ids.size() == (size_t) n_outputs");
+            impl.assert(out_ids.items.len == self.n_outputs, "llama-context.cpp", 2198, "out_ids.size() == (size_t) n_outputs");
 
             for (0..self.n_outputs) |i| {
                 const out_id = out_ids.items[i];
@@ -2081,7 +2098,7 @@ pub const Context = struct {
             // The outputs in the order of the caller's batch; this matters
             // mostly for recurrent models.
             if (!sorted_output and self.n_outputs > 1) {
-                impl.assert(self.n_outputs == out_ids.items.len, "llama-context.cpp", 2189, "(size_t) n_outputs == out_ids.size()");
+                impl.assert(self.n_outputs == out_ids.items.len, "llama-context.cpp", 2211, "(size_t) n_outputs == out_ids.size()");
                 // A selection sort, which minimizes swaps.
                 var i: u32 = 0;
                 while (i < self.n_outputs - 1) : (i += 1) {
@@ -2102,8 +2119,8 @@ pub const Context = struct {
         return 0;
     }
 
-    /// Ports `llama_context`'s `output_reserve` (llama-context.cpp:2227
-    /// @620d2225c): the host buffer every output is copied into.
+    /// Ports `llama_context`'s `output_reserve` (llama-context.cpp:2249
+    /// @8642541b2): the host buffer every output is copied into.
     ///
     /// Return: the outputs reserved; 0 when allocation failed.
     pub fn outputReserve(self: *Context, n_outputs: i32) u32 {
@@ -2232,30 +2249,30 @@ pub const Context = struct {
         @memset(self.output_ids.items, -1);
         self.n_outputs = 0;
 
-        impl.assert(n_outputs_max <= self.cparams.n_outputs_max, "llama-context.cpp", 2384, "n_outputs_max <= cparams.n_outputs_max");
+        impl.assert(n_outputs_max <= self.cparams.n_outputs_max, "llama-context.cpp", 2406, "n_outputs_max <= cparams.n_outputs_max");
         return @intCast(n_outputs_max);
     }
 
-    /// Ports `llama_context`'s `extract_layer_inputs` (llama-context.cpp:2389
-    /// @620d2225c): copy the enabled layers' inputs out asynchronously.
+    /// Ports `llama_context`'s `extract_layer_inputs` (llama-context.cpp:2411
+    /// @8642541b2): copy the enabled layers' inputs out asynchronously.
     ///
     /// Return: whether any layer was copied.
     fn extractLayerInputs(self: *Context, res: *const graph.Result, token_offset: usize, n_tokens: usize) bool {
         var extracted = false;
         for (self.embeddings_layer_inp, 0..) |enabled, il| {
             if (!enabled) continue;
-            if (!self.embd_layer_inp[il].hasData()) impl.abort("llama-context.cpp", 2396, "output layer input buffer not allocated");
-            const t = res.t_layer_inp[il] orelse impl.abort("llama-context.cpp", 2400, "layer input tensor not found");
+            if (!self.embd_layer_inp[il].hasData()) impl.abort("llama-context.cpp", 2418, "output layer input buffer not allocated");
+            const t = res.t_layer_inp[il] orelse impl.abort("llama-context.cpp", 2422, "layer input tensor not found");
             const nbytes = c.ggml_nbytes(t);
             const nfloats = nbytes / @sizeOf(f32);
-            impl.assert(n_tokens > 0, "llama-context.cpp", 2405, "n_tokens > 0");
-            impl.assert(nfloats % n_tokens == 0, "llama-context.cpp", 2406, "nfloats % n_tokens == 0");
+            impl.assert(n_tokens > 0, "llama-context.cpp", 2427, "n_tokens > 0");
+            impl.assert(nfloats % n_tokens == 0, "llama-context.cpp", 2428, "nfloats % n_tokens == 0");
             const row_floats = nfloats / n_tokens;
-            impl.assert(row_floats == self.model.hparams.n_embd, "llama-context.cpp", 2409, "row_floats == model.hparams.n_embd");
+            impl.assert(row_floats == self.model.hparams.n_embd, "llama-context.cpp", 2431, "row_floats == model.hparams.n_embd");
             const dst_offset = token_offset * row_floats;
-            impl.assert(dst_offset + nfloats <= self.embd_layer_inp[il].size, "llama-context.cpp", 2411, "dst_offset + nfloats <= embd_layer_inp[il].size");
+            impl.assert(dst_offset + nfloats <= self.embd_layer_inp[il].size, "llama-context.cpp", 2433, "dst_offset + nfloats <= embd_layer_inp[il].size");
             const backend = c.ggml_backend_sched_get_tensor_backend(self.sched, t);
-            impl.assert(backend != null, "llama-context.cpp", 2414, "backend != nullptr");
+            impl.assert(backend != null, "llama-context.cpp", 2436, "backend != nullptr");
             // A tensor-split backend needs a zero source offset.
             c.ggml_backend_tensor_get_async(backend, t, self.embd_layer_inp[il].data.? + dst_offset, 0, nbytes);
             extracted = true;
@@ -2263,8 +2280,8 @@ pub const Context = struct {
         return extracted;
     }
 
-    /// Ports `llama_context`'s `output_reorder` (llama-context.cpp:2422
-    /// @620d2225c): apply the swaps decode deferred, then put the rows that
+    /// Ports `llama_context`'s `output_reorder` (llama-context.cpp:2444
+    /// @8642541b2): apply the swaps decode deferred, then put the rows that
     /// hold every token -- layer inputs, unmasked NextN embeddings -- back
     /// in batch order, whatever the logits selection was.
     pub fn outputReorder(self: *Context) void {
@@ -2295,7 +2312,7 @@ pub const Context = struct {
         for (0..idxs.len) |i| {
             while (idxs[i] != @as(i32, @intCast(i))) {
                 const j = idxs[i];
-                impl.assert(j >= 0 and @as(usize, @intCast(j)) < idxs.len, "llama-context.cpp", 2484, "j >= 0 && (size_t) j < embd_batch_idxs.size()");
+                impl.assert(j >= 0 and @as(usize, @intCast(j)) < idxs.len, "llama-context.cpp", 2506, "j >= 0 && (size_t) j < embd_batch_idxs.size()");
                 const ju: usize = @intCast(j);
                 if (self.embd_nextn.hasData() and !self.cparams.embeddings_nextn_masked) swapRows(f32, self.embd_nextn.data.?, i, ju, n_embd_out);
                 for (self.embd_layer_inp) |li| {
@@ -2311,7 +2328,7 @@ pub const Context = struct {
         for (0..n) |k| std.mem.swap(T, &data[i_0 * n + k], &data[i_1 * n + k]);
     }
 
-    /// Ports `llama_context`'s `graph_max_nodes` (llama-context.cpp:2507 @620d2225c).
+    /// Ports `llama_context`'s `graph_max_nodes` (llama-context.cpp:2529 @8642541b2).
     pub fn graphMaxNodes(self: *const Context, n_tokens: u32) u32 {
         const m = self.model;
         const n_tensors: u32 = @intCast(m.nTensors());
@@ -2323,7 +2340,7 @@ pub const Context = struct {
             // the 128-slot looped graph needs roughly one stack per token budget
             res = @max(n_tokens *% 80, 64 *% n_tensors);
         } else if (m.arch == .qwen3next or m.arch == .kimi_linear or m.arch == .bailingmoe3 or m.arch == .qwen35 or
-            m.arch == .qwen35moe or m.arch == .clef or m.arch == .qwen4exp or m.arch == .deepseek4 or (m.arch == .dflash and m.hparams.dsv4_hc_mult > 0) or
+            m.arch == .qwen35moe or m.arch == .clef or m.arch == .qwen4exp or m.arch == .deepseek4 or m.arch == .deepseek41 or (m.arch == .dflash and m.hparams.dsv4_hc_mult > 0) or
             m.arch == .nanbeige or m.arch == .minimax_01 or m.arch == .minimax_m3 or m.arch == .hy_v4)
         {
             res = @max(n_tokens *% 40, 32 *% n_tensors);
@@ -2348,13 +2365,13 @@ pub const Context = struct {
         return res;
     }
 
-    /// Ports `llama_context`'s `get_gf_res_reserve` (llama-context.cpp:2552 @620d2225c).
+    /// Ports `llama_context`'s `get_gf_res_reserve` (llama-context.cpp:2575 @8642541b2).
     pub fn getGfResReserve(self: *const Context) *graph.Result {
         return self.gf_res_reserve.?;
     }
 
-    /// Ports `llama_context`'s `get_gf_res_prev` (llama-context.cpp:2556
-    /// @620d2225c): the arena for a ubatch with outputs or for one without,
+    /// Ports `llama_context`'s `get_gf_res_prev` (llama-context.cpp:2579
+    /// @8642541b2): the arena for a ubatch with outputs or for one without,
     /// created on first use with the reserve's node budget.
     pub fn getGfResPrev(self: *Context) *graph.Result {
         const res = &self.gf_res_prev[@intFromBool(self.n_outputs > 0)];
@@ -2362,8 +2379,8 @@ pub const Context = struct {
         return res.*.?;
     }
 
-    /// Ports `llama_context`'s `graph_reserve` (llama-context.cpp:2621
-    /// @620d2225c): build the worst-case graph for a ubatch shape and size
+    /// Ports `llama_context`'s `graph_reserve` (llama-context.cpp:2644
+    /// @8642541b2): build the worst-case graph for a ubatch shape and size
     /// the scheduler's buffers for it.
     ///
     /// Return: the graph, null when the buffers could not be allocated, or
@@ -2373,7 +2390,7 @@ pub const Context = struct {
         const func = "graph_reserve";
         var n_tokens = n_tokens_;
         impl.logDebug("%s: reserving a graph for ubatch with n_tokens = %4u, n_seqs = %2u, n_outputs = %4u\n", .{ func, n_tokens, n_seqs, n_outputs });
-        impl.assert(n_outputs >= 1, "llama-context.cpp", 2624, "n_outputs >= 1");
+        impl.assert(n_outputs >= 1, "llama-context.cpp", 2647, "n_outputs >= 1");
 
         if (n_tokens % n_seqs != 0) {
             // Round up to a multiple of n_seqs.
@@ -2404,6 +2421,13 @@ pub const Context = struct {
 
         res.reset();
 
+        // `llama_model_deepseek41`'s `build_arch_graph` throws for an MTP
+        // graph (models/deepseek41.cpp:220 @8642541b2). The architectures'
+        // builders have no error path, and the first reservation reaches it.
+        if (self.model.arch == .deepseek41 and gparams.gtype == .decoder_mtp) {
+            return exc.throw(.runtime_error, "DeepSeek-V4.1 has no MTP graph: its DSpark draft is a separate DFLASH GGUF (convert_hf_to_gguf.py --dspark), used with --spec-type draft-dspark", .{});
+        }
+
         const gf = self.model.buildGraph(&gparams);
 
         // check the graph before scheduling: cross-backend copies break the
@@ -2426,14 +2450,14 @@ pub const Context = struct {
                 _ = c.ggml_backend_sched_split_graph(self.sched, gf);
             }
         } else if (!c.ggml_backend_sched_reserve(self.sched, gf)) {
-            impl.assert(sizes == null, "llama-context.cpp", 2677, "!sizes");
+            impl.assert(sizes == null, "llama-context.cpp", 2700, "!sizes");
             impl.logError("%s: failed to allocate compute buffers\n", .{func});
             return null;
         }
         return gf;
     }
 
-    /// Ports `llama_context`'s `graph_params` (llama-context.cpp:2685 @620d2225c).
+    /// Ports `llama_context`'s `graph_params` (llama-context.cpp:2708 @8642541b2).
     ///
     /// Return: the parameters; the caller deinits their `samplers`, the
     /// copy the C++ makes of the map.
@@ -2460,8 +2484,8 @@ pub const Context = struct {
         };
     }
 
-    /// Ports `llama_context`'s `sched_graph_realloc` (llama-context.cpp:2712
-    /// @620d2225c): the scheduler's realloc callback, which counts and traces
+    /// Ports `llama_context`'s `sched_graph_realloc` (llama-context.cpp:2735
+    /// @8642541b2): the scheduler's realloc callback, which counts and traces
     /// this context's graph reallocations. Reallocating after the backend
     /// assignments changed is expected, so only the others are traced.
     fn schedGraphRealloc(sched: c.ggml_backend_sched_t, gf: ?*c.ggml_cgraph, backend_ids_changed: bool, graph_size_changed: bool, user_data: ?*anyopaque) callconv(.c) void {
@@ -2487,8 +2511,8 @@ pub const Context = struct {
         });
     }
 
-    /// Ports `llama_context`'s `sched_copy_experts` (llama-context.cpp:2762
-    /// @620d2225c): the scheduler's copy callback. A slot map of the MoE
+    /// Ports `llama_context`'s `sched_copy_experts` (llama-context.cpp:2785
+    /// @8642541b2): the scheduler's copy callback. A slot map of the MoE
     /// cache goes to the cache; a host expert tensor read by the split's
     /// first `MUL_MAT_ID` copies only the experts its ids use, from the
     /// cache where they are in it.
@@ -2539,7 +2563,7 @@ pub const Context = struct {
                 while (i_0 < ids.ne[0]) : (i_0 += 1) {
                     const at = @as(usize, @intCast(i_1)) * ids.nb[1] / @sizeOf(i32) + @as(usize, @intCast(i_0)) * ids.nb[0] / @sizeOf(i32);
                     const id = st.ids_data.items[at];
-                    impl.assert(id >= 0 and id < n_expert, "llama-context.cpp", 2798, "id >= 0 && id < n_expert");
+                    impl.assert(id >= 0 and id < n_expert, "llama-context.cpp", 2821, "id >= 0 && id < n_expert");
                     st.used.items[@intCast(id)] = true;
                 }
             }
@@ -2596,7 +2620,7 @@ pub const Context = struct {
         return true;
     }
 
-    /// Ports `llama_context`'s `graph_compute` (llama-context.cpp:2731 @620d2225c).
+    /// Ports `llama_context`'s `graph_compute` (llama-context.cpp:2754 @8642541b2).
     pub fn graphCompute(self: *Context, gf: *c.ggml_cgraph, batched: bool) c.enum_ggml_status {
         const n_threads: c_int = if (batched) self.cparams.n_threads_batch else self.cparams.n_threads;
         const tp = if (batched) self.threadpool_batch else self.threadpool;
@@ -2620,7 +2644,7 @@ pub const Context = struct {
     }
 
     /// Ports the lambda `llama_context`'s `graph_get_cb` returns
-    /// (llama-context.cpp:2846 @620d2225c): name each tensor, and pin a
+    /// (llama-context.cpp:2869 @8642541b2): name each tensor, and pin a
     /// layer's norm to its device.
     fn graphCb(ctx: ?*anyopaque, ubatch: *const Ubatch, cur: *Tensor, name: [*:0]const u8, il: c_int) void {
         const self: *Context = @ptrCast(@alignCast(ctx.?));
@@ -2646,7 +2670,7 @@ pub const Context = struct {
         }
     }
 
-    /// Ports `llama_context`'s `perf_get_data` (llama-context.cpp:3674 @620d2225c).
+    /// Ports `llama_context`'s `perf_get_data` (llama-context.cpp:3697 @8642541b2).
     pub fn perfGetData(self: *const Context) c.llama_perf_context_data {
         return .{
             .t_start_ms = 1e-3 * @as(f64, @floatFromInt(self.t_start_us)),
@@ -2661,7 +2685,7 @@ pub const Context = struct {
         };
     }
 
-    /// Ports `llama_context`'s `perf_reset` (llama-context.cpp:3691 @620d2225c).
+    /// Ports `llama_context`'s `perf_reset` (llama-context.cpp:3714 @8642541b2).
     pub fn perfReset(self: *Context) void {
         self.t_start_us = c.ggml_time_us();
         self.t_eval_us = 0;
@@ -2674,8 +2698,8 @@ pub const Context = struct {
         // totals for this context
     }
 
-    /// Ports `llama_context`'s `memory_breakdown` (llama-context.cpp:3700
-    /// @620d2225c): bytes per buffer type, for the model, the context and
+    /// Ports `llama_context`'s `memory_breakdown` (llama-context.cpp:3723
+    /// @8642541b2): bytes per buffer type, for the model, the context and
     /// the compute buffers, in buffer-type pointer order.
     ///
     /// Return: the entries, the caller's to free with `impl.allocator`.
@@ -2697,7 +2721,7 @@ pub const Context = struct {
         }
         for (self.backends.items, 0..) |backend, i| {
             const buft = c.ggml_backend_sched_get_buffer_type(self.sched, backend);
-            breakdownAt(&ret, buft).compute += if (self.model.hparams.no_alloc) self.backend_buf_exp_size.items[i] else c.ggml_backend_sched_get_buffer_size(self.sched, backend);
+            breakdownAt(&ret, buft).compute += if (self.model.noAlloc()) self.backend_buf_exp_size.items[i] else c.ggml_backend_sched_get_buffer_size(self.sched, backend);
         }
         return ret.toOwnedSlice(allocator) catch oom();
     }
@@ -2718,7 +2742,7 @@ fn padTo(x: u32, n: u32) u32 {
     return (x + n - 1) / n * n;
 }
 
-/// Ports `llama_flash_attn_type_name` (src/llama.cpp:38 @620d2225c).
+/// Ports `llama_flash_attn_type_name` (src/llama.cpp:38 @8642541b2).
 pub fn flashAttnTypeName(t: c.enum_llama_flash_attn_type) [:0]const u8 {
     return switch (t) {
         c.LLAMA_FLASH_ATTN_TYPE_AUTO => "auto",
@@ -2728,7 +2752,7 @@ pub fn flashAttnTypeName(t: c.enum_llama_flash_attn_type) [:0]const u8 {
     };
 }
 
-/// Ports `copy_tensor_async_rows` (llama-context.cpp:1770 @620d2225c):
+/// Ports `copy_tensor_async_rows` (llama-context.cpp:1792 @8642541b2):
 /// each non-null tensor's data into its row of `dst`, counting what was
 /// copied.
 fn copyTensorAsyncRows(comptime T: type, tensors: []const ?*Tensor, dst: BufferView(T), stride: usize, row_offset: u32, sched: c.ggml_backend_sched_t, counts: ?*std.ArrayList(u32)) void {
@@ -2737,20 +2761,20 @@ fn copyTensorAsyncRows(comptime T: type, tensors: []const ?*Tensor, dst: BufferV
         const tensor = t orelse continue;
         const row: usize = row_offset + @as(u32, @intCast(i));
         const n_elements: usize = @intCast(c.ggml_nelements(tensor));
-        impl.assert(c.ggml_is_contiguous(tensor), "llama-context.cpp", 1789, "ggml_is_contiguous(tensor) && \"sampling tensor must be contiguous for async copy\"");
-        impl.assert(n_elements <= stride, "llama-context.cpp", 1790, "n_elements <= stride");
-        impl.assert(row * stride + n_elements <= dst.size, "llama-context.cpp", 1791, "(size_t) row * stride + n_elements <= dst.size");
+        impl.assert(c.ggml_is_contiguous(tensor), "llama-context.cpp", 1811, "ggml_is_contiguous(tensor) && \"sampling tensor must be contiguous for async copy\"");
+        impl.assert(n_elements <= stride, "llama-context.cpp", 1812, "n_elements <= stride");
+        impl.assert(row * stride + n_elements <= dst.size, "llama-context.cpp", 1813, "(size_t) row * stride + n_elements <= dst.size");
         const backend = c.ggml_backend_sched_get_tensor_backend(sched, tensor);
         const row_ptr = dst.data.? + row * stride;
         c.ggml_backend_tensor_get_async(backend, tensor, row_ptr, 0, c.ggml_nbytes(tensor));
         if (counts) |cn| {
-            impl.assert(row < cn.items.len, "llama-context.cpp", 1798, "row < counts->size()");
+            impl.assert(row < cn.items.len, "llama-context.cpp", 1820, "row < counts->size()");
             cn.items[row] = @intCast(n_elements);
         }
     }
 }
 
-/// Ports `needs_raw_logits` (llama-context.cpp:1804 @620d2225c): whether
+/// Ports `needs_raw_logits` (llama-context.cpp:1826 @8642541b2): whether
 /// some output has a sequence without a backend sampler.
 fn needsRawLogits(ubatch: *const Ubatch, samplers: *const graph.SamplerMap) bool {
     for (0..ubatch.n_tokens) |i| {
@@ -2763,7 +2787,7 @@ fn needsRawLogits(ubatch: *const Ubatch, samplers: *const graph.SamplerMap) bool
     return false;
 }
 
-/// Ports `ubatch_prepare_reserve` (llama-context.cpp:2565 @620d2225c):
+/// Ports `ubatch_prepare_reserve` (llama-context.cpp:2588 @8642541b2):
 /// pack the outputs into the sequences with samplers first.
 fn ubatchPrepareReserve(ubatch: *Ubatch, n_outputs: u32, samplers: *const graph.SamplerMap, n_outputs_max_per_seq: u32) void {
     const n_seqs = ubatch.n_seqs;
@@ -2812,7 +2836,7 @@ fn ubatchPrepareReserve(ubatch: *Ubatch, n_outputs: u32, samplers: *const graph.
     }
 }
 
-/// Ports `llama_context_default_params` (llama-context.cpp:3976 @620d2225c).
+/// Ports `llama_context_default_params` (llama-context.cpp:3999 @8642541b2).
 pub fn defaultParams() c.llama_context_params {
     return .{
         .n_ctx = 512,
@@ -2856,7 +2880,7 @@ pub fn defaultParams() c.llama_context_params {
     };
 }
 
-/// Ports `llama_init_from_model` (llama-context.cpp:4021 @620d2225c). The
+/// Ports `llama_init_from_model` (llama-context.cpp:4044 @8642541b2). The
 /// model is mutable, as the C++'s is: a custom YaRN scale re-adjusts its
 /// `n_ctx_train`.
 ///
@@ -2895,7 +2919,7 @@ pub fn initFromModel(model_: ?*Model, params_: c.llama_context_params) ?*Context
             impl.logWarn("%s: SPLIT_MODE_TENSOR being used for a single device is not recommended\n", .{func});
         }
     }
-    if ((hp.isMla() or model.arch == .deepseek4) and params.type_k != params.type_v) {
+    if ((hp.isMla() or model.arch == .deepseek4 or model.arch == .deepseek41) and params.type_k != params.type_v) {
         impl.logError("%s: model does not support different K (%s) and V (%s) cache types\n", .{ func, c.ggml_type_name(params.type_k), c.ggml_type_name(params.type_v) });
         return null;
     }

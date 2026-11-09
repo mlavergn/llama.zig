@@ -8,7 +8,7 @@
 //! members from `llama.cpp/common/chat.h` and `llama.cpp/common/chat.cpp`,
 //! and `common_sampling_add_preserved_tokens` and
 //! `common_sampling_add_grammar_triggers` from
-//! `llama.cpp/common/sampling.cpp` (llama.cpp v0.7.0, `620d2225c`), which
+//! `llama.cpp/common/sampling.cpp` (llama.cpp v0.8.0, `8642541b2`), which
 //! the session's constructor calls. Those two live here because
 //! `tools_common` does not import this module; `tools/common/sampling.zig`
 //! has its own over its own sampling parameters. Each declaration names
@@ -45,7 +45,7 @@ const Prompt = prompt_mod.Prompt;
 const GrammarTrigger = params_mod.GrammarTrigger;
 
 /// Ports `common_sampling_add_preserved_tokens` (sampling.cpp:1055
-/// @620d2225c): each string that is a single token in the vocabulary added
+/// @8642541b2): each string that is a single token in the vocabulary added
 /// to `preserved`, a `std::set` kept sorted and unique.
 ///
 /// Parameters:
@@ -71,7 +71,7 @@ fn setInsert(a: Allocator, set: *std.ArrayList(i32), id: i32) Error!void {
 }
 
 /// Ports `common_sampling_add_grammar_triggers` (sampling.cpp:1065
-/// @620d2225c): the triggers added to `out`, a trigger word that is a
+/// @8642541b2): the triggers added to `out`, a trigger word that is a
 /// single token becoming a token trigger -- which must then be one of
 /// `preserved`.
 ///
@@ -105,13 +105,13 @@ pub fn addGrammarTriggers(a: Allocator, out: *std.ArrayList(GrammarTrigger), pre
     }
 }
 
-/// Ports `common_chat_session_params` (chat.h:391 @620d2225c).
+/// Ports `common_chat_session_params` (chat.h:397 @8642541b2).
 pub const SessionParams = struct {
     echo: bool = false, // include the assistant prefill in the output when continuing a message
     debug: bool = false, // enable debug output for the PEG parser
 };
 
-/// Ports `common_chat_session` (chat.h:396 @620d2225c).
+/// Ports `common_chat_session` (chat.h:402 @8642541b2).
 pub const Session = struct {
     gpa: Allocator,
     /// Everything the templates produced; never freed singly.
@@ -141,7 +141,7 @@ pub const Session = struct {
     templated: bool = false,
     finished: bool = false,
 
-    /// Ports `common_chat_session` (chat.h:398 @620d2225c), the default
+    /// Ports `common_chat_session` (chat.h:404 @8642541b2), the default
     /// constructor: no template; feeding it parses content only.
     ///
     /// Return: owned by `gpa`; release with `deinit`.
@@ -159,7 +159,7 @@ pub const Session = struct {
         return self;
     }
 
-    /// Ports `common_chat_session` (chat.cpp:1683 @620d2225c), the
+    /// Ports `common_chat_session` (chat.cpp:1868 @8642541b2), the
     /// constructor: the inputs applied through `tmpls`; with a vocabulary,
     /// the generation prompt tokenized, the preserved tokens and grammar
     /// triggers resolved and the message delimiters tokenized. When continuing a message and not
@@ -284,62 +284,62 @@ pub const Session = struct {
         };
     }
 
-    /// Ports `prompt` (chat.h:405 @620d2225c).
+    /// Ports `prompt` (chat.h:411 @8642541b2).
     pub fn prompt(self: *const Session) *const Prompt {
         return &self.prompt_parts;
     }
 
-    /// Ports `format` (chat.h:406 @620d2225c).
+    /// Ports `format` (chat.h:412 @8642541b2).
     pub fn format(self: *const Session) msg_mod.Format {
         return self.parser_format;
     }
 
-    /// Ports `msg` (chat.h:407 @620d2225c).
+    /// Ports `msg` (chat.h:413 @8642541b2).
     pub fn msg(self: *const Session) *const Msg {
         return &self.result;
     }
 
-    /// Ports `parser` (chat.h:408 @620d2225c): null for the empty arena.
+    /// Ports `parser` (chat.h:414 @8642541b2): null for the empty arena.
     pub fn parser(self: *const Session) ?*const peg.Arena {
         return if (self.parser_arena) |*p| p else null;
     }
 
-    /// Ports `grammar` (chat.h:410 @620d2225c).
+    /// Ports `grammar` (chat.h:416 @8642541b2).
     pub fn grammar(self: *const Session) []const u8 {
         return self.grammar_text;
     }
 
-    /// Ports `generation_prompt` (chat.h:411 @620d2225c).
+    /// Ports `generation_prompt` (chat.h:417 @8642541b2).
     pub fn generationPrompt(self: *const Session) []const u8 {
         return self.generation_prompt_text;
     }
 
-    /// Ports `thinking_start_tag` (chat.h:412 @620d2225c).
+    /// Ports `thinking_start_tag` (chat.h:418 @8642541b2).
     pub fn thinkingStartTag(self: *const Session) []const u8 {
         return self.thinking_start;
     }
 
-    /// Ports `thinking_end_tags` (chat.h:413 @620d2225c).
+    /// Ports `thinking_end_tags` (chat.h:419 @8642541b2).
     pub fn thinkingEndTags(self: *const Session) []const []const u8 {
         return self.thinking_ends.items;
     }
 
-    /// Ports `additional_stops` (chat.h:414 @620d2225c).
+    /// Ports `additional_stops` (chat.h:420 @8642541b2).
     pub fn additionalStops(self: *const Session) []const []const u8 {
         return self.stops.items;
     }
 
-    /// Ports `message_delimiters` (chat.h:416 @620d2225c).
+    /// Ports `message_delimiters` (chat.h:422 @8642541b2).
     pub fn messageDelimiters(self: *const Session) *const msg_mod.MsgDelimiters {
         return &self.delimiters;
     }
 
-    /// Ports `has_template` (chat.h:420 @620d2225c).
+    /// Ports `has_template` (chat.h:426 @8642541b2).
     pub fn hasTemplate(self: *const Session) bool {
         return self.templated;
     }
 
-    /// Ports `apply_sampling` (chat.cpp:1727 @620d2225c): the grammar,
+    /// Ports `apply_sampling` (chat.cpp:1912 @8642541b2): the grammar,
     /// triggers, preserved tokens and generation prompt into a caller's
     /// `common_params_sampling`, nothing without a template.
     ///
@@ -369,7 +369,7 @@ pub const Session = struct {
         }
     }
 
-    /// Ports `feed` (chat.cpp:1740 @620d2225c): `chunk` appended to the
+    /// Ports `feed` (chat.cpp:1925 @8642541b2): `chunk` appended to the
     /// reply, which is parsed as partial; the message is replaced only by a
     /// parse that is not empty.
     ///
@@ -380,7 +380,7 @@ pub const Session = struct {
         return self.update(true);
     }
 
-    /// Ports `finish` (chat.cpp:1750 @620d2225c): the last `chunk`, and the
+    /// Ports `finish` (chat.cpp:1935 @8642541b2): the last `chunk`, and the
     /// whole reply parsed as complete.
     ///
     /// Return: the message, borrowed until `deinit`.

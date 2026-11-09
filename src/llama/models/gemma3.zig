@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gemma3.cpp` at v0.7.0 (`620d2225c`):
+//! Ported from `llama.cpp/src/models/gemma3.cpp` at v0.8.0 (`8642541b2`):
 //! `llama_model_gemma3`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph<iswa>`.
 
@@ -21,7 +21,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_gemma3`'s `load_arch_hparams` (models/gemma3.cpp:3 @620d2225c).
+/// Ports `llama_model_gemma3`'s `load_arch_hparams` (models/gemma3.cpp:3 @8642541b2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -61,7 +61,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         1.0 / impl.sqrtf(@floatFromInt(hp.nEmbdHeadK(0)));
 }
 
-/// Ports `llama_model_gemma3`'s `load_arch_tensors` (models/gemma3.cpp:34 @620d2225c).
+/// Ports `llama_model_gemma3`'s `load_arch_tensors` (models/gemma3.cpp:34 @8642541b2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -103,7 +103,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_gemma3`'s `build_arch_graph` (models/gemma3.cpp:73 @620d2225c).
+/// Ports `llama_model_gemma3`'s `build_arch_graph` (models/gemma3.cpp:73 @8642541b2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     if (b.hparams.swa_type == @backingInt(hparams_mod.SwaType.standard)) {
         buildGraph(true, model, b);
@@ -113,7 +113,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_gemma3`'s `graph<iswa>`
-/// (models/gemma3.cpp:82 @620d2225c).
+/// (models/gemma3.cpp:82 @8642541b2).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

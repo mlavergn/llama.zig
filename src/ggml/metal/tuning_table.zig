@@ -8,7 +8,7 @@
 //! - `llama.cpp/ggml/src/ggml-metal/ggml-metal-tuning.cpp` — the table
 //! - `llama.cpp/ggml/src/ggml-metal/ggml-metal-tuning.h`   — the structs
 //!
-//! all at v0.7.0 (`620d2225c`).
+//! all at v0.8.0 (`8642541b2`).
 //!
 //! # Generated, not written
 //!
@@ -36,7 +36,7 @@ const impl = @import("../impl.zig");
 
 const c = impl.c;
 
-/// Mirrors `fa_vec_key_t` (ggml-metal-tuning.h:33 @620d2225c).
+/// Mirrors `fa_vec_key_t` (ggml-metal-tuning.h:33 @8642541b2).
 ///
 /// Eight bytes with no padding, which the C's `static_assert` exists to
 /// guarantee because `find_cfg` compares keys with `memcmp`.
@@ -50,19 +50,19 @@ pub const Key = extern struct {
     ne01_b: i8,
 };
 
-/// Mirrors `struct fa_vec_cfg_t` (ggml-metal-tuning.h:44 @620d2225c).
+/// Mirrors `struct fa_vec_cfg_t` (ggml-metal-tuning.h:44 @8642541b2).
 pub const Cfg = extern struct {
     Q: i8,
     NE: i8,
 };
 
-/// Mirrors `struct fa_vec_entry_t` (ggml-metal-tuning.h:49 @620d2225c).
+/// Mirrors `struct fa_vec_entry_t` (ggml-metal-tuning.h:49 @8642541b2).
 pub const Entry = extern struct {
     key: Key,
     cfg: Cfg,
 };
 
-/// Mirrors `fa_vec_tuned_table` (ggml-metal-tuning.cpp:79 @620d2225c).
+/// Mirrors `fa_vec_tuned_table` (ggml-metal-tuning.cpp:79 @8642541b2).
 ///
 /// One row per kept bucket, plus per-`(dtype, dk, dv)` `ne11`-collapsed
 /// domain defaults, which carry `ne11_b == -1` and the domain in `ne01_b`.

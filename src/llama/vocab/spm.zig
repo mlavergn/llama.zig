@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.7.0 (`620d2225c`).
+//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.8.0 (`8642541b2`).
 //!
 //! The work queue is a `std::priority_queue` with a float comparator, so
 //! among equal scores -- and around a NaN score, where the comparator is no
@@ -25,7 +25,7 @@ fn oom() noreturn {
     impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
-/// Ports `llm_symbol` (llama-vocab.cpp:81 @620d2225c), with the text as an
+/// Ports `llm_symbol` (llama-vocab.cpp:75 @8642541b2), with the text as an
 /// offset into the string being tokenized.
 pub const Symbol = struct {
     prev: i32,
@@ -34,7 +34,7 @@ pub const Symbol = struct {
     n: usize,
 };
 
-/// Ports `llm_bigram_spm` (llama-vocab.cpp:97 @620d2225c).
+/// Ports `llm_bigram_spm` (llama-vocab.cpp:91 @8642541b2).
 const Bigram = struct {
     left: i32,
     right: i32,
@@ -47,7 +47,7 @@ fn bigramLess(_: void, l: Bigram, r: Bigram) bool {
     return (l.score < r.score) or (l.score == r.score and l.left > r.left);
 }
 
-/// Ports `llm_tokenizer_spm_session` (llama-vocab.cpp:115 @620d2225c).
+/// Ports `llm_tokenizer_spm_session` (llama-vocab.cpp:109 @8642541b2).
 const Session = struct {
     vocab: *const Vocab,
     text: []const u8,
@@ -91,27 +91,33 @@ const Session = struct {
         g.value_ptr.* = .{ left, right };
     }
 
-    /// Ports `llm_tokenizer_spm_session`'s `resegment`.
+    /// Ports `llm_tokenizer_spm_session`'s `resegment` (llama-vocab.cpp:172
+    /// @8642541b2). No recursion: the merges of a long token can be deep.
     fn resegment(self: *Session, symbol: Symbol, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
-        const t = self.symText(symbol);
-        const token = self.vocab.textToToken(t);
-        if (token != token_null) {
-            output.append(allocator, token) catch oom();
-            return;
+        var todo: std.ArrayList(Symbol) = .empty;
+        defer todo.deinit(allocator);
+        todo.append(allocator, symbol) catch oom();
+        while (todo.pop()) |cur| {
+            const t = self.symText(cur);
+            const token = self.vocab.textToToken(t);
+            if (token != token_null) {
+                output.append(allocator, token) catch oom();
+                continue;
+            }
+            const p = self.rev_merge.get(t) orelse {
+                // output any symbols that did not form tokens as bytes.
+                output.ensureUnusedCapacity(allocator, cur.n) catch oom();
+                for (t) |ch| output.append(allocator, try self.vocab.byteToToken(ch, exc)) catch oom();
+                continue;
+            };
+            todo.append(allocator, self.symbols.items[@intCast(p[1])]) catch oom();
+            todo.append(allocator, self.symbols.items[@intCast(p[0])]) catch oom();
         }
-        const p = self.rev_merge.get(t) orelse {
-            // output any symbols that did not form tokens as bytes.
-            output.ensureUnusedCapacity(allocator, symbol.n) catch oom();
-            for (t) |ch| output.append(allocator, try self.vocab.byteToToken(ch, exc)) catch oom();
-            return;
-        };
-        try self.resegment(self.symbols.items[@intCast(p[0])], output, exc);
-        try self.resegment(self.symbols.items[@intCast(p[1])], output, exc);
     }
 };
 
-/// Ports `llm_tokenizer_spm_session`'s `tokenize` (llama-vocab.cpp:118
-/// @620d2225c).
+/// Ports `llm_tokenizer_spm_session`'s `tokenize` (llama-vocab.cpp:112
+/// @8642541b2).
 ///
 /// Parameters:
 /// - `vocab`: the vocabulary.

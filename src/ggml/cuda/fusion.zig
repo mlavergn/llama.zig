@@ -3,10 +3,10 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.7.0
-//! (`620d2225c`): `ggml_cuda_should_fuse_rope_set_rows`,
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.8.0
+//! (`8642541b2`): `ggml_cuda_should_fuse_rope_set_rows`,
 //! `ggml_cuda_should_fuse_rms_norm_mul_rope`, `ggml_cuda_try_gdn_cache_fusion`,
-//! `ggml_cuda_try_ssm_scan_cache_fusion`,
+//! `ggml_cuda_try_ssm_scan_cache_fusion`, `ggml_cuda_topk_moe_group_fusion`,
 //! `ggml_cuda_topk_moe_fusion`, `ggml_cuda_check_fusion_memory_ranges`,
 //! `ggml_cuda_match_moe_weighted_reduction`, `ggml_cuda_can_fuse` and
 //! `ggml_cuda_try_fuse`; and the C++ overloads of
@@ -33,6 +33,8 @@ const gated_delta_net = @import("gated_delta_net.zig");
 const ssm_scan = @import("ssm_scan.zig");
 const topk_moe = @import("topk_moe.zig");
 const moe_weighted_reduction = @import("moe_weighted_reduction.zig");
+const mmq = @import("mmq.zig");
+const dsv4_hc = @import("dsv4_hc.zig");
 
 const c = impl.c;
 const Tensor = c.ggml_tensor;
@@ -53,7 +55,7 @@ fn src(t: *const Tensor, i: usize) *Tensor {
 const canFuseSubgraph = ggml_graph.canFuseSubgraph;
 const checkEdges = ggml_graph.checkEdges;
 
-/// Ports `ggml_cuda_should_fuse_rope_set_rows` (ggml-cuda.cu:2803 @620d2225c).
+/// Ports `ggml_cuda_should_fuse_rope_set_rows` (ggml-cuda.cu:2898 @8642541b2).
 fn shouldFuseRopeSetRows(rope_t: *const Tensor, view: *const Tensor, set_rows: *const Tensor) bool {
     if (rope_t.op != c.GGML_OP_ROPE or view.op != c.GGML_OP_VIEW or set_rows.op != c.GGML_OP_SET_ROWS) return false;
     // ne3 not tested
@@ -62,13 +64,14 @@ fn shouldFuseRopeSetRows(rope_t: *const Tensor, view: *const Tensor, set_rows: *
     if (src(set_rows, 1).type != c.GGML_TYPE_I64) return false;
     // The view should flatten two dims of rope into one dim
     if (!c.ggml_is_contiguous(view) or view.ne[0] != rope_t.ne[0] * rope_t.ne[1]) return false;
-    // Only norm/neox shaders have the fusion code
+    // Only norm/neox/multi shaders have the fusion code
     const mode = rope_t.op_params[2];
-    if (mode != c.GGML_ROPE_TYPE_NORMAL and mode != c.GGML_ROPE_TYPE_NEOX) return false;
+    if (mode != c.GGML_ROPE_TYPE_NORMAL and mode != c.GGML_ROPE_TYPE_NEOX and
+        mode != c.GGML_ROPE_TYPE_MROPE and mode != c.GGML_ROPE_TYPE_IMROPE) return false;
     return true;
 }
 
-/// Ports `ggml_cuda_should_fuse_rms_norm_mul_rope` (ggml-cuda.cu:2837 @620d2225c).
+/// Ports `ggml_cuda_should_fuse_rms_norm_mul_rope` (ggml-cuda.cu:2933 @8642541b2).
 fn shouldFuseRmsNormMulRope(rms_norm: *const Tensor, mul: *const Tensor, rope_t: *const Tensor) bool {
     if (rms_norm.op != c.GGML_OP_RMS_NORM or mul.op != c.GGML_OP_MUL or rope_t.op != c.GGML_OP_ROPE) return false;
 
@@ -102,14 +105,14 @@ fn shouldFuseRmsNormMulRope(rms_norm: *const Tensor, mul: *const Tensor, rope_t:
     return true;
 }
 
-/// Ports `ggml_cuda_is_view_or_noop` (ggml-cuda.cu:2682 @620d2225c), for the
+/// Ports `ggml_cuda_is_view_or_noop` (ggml-cuda.cu:2753 @8642541b2), for the
 /// gated-delta-net match; `graph.zig` has its own copy for the compute loop.
 fn isViewOrNoop(t: *const Tensor) bool {
     return c.ggml_is_empty(t) or t.op == c.GGML_OP_RESHAPE or t.op == c.GGML_OP_TRANSPOSE or
         t.op == c.GGML_OP_VIEW or t.op == c.GGML_OP_PERMUTE or t.op == c.GGML_OP_NONE;
 }
 
-/// Ports `ggml_cuda_try_gdn_cache_fusion` (ggml-cuda.cu:2891 @620d2225c):
+/// Ports `ggml_cuda_try_gdn_cache_fusion` (ggml-cuda.cu:2987 @8642541b2):
 /// match gated_delta_net + the strided cpy that scatters its state
 /// snapshots into the cache, so the kernel can write them and skip the cpy.
 fn tryGdnCacheFusion(cgraph: *const CGraph, node_idx: c_int, fused_state_cpy: *gated_delta_net.FusedCache) c_int {
@@ -159,8 +162,8 @@ fn tryGdnCacheFusion(cgraph: *const CGraph, node_idx: c_int, fused_state_cpy: *g
     return skip;
 }
 
-/// Ports `ggml_cuda_try_ssm_scan_cache_fusion` (ggml-cuda.cu:2954
-/// @620d2225c), new at v0.7.0: match ssm_scan + the strided cpy that
+/// Ports `ggml_cuda_try_ssm_scan_cache_fusion` (ggml-cuda.cu:3050
+/// @8642541b2), new at v0.7.0: match ssm_scan + the strided cpy that
 /// scatters its state snapshots into the cache, so the kernel writes them
 /// and skips the cpy. Only the Mamba-2 kernels (the group scan and SSD)
 /// write to the cache, and only for one sequence.
@@ -219,7 +222,66 @@ fn trySsmScanCacheFusion(cgraph: *const CGraph, node_idx: c_int, fused_state_cpy
     return skip;
 }
 
-/// Ports `ggml_cuda_topk_moe_fusion` (ggml-cuda.cu:3026 @620d2225c).
+/// One row of `topk_moe_group_pattern`: `src0` and `src1` index into the
+/// table, -1 is the (biased) probs, -2 is not checked.
+const GroupStep = struct { op: Op, src0: c_int, src1: c_int };
+
+/// Ports `topk_moe_group_pattern` (ggml-cuda.cu:3128 @8642541b2): expert
+/// group selection from `build_moe_ffn` (`n_expert_groups > 1`).
+const topk_moe_group_pattern = [_]GroupStep{
+    .{ .op = c.GGML_OP_RESHAPE, .src0 = -1, .src1 = -2 }, //  0: [n_exp_per_group, n_expert_groups, n_tokens]
+    .{ .op = c.GGML_OP_RESHAPE, .src0 = 0, .src1 = -2 }, //  1: [1, n_exp_per_group, n_expert_groups, n_tokens]
+    .{ .op = c.GGML_OP_ARGSORT, .src0 = 0, .src1 = -2 }, //  2
+    .{ .op = c.GGML_OP_VIEW, .src0 = 2, .src1 = -2 }, //  3: top-2 per group
+    .{ .op = c.GGML_OP_GET_ROWS, .src0 = 1, .src1 = 3 }, //  4
+    .{ .op = c.GGML_OP_RESHAPE, .src0 = 4, .src1 = -2 }, //  5
+    .{ .op = c.GGML_OP_SUM_ROWS, .src0 = 5, .src1 = -2 }, //  6: group scores
+    .{ .op = c.GGML_OP_RESHAPE, .src0 = 6, .src1 = -2 }, //  7
+    .{ .op = c.GGML_OP_ARGSORT, .src0 = 7, .src1 = -2 }, //  8
+    .{ .op = c.GGML_OP_VIEW, .src0 = 8, .src1 = -2 }, //  9: top n_group_used groups
+    .{ .op = c.GGML_OP_GET_ROWS, .src0 = 0, .src1 = 9 }, // 10
+    .{ .op = c.GGML_OP_FILL, .src0 = 0, .src1 = -2 }, // 11
+    .{ .op = c.GGML_OP_SET_ROWS, .src0 = 10, .src1 = 9 }, // 12: unused groups -> -inf
+    .{ .op = c.GGML_OP_RESHAPE, .src0 = 12, .src1 = -2 }, // 13: [n_expert, n_tokens]
+};
+
+/// Ports `ggml_cuda_topk_moe_group_fusion` (ggml-cuda.cu:3145 @8642541b2),
+/// new at v0.8.0: whether `topk_moe_group_pattern` starts at `node_idx` over
+/// `selection`. The `HIP_VERSION < 60300000` arm never compiles here.
+fn topkMoeGroupFusion(cgraph: *const CGraph, node_idx: c_int, selection: *const Tensor, args: *topk_moe.Args) bool {
+    const n_ops: c_int = topk_moe_group_pattern.len;
+    if (node_idx + n_ops > cgraph.n_nodes) return false;
+
+    const S = struct {
+        fn srcOk(g: *const CGraph, base: c_int, sel: *const Tensor, s: ?*const Tensor, idx: c_int) bool {
+            if (idx == -2) return true;
+            const want: *const Tensor = if (idx == -1) sel else node(g, base + idx);
+            return s == want;
+        }
+    };
+
+    for (topk_moe_group_pattern, 0..) |p, i| {
+        const n = node(cgraph, node_idx + @as(c_int, @intCast(i)));
+        if (n.op != p.op or !S.srcOk(cgraph, node_idx, selection, n.src[0], p.src0) or !S.srcOk(cgraph, node_idx, selection, n.src[1], p.src1)) {
+            return false;
+        }
+    }
+
+    const n_groups: c_int = @truncate(node(cgraph, node_idx).ne[1]);
+    const n_group_used: c_int = @truncate(node(cgraph, node_idx + 9).ne[0]);
+
+    if (node(cgraph, node_idx + 3).ne[0] != 2 or node(cgraph, node_idx + 12).src[2] != node(cgraph, node_idx + 11) or
+        impl.getOpParamsF32(node(cgraph, node_idx + 11), 0) != -std.math.inf(f32) or n_groups > common.warp_size)
+    {
+        return false;
+    }
+
+    args.n_groups = n_groups;
+    args.n_group_used = n_group_used;
+    return true;
+}
+
+/// Ports `ggml_cuda_topk_moe_fusion` (ggml-cuda.cu:3181 @8642541b2).
 pub fn topkMoeFusion(cgraph: *const CGraph, node_idx_in: c_int, args: *topk_moe.Args) bool {
     args.sigmoid = false;
     args.sqrt_softplus = false;
@@ -227,6 +289,8 @@ pub fn topkMoeFusion(cgraph: *const CGraph, node_idx_in: c_int, args: *topk_moe.
     args.delayed_softmax = false;
     args.prob_bias = false;
     args.norm = false;
+    args.n_groups = 0;
+    args.n_group_used = 0;
 
     const n_nodes = cgraph.n_nodes;
     var node_idx = node_idx_in;
@@ -262,24 +326,29 @@ pub fn topkMoeFusion(cgraph: *const CGraph, node_idx_in: c_int, args: *topk_moe.
         if (node_idx >= n_nodes) return false;
 
         // src of bias add is the unreshaped probs (-2 instead of -1)
-        if (node(cgraph, node_idx).op == c.GGML_OP_ADD and node(cgraph, node_idx).src[0] == node(cgraph, node_idx - 2)) {
+        var selection: *const Tensor = node(cgraph, node_idx - 2);
+        if (node(cgraph, node_idx).op == c.GGML_OP_ADD and node(cgraph, node_idx).src[0] == selection) {
             args.prob_bias = true;
+            selection = node(cgraph, node_idx);
             node_idx += 1;
         }
-        // RESHAPE/ADD -> ARGSORT
-        if (node_idx >= n_nodes or node(cgraph, node_idx).op != c.GGML_OP_ARGSORT) return false;
 
-        if (args.prob_bias and node(cgraph, node_idx).src[0] != node(cgraph, node_idx - 1)) {
-            return false;
-        } else if (!args.prob_bias and node(cgraph, node_idx).src[0] != node(cgraph, node_idx - 2)) {
-            return false;
+        if (topkMoeGroupFusion(cgraph, node_idx, selection, args)) {
+            node_idx += topk_moe_group_pattern.len;
+            selection = node(cgraph, node_idx - 1);
         }
+
+        // RESHAPE/ADD/group mask -> ARGSORT
+        if (node_idx >= n_nodes or node(cgraph, node_idx).op != c.GGML_OP_ARGSORT or node(cgraph, node_idx).src[0] != selection) return false;
 
         node_idx += 1;
 
         // ARGSORT-> VIEW
         if (node_idx >= n_nodes or node(cgraph, node_idx).op != c.GGML_OP_VIEW or
             node(cgraph, node_idx).src[0] != node(cgraph, node_idx - 1)) return false;
+
+        // kept groups must hold all used experts
+        if (args.n_groups > 0 and node(cgraph, node_idx).ne[0] > args.n_group_used * @divTrunc(probs_reshaped.ne[1], args.n_groups)) return false;
         node_idx += 1;
 
         if (node_idx >= n_nodes or node(cgraph, node_idx).op != c.GGML_OP_GET_ROWS) return false;
@@ -350,7 +419,7 @@ pub fn topkMoeFusion(cgraph: *const CGraph, node_idx_in: c_int, args: *topk_moe.
     return true;
 }
 
-/// Ports `ggml_cuda_check_fusion_memory_ranges` (ggml-cuda.cu:3181 @620d2225c):
+/// Ports `ggml_cuda_check_fusion_memory_ranges` (ggml-cuda.cu:3345 @8642541b2):
 /// whether the write (out) nodes overwrite the read nodes in operation.
 fn checkFusionMemoryRanges(cgraph: *const CGraph, node_idx: c_int, node_count: c_int, out_nodes: []const c_int, is_topk_moe: bool) bool {
     const S = struct {
@@ -403,12 +472,12 @@ fn checkFusionMemoryRanges(cgraph: *const CGraph, node_idx: c_int, node_count: c
     return is_ok;
 }
 
-/// Ports `MOE_WEIGHTED_REDUCTION_MAX_EXPERTS` (ggml-cuda.cu:3247 @620d2225c).
+/// Ports `MOE_WEIGHTED_REDUCTION_MAX_EXPERTS` (ggml-cuda.cu:3411 @8642541b2).
 /// The long form spans 2*k + 1 nodes. `ggml_can_fuse_subgraph` accepts at
 /// most 31 nodes, so k <= 15; larger values use the per-operation path.
 const moe_weighted_reduction_max_experts = 15;
 
-/// Ports `ggml_cuda_moe_weighted_reduction_match` (ggml-cuda.cu:3249 @620d2225c).
+/// Ports `ggml_cuda_moe_weighted_reduction_match` (ggml-cuda.cu:3413 @8642541b2).
 pub const MoeWeightedReductionMatch = struct {
     experts: ?*const Tensor = null,
     expert_scale: ?*const Tensor = null,
@@ -417,7 +486,7 @@ pub const MoeWeightedReductionMatch = struct {
     node_count: c_int = 0,
 };
 
-/// Ports `ggml_cuda_match_moe_weighted_reduction` (ggml-cuda.cu:3257 @620d2225c),
+/// Ports `ggml_cuda_match_moe_weighted_reduction` (ggml-cuda.cu:3421 @8642541b2),
 /// with its `split_mul`, `is_weights` and `is_experts` lambdas. The C's
 /// `std::vector`s are bounded by `moe_weighted_reduction_max_experts`, so
 /// they are fixed buffers here.
@@ -548,7 +617,7 @@ fn opsEqual(a: []const Op, b: []const Op) bool {
     return std.mem.eql(Op, a, b);
 }
 
-/// Ports `ggml_cuda_can_fuse` (ggml-cuda.cu:3390 @620d2225c). The C's
+/// Ports `ggml_cuda_can_fuse` (ggml-cuda.cu:3554 @8642541b2). The C's
 /// `NDEBUG`-only assertion on `unary_ops.size()` compiles out.
 fn canFuse(cgraph: *const CGraph, node_idx: c_int, ops: []const Op, unary_ops: []const UnaryOp) bool {
     const mul_mat_bias_glu_ops = [_]Op{ c.GGML_OP_MUL_MAT, c.GGML_OP_ADD, c.GGML_OP_MUL_MAT, c.GGML_OP_ADD, c.GGML_OP_GLU };
@@ -624,6 +693,26 @@ fn canFuse(cgraph: *const CGraph, node_idx: c_int, ops: []const Op, unary_ops: [
         if (shouldFuseRopeSetRows(rope_t, view, set_rows)) {
             return checkFusionMemoryRanges(cgraph, node_idx, n, &.{node_idx + 2}, false);
         }
+    }
+
+    // scale_out*sigmoid(scale_in*post) as the hc_post weights (qwen4exp hc_combine)
+    const hc_post_gate_ops = [_]Op{ c.GGML_OP_SCALE, c.GGML_OP_UNARY, c.GGML_OP_SCALE, c.GGML_OP_DSV4_HC_POST };
+
+    if (opsEqual(&hc_post_gate_ops, ops) and canFuseSubgraph(cgraph, node_idx, ops, &.{node_idx + 3})) {
+        const scale_in = node(cgraph, node_idx);
+        const sigmoid = node(cgraph, node_idx + 1);
+        const scale_out = node(cgraph, node_idx + 2);
+
+        // the chain must feed hc_post->src[2]; a bias on either scale is not handled
+        if (checkEdges(cgraph, node_idx, &.{ .{ 1, 0, 0 }, .{ 2, 0, 1 }, .{ 3, 2, 2 } }) and
+            c.ggml_get_unary_op(sigmoid) == c.GGML_UNARY_OP_SIGMOID and
+            impl.getOpParamsF32(scale_in, 1) == 0.0 and impl.getOpParamsF32(scale_out, 1) == 0.0 and
+            src(scale_in, 0).type == c.GGML_TYPE_F32 and scale_out.type == c.GGML_TYPE_F32 and
+            c.ggml_are_same_shape(src(scale_in, 0), scale_out))
+        {
+            return checkFusionMemoryRanges(cgraph, node_idx, n, &.{node_idx + 3}, false);
+        }
+        return false;
     }
 
     if (!ggml_graph.canFuse(cgraph, node_idx, ops)) return false;
@@ -739,6 +828,9 @@ fn canFuse(cgraph: *const CGraph, node_idx: c_int, ops: []const Op, unary_ops: [
         // the fused softcap kernel is F32 only
         if (src(scale, 0).type != c.GGML_TYPE_F32 or scale.type != c.GGML_TYPE_F32) return false;
 
+        // TODO: make the fused softcap kernel stride aware, it reads src and writes dst as dense
+        if (!c.ggml_is_contiguous(src(scale, 0)) or !c.ggml_is_contiguous(scale2)) return false;
+
         if (c.ggml_get_unary_op(tanh) != c.GGML_UNARY_OP_TANH) return false;
 
         // Check for bias
@@ -750,7 +842,7 @@ fn canFuse(cgraph: *const CGraph, node_idx: c_int, ops: []const Op, unary_ops: [
     return false;
 }
 
-/// Ports `ggml_cuda_match_shared_expert` (ggml-cuda.cu:1898 @620d2225c),
+/// Ports `ggml_cuda_match_shared_expert` (ggml-cuda.cu:1908 @8642541b2),
 /// new at v0.6.0: whether the routed experts' gate/up/GLU at `routed_idx`
 /// and a shared expert's at `shared_idx` can run as one MMVQ launch --
 /// both pairs fusable, the same quantized weight shape, the shared input
@@ -857,7 +949,7 @@ fn srcOpt(t: *const Tensor, i: usize) ?*const Tensor {
     return if (t.src[i]) |s| s else null;
 }
 
-/// Ports `ggml_cuda_try_fuse` (ggml-cuda.cu:3657 @620d2225c): try and fuse
+/// Ports `ggml_cuda_try_fuse` (ggml-cuda.cu:3846 @8642541b2): try and fuse
 /// nodes, and return the number of nodes to skip. v0.7.0 added the
 /// `SSM_SCAN -> CPY` cache fusion, beside the gated-delta-net one.
 pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
@@ -921,10 +1013,12 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
     if (nd.op == c.GGML_OP_UNARY or nd.op == c.GGML_OP_SOFT_MAX or nd.op == c.GGML_OP_ARGSORT) {
         var args: topk_moe.Args = .{};
         const can_fuse = topkMoeFusion(cgraph, i, &args);
-        var ops_buf: [16]Op = undefined;
+        // two for the gating, ADD and RESHAPE, the group pattern, three for
+        // the selection, five for the norm and one for the scale
+        var ops_buf: [32]Op = undefined;
         var n_ops: usize = 0;
         const Append = struct {
-            fn f(buf: *[16]Op, n: *usize, items: []const Op) void {
+            fn f(buf: []Op, n: *usize, items: []const Op) void {
                 for (items) |x| {
                     buf[n.*] = x;
                     n.* += 1;
@@ -950,16 +1044,16 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
                 } else {
                     Append.f(&ops_buf, &n_ops, &.{c.GGML_OP_SOFT_MAX});
                 }
-                const i_probs = i + @as(c_int, @intCast(n_ops)) - 1; // last node of the gating activation
-
+                Append.f(&ops_buf, &n_ops, &.{c.GGML_OP_RESHAPE});
                 if (args.prob_bias) {
-                    bias = srcOpt(node(cgraph, i_probs + 2), 1);
-                    Append.f(&ops_buf, &n_ops, &.{ c.GGML_OP_RESHAPE, c.GGML_OP_ADD, c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS });
-                    out_nodes[0] = i_probs + 4;
-                } else {
-                    Append.f(&ops_buf, &n_ops, &.{ c.GGML_OP_RESHAPE, c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS });
-                    out_nodes[0] = i_probs + 3;
+                    Append.f(&ops_buf, &n_ops, &.{c.GGML_OP_ADD});
+                    bias = srcOpt(node(cgraph, i + @as(c_int, @intCast(n_ops)) - 1), 1);
                 }
+                if (args.n_groups > 0) {
+                    for (topk_moe_group_pattern) |p| Append.f(&ops_buf, &n_ops, &.{p.op});
+                }
+                Append.f(&ops_buf, &n_ops, &.{ c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS });
+                out_nodes[0] = i + @as(c_int, @intCast(n_ops)) - 2;
                 ids = node(cgraph, out_nodes[0]);
 
                 if (args.norm) {
@@ -1282,6 +1376,14 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
                 fused_node_count = 3;
                 break;
             }
+
+            if (mulmat.shouldFuseMulMatQ(up, gate, glu)) {
+                const fusion_data: common.MmFusionArgsHost = .{ .gate = src(gate, 0), .glu_op = c.ggml_get_glu_op(glu), .glu_limit = impl.getOpParamsF32(glu, 3) };
+                mmq.mulMatQ(cuda_ctx, src(up, 0), src(up, 1), srcOpt(up, 2), glu, &fusion_data);
+                fused_mul_mat_vec = true;
+                fused_node_count = 3;
+                break;
+            }
         }
     }
 
@@ -1428,6 +1530,11 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
     if (canFuse(cgraph, i, &.{ c.GGML_OP_UNARY, c.GGML_OP_SQR }, &.{c.GGML_UNARY_OP_RELU})) {
         unary.opReluSqr(cuda_ctx, nd, node(cgraph, i + 1));
         return 1;
+    }
+
+    if (canFuse(cgraph, i, &.{ c.GGML_OP_SCALE, c.GGML_OP_UNARY, c.GGML_OP_SCALE, c.GGML_OP_DSV4_HC_POST }, &.{c.GGML_UNARY_OP_SIGMOID})) {
+        dsv4_hc.opDsv4HcPost(cuda_ctx, node(cgraph, i + 3), nd, node(cgraph, i + 2));
+        return 3;
     }
 
     if (canFuse(cgraph, i, &.{ c.GGML_OP_SCALE, c.GGML_OP_UNARY, c.GGML_OP_SCALE }, &.{c.GGML_UNARY_OP_TANH})) {

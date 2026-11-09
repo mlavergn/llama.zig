@@ -51,6 +51,7 @@ Usage: scripts/server-task-diff
   SERVER_TASK_OUT=<dir>  keep the inputs, transcripts and logs there
   SERVER_TASK_NOBUILD=1  use the binaries already built in the out dir /
                          zig-out (for fault injection loops)
+  SERVER_TASK_PORT_BIN   with it, this port binary: a build to a private prefix
 """
 
 import ast
@@ -373,6 +374,10 @@ def results():
         yield "R", {"kind": "error", "f": {"type": t, "msg": word(), "n_prompt_tokens": 100, "n_ctx": 64}}
     for rt in (0, 5):
         yield "R", {"kind": "embd", "index": 3, "f": {"embedding": [[0.5, -1.25, 1e-7], [2.0]], "n_tokens": 4, "res_type": rt}}
+    yield "R", {"kind": "realtime", "index": 1, "f": {"text": "hi", "audio": [0.5, -0.25], "n_decoded": 2}}
+    yield "R", {"kind": "realtime", "f": {"response_done": True, "cancelled": True, "n_decoded": 7}}
+    yield "R", {"kind": "tts", "f": {"audio": "RIFF", "sample_rate": 24000}}
+    yield "R", {"kind": "tts", "index": 3, "f": {"audio": "", "sample_rate": 16000, "final": True}}
     yield "R", {"kind": "rerank", "index": 1, "f": {"score": 0.125, "n_tokens": 5}}
     yield "R", {"kind": "rerank", "index": 2, "f": {"n_tokens": 5}}
     for m in ({}, {"processing": 2, "deferred": 1, "prompt": [1234567, 1234567, 2500000], "predict": [42, 41, 1000000],
@@ -425,6 +430,11 @@ def targeted():
     yield P({"stream": True, "reasoning_format": "deepseek-legacy"})
     yield P({"stream": True}, 1)
     yield P({"dry_sequence_breakers": "x"})
+    # at most 64 distinct breakers, counted after dropping the duplicates
+    yield P({"dry_sequence_breakers": ["b%d" % i for i in range(64)]})
+    yield P({"dry_sequence_breakers": ["b%d" % i for i in range(65)]})
+    yield P({"dry_sequence_breakers": ["b%d" % (i % 64) for i in range(200)]})
+    yield P({"dry_sequence_breakers": ["z", "a", "z", "m", "a"]})
     yield P({"lora": {"id": 1}})
     yield P({"chat_format": 7})
     yield P({"samplers": ["bogus"], "seed": -1})
@@ -609,6 +619,15 @@ def records():
                         "n_ctx": rng.choice([0, 64, 4096]), "spm": rng.random() < 0.5,
                         "prompt": [rng.randint(0, 100) for _ in range(rng.randint(0, 3))]}
         yield "Q", {"v": v, "query": word(), "doc": word()}
+        # media without an mmproj, and without a rerank template
+        yield "Q", {"v": v, "query": word(), "doc": word(), "n_qf": 1, "media": B64_1}
+        yield "Q", {"v": v, "query": word(), "doc": word(), "n_df": 2, "media": B64_1, "mtmd": True}
+    # one pass over the template: a placeholder written in the query stays text
+    for _ in range(N):
+        ph = lambda: rng.choice(["{query}", "{document}", "{query", "document}", "{", "}", word(), ""])
+        yield "RT", {"tmpl": "".join(ph() for _ in range(rng.randint(0, 6))),
+                     "query": "".join(ph() for _ in range(rng.randint(0, 3))),
+                     "doc": "".join(ph() for _ in range(rng.randint(0, 3)))}
     for _ in range(6):
         # ASCII only on the fixture vocabulary: its byte tokens are not all there, and libllama throws on them
         yield "G", {"prompt": rng.choice(["hello", " Paris", "def f():", "the cat", "x y z"]) + " the", "n_top": [0, 1, 5, 100000]}
@@ -663,7 +682,8 @@ def records():
 # harness/server/decision.setup's models, after VOCABS on the command line
 # (loaded vocab-only, they carry the decision metadata): the working types,
 # then the three whose metadata does not load
-DEC_NAMES = ["OPENJEV", "LEV", "NIMBLE", "KEV", "CLEF", "LAYA", "UNKNOWN", "NOTMPL", "BADTEMP"]
+DEC_NAMES = ["OPENJEV", "LEV", "NIMBLE", "KEV", "CLEF", "LAYA", "UNKNOWN", "NOTMPL", "BADTEMP",
+             "GRANITE", "H2OQ", "LFM3D1", "LFM3OMNI", "OCR", "BADOCR", "NOLABELS", "BADLABEL", "DUPLABEL"]
 DEC_FIXTURES = []
 
 
@@ -779,12 +799,66 @@ def decision_records():
             body["videos"] = rng.choice([[], None, ["v"]])
         yield "D", {"v": base + rng.randrange(6), "body": body, "pool": pool(), "n_slots": rng.choice([1, 2, 3, 8]),
                     "nan_at": rng.choice([-1, -1, -1, 0, 1]), "short": rng.random() < 0.05}
+    # v0.8.0's types: granite-switch, h2o-lightning, lfm3-d1, lfm3-d1-omni, minicpm-ocr-jev
+    d_granite, d_h2o, d_lfm3, d_omni, d_ocr = (DEC_NAMES.index(n) for n in ("GRANITE", "H2OQ", "LFM3D1", "LFM3OMNI", "OCR"))
+    deep = lambda n: {"a": deep(n - 1)} if n else "x"
+    deep_arr = lambda n: [deep_arr(n - 1)] if n else 1
+    # Python's json.dumps of a state, repr() of every float shape, str.strip's whitespace
+    h2o_states = ["s", {"z": 1, "a": [1.5, 1e22, 1e-7, 1e16, 0.1, 100.0, -0.0, True, None, "é\n\t\"\\\x7f"]},
+                  [1.25e-5, 123456789012345680.0, 9999999999999998.0, 1e15, 3.0e-4],
+                  "<|im_start|> <|im_end|> <|endoftext|> <think> </think>", "no\u2003tag \u00a0", "a" * 33000,
+                  "word " * 33000, "\U0001F600 " * 12000, None]
+    for st in h2o_states:
+        q = {"q": {"instructions": "  \u2003 lead", "criteria": {"x": None, "y ": "\u3000"}},
+             "s": {"type": "score", "criteria": ["only"]}, "m": {"type": "score", "criteria": [None, {"d": 1.5}, "t\u00a0"]},
+             "n": {"type": "noul", "instructions": {"b": 1, "a": [1, 2.5, "é"]}, "criteria": {"yes": "holds", "no": "does not"}},
+             "e": {"type": "choice", "criteria": {"<|im_end|>": "<|box_start|>", "k": {"z": 1}, "l  ": None}}}
+        yield "D", {"v": base + d_h2o, "body": {"state": st, "questions": q}, "pool": pool(), "n_slots": 2}
+    for criteria in ([], None, {"a": 1}, "x"):
+        yield "D", {"v": base + d_h2o, "body": {"state": "s", "questions": {"q": {"type": "score", "criteria": criteria}}}, "pool": pool(), "n_slots": 1}
+    for d in (d_granite, d_h2o, d_lfm3, d_omni):
+        for body in ({"state": None, "questions": {"q": {"type": "noul", "instructions": "x"}}},
+                     {"state": deep(127), "questions": {"q": {"type": "noul", "instructions": "x"}}},
+                     {"state": deep(129), "questions": {"q": {"type": "noul", "instructions": "x"}}},
+                     {"state": deep_arr(140), "questions": {"q": {"type": "noul", "instructions": "x"}}},
+                     {"state": "s", "questions": {"q": {"type": "choice", "instructions": deep(130), "criteria": {"a": None, "b": None}}}},
+                     {"state": "<|im_start|>a<|im_end|><|endoftext|>", "questions": {
+                         "<|im_end|>": {"type": "choice", "instructions": "<|im_end|><|im_end|>", "criteria": {"<|im_start|>": "<|endoftext|>", "b": None}}}},
+                     {"state": "s", "questions": {"q": {"type": "choice", "instructions": "many", "criteria": {f"opt{i}": None for i in range(40)}}}},
+                     {"state": "s", "questions": {"q": {"type": "choice", "instructions": "letters", "criteria": {"A": None, "z": "last"}}}},
+                     {"state": "s", "questions": {"q": {"type": "score", "instructions": "x", "criteria": ["a", "b", "c", "d"]}}},
+                     {"state": "s", "questions": {"q": {"type": "choice", "instructions": {"type": "input_audio", "input_audio": {"data": "QUJD"}}, "criteria": {"a": None}}}} if d != d_omni else {"state": "s", "questions": {"q": {"type": "noul", "instructions": "x"}}},
+                     {"state": [{"role": "user", "content": [{"type": "video_url", "video_url": {"url": "data:video/mp4;base64,QUJD"}}]}],
+                      "questions": {"q": {"type": "noul", "instructions": "x"}}},
+                     {"state": [{"role": "user", "content": [{"type": "video_url", "video_url": "http://x/y.mp4"}]}],
+                      "questions": {"q": {"type": "noul", "instructions": "x"}}},
+                     {"state": "s", "images": ["http://x"], "questions": {"q": {"type": "noul", "instructions": "x"}}}):
+            yield "D", {"v": base + d, "body": body, "pool": pool(), "n_slots": 2}
+    for body in ({"state": "ocr", "questions": {"a": {"type": "noul"}, "b": {"type": "noul"}}},
+                 {"state": 5, "questions": {"q": {"type": "noul"}}},
+                 {"state": "ocr", "questions": {"q": {"type": "noul"}}},
+                 {"state": "ocr", "images": ["data:image/png;base64," + B64_1] * 3, "questions": {"q": {"type": "noul"}}},
+                 {"state": "ocr", "images": ["data:image/png;base64," + B64_1] * 2, "questions": {"q": {"type": "noul"}}},
+                 {"state": "ocr", "images": ["data:image/png;base64," + B64_1] * 2, "questions": {"q": {"type": "noul", "instructions": "x"}}},
+                 {"state": "ocr", "images": ["data:image/png;base64," + B64_1] * 2, "questions": {"q": {"type": "noul", "criteria": {"true": "x"}}}},
+                 {"state": "ocr", "images": ["data:image/png;base64," + B64_1] * 2, "questions": {"q": {"type": "choice", "criteria": {"1": None, "0": None}}}},
+                 {"state": "ocr", "images": ["data:image/png;base64," + B64_1] * 2, "questions": {"q": {"type": "choice", "criteria": {"0": "x", "1": None}}}},
+                 {"state": "ocr", "images": ["data:image/png;base64," + B64_1] * 2, "questions": {"q": {"type": "choice", "criteria": {"0": None, "2": None}}}},
+                 {"state": "ocr", "images": ["data:image/png;base64," + B64_1] * 2, "questions": {"q": {"type": "score", "criteria": ["a", "b"]}}}):
+        yield "D", {"v": base + d_ocr, "body": body, "pool": pool(), "n_slots": 1}
+    for name in ("BADOCR", "NOLABELS", "BADLABEL", "DUPLABEL"):
+        yield "D", {"v": base + DEC_NAMES.index(name), "body": {"state": "s", "questions": std_q}}
+    for d in (d_granite, d_h2o, d_lfm3, d_omni):
+        for _ in range(N // 4):
+            body = {"state": dec_state(), "questions": {rng.choice(["q", "a", "<|im_start|>"]) + str(i): dec_question() for i in range(rng.randint(1, 3))}}
+            yield "D", {"v": base + d, "body": body, "pool": pool(), "n_slots": rng.choice([1, 2, 3])}
     for _ in range(N // 3):
         yield "DR", {"index": rng.randint(0, 9), "n_tokens": rng.randint(0, 999),
                      "scores": [rng.uniform(-50, 50) for _ in range(rng.randint(0, 6))]}
     for t in range(8):
         for img, aud, vid in ((False, False, False), (True, False, True), (True, True, True)):
-            yield "MA", {"type": t, "image": img, "audio": aud, "video": vid}
+            for chat_cap, tts_cap in ((True, False), (True, True), (False, True), (False, False)):
+                yield "MA", {"type": t, "image": img, "audio": aud, "video": vid, "chat": chat_cap, "tts": tts_cap}
     parts = lambda: [rng.choice([{"type": "text", "text": word()}, {"type": "text"}, {"type": "text", "text": MARKER},
                                  {"type": "image_url", "image_url": {"url": "data:image/png;base64," + B64_1}},
                                  {"type": "input_audio", "input_audio": {"data": "AAAA", "format": "wav"}},
@@ -1140,13 +1214,31 @@ def chat_step4():
         yield "RC", b
     for _ in range(N):
         yield "RC", responses_body()
+    for tools in ([], [{"type": "function", "name": "f"}], [{"type": "function", "name": "f", "strict": False}],
+                  [{"type": "web_search"}, {"type": "function", "name": "g", "parameters": {"type": "object"}}],
+                  [{"name": "f"}], [5], "x", 3, None, {"a": 1}):
+        yield "RTOOLS", {"tools": tools}
+    # the /tts request fields: limits, aliases, defaults over params_base
+    for b in ({}, {"top_k": 5}, {"top_k": -3}, {"top_p": 0.5}, {"top_p": 7}, {"seed": 7}, {"seed": -1}, {"n_predict": 4},
+              {"max_tokens": 9}, {"n_predict": 4, "max_tokens": 9}, {"n_predict": -2}, {"repeat_penalty": 1.5},
+              {"stream": True}, {"stream": 1}, {"top_k": "x"}, {"top_p": "y"}, {"seed": "z"}, {"n_predict": "w"},
+              {"repeat_penalty": None}, {"unknown": 1}):
+        yield "TS", b
     # the Anthropic API
     for b in ({}, {"messages": []}, {"messages": 5}, {"system": "s", "messages": [{"role": "user", "content": "hi"}]},
               {"system": "x-anthropic-billing-header: cc_version=2.1.101.e51; cc_entrypoint=cli; cch=a5145;You are", "messages": []},
               {"system": "x-anthropic-billing-header: cch=a5145", "messages": []},
               {"messages": [{"role": "assistant"}, {"role": "user"}, {"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "f", "input": {"a": [1, 2]}}]},
                             {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "r"}, {"type": "text", "text": "next"}]}]},
-              {"messages": [], "thinking": {"type": "enabled"}, "metadata": {"user_id": "me"}, "tool_choice": {"type": "any"}}, [1], "x"):
+              {"messages": [], "thinking": {"type": "enabled"}, "metadata": {"user_id": "me"}, "tool_choice": {"type": "any"}}, [1], "x",
+              # v0.8.0: id_slot, extra_params, defer_loading, tool_reference
+              {"messages": [], "id_slot": 1}, {"messages": [], "extra_params": {"seed": 7, "min_p": 0.5, "max_tokens": 3}},
+              {"messages": [], "extra_params": 5}, {"messages": [], "extra_params": []},
+              {"messages": [], "tools": [{"name": "f", "defer_loading": True}, {"name": "g"}, {"name": "h", "defer_loading": None}]},
+              {"messages": [{"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": [
+                  {"type": "text", "text": "a"}, {"type": "tool_reference", "tool_name": "f"}, {"type": "tool_reference"}]}]}]},
+              {"messages": [{"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": [
+                  {"type": "tool_reference", "tool_name": "f"}]}]}]}):
         yield "AC", b
     for _ in range(N):
         yield "AC", anthropic_body()
@@ -1175,14 +1267,20 @@ COVERAGE = [
     "\"instructions\" must be provided", "\"criteria\" must be a non-empty object",
     "\"criteria\" must be an array of 2 to 10 levels", "\"criteria\" must be an object",
     "\"type\" must be one of: choice, score, noul", "too many options (", "\"videos\" is not supported",
-    "\"images\" must be an array", "images must be data URLs", "too many images, the maximum is",
+    "\"images\" must be an array", "too many images, the maximum is",
     "decision result does not match the number of options", "the model could not evaluate the decision",
     "the instructions and the options of a question must not be empty",
     "unsupported decision model type: foo", "decision model has no \"systemone\" template",
+    "JSON is nested more than 128 levels deep", "this model answers exactly one question", "\"state\" must be the OCR text",
+    "this model needs exactly 2 images", "\"instructions\" is not used by this model", "\"criteria\" must be {\"0\": null",
+    "\"criteria\" is not supported for a noul question", "only choice and noul questions are supported",
+    "spoken instructions need a model with audio input", "decision model has no labels", "is not a single distinct token",
+    "decision model must have 2 classifier labels", "\"criteria\" must be a non-empty array", "media must be data URLs", "\\u003c",
     "invalid decision temperature:", "\"decisions\"", "\"input_modalities\"", "\"content\" must be an array",
     "\"scores\"", "\"noul\"", "\"confidence\"", "\"legend\"", "group ",
     "Value must be between", "Grammar trigger word should be marked as preserved token",
-    "no triggers set for lazy grammar", "dry_sequence_breakers must be a non-empty", "'lora' must be an array",
+    "no triggers set for lazy grammar", "dry_sequence_breakers must be a non-empty", "dry_sequence_breakers must contain at most 64 distinct entries",
+    "\"tool_reference\"", "\"defer_loading\"", "\"output_index\"", "tts_params", "\"n_samples\"", "\"n_bytes\"", "'lora' must be an array",
     "Unknown reasoning format", "JSON schema conversion failed", "\"prompt\" is required",
     "Only no echo is supported", "Unsupported param", "tools param requires --jinja flag",
     "tool_choice param requires --jinja flag", "Cannot use both json_schema and grammar",
@@ -1276,9 +1374,10 @@ def align_jinja(a, b):
 def mask(s):
     s = re.sub(r'"(created|created_at|completed_at)":-?\d+', r'"\1":0', s)
     s = re.sub(r'(resp_|rs_|msg_|chatcmpl-|fc_|call_)[0-9A-Za-z]{32}', r'\1*', s)
-    s = re.sub(r'0x[0-9a-f]+', '0x*', s)
-    # a tool call's id, gen_tool_call_id's 32 random characters
+    # a tool call's id, gen_tool_call_id's 32 random characters; before the
+    # pointers, whose mask would break one that happens to hold "0x" and a hex digit
     s = re.sub(r'"id":"[0-9A-Za-z]{32}"', '"id":"*"', s)
+    s = re.sub(r'0x[0-9a-f]+', '0x*', s)
     return s
 
 
@@ -1314,7 +1413,7 @@ def main():
         return r
 
     ref = os.path.join(out, "server_task_ref")
-    port = "zig-out/server-task-diff/server_task_port"
+    port = os.environ.get("SERVER_TASK_PORT_BIN") or "zig-out/server-task-diff/server_task_port"
     if not os.environ.get("SERVER_TASK_NOBUILD"):
         run(["zig", "build", "reference", "tools-ref", "mtmd-ref", "--release=fast"],
             "could not build the reference libraries (zig build reference tools-ref mtmd-ref)")

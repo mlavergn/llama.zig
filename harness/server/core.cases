@@ -59,6 +59,9 @@ POST /detokenize {"tokens": [9707, 11]}
 POST /detokenize {"tokens": "x"}
 POST /detokenize {"tokens": [1.5, 2]}
 POST /detokenize {}
+# token ids outside the vocabulary: libllama throws, the handler answers 500
+POST /detokenize {"tokens": [99999999]}
+POST /detokenize {"tokens": [9707, -5]}
 POST /completion {"prompt": ["The capital of France is", "Count: 1, 2,"], "n_predict": 6, "temperature": 0}
 POST /completion {"prompt": [[9707, 11], "Hello"], "n_predict": 4, "temperature": 0}
 POST /completion {"prompt": "", "n_predict": 4, "temperature": 0}

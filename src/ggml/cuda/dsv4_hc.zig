@@ -4,9 +4,9 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/dsv4-hc.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/dsv4-hc.cuh` at v0.7.0 (`620d2225c`). The
+//! `llama.cpp/ggml/src/ggml-cuda/dsv4-hc.cuh` at v0.8.0 (`8642541b2`). The
 //! kernels -- `dsv4_hc_comb_f32`, `dsv4_hc_pre_f32<gated>`,
-//! `dsv4_hc_post_f32<has_comb>` -- stay CUDA. All three launch through
+//! `dsv4_hc_post_f32<has_comb, gated>` -- stay CUDA. All three launch through
 //! `ggml_cuda_kernel_launch` (PDL).
 
 const std = @import("std");
@@ -17,7 +17,7 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `DSV4_HC` (dsv4-hc.cu:5 @620d2225c).
+/// Ports `DSV4_HC` (dsv4-hc.cu:5 @8642541b2).
 const hc_n = 4;
 
 /// An `int64_t` into a `dim3` member, which is `unsigned int`.
@@ -35,7 +35,7 @@ fn srcOf(dst: *const Tensor, i: usize) *const Tensor {
     return impl.one(Tensor, dst.src[i]);
 }
 
-/// Ports `ggml_cuda_op_dsv4_hc_comb` (dsv4-hc.cu:197 @620d2225c).
+/// Ports `ggml_cuda_op_dsv4_hc_comb` (dsv4-hc.cu:205 @8642541b2).
 pub fn opDsv4HcComb(ctx: *common.Context, dst: *Tensor) void {
     const mixes = srcOf(dst, 0);
     const scale = srcOf(dst, 1);
@@ -73,7 +73,7 @@ pub fn opDsv4HcComb(ctx: *common.Context, dst: *Tensor) void {
     });
 }
 
-/// Ports `ggml_cuda_op_dsv4_hc_pre` (dsv4-hc.cu:240 @620d2225c). Op params
+/// Ports `ggml_cuda_op_dsv4_hc_pre` (dsv4-hc.cu:248 @8642541b2). Op params
 /// slot 0 is a scale the sum is multiplied by and slot 1 says whether the
 /// weights are gated: `ggml_dsv4_hc_pre_gated` gives one weight per
 /// element, put through a sigmoid in the kernel, where the plain op gives
@@ -110,15 +110,24 @@ pub fn opDsv4HcPre(ctx: *common.Context, dst: *Tensor) void {
     });
 }
 
-/// Ports `ggml_cuda_op_dsv4_hc_post` (dsv4-hc.cu:275 @620d2225c). A null
+/// Ports `ggml_cuda_op_dsv4_hc_post` (dsv4-hc.cu:283 @8642541b2). A null
 /// `comb` (`src[3]`) is the identity: each stream adds its own residual,
-/// through `dsv4_hc_post_f32<false>`, which never reads `comb` or its
-/// strides, both passed as zero.
-pub fn opDsv4HcPost(ctx: *common.Context, dst: *Tensor) void {
+/// through `dsv4_hc_post_f32<false, gated>`, which never reads `comb` or its
+/// strides, both passed as zero. Since v0.8.0 `gate_scale_in` and
+/// `gate_scale_out` are the `SCALE` nodes of a fused `SCALE -> SIGMOID ->
+/// SCALE` chain feeding `src[2]` (qwen4exp's `hc_combine`): the kernel reads
+/// the raw weights from before the chain and applies it.
+pub fn opDsv4HcPost(ctx: *common.Context, dst: *Tensor, gate_scale_in: ?*const Tensor, gate_scale_out: ?*const Tensor) void {
     const x = srcOf(dst, 0);
     const residual = srcOf(dst, 1);
-    const post = srcOf(dst, 2);
     const comb: ?*const Tensor = dst.src[3];
+
+    // when fused, read the raw post weights from before the SCALE -> SIGMOID -> SCALE chain
+    const gated = gate_scale_in != null;
+    const post = if (gate_scale_in) |g| srcOf(g, 0) else srcOf(dst, 2);
+
+    const gate_in: f32 = if (gate_scale_in) |g| impl.getOpParamsF32(g, 0) else 1.0;
+    const gate_out: f32 = if (gated) impl.getOpParamsF32(gate_scale_out.?, 0) else 1.0;
 
     impl.assert(x.type == c.GGML_TYPE_F32, "x->type == GGML_TYPE_F32");
     impl.assert(residual.type == c.GGML_TYPE_F32, "residual->type == GGML_TYPE_F32");
@@ -136,7 +145,10 @@ pub fn opDsv4HcPost(ctx: *common.Context, dst: *Tensor) void {
 
     const block_size = 256;
     const nr = n_embd * hc * n_tokens;
-    const kernel = if (comb != null) kernels.get("dsv4-hc", "dsv4_hc_post_f32<(bool)1>") else kernels.get("dsv4-hc", "dsv4_hc_post_f32<(bool)0>");
+    const kernel = if (comb != null)
+        (if (gated) kernels.get("dsv4-hc", "dsv4_hc_post_f32<(bool)1, (bool)1>") else kernels.get("dsv4-hc", "dsv4_hc_post_f32<(bool)1, (bool)0>"))
+    else
+        (if (gated) kernels.get("dsv4-hc", "dsv4_hc_post_f32<(bool)0, (bool)1>") else kernels.get("dsv4-hc", "dsv4_hc_post_f32<(bool)0, (bool)0>"));
     const comb_d: ?*const anyopaque = if (comb) |t| t.data else null;
     kernels.launchPdl(kernel, .{
         .grid = .{ .x = dim(@divTrunc(nr + block_size - 1, block_size)) },
@@ -151,5 +163,6 @@ pub fn opDsv4HcPost(ctx: *common.Context, dst: *Tensor) void {
         fs(residual.nb[2]),             fs(post.nb[0]),                        fs(post.nb[1]),
         fs(nbc0),                       fs(nbc1),                              fs(nbc2),
         fs(dst.nb[0]),                  fs(dst.nb[1]),                         fs(dst.nb[2]),
+        gate_in,                        gate_out,
     });
 }

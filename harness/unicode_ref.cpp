@@ -101,6 +101,15 @@ int ref_uni_byte_to_utf8(uint8_t b, char * out) {
 }
 
 // Return: the byte, or -1 for std::out_of_range.
+int ref_uni_cpt_to_byte(uint32_t cpt) {
+    try {
+        return unicode_cpt_to_byte(cpt);
+    } catch (const std::out_of_range &) {
+        return -1;
+    }
+}
+
+// Return: the byte, or -1 for std::out_of_range.
 int ref_uni_utf8_to_byte(const char * s, size_t n) {
     try {
         return unicode_utf8_to_byte(std::string(s, n));

@@ -5,7 +5,7 @@
 //! Ports `nlohmann::detail::lexer`, `nlohmann::detail::parser` and the DOM
 //! half of `json_sax_dom_parser` from `llama.cpp/vendor/nlohmann/json.hpp`
 //! (nlohmann/json 3.12.0), and `common_json::parse` and `parse_no_throw`
-//! from `llama.cpp/common/json.cpp` (llama.cpp v0.7.0, `620d2225c`). Each
+//! from `llama.cpp/common/json.cpp` (llama.cpp v0.8.0, `8642541b2`). Each
 //! declaration names what it ports and the line it began at.
 //!
 //! # What has to match
@@ -60,7 +60,7 @@ const TokenType = enum {
     literal_or_value,
 };
 
-/// Ports `token_type_name` (json.hpp:7094 @620d2225c).
+/// Ports `token_type_name` (json.hpp:7094 @8642541b2).
 fn tokenTypeName(t: TokenType) []const u8 {
     return switch (t) {
         .uninitialized => "<uninitialized>",
@@ -107,7 +107,7 @@ const control_messages = blk: {
     break :blk out;
 };
 
-/// Ports `lexer` (json.hpp:7143 @620d2225c) over a byte string, the input
+/// Ports `lexer` (json.hpp:7143 @8642541b2) over a byte string, the input
 /// adapter `parse(const std::string &)` builds.
 const Lexer = struct {
     input: []const u8,
@@ -153,7 +153,7 @@ const Lexer = struct {
         return c;
     }
 
-    /// Ports `get` (json.hpp:8372 @620d2225c).
+    /// Ports `get` (json.hpp:8372 @8642541b2).
     fn get(self: *Lexer) i32 {
         self.position.chars_read_total += 1;
         self.position.chars_read_current_line += 1;
@@ -177,7 +177,7 @@ const Lexer = struct {
         return self.current;
     }
 
-    /// Ports `unget` (json.hpp:8409 @620d2225c).
+    /// Ports `unget` (json.hpp:8409 @8642541b2).
     fn unget(self: *Lexer) void {
         self.next_unget = true;
 
@@ -203,14 +203,14 @@ const Lexer = struct {
         self.token_buffer.appendAssumeCapacity(@truncate(@as(u32, @bitCast(c))));
     }
 
-    /// Ports `reset` (json.hpp:8354 @620d2225c).
+    /// Ports `reset` (json.hpp:8354 @8642541b2).
     fn reset(self: *Lexer) void {
         self.token_buffer.clearRetainingCapacity();
         self.token_string.clearRetainingCapacity();
         self.token_string.appendAssumeCapacity(@truncate(@as(u32, @bitCast(self.current))));
     }
 
-    /// Ports `get_codepoint` (json.hpp:7201 @620d2225c): the four hex digits
+    /// Ports `get_codepoint` (json.hpp:7201 @8642541b2): the four hex digits
     /// after `\u`, or -1.
     fn getCodepoint(self: *Lexer) i32 {
         std.debug.assert(self.current == 'u');
@@ -234,7 +234,7 @@ const Lexer = struct {
         return codepoint;
     }
 
-    /// Ports `next_byte_in_range` (json.hpp:7249 @620d2225c): adds the
+    /// Ports `next_byte_in_range` (json.hpp:7249 @8642541b2): adds the
     /// current byte, then reads one byte per range and checks it.
     fn nextByteInRange(self: *Lexer, ranges: []const [2]i32) bool {
         self.add(self.current);
@@ -252,7 +252,7 @@ const Lexer = struct {
         return true;
     }
 
-    /// Ports `scan_string` (json.hpp:7286 @620d2225c).
+    /// Ports `scan_string` (json.hpp:7286 @8642541b2).
     fn scanString(self: *Lexer) TokenType {
         // reset token_buffer (ignore opening quote)
         self.reset();
@@ -396,7 +396,7 @@ const Lexer = struct {
         }
     }
 
-    /// Ports `scan_number` (json.hpp:8001 @620d2225c): the state machine of
+    /// Ports `scan_number` (json.hpp:8001 @8642541b2): the state machine of
     /// RFC 8259's number grammar, then `strtoull`, `strtoll` or `strtod`.
     /// An integer that does not fit its type is a float, as `strtoull`'s
     /// `ERANGE` makes it.
@@ -563,7 +563,7 @@ const Lexer = struct {
         return .value_float;
     }
 
-    /// Ports `scan_literal` (json.hpp:8334 @620d2225c).
+    /// Ports `scan_literal` (json.hpp:8334 @8642541b2).
     fn scanLiteral(self: *Lexer, literal_text: []const u8, return_type: TokenType) TokenType {
         std.debug.assert(self.current == literal_text[0]);
         for (literal_text[1..]) |ch| {
@@ -575,7 +575,7 @@ const Lexer = struct {
         return return_type;
     }
 
-    /// Ports `get_token_string` (json.hpp:8488 @620d2225c): the bytes read
+    /// Ports `get_token_string` (json.hpp:8488 @8642541b2): the bytes read
     /// for the current token, control characters as `<U+XXXX>`.
     fn tokenString(self: *const Lexer, out: *std.ArrayList(u8), gpa: std.mem.Allocator) Error!void {
         for (self.token_string.items) |c| {
@@ -587,7 +587,7 @@ const Lexer = struct {
         }
     }
 
-    /// Ports `skip_bom` (json.hpp:8526 @620d2225c).
+    /// Ports `skip_bom` (json.hpp:8526 @8642541b2).
     fn skipBom(self: *Lexer) bool {
         if (self.get() == 0xEF) {
             // check if we completely parse the BOM
@@ -600,7 +600,7 @@ const Lexer = struct {
         return true;
     }
 
-    /// Ports `skip_whitespace` (json.hpp:8540 @620d2225c).
+    /// Ports `skip_whitespace` (json.hpp:8540 @8642541b2).
     fn skipWhitespace(self: *Lexer) void {
         while (true) {
             const c = self.get();
@@ -608,7 +608,7 @@ const Lexer = struct {
         }
     }
 
-    /// Ports `scan` (json.hpp:8549 @620d2225c).
+    /// Ports `scan` (json.hpp:8549 @8642541b2).
     fn scan(self: *Lexer) TokenType {
         // initially, skip the BOM
         if (self.position.chars_read_total == 0 and !self.skipBom()) {
@@ -652,7 +652,7 @@ const Lexer = struct {
     }
 };
 
-/// Ports `parser` (json.hpp:12927 @620d2225c) with `json_sax_dom_parser`
+/// Ports `parser` (json.hpp:12927 @8642541b2) with `json_sax_dom_parser`
 /// building the tree.
 const Parser = struct {
     gpa: std.mem.Allocator,
@@ -672,7 +672,7 @@ const Parser = struct {
         return self.last_token;
     }
 
-    /// Ports `exception_message` (json.hpp:13345 @620d2225c).
+    /// Ports `exception_message` (json.hpp:13345 @8642541b2).
     fn exceptionMessage(self: *Parser, out: *std.ArrayList(u8), expected: TokenType, context: []const u8) Error!void {
         const a = self.gpa;
         try out.appendSlice(a, "syntax error ");
@@ -712,7 +712,7 @@ const Parser = struct {
         return errors.parseError(101, self.lexer.position, "attempting to parse an empty input; check that your input string or stream contains the expected JSON");
     }
 
-    /// Ports `json_sax_dom_parser`'s `handle_value` (json.hpp:9080 @620d2225c).
+    /// Ports `json_sax_dom_parser`'s `handle_value` (json.hpp:9080 @8642541b2).
     fn handleValue(self: *Parser, v: Value) Error!*Value {
         if (self.ref_stack.items.len == 0) {
             self.root = v;
@@ -737,7 +737,7 @@ const Parser = struct {
         }
     }
 
-    /// Ports `json_sax_dom_parser`'s `key` (json.hpp:8917 @620d2225c): the
+    /// Ports `json_sax_dom_parser`'s `key` (json.hpp:8917 @8642541b2): the
     /// member, found or added, that the next value lands in.
     fn key(self: *Parser) Error!void {
         const top = self.ref_stack.items[self.ref_stack.items.len - 1];
@@ -748,7 +748,7 @@ const Parser = struct {
         return Value.initString(self.gpa, self.lexer.token_buffer.items);
     }
 
-    /// Ports `sax_parse_internal` (json.hpp:13047 @620d2225c).
+    /// Ports `sax_parse_internal` (json.hpp:13047 @8642541b2).
     fn saxParseInternal(self: *Parser) Error!void {
         // stack to remember the hierarchy of structured values we are
         // parsing; true = array; false = object
@@ -912,7 +912,7 @@ const Parser = struct {
         }
     }
 
-    /// Ports `parser`'s `parse` (json.hpp:12960 @620d2225c) with `strict`:
+    /// Ports `parser`'s `parse` (json.hpp:12960 @8642541b2) with `strict`:
     /// one value, then nothing but whitespace.
     fn parse(self: *Parser) Error!void {
         // read first token (the parser constructor does)
@@ -942,8 +942,8 @@ fn run(gpa: std.mem.Allocator, text: []const u8, allow_exceptions: bool) Error!V
     return p.root;
 }
 
-/// Ports `common_json`'s `parse` (json.cpp:201 @620d2225c) over
-/// `basic_json`'s `parse` (json.hpp:24898 @620d2225c).
+/// Ports `common_json`'s `parse` (json.cpp:201 @8642541b2) over
+/// `basic_json`'s `parse` (json.hpp:24898 @8642541b2).
 ///
 /// Parameters:
 /// - `gpa`: allocates the tree.
@@ -955,7 +955,7 @@ pub fn parse(gpa: std.mem.Allocator, text: []const u8) Error!Value {
     return run(gpa, text, true);
 }
 
-/// Ports `common_json`'s `parse_no_throw` (json.cpp:212 @620d2225c): as
+/// Ports `common_json`'s `parse_no_throw` (json.cpp:212 @8642541b2): as
 /// `parse`, but text that is not JSON gives a discarded value.
 ///
 /// Return: the value, owned by the caller.

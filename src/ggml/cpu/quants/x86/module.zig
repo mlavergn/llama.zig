@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! **Not a port by itself.** It gathers the port of
-//! `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` at v0.7.0 (`620d2225c`),
+//! `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` at v0.8.0 (`8642541b2`),
 //! the x86 counterpart of `quants/arm/`: that file's 28 exports, at the
 //! `__AVX2__` arms x86-64-v3 compiles. Until v0.7.0 the 28th,
 //! `ggml_vec_dot_q2_0_q8_0`, was `quants.c`'s generic body renamed by

@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/translate-gemma.cpp` (llama.cpp v0.7.0,
-//! `620d2225c`).
+//! Ports `llama.cpp/common/parsers/translate-gemma.cpp` (llama.cpp v0.8.0,
+//! `8642541b2`).
 
 const std = @import("std");
 const json = @import("json");
@@ -36,7 +36,7 @@ fn obj(a: Allocator, members: []const [2][]const u8) Error!Value {
 }
 
 /// Ports `common_chat_params_init_translate_gemma` (parsers/translate-gemma.cpp:5
-/// @620d2225c).
+/// @8642541b2).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

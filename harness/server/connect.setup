@@ -1,0 +1,31 @@
+#!/bin/bash
+# Stand-ins for llama-connect (server-connect.cpp): the binary is a separate
+# project, downloaded, so the gate gives each directory on PATH a script. It
+# prints what it was given, a line per log level, and waits for its stdin to
+# close, as --exit-on-stdin-eof asks. Run by scripts/server-diff.
+set -eu
+mkdir -p "$DATA/bin" "$DATA/exits" "$DATA/noexec" "$DATA/none"
+cat > "$DATA/bin/llama-connect" <<'SH'
+#!/bin/bash
+sleep 1
+echo "banner: llama-connect stand-in"
+echo "[INFO] args: $*"
+echo "[WARN] a warning"
+echo "[ERROR] an error"
+echo "[DEBUG] a debug line"
+echo "[TRACE] a trace line"
+echo "[OTHER] an untagged level"
+cat > /dev/null
+echo "[INFO] stdin closed"
+SH
+chmod +x "$DATA/bin/llama-connect"
+cat > "$DATA/exits/llama-connect" <<'SH'
+#!/bin/bash
+sleep 1
+echo "[ERROR] cannot reach the signalling server"
+exit 3
+SH
+chmod +x "$DATA/exits/llama-connect"
+printf 'not a program\n' > "$DATA/noexec/llama-connect"
+mkdir -p "$DATA/models"
+cp "$(cd "$(dirname "$0")/../.." && pwd)/zig-out/arch-fixtures/llama-dense.gguf" "$DATA/models/tiny.gguf"

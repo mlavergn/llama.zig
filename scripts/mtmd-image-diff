@@ -2,13 +2,22 @@
 # Diff every image preprocessor of src/mtmd/image.zig against upstream's
 # llama.cpp/tools/mtmd/mtmd-image.cpp, compiled unmodified beside it, in one
 # process: every output float's bits, the grid, the overview, the anyres
-# info and every log line (harness/mtmd_image_diff.zig).
+# info, every log line and every exception (harness/mtmd_image_diff.zig); then
+# the static helpers over a grid of sizes, upstream's test vectors and the
+# aborts, each side forked.
 #
-# Usage: scripts/mtmd-image-diff [kind-substring] [-v]
+# Usage: scripts/mtmd-image-diff [kind-substring | sweep | vectors | death] [-v]
 #   MTMD_IMAGE_O=fast|safe   build mode, ReleaseFast by default; run it as
 #                            safe too, where Zig checks for undefined
 #                            behaviour the fast build cannot see
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
-exec zig build mtmd-image-diff --release="${MTMD_IMAGE_O:-fast}" -- "$@"
+# -Dcuda=false: these preprocessors run on the CPU alone, and a CUDA build
+# imports the port's `llama` module, whose CUDA link carries `libstdc++.so`
+# (llama-cli needs it for cuBLAS and the CUB shim). libstdc++'s
+# `__gxx_personality_v0` then wins over Zig's libc++abi and aborts on every
+# exception the reference throws, which the harness means to catch: on the
+# GB10, v0.8.0's torch-resize cases ended in `terminate` (NOTES.md, "Upstream
+# sync v0.7.0 → v0.8.0"). A no-op on macOS, where CUDA is off anyway.
+exec zig build mtmd-image-diff --release="${MTMD_IMAGE_O:-fast}" -Dcuda=false -- "$@"

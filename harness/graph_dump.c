@@ -83,6 +83,51 @@ static void acc_offset_below_limit(void) {
     ggml_acc_inplace(ctx, a, b, 32, 128, 128, ((size_t) 1 << 30) - 4);
 }
 
+/* v0.8.0: `ggml_scale_impl` asserts `ggml_is_contiguous_rows`, where it had
+ * asserted `ggml_is_padded_1d`. A permutation that keeps dim 0 now builds; one
+ * that moves it does not. */
+static void scale_permuted_rows(void) {
+    ggml_scale(ctx, ggml_permute(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 8, 4, 2), 0, 2, 1, 3), 2.0f);
+}
+static void scale_transposed(void) {
+    ggml_scale(ctx, ggml_transpose(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 4)), 2.0f);
+}
+
+/* Every GGML_ASSERT of `ggml_top_k_mask`, each from a call that is otherwise
+ * valid. */
+#define TKM_MASK(t)  ggml_new_tensor_4d(ctx, (t), 64, 2, 1, 1)
+#define TKM_TOP()    ggml_new_tensor_4d(ctx, GGML_TYPE_I32, 8, 4, 3, 2)
+#define TKM_SCORE(t) ggml_new_tensor_4d(ctx, (t), 16, 4, 3, 2)
+#define TKM_BLOCKS() ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 4, 16)
+#define TKM_EXTRA()  ggml_new_tensor_4d(ctx, GGML_TYPE_I32, 2, 4, 3, 2)
+static void tkm_ok(void)            { ggml_top_k_mask(ctx, TKM_MASK(GGML_TYPE_F32), TKM_TOP(), TKM_SCORE(GGML_TYPE_F32), TKM_BLOCKS(), TKM_EXTRA()); }
+static void tkm_mask_type(void)     { ggml_top_k_mask(ctx, TKM_MASK(GGML_TYPE_BF16), TKM_TOP(), NULL, NULL, NULL); }
+static void tkm_mask_strided(void)  { ggml_top_k_mask(ctx, ggml_transpose(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 2, 64)), TKM_TOP(), NULL, NULL, NULL); }
+static void tkm_top_type(void)      { ggml_top_k_mask(ctx, TKM_MASK(GGML_TYPE_F32), ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 8, 4, 3, 2), NULL, NULL, NULL); }
+static void tkm_bcast1(void)        { ggml_top_k_mask(ctx, ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 64, 3, 1, 1), TKM_TOP(), NULL, NULL, NULL); }
+static void tkm_bcast2(void)        { ggml_top_k_mask(ctx, ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 64, 1, 2, 1), TKM_TOP(), NULL, NULL, NULL); }
+static void tkm_bcast3(void)        { ggml_top_k_mask(ctx, ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 64, 1, 1, 3), TKM_TOP(), NULL, NULL, NULL); }
+static void tkm_score_type(void)    { ggml_top_k_mask(ctx, TKM_MASK(GGML_TYPE_F32), TKM_TOP(), TKM_SCORE(GGML_TYPE_F16), NULL, NULL); }
+static void tkm_score_ne1(void)     { ggml_top_k_mask(ctx, TKM_MASK(GGML_TYPE_F32), TKM_TOP(), ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 16, 5, 3, 2), NULL, NULL); }
+static void tkm_score_ne2(void)     { ggml_top_k_mask(ctx, TKM_MASK(GGML_TYPE_F32), TKM_TOP(), ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 16, 4, 1, 2), NULL, NULL); }
+static void tkm_score_ne3(void)     { ggml_top_k_mask(ctx, TKM_MASK(GGML_TYPE_F32), TKM_TOP(), ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 16, 4, 3, 1), NULL, NULL); }
+static void tkm_blocks_type(void)   { ggml_top_k_mask(ctx, TKM_MASK(GGML_TYPE_F32), TKM_TOP(), NULL, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 4, 16), NULL); }
+static void tkm_blocks_ne2(void)    { ggml_top_k_mask(ctx, TKM_MASK(GGML_TYPE_F32), TKM_TOP(), NULL, ggml_new_tensor_3d(ctx, GGML_TYPE_I32, 4, 16, 2), NULL); }
+static void tkm_blocks_ne3(void)    { ggml_top_k_mask(ctx, TKM_MASK(GGML_TYPE_F32), TKM_TOP(), NULL, ggml_new_tensor_4d(ctx, GGML_TYPE_I32, 4, 16, 1, 2), NULL); }
+static void tkm_blocks_score(void)  { ggml_top_k_mask(ctx, TKM_MASK(GGML_TYPE_F32), TKM_TOP(), TKM_SCORE(GGML_TYPE_F32), ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 4, 15), NULL); }
+static void tkm_extra_type(void)    { ggml_top_k_mask(ctx, TKM_MASK(GGML_TYPE_F32), TKM_TOP(), NULL, NULL, ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 2, 4, 3, 2)); }
+static void tkm_extra_ne1(void)     { ggml_top_k_mask(ctx, TKM_MASK(GGML_TYPE_F32), TKM_TOP(), NULL, NULL, ggml_new_tensor_4d(ctx, GGML_TYPE_I32, 2, 5, 3, 2)); }
+static void tkm_extra_ne2(void)     { ggml_top_k_mask(ctx, TKM_MASK(GGML_TYPE_F32), TKM_TOP(), NULL, NULL, ggml_new_tensor_4d(ctx, GGML_TYPE_I32, 2, 4, 1, 2)); }
+static void tkm_extra_ne3(void)     { ggml_top_k_mask(ctx, TKM_MASK(GGML_TYPE_F32), TKM_TOP(), NULL, NULL, ggml_new_tensor_4d(ctx, GGML_TYPE_I32, 2, 4, 3, 1)); }
+
+/* `ggml_prec_get_src` asserts its index; `idx` is out of range on each side. */
+static struct ggml_tensor * prec_node;
+static void prec_idx_negative(void) { ggml_prec_get_src(prec_node, -1); }
+static void prec_idx_past_end(void) { ggml_prec_get_src(prec_node, GGML_MAX_SRC); }
+
+/* ggml-backend-impl.h: which ops `get_alloc_size` may size past `ggml_nbytes`. */
+bool ggml_op_alloc_size_may_expand(enum ggml_op op);
+
 int main(void) {
     struct ggml_init_params p = { 256u * 1024u * 1024u, NULL, true /*no_alloc*/ };
     ctx = ggml_init(p);
@@ -176,6 +221,9 @@ int main(void) {
                          ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 6, 8)));
     D(ggml_scale(ctx, a2, 2.5f));
     D(ggml_scale_bias(ctx, a2, 2.5f, -1.25f));
+    D(ggml_scale(ctx, ggml_permute(ctx, a3, 0, 2, 1, 3), 2.5f));
+    dies("scale permuted rows", scale_permuted_rows);
+    dies("scale transposed", scale_transposed);
 
     puts("=== layout ===");
     D(ggml_reshape_1d(ctx, a2, 32));
@@ -305,6 +353,44 @@ int main(void) {
     D(ggml_argsort(ctx, a2, GGML_SORT_ORDER_DESC));
     D(ggml_argsort_top_k(ctx, a2, 4));
     D(ggml_top_k(ctx, a2, 4));
+
+    puts("=== top_k_mask ===");
+    {
+        /* Each optional source present and absent, over both mask types and a
+         * mask that broadcasts: `src=` is the pattern to read. */
+        static const enum ggml_type types[] = { GGML_TYPE_F32, GGML_TYPE_F16 };
+        for (int ti = 0; ti < 2; ti++) {
+            for (int bits = 0; bits < 8; bits++) {
+                struct ggml_tensor * mask = ggml_new_tensor_4d(ctx, types[ti], 64, bits & 1 ? 4 : 2, bits & 1 ? 3 : 1, 1);
+                char label[64];
+                snprintf(label, sizeof(label), "top_k_mask %s score=%d blocks=%d extra=%d",
+                         ggml_type_name(types[ti]), bits & 1, !!(bits & 2), !!(bits & 4));
+                dump(label, ggml_top_k_mask(ctx, mask, TKM_TOP(),
+                                            bits & 1 ? TKM_SCORE(GGML_TYPE_F32) : NULL,
+                                            bits & 2 ? TKM_BLOCKS() : NULL,
+                                            bits & 4 ? TKM_EXTRA() : NULL));
+            }
+        }
+        dies("top_k_mask valid", tkm_ok);
+        dies("top_k_mask mask type", tkm_mask_type);
+        dies("top_k_mask mask strided", tkm_mask_strided);
+        dies("top_k_mask top_k type", tkm_top_type);
+        dies("top_k_mask mask ne1", tkm_bcast1);
+        dies("top_k_mask mask ne2", tkm_bcast2);
+        dies("top_k_mask mask ne3", tkm_bcast3);
+        dies("top_k_mask score type", tkm_score_type);
+        dies("top_k_mask score ne1", tkm_score_ne1);
+        dies("top_k_mask score ne2", tkm_score_ne2);
+        dies("top_k_mask score ne3", tkm_score_ne3);
+        dies("top_k_mask blocks type", tkm_blocks_type);
+        dies("top_k_mask blocks ne2", tkm_blocks_ne2);
+        dies("top_k_mask blocks ne3", tkm_blocks_ne3);
+        dies("top_k_mask blocks score", tkm_blocks_score);
+        dies("top_k_mask extra type", tkm_extra_type);
+        dies("top_k_mask extra ne1", tkm_extra_ne1);
+        dies("top_k_mask extra ne2", tkm_extra_ne2);
+        dies("top_k_mask extra ne3", tkm_extra_ne3);
+    }
     D(ggml_arange(ctx, 0.0f, 10.0f, 2.5f));
     D(ggml_timestep_embedding(ctx, vec, 64, 10000));
     D(ggml_roll(ctx, a2, 3, -2, 0, 0));
@@ -382,8 +468,24 @@ int main(void) {
                 const bool src1 = ggml_prec_set_src(nodes[n], precs[p], 1);
                 snprintf(label, sizeof(label), "prec_set_src(%d,1)=%d", (int) precs[p], src1);
                 dump(label, nodes[n]);
+
+                /* v0.8.0's getters read back what the setters above left. */
+                printf("prec_get_acc=%d prec_get_src=", (int) ggml_prec_get_acc(nodes[n]));
+                for (int idx = 0; idx < GGML_MAX_SRC; idx++) {
+                    printf("%d,", (int) ggml_prec_get_src(nodes[n], idx));
+                }
+                printf("\n");
             }
         }
+        prec_node = ggml_mul_mat(ctx, w, a2);
+        dies("prec_get_src(-1)", prec_idx_negative);
+        dies("prec_get_src(GGML_MAX_SRC)", prec_idx_past_end);
+    }
+
+    puts("=== op tables ===");
+    for (int op = 0; op < GGML_OP_COUNT; op++) {
+        printf("op %3d %-24s %-46s expand=%d\n", op, ggml_op_name((enum ggml_op) op), ggml_op_symbol((enum ggml_op) op),
+               ggml_op_alloc_size_may_expand((enum ggml_op) op));
     }
 
     puts("=== type and shape queries ===");

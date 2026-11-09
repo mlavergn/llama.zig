@@ -50,6 +50,7 @@
 
 #include "ggml.h"
 #include "ggml-backend.h"
+#include "op_filter.h"
 #include "ggml-vulkan.h"
 
 ggml_backend_t ref_ggml_backend_vk_init(size_t dev_num);
@@ -247,7 +248,7 @@ static bool no_callback(int i, struct ggml_tensor * t1, struct ggml_tensor * t2,
     return true;
 }
 
-/* `graph_copy_dup_tensor` (ggml-backend.cpp:2262 @620d2225c) records a
+/* `graph_copy_dup_tensor` (ggml-backend.cpp:2263 @8642541b2) records a
  * node's copy only after copying its sources, so `ggml_cast`'s `src[1]`,
  * the node itself, comes back NULL in the copy. Put it back; see the file
  * comment. */
@@ -601,6 +602,27 @@ static struct ggml_tensor * build_rope_set_rows_misaligned(struct ggml_context *
 static struct ggml_tensor * build_rope_sr_mis(struct ggml_context * c, struct ggml_tensor ** t) { return build_rope_set_rows_misaligned(c, t, false); }
 static struct ggml_tensor * build_rms_rope_sr_mis(struct ggml_context * c, struct ggml_tensor ** t) { return build_rope_set_rows_misaligned(c, t, true); }
 
+/* v0.8.0: RMS_NORM + VIEW + SET_ROWS (`RMS_NORM_VIEW_SET_ROWS`), whose
+ * pipeline has its own block size, 128. Upstream's cases are one 256-column
+ * row and twelve 128-column ones: at 128 or fewer columns a larger block
+ * only adds threads holding zero, and one row's sum agreed by chance when
+ * the block went to 256 -- every row here is 200 or 256 columns, 128 rows
+ * of them, into F32 and F16. */
+static struct ggml_tensor * build_rms_set_rows(struct ggml_context * ctx, struct ggml_tensor ** cmp, int64_t ncols, enum ggml_type type) {
+    const int64_t nh = 4, nt = 32;
+    struct ggml_tensor * a = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ncols, nh, nt);
+    struct ggml_tensor * rms = ggml_rms_norm(ctx, a, 1e-6f);
+    struct ggml_tensor * view = ggml_view_2d(ctx, rms, ncols * nh, nt, rms->nb[2], 0);
+    struct ggml_tensor * dst = ggml_new_tensor_2d(ctx, type, ncols * nh, nt);
+    struct ggml_tensor * rows = ggml_new_tensor_1d(ctx, GGML_TYPE_I64, nt);
+    struct ggml_tensor * out = ggml_set_rows(ctx, dst, view, rows);
+    *cmp = out;
+    return out;
+}
+static struct ggml_tensor * build_rms_sr_256_f32(struct ggml_context * c, struct ggml_tensor ** t) { return build_rms_set_rows(c, t, 256, GGML_TYPE_F32); }
+static struct ggml_tensor * build_rms_sr_200_f32(struct ggml_context * c, struct ggml_tensor ** t) { return build_rms_set_rows(c, t, 200, GGML_TYPE_F32); }
+static struct ggml_tensor * build_rms_sr_256_f16(struct ggml_context * c, struct ggml_tensor ** t) { return build_rms_set_rows(c, t, 256, GGML_TYPE_F16); }
+
 /* Matrix-matrix shapes upstream's MUL_MAT list never reaches. Its cases
  * keep K small, so `ggml_vk_guess_split_k` (K >= 2048 and few enough tiles
  * to leave the GPU half empty) never split and its rounding passed when
@@ -810,6 +832,166 @@ static struct ggml_tensor * build_pool2d_w4(struct ggml_context * c, struct ggml
 static struct ggml_tensor * build_pool2d_w8(struct ggml_context * c, struct ggml_tensor ** t) { return build_pool2d_w(c, t, 8); }
 static struct ggml_tensor * build_pool2d_w16(struct ggml_context * c, struct ggml_tensor ** t) { return build_pool2d_w(c, t, 16); }
 
+/* v0.8.0: `ggml_prec_set_src` names the precision src1 may be reduced to,
+ * and every q8_1 activation path asks it; upstream's cases only ever set
+ * GGML_PREC_Q8, which allows it. Here f16 forbids it, on the matrix and the
+ * vector paths of MUL_MAT and MUL_MAT_ID -- two columns, because the vector
+ * path takes q8_1 for any batch but only past k = 4096 for one column on
+ * NVIDIA. The swapped one-row path multiplies the other way round, so the
+ * request about src1 says nothing about what it quantizes: it stays allowed.
+ * That path is one column, so over q4_0 at k = 256 NVIDIA never quantizes
+ * and dropping the swap from the condition passed it; over q2_K, which
+ * NVIDIA's `should_use_mmvq` takes at any k, it does. Only the integer-dot
+ * arms take these branches, and the matrix path's q8_1 shaders exist with
+ * neither coopmat (under KHR coopmat only on RDNA3 and 4): on the GB10 the
+ * matrix cases reach q8_1 on the `none` arm alone, and dropping the
+ * precision check passed coopmat2 and KHR coopmat both (v0.8.0). */
+static struct ggml_tensor * build_mm_src1_prec(struct ggml_context * ctx, struct ggml_tensor ** cmp, int64_t m, int64_t n) {
+    struct ggml_tensor * out = build_mm(ctx, cmp, GGML_TYPE_Q4_0, m, n, 256);
+    ggml_prec_set_src(out, GGML_PREC_F16, 1);
+    return out;
+}
+static struct ggml_tensor * build_mm_src1_prec_mat(struct ggml_context * c, struct ggml_tensor ** t) { return build_mm_src1_prec(c, t, 64, 33); }
+static struct ggml_tensor * build_mm_src1_prec_vec(struct ggml_context * c, struct ggml_tensor ** t) { return build_mm_src1_prec(c, t, 64, 2); }
+static struct ggml_tensor * build_mm_id_src1_prec(struct ggml_context * ctx, struct ggml_tensor ** cmp, int64_t n_tokens) {
+    struct ggml_tensor * out = build_mm_id(ctx, cmp, GGML_TYPE_Q4_0, 4, 2, n_tokens);
+    ggml_prec_set_src(out, GGML_PREC_F16, 1);
+    return out;
+}
+static struct ggml_tensor * build_mm_id_src1_prec_mat(struct ggml_context * c, struct ggml_tensor ** t) { return build_mm_id_src1_prec(c, t, 33); }
+static struct ggml_tensor * build_mm_id_src1_prec_vec(struct ggml_context * c, struct ggml_tensor ** t) { return build_mm_id_src1_prec(c, t, 2); }
+static struct ggml_tensor * build_mm_src1_prec_swapped_t(struct ggml_context * ctx, struct ggml_tensor ** cmp, enum ggml_type tb) {
+    struct ggml_tensor * out = build_mm_b(ctx, cmp, GGML_TYPE_F32, tb, 1, 33, 256);
+    ggml_prec_set_src(out, GGML_PREC_F16, 1);
+    return out;
+}
+static struct ggml_tensor * build_mm_src1_prec_swapped(struct ggml_context * c, struct ggml_tensor ** t) { return build_mm_src1_prec_swapped_t(c, t, GGML_TYPE_Q4_0); }
+static struct ggml_tensor * build_mm_src1_prec_swapped_q2_k(struct ggml_context * c, struct ggml_tensor ** t) { return build_mm_src1_prec_swapped_t(c, t, GGML_TYPE_Q2_K); }
+
+/* v0.8.0: GGML_PREC_BF16 is new, and an f16 accumulator refuses it as it
+ * does F32, in the matmul and in flash attention; the old test named only
+ * GGML_PREC_F32, so this is what tells the two apart. */
+static struct ggml_tensor * build_mm_acc_bf16(struct ggml_context * ctx, struct ggml_tensor ** cmp) {
+    struct ggml_tensor * out = build_mm(ctx, cmp, GGML_TYPE_F16, 64, 33, 256);
+    ggml_prec_set_acc(out, GGML_PREC_BF16);
+    return out;
+}
+static struct ggml_tensor * build_fa_acc_bf16(struct ggml_context * ctx, struct ggml_tensor ** cmp) {
+    const int64_t hs = 64, kv = 256, nq = 8;
+    struct ggml_tensor * q = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, hs, nq, 2, 1);
+    struct ggml_tensor * k = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, hs, kv, 2, 1);
+    struct ggml_tensor * v = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, hs, kv, 2, 1);
+    struct ggml_tensor * out = ggml_flash_attn_ext(ctx, q, k, v, NULL, 1.0f / sqrtf((float) hs), 0.0f, 0.0f);
+    ggml_prec_set_acc(out, GGML_PREC_BF16);
+    *cmp = out;
+    return out;
+}
+
+/* v0.8.0 lets MUL_MAT broadcast src0 over dim 3, and the non-contiguous
+ * vector kernel cannot: `ggml_vk_mul_mat` now keeps such a node off it,
+ * where supports_op used to. Upstream's broadcast cases are contiguous. */
+static struct ggml_tensor * build_mm_nc_bcast3(struct ggml_context * ctx, struct ggml_tensor ** cmp) {
+    const int64_t k = 64, m = 16;
+    struct ggml_tensor * storage = ggml_new_tensor_3d(ctx, GGML_TYPE_F16, 2 * k, m, 2);
+    struct ggml_tensor * a = ggml_view_3d(ctx, storage, k, m, 2, storage->nb[1], storage->nb[2], 0);
+    struct ggml_tensor * b = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, k, 1, 2, 3);
+    struct ggml_tensor * out = ggml_mul_mat(ctx, a, b);
+    *cmp = out;
+    return out;
+}
+
+/* v0.8.0: RMS_NORM and its MUL, MUL+ADD and MUL+ROPE fusions pick a 128,
+ * 256 or 512 block by row length. Upstream's rows do not sit on either
+ * threshold. A tree reduction gives the same bits at any block size, so
+ * only a device on the subgroup shader (NVIDIA, AMD, Intel) can tell. */
+enum rms_kind { RMS_PLAIN, RMS_MUL, RMS_MUL_ADD, RMS_MUL_ROPE };
+static struct ggml_tensor * build_rms_width(struct ggml_context * ctx, struct ggml_tensor ** cmp, enum rms_kind kind, int64_t ncols) {
+    const int64_t nh = 3, nt = 5;
+    struct ggml_tensor * x = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ncols, nh, nt);
+    struct ggml_tensor * out = ggml_rms_norm(ctx, x, 1e-6f);
+    if (kind != RMS_PLAIN) {
+        out = ggml_mul(ctx, out, ggml_new_tensor_1d(ctx, GGML_TYPE_F32, ncols));
+    }
+    if (kind == RMS_MUL_ADD) {
+        out = ggml_add(ctx, out, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ncols, nh, nt));
+    }
+    if (kind == RMS_MUL_ROPE) {
+        struct ggml_tensor * pos = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, nt);
+        ggml_set_name(pos, "ids:100");
+        out = ggml_rope(ctx, out, pos, (int) ncols, GGML_ROPE_TYPE_NEOX);
+    }
+    *cmp = out;
+    return out;
+}
+#define RMS_WIDTH(name, kind, ncols) static struct ggml_tensor * build_rms_##name##_##ncols(struct ggml_context * c, struct ggml_tensor ** t) { return build_rms_width(c, t, kind, ncols); }
+#define RMS_WIDTHS(name, kind) RMS_WIDTH(name, kind, 128) RMS_WIDTH(name, kind, 130) RMS_WIDTH(name, kind, 256) RMS_WIDTH(name, kind, 258)
+RMS_WIDTHS(plain, RMS_PLAIN)
+RMS_WIDTHS(mul, RMS_MUL)
+RMS_WIDTHS(mul_add, RMS_MUL_ADD)
+RMS_WIDTHS(mul_rope, RMS_MUL_ROPE)
+
+/* v0.8.0: CONV_3D takes a 256x128 tile on coopmat2, at a multiple of 256
+ * output channels with a workgroup per core: 64 here, past the GB10's 48
+ * SMs. Upstream's output channels stop short of it. On NVIDIA's own driver
+ * only from R615 (`ggml_vk_conv3d_select_shape`), and the GB10's is 580: there
+ * this case takes `convSelectShape`'s tile on both sides, and calling that in
+ * place of `conv3dSelectShape` passed it (v0.8.0). */
+static struct ggml_tensor * build_conv_3d_oc256(struct ggml_context * ctx, struct ggml_tensor ** cmp) {
+    const int64_t IC = 2, OC = 256, N = 1;
+    struct ggml_tensor * kernel = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 3, 3, 3, IC * OC);
+    struct ggml_tensor * input = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 34, 34, 10, IC * N);
+    struct ggml_tensor * out = ggml_conv_3d_direct(ctx, kernel, input, 1, 1, 1, 0, 0, 0, 1, 1, 1, (int) IC, (int) N, (int) OC);
+    *cmp = out;
+    return out;
+}
+
+/* v0.8.0's supports_op answers no case of test-backend-ops can ask: extras
+ * compute directly, and upstream's list sets no refused precision. MUL_MAT
+ * and MUL_MAT_ID refuse a src1 precision of F32 alone, whichever the other
+ * precisions and whichever path; MUL_MAT broadcasts over dim 3; SUM takes
+ * any tensor contiguously allocated, permuted or not, but no strided view;
+ * nothing here runs TOP_K_MASK. The answers go through
+ * `vk_diff_supports_op`, so a disagreement prints `SUPPORTS` and fails. */
+static void supports_extra(void) {
+    struct ggml_init_params params = { 64 * ggml_tensor_overhead(), NULL, true };
+    struct ggml_context * ctx = ggml_init(params);
+    ggml_backend_t port = ggml_backend_vk_init(0);
+
+    static const enum ggml_prec precs[] = { GGML_PREC_UNDEFINED, GGML_PREC_F32, GGML_PREC_BF16, GGML_PREC_F16, GGML_PREC_Q8, GGML_PREC_Q4 };
+    struct ggml_tensor * as = ggml_new_tensor_3d(ctx, GGML_TYPE_Q4_0, 256, 64, 4);
+    struct ggml_tensor * b = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 256, 2, 33);
+    struct ggml_tensor * ids = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 2, 33);
+    struct ggml_tensor * w = ggml_new_tensor_2d(ctx, GGML_TYPE_Q4_0, 256, 64);
+    struct ggml_tensor * x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 256, 33);
+    for (size_t i = 0; i < sizeof(precs) / sizeof(precs[0]); i++) {
+        struct ggml_tensor * mm = ggml_mul_mat(ctx, w, x);
+        ggml_prec_set_src(mm, precs[i], 1);
+        struct ggml_tensor * id = ggml_mul_mat_id(ctx, as, b, ids);
+        ggml_prec_set_src(id, precs[i], 1);
+        const bool answers[2] = { vk_diff_supports_op(port, mm), vk_diff_supports_op(port, id) };
+        printf("  SUPPORTED src1 precision %d: mul_mat %d, mul_mat_id %d\n", (int) precs[i], answers[0], answers[1]);
+    }
+
+    struct ggml_tensor * a3 = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 64, 16, 2, 1);
+    struct ggml_tensor * b3 = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 64, 4, 2, 3);
+    printf("  SUPPORTED mul_mat broadcast over dim 3: %d\n", vk_diff_supports_op(port, ggml_mul_mat(ctx, a3, b3)));
+
+    struct ggml_tensor * m = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 11, 5, 6, 3);
+    struct ggml_tensor * strided = ggml_view_3d(ctx, m, 7, 5, 6, m->nb[1], m->nb[2], 0);
+    printf("  SUPPORTED sum: plain %d, permuted %d, transposed %d, strided %d\n",
+        vk_diff_supports_op(port, ggml_sum(ctx, m)),
+        vk_diff_supports_op(port, ggml_sum(ctx, ggml_permute(ctx, m, 0, 2, 1, 3))),
+        vk_diff_supports_op(port, ggml_sum(ctx, ggml_permute(ctx, m, 1, 0, 2, 3))),
+        vk_diff_supports_op(port, ggml_sum(ctx, strided)));
+
+    struct ggml_tensor * mask = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, 256, 8);
+    struct ggml_tensor * top_k = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 16, 8);
+    printf("  SUPPORTED top_k_mask: %d\n", vk_diff_supports_op(port, ggml_top_k_mask(ctx, mask, top_k, NULL, NULL, NULL)));
+
+    ggml_backend_free(port);
+    ggml_free(ctx);
+}
+
 /* Shapes and patterns upstream's list lacks; each later layer of the port
  * adds the cases its host code needs. */
 static int extra_cases(const char * filter) {
@@ -837,16 +1019,46 @@ static int extra_cases(const char * filter) {
         { "POOL_2D",           "avg pool, window 4 wide",                         build_pool2d_w4 },
         { "POOL_2D",           "avg pool, window 8 wide",                         build_pool2d_w8 },
         { "POOL_2D",           "avg pool, window 16 wide",                        build_pool2d_w16 },
+        { "MUL_MAT",           "q4_0 64x33x256, src1 precision f16, matrix path",  build_mm_src1_prec_mat },
+        { "MUL_MAT",           "q4_0 64x2x256, src1 precision f16, vector path",   build_mm_src1_prec_vec },
+        { "MUL_MAT",           "f32 1x33x256 over q4_0, src1 precision f16, swapped", build_mm_src1_prec_swapped },
+        { "MUL_MAT",           "f32 1x33x256 over q2_K, src1 precision f16, swapped", build_mm_src1_prec_swapped_q2_k },
+        { "MUL_MAT_ID",        "q4_0, src1 precision f16, matrix path",            build_mm_id_src1_prec_mat },
+        { "MUL_MAT_ID",        "q4_0, src1 precision f16, vector path",            build_mm_id_src1_prec_vec },
+        { "MUL_MAT",           "f16 64x33x256, accumulator bf16",                  build_mm_acc_bf16 },
+        { "FLASH_ATTN_EXT",    "f16 K and V, accumulator bf16",                    build_fa_acc_bf16 },
+        { "MUL_MAT",           "non-contiguous f16, one column, broadcast over dim 3", build_mm_nc_bcast3 },
+        { "RMS_NORM",          "rms_norm, 128 columns", build_rms_plain_128 },
+        { "RMS_NORM",          "rms_norm, 130 columns", build_rms_plain_130 },
+        { "RMS_NORM",          "rms_norm, 256 columns", build_rms_plain_256 },
+        { "RMS_NORM",          "rms_norm, 258 columns", build_rms_plain_258 },
+        { "RMS_NORM",          "rms_norm*w, 128 columns", build_rms_mul_128 },
+        { "RMS_NORM",          "rms_norm*w, 130 columns", build_rms_mul_130 },
+        { "RMS_NORM",          "rms_norm*w, 256 columns", build_rms_mul_256 },
+        { "RMS_NORM",          "rms_norm*w, 258 columns", build_rms_mul_258 },
+        { "RMS_NORM",          "rms_norm*w+b, 128 columns", build_rms_mul_add_128 },
+        { "RMS_NORM",          "rms_norm*w+b, 130 columns", build_rms_mul_add_130 },
+        { "RMS_NORM",          "rms_norm*w+b, 256 columns", build_rms_mul_add_256 },
+        { "RMS_NORM",          "rms_norm*w+b, 258 columns", build_rms_mul_add_258 },
+        { "RMS_NORM",          "rms_norm*w+rope, 128 columns", build_rms_mul_rope_128 },
+        { "RMS_NORM",          "rms_norm*w+rope, 130 columns", build_rms_mul_rope_130 },
+        { "RMS_NORM",          "rms_norm*w+rope, 256 columns", build_rms_mul_rope_256 },
+        { "RMS_NORM",          "rms_norm*w+rope, 258 columns", build_rms_mul_rope_258 },
+        { "CONV_3D",           "conv_3d, 256 output channels, 64 tiles",           build_conv_3d_oc256 },
+        { "RMS_NORM_MUL_ROPE", "rms_norm+view+set_rows, 256 columns, f32",          build_rms_sr_256_f32 },
+        { "RMS_NORM_MUL_ROPE", "rms_norm+view+set_rows, 200 columns, f32",          build_rms_sr_200_f32 },
+        { "RMS_NORM_MUL_ROPE", "rms_norm+view+set_rows, 256 columns, f16",          build_rms_sr_256_f16 },
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         if (cases[i].op == NULL) {
             continue;
         }
-        if (filter == NULL || strcmp(filter, cases[i].op) == 0) {
+        if (op_filter_matches(filter, cases[i].op)) {
             failed += !extra_case(cases[i].name, cases[i].build);
         }
     }
+    supports_extra();
     return failed;
 }
 

@@ -63,6 +63,7 @@ import json
 import os
 import random
 import re
+import struct
 import subprocess
 import sys
 import tempfile
@@ -120,6 +121,12 @@ COVERAGE = [
     # v0.7.0's two dedicated parsers
     "L W TranslateGemma: source_lang_code not set in chat_template_kwargs, defaulting to en-GB",
     "think_start <ifm|think_faster>", "think_start <ifm|think_fast>", "trigger 1 -1 <ifm|tool_calls>",
+    # v0.8.0: the effort levels, LFM3's ASR prompt, the tts template, the two
+    # new parsers' triggers
+    '"reasoning_effort_levels":["', "asr.system Perform ASR in French.", "asr.system Perform ASR in xx.",
+    "asr.system Perform ASR in French.", "asr.has_language 1",
+    "JSON is nested more than 128 levels deep", "tts <s>[voice alice][lang fr]", "L E common_chat_templates_init: failed to parse the tts chat template",
+    "(?!commentary<\\\\|message\\\\|>)", "<\\\\|start\\\\|>assistant(\\\\s+to)", "think_start <|channel|>analysis<|message|>",
 ]
 
 
@@ -240,10 +247,10 @@ def hexs(b):
     return b.hex()
 
 
-def raw_msg(role, content="", parts=(), tool_calls=(), reasoning="", tool_name="", tool_call_id=""):
+def raw_msg(role, content="", parts=(), tool_calls=(), reasoning="", tool_name="", tool_call_id="", extra_json=""):
     return {"role": role, "content": content, "parts": [list(p) for p in parts],
             "tool_calls": [list(t) for t in tool_calls], "reasoning_content": reasoning,
-            "tool_name": tool_name, "tool_call_id": tool_call_id}
+            "tool_name": tool_name, "tool_call_id": tool_call_id, "extra_json": extra_json}
 
 
 TOOLS = [
@@ -296,13 +303,18 @@ def conversation(rng, trailing_assistant):
     msgs = []
     r = rng.random()
     if r < 0.35:
-        msgs.append(raw_msg("system", rng.choice(["You are a helpful assistant.", "  Be brief.  ", "Reasoning: high"])))
+        msgs.append(raw_msg("system", rng.choice(["You are a helpful assistant.", "  Be brief.  ", "Reasoning: high"]),
+                            # v0.8.0: DeepSeek V4.1 reads a system message's own tools
+                            extra_json=rng.choice(["", "", SYSTEM_TOOLS, "{\"timestamp\":\"now\"}"])))
     elif r < 0.45:
         msgs.append(raw_msg("developer", "Follow the rules."))
     turns = rng.randint(1, 3)
     for t in range(turns):
         if rng.random() < 0.15:
             msgs.append(raw_msg("user", "", parts=[("text", "Look:"), ("text", rng.choice(WORDS))]))
+        elif rng.random() < 0.08:
+            # a media marker: V4.1 keeps it as a text part of its own
+            msgs.append(raw_msg("user", "", parts=[("text", "See"), ("media_marker", "<__media__>"), ("text", "this")]))
         else:
             msgs.append(raw_msg("user", rng.choice(WORDS)))
         if t == turns - 1 and not trailing_assistant:
@@ -323,7 +335,15 @@ def conversation(rng, trailing_assistant):
             calls = [tool_call(rng, k) for k in range(rng.randint(1, 2))]
             msgs.append(raw_msg("assistant", rng.choice(["", "Let me check."]), tool_calls=calls,
                                 reasoning=rng.choice(["", "I need a tool."])))
+            if rng.random() < 0.2:
+                # a call's keys beyond OpenAI's, restored for V4.1
+                msgs[-1]["extra_json"] = json.dumps({"__tool_call_extras": [{"namespace": "ns", "function": {"strict": True}}]})
             for c in calls:
+                if rng.random() < 0.15:
+                    # v0.8.0: a tool result naming a deferred tool
+                    msgs.append(raw_msg("tool", "", parts=[("tool_reference", "", rng.choice(TOOLS)[0])],
+                                        tool_name=c[0], tool_call_id=c[2]))
+                    continue
                 msgs.append(raw_msg("tool", rng.choice(["{\"temp\": 20}", "4", "done"]), tool_name=c[0], tool_call_id=c[2]))
             if rng.random() < 0.15:
                 # a response no call asked for
@@ -338,6 +358,9 @@ def conversation(rng, trailing_assistant):
 def gen_inputs(rng):
     cont = rng.choice([0, 0, 0, 1, 2, 3])
     tools = rng.sample(TOOLS, rng.randint(1, len(TOOLS))) if rng.random() < 0.55 else []
+    if tools and rng.random() < 0.3:
+        # v0.8.0: withheld from the system prompt
+        tools = [t + [rng.random() < 0.5] for t in tools]
     if tools and rng.random() < 0.03:
         tools.append(BAD_TOOL)
     kwargs = []
@@ -348,7 +371,10 @@ def gen_inputs(rng):
                          # TranslateGemma's language codes
                          ("tool_call_format", "\"json\""), ("tool_call_format", "\"xml_typed\""),
                          ("reasoning_effort", "\"medium\""), ("source_lang_code", "\"fr\""),
-                         ("target_lang_code", "\"de-DE\"")])
+                         ("target_lang_code", "\"de-DE\""),
+                         # v0.8.0: DeepSeek V4.1's mapped levels
+                         ("reasoning_effort", "\"minimal\""), ("reasoning_effort", "\"xhigh\""),
+                         ("reasoning_effort", "\"max\"")])
         kwargs.append(list(kv))
     grammar = ""
     if rng.random() < 0.06:
@@ -376,12 +402,33 @@ def gen_inputs(rng):
 # language codes
 EXTRA_KWARGS = [("tool_call_format", "\"json\""), ("tool_call_format", "\"xml_typed\""),
                 ("reasoning_effort", "\"low\""), ("reasoning_effort", "\"medium\""),
+                ("reasoning_effort", "\"minimal\""), ("reasoning_effort", "\"xhigh\""),
                 ("source_lang_code", "\"fr\""), ("target_lang_code", "\"de-DE\""),
                 # an empty input string, which upstream keeps as a part
-                ("empty_kw", "\"\"")]
+                ("empty_kw", "\"\""),
+                # v0.8.0: from_json's limit, on either side of it
+                ("deep", "[" * 128 + "]" * 128), ("deep", "[" * 129 + "]" * 129)]
+
+
+# v0.8.0: the tools of a system message, which DeepSeek V4.1 declares there
+SYSTEM_TOOLS = json.dumps({"tools": [{"type": "function", "function": {
+    "name": "get_time", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}]})
 
 
 SYNTHETIC = [
+    # v0.8.0: templates the two new parsers and V4.1 detect
+    ("synthetic-harmony-xml",
+     "{%- for m in messages %}<|start|>{{ m.role }}<|channel|>final<|message|>{{ m.content }}<|end|>{% endfor -%}"
+     "{#- <|constrain|>xml rfl:parameter -#}{% if add_generation_prompt %}<|start|>assistant{% endif %}"),
+    ("synthetic-muse-spark",
+     "{%- for m in messages %}<|start|>{{ m.role }} to=commentary<|message|>{{ m.content }}<|eom|>{% endfor -%}"
+     "{% if add_generation_prompt %}<|start|>assistant{% endif %}"),
+    ("synthetic-deepseek-v41",
+     "{%- for m in messages %}{% if m.role == 'user' %}<｜User｜>{{ m.content }}{% else %}<｜Assistant｜>{{ m.content }}{% endif %}"
+     "{%- if m.tools %}[{{ m.tools | tojson }}]{% endif %}{%- if m.timestamp %}[{{ m.timestamp }}]{% endif %}"
+     "{%- for tc in m.tool_calls or [] -%}<｜DSML｜ calls><｜DSML｜ invoke name=\"{% if tc.namespace %}{{ tc.namespace }}::{% endif %}{{ tc.function.name }}\"></｜DSML｜ invoke></｜DSML｜ calls>{%- endfor -%}"
+     "{% endfor -%}{%- if reasoning_effort is defined and reasoning_effort -%}[{{ reasoning_effort }}]{%- endif -%}"
+     "{% if add_generation_prompt %}<｜Assistant｜>{% if enable_thinking %}<think>{% else %}</think>{% endif %}{% endif %}"),
     ("synthetic-unclosed", "{{ unclosed"),
     ("synthetic-no-endfor", "{% for m in messages %}{{ m.content }}"),
     ("synthetic-chatml", "chatml"),
@@ -420,6 +467,14 @@ SYNTHETIC = [
 
 GENERIC_REPLIES = [
     "Hello, world!",
+    # v0.8.0: the new parsers' shapes
+    " to=get_weather<|channel|>analysis <|constrain|>xml<|message|><rfl:parameter name=\"city\">\nParis\n</rfl:parameter><|call|>",
+    "<|channel|>analysis<|message|>hmm<|end|><|start|>assistant<|channel|>final<|message|>Sure<|return|>",
+    " to=self<|message|>hmm<|eom|><|start|>assistant to=commentary<|message|>one moment<|eom|><|start|>assistant to=user<|message|>Done<|eot|>",
+    " to=get_weather<|message|><atem:function_calls><atem:invoke name=\"get_weather\"><atem:parameter name=\"city\">Paris</atem:parameter></atem:invoke></atem:function_calls>",
+    "<think>hm</think>\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"get_weather\">\n<｜DSML｜ parameter name=\"city\" string=\"true\">Paris</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>",
+    "</think>plain",
+    "<think>thoughts\n</think>\n\ntext\n\n<tool_call>\n<function=get_weather>\n<parameter=city>\nParis\n</parameter>\n</function>\n</tool_call>",
     "<think>I'm thinking</think>The answer.",
     "I'm thinking</think>The answer.",
     "<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Paris\"}}\n</tool_call>",
@@ -462,7 +517,23 @@ def mutate(rng, data):
     return bytes(b)
 
 
-def make_records(rec_path):
+def tts_vocab(out, name, template):
+    """llama-spm's vocabulary with a `tokenizer.chat_template.tts`: the key
+    goes first, the file having no tensors to realign."""
+    data = open(os.path.join(ROOT, "llama.cpp/models/ggml-vocab-llama-spm.gguf"), "rb").read()
+    n_tensors, n_kv = struct.unpack_from("<QQ", data, 8)
+    assert data[:4] == b"GGUF" and n_tensors == 0
+    def s(x):
+        b = x.encode()
+        return struct.pack("<Q", len(b)) + b
+    kv = s("tokenizer.chat_template.tts") + struct.pack("<I", 8) + s(template)
+    path = os.path.join(out, name)
+    with open(path, "wb") as f:
+        f.write(data[:8] + struct.pack("<QQ", n_tensors, n_kv + 1) + kv + data[24:])
+    return path
+
+
+def make_records(rec_path, out):
     records = []
     stats = {"tmpl": 0, "apply": 0, "parse": 0, "helper": 0, "unmatched": 0}
     tmpl_ids = {}
@@ -585,9 +656,18 @@ def make_records(rec_path):
     vocab_eos = os.path.join(ROOT, "llama.cpp/models/ggml-vocab-nomic-bert-moe.gguf")
     with_model_eos = {"synthetic-empty-input-edges", "synthetic-input-ends"}
     with_model.add("synthetic-empty-input-edges")
+    # v0.8.0: a model's "tts" template, with its language and voice, and one
+    # that does not parse, which is logged and ignored
+    vocab_tts = tts_vocab(out, "vocab-tts.gguf",
+                          "{{ bos_token }}{% if voice %}[voice {{ voice }}]{% endif %}{% if language %}[lang {{ language }}]{% endif %}"
+                          "{% for m in messages %}{{ m.role }}: {{ m.content }}{% endfor %}{{ eos_token }}")
+    vocab_tts_bad = tts_vocab(out, "vocab-tts-bad.gguf", "{% for m in messages %}{{ m.content }}")
     expanded = []
     for name, src in sources:
         expanded.append((name, src, None))
+        if name == "synthetic-bos-eos":
+            expanded.append((name + "+tts", src, vocab_tts))
+            expanded.append((name + "+tts-bad", src, vocab_tts_bad))
         if name in with_model:
             expanded.append((name + "+model", src, vocab))
         if name in with_model_eos:
@@ -623,12 +703,29 @@ def make_records(rec_path):
             if not inputs["tools"]:
                 inputs["tools"] = TOOLS[:2]
             inputs["tool_choice"] = 0
+            # an effort tier means nothing with thinking off, and a grammar
+            # with tools throws before the parser reads the kwarg
+            inputs["enable_thinking"] = True
+            inputs["grammar"] = ""
             idx = add({"op": "apply", "t": t, "in": inputs, "keep": True})
             stats["apply"] += 1
             for reply in trng.sample(pool, min(2, len(pool))) + trng.sample(GENERIC_REPLIES, 1):
                 data = reply if isinstance(reply, bytes) else reply.encode()
                 add({"op": "parse", "a": idx, "input_hex": hexs(data), "partial": False})
                 stats["parse"] += 1
+        # v0.8.0: V4.1's tools on a system message, none at the top level:
+        # calls to them parse all the same
+        if "｜DSML｜ calls>" in src:
+            inputs = gen_inputs(trng)
+            inputs.update({"tools": [], "use_jinja": True, "grammar": "", "json_schema": "", "tool_choice": 0,
+                           "continue": 0, "force_pure_content": False, "kwargs": [], "reasoning_format": 1,
+                           "messages": [raw_msg("system", "Be brief.", extra_json=SYSTEM_TOOLS), raw_msg("user", "Time?")]})
+            idx = add({"op": "apply", "t": t, "in": inputs, "keep": True})
+            stats["apply"] += 1
+            add({"op": "parse", "a": idx, "partial": False, "input_hex": hexs(
+                "<think>x</think>\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"get_time\">\n"
+                "<｜DSML｜ parameter name=\"city\" string=\"true\">Tokyo</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>".encode())})
+            stats["parse"] += 1
     return records, stats
 
 
@@ -728,7 +825,7 @@ def main():
     os.makedirs(out, exist_ok=True)
     exes = build(out)
     rec = record_upstream(exes, out) if not FILTER else None
-    records, stats = make_records(rec)
+    records, stats = make_records(rec, out)
     if not records:
         fail("no records (does the filter match a template?)")
     inp = os.path.join(out, "records.jsonl")

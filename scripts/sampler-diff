@@ -61,6 +61,25 @@ fi
 lines=$(wc -l < "$tmp/ref.txt" | tr -d ' ')
 [ "$lines" -gt 0 ] || { echo "FAIL: the reference produced no output"; exit 1; }
 
+# The parser reports why a grammar failed with a direct `fprintf(stderr, ...)`,
+# not through the log, so those lines are compared from stderr.
+grep -a -A2 'error parsing grammar' "$tmp/ref.err"  > "$tmp/ref.parse"
+grep -a -A2 'error parsing grammar' "$tmp/port.err" > "$tmp/port.parse"
+[ -s "$tmp/ref.parse" ] || { echo "FAIL: the reference reported no grammar parse error"; exit 1; }
+if ! diff -q "$tmp/ref.parse" "$tmp/port.parse" > /dev/null; then
+    echo "FAIL: grammar parse errors differ between ported and reference builds"
+    diff "$tmp/ref.parse" "$tmp/port.parse" | cut -c1-200 | head -20
+    exit 1
+fi
+
+# DRY's breaker cases are about which breakers survive, so a breaker has to
+# change the records, or they all read the same whatever the cap did.
+dry_hashes() { grep "^dry $1 " "$tmp/ref.txt" | grep -v ' log \|name=' | sed 's/.*hash=//'; }
+if grep -q '^dry dry-none ' "$tmp/ref.txt" && [ "$(dry_hashes dry-none)" = "$(dry_hashes dry-colon)" ]; then
+    echo "FAIL: a DRY breaker changed nothing, so the breaker cases cannot see the cap"
+    exit 1
+fi
+
 if diff -q "$tmp/ref.txt" "$tmp/port.txt" > /dev/null; then
     for s in syn chain grammar lazy dry infill vocab backend generate; do
         n=$(grep -c "^$s " "$tmp/ref.txt" || true)

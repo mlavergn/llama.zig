@@ -23,3 +23,6 @@
 !fail -m /nonexistent/model.gguf --lora $DATA/qwen3-dense/good.gguf -o e7.gguf
 !fail -m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/good.gguf -o /nonexistent/dir/out.gguf
 !fail -m $FIX/qwen3-dense.gguf --lora-scaled $DATA/qwen3-dense/good.gguf -o e8.gguf
+# v0.8.0: a truncated input is an error, where the tool used to merge what the buffer held
+!fail -m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/trunc.gguf -o e9.gguf
+!fail -m $DATA/qwen3-dense/trunc-base.gguf --lora $DATA/qwen3-dense/good.gguf -o e10.gguf

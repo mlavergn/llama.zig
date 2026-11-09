@@ -1,0 +1,24 @@
+# Multimodal rerank (v0.8.0): scripts/server-diff rerank. A "rerank" chat
+# template over text-qwen3: placeholders replaced from the template only, one
+# media marker per image, the prompt through process_mtmd_prompt.
+!server -m $DECRERANKMM -mm $MM/gemma3.gguf -c 4096 -np 1 --no-jinja --no-warmup --rerank -lv 4
+!fulllog
+POST /rerank {"query": "plain", "documents": ["a", "b"]}
+POST /rerank {"query": "{document} {query}", "documents": ["{query}", "{document}"]}
+POST /rerank {"query": {"text": "with image", "image": "$PNG1"}, "documents": ["a"]}
+POST /rerank {"query": {"text": "t", "image": "data:image/png;base64,$PNG1"}, "documents": [{"text": "doc", "image": ["$PNG1", "$PNG2"]}, "plain"]}
+POST /rerank {"query": "q", "documents": [{"image": "file:///nonexistent.png"}]}
+POST /rerank {"query": "q", "documents": [{"image": "not base64 at all"}]}
+POST /rerank {"query": "q", "documents": [{"text": "x", "video": "y"}]}
+
+# media needs a rerank template
+!server -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -c 4096 -np 1 --no-jinja --no-warmup --rerank -lv 4
+!fulllog
+POST /rerank {"query": {"text": "q", "image": "$PNG1"}, "documents": ["a"]}
+POST /rerank {"query": "q", "documents": ["a"]}
+
+# and an mmproj
+!server -m $DECRERANKMM -c 4096 -np 1 --no-jinja --no-warmup --rerank -lv 4
+!fulllog
+POST /rerank {"query": {"image": "$PNG1"}, "documents": ["a"]}
+POST /rerank {"query": "{query}{document}", "documents": ["x"]}

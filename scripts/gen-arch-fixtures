@@ -26,8 +26,9 @@
 # `harness/arch_fixtures_draft.cpp` writes them, with a Gemma-style DFlash
 # and a Qwen3.5 whose full-attention projections are fused (since v0.5.0),
 # and clef, which the recipe skips and the user-data path cannot build, and a
-# ModernBERT decision model (since v0.6.0), and vllm-decision2 and an LFM2
-# decision model (since v0.7.0).
+# ModernBERT decision model (since v0.6.0), vllm-decision2 and an LFM2
+# decision model (since v0.7.0), and Voxtral Realtime's adaptive norm, the
+# Qwen4exp merged weights and the DSpark draft of DeepSeek-V4.1 (since v0.8.0).
 #
 # Since v0.7.0 the architectures with an MTP (NextN) head also get a fixture
 # with one NextN block, `--variant mtp`, in `<out-dir>/mtp/`: the C++ loads a
@@ -126,7 +127,7 @@ for a in glm5-next qwen4exp; do
 done
 # The other architectures with an MTP head, with a NextN block, in mtp/ too
 # (see arch_fixtures_extra.cpp).
-for a in qwen35 qwen35moe qwen3next deepseek2 deepseek32 glm-dsa glm4moe bailingmoe3 cohere2moe hy_v3 step35 nemotron_h_moe; do
+for a in qwen35 qwen35moe qwen3next deepseek2 deepseek32 glm-dsa glm4moe bailingmoe3 cohere2moe hy_v3 step35 nemotron_h_moe mellum; do
     "$tmp/extra" "$OUT/mtp" "$SEED" --variant mtp "$a" >> "$tmp/extra.log" 2>&1 \
         || [ "$?" -le 1 ] || echo "failed $a (mtp): the C++ aborted" >> "$tmp/extra.log"
 done
@@ -138,6 +139,21 @@ done
 # K2 Horizon's single value expert, softmax routing, no output gate (see arch_fixtures_extra.cpp).
 "$tmp/extra" "$OUT" "$SEED" --variant mova1 k2-horizon >> "$tmp/extra.log" 2>&1 \
     || [ "$?" -le 1 ] || echo "failed k2-horizon (mova1): the C++ aborted" >> "$tmp/extra.log"
+# Since v0.8.0: Mellum's MTP head without a sliding window and on a sliding one, Nemotron's Q wider
+# than n_embd, LFM3 without its sandwich norms, LFM3 as a decision model, and Beam with no
+# softcap key.
+for v in mtpnoswa mtpswa; do
+    "$tmp/extra" "$OUT/mtp" "$SEED" --variant $v mellum >> "$tmp/extra.log" 2>&1 \
+        || [ "$?" -le 1 ] || echo "failed mellum ($v): the C++ aborted" >> "$tmp/extra.log"
+done
+"$tmp/extra" "$OUT" "$SEED" --variant gqa nemotron >> "$tmp/extra.log" 2>&1 \
+    || [ "$?" -le 1 ] || echo "failed nemotron (gqa): the C++ aborted" >> "$tmp/extra.log"
+for v in nopost d1; do
+    "$tmp/extra" "$OUT" "$SEED" --variant $v lfm3 >> "$tmp/extra.log" 2>&1 \
+        || [ "$?" -le 1 ] || echo "failed lfm3 ($v): the C++ aborted" >> "$tmp/extra.log"
+done
+"$tmp/extra" "$OUT" "$SEED" --variant nocap beam >> "$tmp/extra.log" 2>&1 \
+    || [ "$?" -le 1 ] || echo "failed beam (nocap): the C++ aborted" >> "$tmp/extra.log"
 # Granite-Switch, eagle3, DFlash, clef and vllm-decision2, which the recipe cannot build at all:
 # see the header of harness/arch_fixtures_draft.cpp.
 "$tmp/draft" "$OUT" "$SEED" >> "$tmp/extra.log" 2>&1 \

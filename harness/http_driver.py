@@ -125,6 +125,30 @@ class Conn:
         else:
             self.rest()
 
+    def ws_frame(self):
+        """One server frame, as the bytes arrive."""
+        while len(self.buf) < 2:
+            if not self.fill():
+                self.take(len(self.buf))
+                self.note("EOF in frame")
+                return
+        n = self.buf[1] & 0x7F
+        head = 2
+        if n == 126:
+            head = 4
+        elif n == 127:
+            head = 10
+        while len(self.buf) < head:
+            if not self.fill():
+                self.take(len(self.buf))
+                self.note("EOF in frame")
+                return
+        if n == 126:
+            n = int.from_bytes(self.buf[2:4], "big")
+        elif n == 127:
+            n = int.from_bytes(self.buf[2:10], "big")
+        self.exactly(head + n)
+
     def rest(self):
         """Everything until the server closes."""
         while self.fill():
@@ -146,6 +170,8 @@ class Conn:
                 self.response(head_only=True)
             elif op == "upto":
                 self.until(st[1])
+            elif op == "wsframe":
+                self.ws_frame()
             elif op == "sleep":
                 time.sleep(st[1] / 1000.0)
             elif op == "shut":
@@ -493,8 +519,113 @@ def base_cases():
     return c
 
 
+# cpp-httplib 0.62: what the request line, the framing and the Host rules
+# reject or close, what a bodyless status keeps, and the websocket route
+# v0.8.0's /v1/realtime stands on.
+def v062_cases():
+    c = []
+    c.append(simple("rl-two-spaces", b"GET  /echo HTTP/1.1\r\n" + H + b"\r\n"))
+    c.append(simple("rl-trailing-space", b"GET /echo HTTP/1.1 \r\n" + H + b"\r\n"))
+    c.append(simple("rl-leading-space", b" GET /echo HTTP/1.1\r\n" + H + b"\r\n"))
+    c.append(simple("rl-tab", b"GET\t/echo HTTP/1.1\r\n" + H + b"\r\n"))
+    c.append(simple("rl-no-version", b"GET /echo \r\n" + H + b"\r\n"))
+    c.append(simple("rl-fragment", b"GET /echo#f HTTP/1.1\r\n" + H + b"\r\n"))
+    c.append(simple("rl-fragment-q", b"GET /echo?a=1#f HTTP/1.1\r\n" + H + b"\r\n"))
+    c.append(simple("host-none-11", b"GET /echo HTTP/1.1\r\n\r\n"))
+    c.append(simple("host-none-10", b"GET /echo HTTP/1.0\r\n\r\n"))
+    c.append(simple("host-two", b"GET /echo HTTP/1.1\r\nHost: a\r\nHost: b\r\n\r\n"))
+    c.append(simple("te-with-cl", req("POST /echo HTTP/1.1", "Transfer-Encoding: chunked", "Content-Length: 0", body=b"2\r\nhi\r\n0\r\n\r\n"),
+                    ("send", req("GET /health HTTP/1.1")), ("resp",)))
+    c.append(simple("te-http10", b"POST /echo HTTP/1.0\r\n" + H + b"Transfer-Encoding: chunked\r\n\r\n2\r\nhi\r\n0\r\n\r\n",
+                    ("send", req("GET /health HTTP/1.1")), ("resp",)))
+    c.append(simple("prohibited-header-lower", req("GET /echo HTTP/1.1", "remote_addr: 1.2.3.4", "Local_Port: 1")))
+    c.append(simple("status-204-body", req("GET /status?code=204&body=abc HTTP/1.1"), ("send", req("GET /health HTTP/1.1")), ("resp",)))
+    c.append(simple("status-304-body", req("GET /status?code=304&body=abc HTTP/1.1"), ("send", req("GET /health HTTP/1.1")), ("resp",)))
+    c.append(simple("status-204-cl", req("GET /status?code=204&h_Content-Length=9 HTTP/1.1")))
+    c.append(simple("status-handler-cl", req("GET /status?code=200&body=abcd&h_Content-Length=2 HTTP/1.1")))
+    c.append(simple("status-handler-te", req("GET /status?code=200&body=abcd&h_Transfer-Encoding=chunked HTTP/1.1")))
+    c.append(simple("head-echo", req("HEAD /echo HTTP/1.1")))
+    c.append(simple("head-status-cl", req("HEAD /status?h_Content-Length=7 HTTP/1.1")))
+    c.append(simple("head-stream", req("HEAD /stream HTTP/1.1")))
+    c.append(simple("multipart-upper", post("/echo", mp(b"BB", [([b'Content-Disposition: form-data; name="a"'], b"1")]), ct="MULTIPART/Form-Data; BOUNDARY=BB")))
+    c.append(simple("multipart-quoted", post("/echo", mp(b"BB", [([b'Content-Disposition: form-data; name="a\\"b"; filename="c:\\x.txt"'], b"1")]), ct='multipart/form-data; boundary="BB"')))
+    c.append(simple("form-upper", post("/echo", b"a=1", ct="APPLICATION/X-WWW-FORM-URLENCODED")))
+    c.append(simple("path-bad-u", req("GET /%uD800cho HTTP/1.1")))
+
+    # websockets: the upgrade
+    c.append(simple("ws-echo-open", ws_upgrade("/ws/one?x=1&y=two", "X-T: v"), ("wsframe",),
+                    ("send", ws_frame(1, b"hello")), ("wsframe",),
+                    ("send", ws_frame(2, b"\x00\xff")), ("wsframe",),
+                    ("send", ws_frame(1, b"binary:xy")), ("wsframe",),
+                    ("send", ws_frame(1, b"open")), ("wsframe",),
+                    ("send", ws_frame(8, b"\x03\xe8bye")), ("wsframe",)))
+    c.append(simple("ws-server-close", ws_upgrade("/ws/a"), ("wsframe",), ("send", ws_frame(1, b"close")), ("wsframe",),
+                    ("send", ws_frame(8, b"\x03\xe8"))))
+    c.append(simple("ws-empty", ws_upgrade("/ws/a"), ("wsframe",), ("send", ws_frame(1, b"")), ("wsframe",), ("send", ws_frame(8, b"")), ("wsframe",)))
+    c.append(simple("ws-len-126", ws_upgrade("/ws/a"), ("wsframe",), ("send", ws_frame(1, b"a" * 300)), ("wsframe",), ("send", ws_frame(8, b"")), ("wsframe",)))
+    c.append(simple("ws-len-127", ws_upgrade("/ws/a"), ("wsframe",), ("send", ws_frame(2, b"b" * 70000)), ("wsframe",), ("send", ws_frame(8, b"")), ("wsframe",)))
+    c.append(simple("ws-ping", ws_upgrade("/ws/a"), ("wsframe",), ("send", ws_frame(9, b"pp")), ("wsframe",), ("send", ws_frame(10, b"")), ("send", ws_frame(8, b"")), ("wsframe",)))
+    c.append(simple("ws-fragments", ws_upgrade("/ws/a"), ("wsframe",),
+                    ("send", ws_frame(1, b"ab", fin=False)), ("send", ws_frame(9, b"m")), ("wsframe",),
+                    ("send", ws_frame(0, b"cd", fin=False)), ("send", ws_frame(0, b"ef")), ("wsframe",),
+                    ("send", ws_frame(8, b"")), ("wsframe",)))
+    c.append(simple("ws-frag-bad-next", ws_upgrade("/ws/a"), ("wsframe",), ("send", ws_frame(1, b"ab", fin=False)), ("send", ws_frame(1, b"cd"))))
+    c.append(simple("ws-frag-close", ws_upgrade("/ws/a"), ("wsframe",), ("send", ws_frame(1, b"ab", fin=False)), ("send", ws_frame(8, b"\x03\xe8")), ("wsframe",)))
+    c.append(simple("ws-bad-utf8", ws_upgrade("/ws/a"), ("wsframe",), ("send", ws_frame(1, b"\xff\xfe")), ("wsframe",), ("send", ws_frame(8, b"\x03\xef"))))
+    c.append(simple("ws-rsv", ws_upgrade("/ws/a"), ("wsframe",), ("send", b"\xc1\x80\x00\x00\x00\x00")))
+    c.append(simple("ws-unmasked", ws_upgrade("/ws/a"), ("wsframe",), ("send", b"\x81\x02hi")))
+    c.append(simple("ws-frag-control", ws_upgrade("/ws/a"), ("wsframe",), ("send", ws_frame(9, b"x", fin=False))))
+    c.append(simple("ws-long-control", ws_upgrade("/ws/a"), ("wsframe",), ("send", ws_frame(9, b"x" * 126))))
+    c.append(simple("ws-bad-opcode", ws_upgrade("/ws/a"), ("wsframe",), ("send", ws_frame(3, b"x"))))
+    c.append(simple("ws-too-long", ws_upgrade("/ws/a"), ("wsframe",), ("send", b"\x82\xff\x00\x00\x00\x00\x01\x00\x00\x01")))
+    c.append(simple("ws-msb-len", ws_upgrade("/ws/a"), ("wsframe",), ("send", b"\x82\xff\x80\x00\x00\x00\x00\x00\x00\x01")))
+    c.append(simple("ws-close-bad-code", ws_upgrade("/ws/a"), ("wsframe",), ("send", ws_frame(8, b"\x03\xed")), ("wsframe",)))
+    c.append(simple("ws-close-short", ws_upgrade("/ws/a"), ("wsframe",), ("send", ws_frame(8, b"\x03")), ("wsframe",)))
+    c.append(simple("ws-close-bad-reason", ws_upgrade("/ws/a"), ("wsframe",), ("send", ws_frame(8, b"\x03\xe8\xff")), ("wsframe",)))
+    c.append(simple("ws-hangup", ws_upgrade("/ws/a"), ("wsframe",)))
+    # websockets: what is not an upgrade, or finds no route
+    c.append(simple("ws-no-route", ws_upgrade("/nope")))
+    c.append(simple("ws-plain-route", ws_upgrade("/echo")))
+    c.append(simple("ws-bad-version", ws_upgrade("/ws/a", version="12")))
+    c.append(simple("ws-bad-key", ws_upgrade("/ws/a", key="short")))
+    c.append(simple("ws-get-without-upgrade", req("GET /ws/a HTTP/1.1")))
+    c.append(simple("ws-post", ws_upgrade("/ws/a", method="POST")))
+    return c
+
+
+WS_KEY = "dGhlIHNhbXBsZSBub25jZQ=="
+
+
+def ws_upgrade(path, *headers, key=WS_KEY, version="13", method="GET"):
+    return req("%s %s HTTP/1.1" % (method, path), "Upgrade: websocket", "Connection: Upgrade",
+               "Sec-WebSocket-Key: " + key, "Sec-WebSocket-Version: " + version, *headers)
+
+
+def ws_frame(opcode, data, fin=True):
+    """A client frame, masked with a fixed key."""
+    out = bytes([(0x80 if fin else 0) | opcode])
+    n = len(data)
+    if n < 126:
+        out += bytes([0x80 | n])
+    elif n <= 0xFFFF:
+        out += bytes([0x80 | 126]) + n.to_bytes(2, "big")
+    else:
+        out += bytes([0x80 | 127]) + n.to_bytes(8, "big")
+    mask = b"\x11\x22\x33\x44"
+    return out + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(data))
+
+
+def ws_key_cases():
+    c = []
+    # middleware runs before the switch
+    c.append(simple("ws-nokey", ws_upgrade("/ws/a")))
+    c.append(simple("ws-key", ws_upgrade("/ws/a", "Authorization: Bearer k2"), ("wsframe",), ("send", ws_frame(8, b"")), ("wsframe",)))
+    return c
+
+
 def key_cases():
     c = []
+    c.extend(ws_key_cases())
     c.append(simple("nokey", req("GET /echo HTTP/1.1")))
     # cpp-httplib 0.57: a request the middleware rejects is never sent `100 Continue`
     c.append(simple("expect-100-nokey", req("POST /echo HTTP/1.1", "Content-Length: 4", "Expect: 100-continue")))
@@ -634,6 +765,7 @@ def unix_cases():
 # name -> (environment, cases, how it stops)
 CONFIGS = [
     ("default", {}, base_cases),
+    ("v062", {}, v062_cases),
     ("apikey", {}, key_cases),
     ("prefix", {}, prefix_cases),
     ("auto", {}, small_cases),

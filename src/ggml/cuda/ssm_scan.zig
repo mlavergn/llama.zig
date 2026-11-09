@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/ssm-scan.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/ssm-scan.cuh` at v0.7.0 (`620d2225c`). The
+//! `llama.cpp/ggml/src/ggml-cuda/ssm-scan.cuh` at v0.8.0 (`8642541b2`). The
 //! kernels -- `ssm_scan_f32`, `ssm_scan_f32_group` and the four
 //! `ssm_ssd_*` kernels -- stay CUDA. The SSD arm is the C's
 //! `!defined(GGML_USE_HIP)` one (v0.6.0 dropped its MUSA exclusion), which
@@ -28,15 +28,15 @@ const cu = common.cu;
 const Tensor = c.ggml_tensor;
 const half = kernels.half;
 
-/// Ports `SSM_SSD_MIN_TOKENS` (ssm-scan.cu:15 @620d2225c).
+/// Ports `SSM_SSD_MIN_TOKENS` (ssm-scan.cu:15 @8642541b2).
 const ssd_min_tokens = 128;
-/// Ports `SSM_SSD_DT_BLOCK` (ssm-scan.cu:18 @620d2225c).
+/// Ports `SSM_SSD_DT_BLOCK` (ssm-scan.cu:18 @8642541b2).
 const ssd_dt_block = 256;
-/// Ports `SSM_SSD_DT_MAX_ITEMS` (ssm-scan.cu:19 @620d2225c).
+/// Ports `SSM_SSD_DT_MAX_ITEMS` (ssm-scan.cu:19 @8642541b2).
 const ssd_dt_max_items = 32;
-/// Ports `SSM_SSD_MAX_TOKENS` (ssm-scan.cu:22 @620d2225c).
+/// Ports `SSM_SSD_MAX_TOKENS` (ssm-scan.cu:22 @8642541b2).
 const ssd_max_tokens = ssd_dt_block * ssd_dt_max_items;
-/// Ports `SSM_SSD_CHUNK_SIZE` (ssm-scan.cu:25 @620d2225c).
+/// Ports `SSM_SSD_CHUNK_SIZE` (ssm-scan.cu:25 @8642541b2).
 const ssd_chunk_size = 256;
 
 const int_max: usize = std.math.maxInt(c_int);
@@ -62,7 +62,7 @@ fn at(p: anytype, off: i64) @TypeOf(p) {
     return if (off >= 0) p + @as(usize, @intCast(off)) else p - @as(usize, @intCast(-off));
 }
 
-/// Ports `ggml_cuda_ssm_scan_fused_cache` (ssm-scan.cuh:4 @620d2225c): the
+/// Ports `ggml_cuda_ssm_scan_fused_cache` (ssm-scan.cuh:4 @8642541b2): the
 /// fused kernel's recurrent-state output, strides in elements (the per-seq
 /// stride is always the state row size, set in-kernel). New at v0.7.0, for
 /// the `SSM_SCAN -> CPY` fusion `fusion.zig` matches.
@@ -73,7 +73,7 @@ pub const FusedCache = struct {
     slot_stride: i64,
 };
 
-/// Ports `ssm_scan_f32_cuda` (ssm-scan.cu:245 @620d2225c). Since v0.7.0 the
+/// Ports `ssm_scan_f32_cuda` (ssm-scan.cu:245 @8642541b2). Since v0.7.0 the
 /// Mamba-2 kernels take the state's base and the bytes between rollback
 /// slots instead of `s_off`, so that the fused path can point them into the
 /// cache; Mamba-1 still takes `s_off`.
@@ -178,7 +178,7 @@ fn scanKernel(comptime threads: comptime_int, comptime l: comptime_int) kernels.
     return kernels.get("ssm-scan", kernels.tmpl("ssm_scan_f32", &.{ kernels.ulong(threads), kernels.ulong(16), kernels.ulong(l) }));
 }
 
-/// Ports `ssm_scan_ssd_f32_cuda` (ssm-scan.cu:597 @620d2225c): the SSD
+/// Ports `ssm_scan_ssd_f32_cuda` (ssm-scan.cu:597 @8642541b2): the SSD
 /// dispatch for Mamba-2 prefill. All strides are in elements, not bytes.
 /// Since v0.7.0 the caller passes the state, `s_cur`: the dst state tail,
 /// or the cache when fused.
@@ -394,7 +394,7 @@ fn ssmScanSsdF32Cuda(
     }
 }
 
-/// Ports `ggml_cuda_op_ssm_scan_impl` (ssm-scan.cu:788 @620d2225c), the
+/// Ports `ggml_cuda_op_ssm_scan_impl` (ssm-scan.cu:788 @8642541b2), the
 /// body v0.7.0 moved out of `ggml_cuda_op_ssm_scan` so that the fused entry
 /// point can pass a cache.
 fn opSsmScanImpl(ctx: *common.Context, dst: *Tensor, cache: ?*const FusedCache) void {
@@ -506,12 +506,12 @@ fn opSsmScanImpl(ctx: *common.Context, dst: *Tensor, cache: ?*const FusedCache) 
     ssmScanF32Cuda(src0_d, src1_d, src2_d, src3_d, src4_d, src5_d, src6_d, dst_d, int(src0.nb[2]), int(src0.nb[3]), int(src1.nb[2]), int(src1.nb[3]), int(src2.nb[1]), int(src2.nb[2]), int(src3.nb[1]), int(src4.nb[2]), int(src4.nb[3]), int(src5.nb[2]), int(src5.nb[3]), s_off, nc, nr, nh, ng, n_t, n_s, K, cache, stream);
 }
 
-/// Ports `ggml_cuda_op_ssm_scan` (ssm-scan.cu:883 @620d2225c).
+/// Ports `ggml_cuda_op_ssm_scan` (ssm-scan.cu:883 @8642541b2).
 pub fn opSsmScan(ctx: *common.Context, dst: *Tensor) void {
     opSsmScanImpl(ctx, dst, null);
 }
 
-/// Ports `ggml_cuda_op_ssm_scan_fused_cache` (ssm-scan.cu:887 @620d2225c):
+/// Ports `ggml_cuda_op_ssm_scan_fused_cache` (ssm-scan.cu:887 @8642541b2):
 /// the same op, writing the state snapshots into the cache instead of dst.
 pub fn opSsmScanFusedCache(ctx: *common.Context, dst: *Tensor, cache: FusedCache) void {
     opSsmScanImpl(ctx, dst, &cache);

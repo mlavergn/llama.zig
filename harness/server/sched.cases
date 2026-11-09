@@ -1,0 +1,129 @@
+# The router's device memory scheduler (v0.8.0, server-models-sched.cpp): a
+# measure child per model, what each instance holds, and --models-memory-margin
+# unloading idle models until a new one fits. Free memory is read live, so
+# every figure derived from it is masked; the arithmetic shows in which model
+# goes. A margin past any device makes every load short, a small one none.
+!env LLAMA_CACHE=$CWD/cache
+!mask "--port",\s+"\d+"
+!mask load:   \d+$
+!mask-key free
+!mask \d+ MiB
+!mask total=\d+
+!mask external=\d+
+!mask available=-?\d+
+!droplog ^\S*\s*\d+\.\d+\.\d+\.\d+ .*(print_info|load_tensors|llama_memory_breakdown)
+
+# --- a small margin: every model measured, none short
+!server --models-dir $DATA/models -c 256 -np 1 --no-jinja -lv 4 --models-memory-margin 1
+!fulllog
+!waitfor /models "id":"tiny2"(?:(?!"id":).)*"memory":\{"status":"(measured|failed)"
+!waitfor /models "id":"tiny"(?:(?!"id":).)*"memory":\{"status":"(measured|failed)"
+!waitfor /models "id":"broken"(?:(?!"id":).)*"memory":\{"status":"(measured|failed)"
+GET /models
+!sse /models/sse
+POST /models/load {"model":"tiny"}
+!waitfor /models "id":"tiny"[^{]*\{"value":"loaded"
+!sseend
+GET /models
+POST /completion {"model":"tiny","prompt":"x","n_predict":1,"temperature":0}
+POST /models/unload {"model":"tiny"}
+!waitfor /models "id":"tiny"[^{]*\{"value":"unloaded"
+GET /models
+
+# --- a margin no device has: the first load goes anyway, the next unloads it
+!server --models-dir $DATA/two -c 256 -np 1 --no-jinja -lv 4 --models-memory-margin 100000000
+!fulllog
+!waitfor /models "id":"tiny2"(?:(?!"id":).)*"memory":\{"status":"measured"
+!waitfor /models "id":"tiny"(?:(?!"id":).)*"memory":\{"status":"measured"
+GET /models
+POST /models/load {"model":"tiny"}
+!waitfor /models "id":"tiny"[^{]*\{"value":"loaded"
+GET /models
+POST /models/load {"model":"tiny2"}
+!waitfor /models "id":"tiny2"[^{]*\{"value":"loaded"
+!waitfor /models "id":"tiny"[^{]*\{"value":"unloaded"
+GET /models
+# a request for the other one evicts through the queue, by the same limit
+POST /completion {"model":"tiny","prompt":"x","n_predict":1,"temperature":0}
+!waitfor /models "id":"tiny2"[^{]*\{"value":"unloaded"
+GET /models
+POST /models/unload {"model":"tiny"}
+!waitfor /models "id":"tiny"[^{]*\{"value":"unloaded"
+
+# --- two models wanted at once over the margin: one waits for the other to
+# go idle, then evicts it. Which comes first is a race: the answers only
+!server --models-dir $DATA/two -c 256 -np 1 --no-jinja --models-memory-margin 100000000
+!waitfor /models "id":"tiny2"(?:(?!"id":).)*"memory":\{"status":"measured"
+!waitfor /models "id":"tiny"(?:(?!"id":).)*"memory":\{"status":"measured"
+# the other's load can evict a model between its ready and its request, which
+# upstream answers with a 500 or not as the clock falls
+!parallel quiet
+POST /completion {"model":"tiny","prompt":"x","n_predict":1,"temperature":0}
+POST /completion {"model":"tiny2","prompt":"x","n_predict":1,"temperature":0}
+!end
+
+# --- a measure child that exits before reporting: limits do not apply
+!server --models-preset $DATA/norepo.ini -c 256 -np 1 --no-jinja -lv 4 --models-memory-margin 100000000
+!fulllog
+!waitfor /models "id":"norepo"(?:(?!"id":).)*"memory":\{"status":"failed"
+!waitfor /models "id":"local"(?:(?!"id":).)*"memory":\{"status":"measured"
+# a measure child that dies on its arguments, before it can report
+!waitfor /models "id":"crash"(?:(?!"id":).)*"memory":\{"status":"failed"
+GET /models
+POST /models/load {"model":"norepo"}
+!waitfor /models "id":"norepo"(?:(?!"id":).)*"failed":true
+GET /models
+
+# --- nothing to evict: the model in use is busy, so the next load waits for it
+# to finish and only then takes its place
+!server --models-dir $DATA/two -c 256 -np 1 --no-jinja --context-shift --models-memory-margin 100000000
+# a claim taken with nothing to evict only shows here: load() refuses it, the
+# waiter logs that and stays in line
+!fulllog
+!droplog print_timing: id +\d+ \| task \d+ \| n_gen =
+!waitfor /models "id":"tiny2"(?:(?!"id":).)*"memory":\{"status":"measured"
+!waitfor /models "id":"tiny"(?:(?!"id":).)*"memory":\{"status":"measured"
+POST /models/load {"model":"tiny2"}
+!waitfor /models "id":"tiny2"[^{]*\{"value":"loaded"
+!parallel
+POST /completion {"model":"tiny2","prompt":"x","n_predict":20000,"ignore_eos":true,"temperature":0}
+!sleep 0.5
+POST /completion {"model":"tiny","prompt":"x","n_predict":1,"temperature":0}
+!sleep 2.5
+GET /models
+!end
+GET /models
+
+# --- a sleeping instance gives its memory back and takes it again on waking
+!server --models-dir $DATA/two -c 256 -np 1 --no-jinja -lv 4 --models-memory-margin 1 --sleep-idle-seconds 1
+!fulllog
+!waitfor /models "id":"tiny2"(?:(?!"id":).)*"memory":\{"status":"measured"
+!waitfor /models "id":"tiny"(?:(?!"id":).)*"memory":\{"status":"measured"
+!sse /models/sse
+POST /models/load {"model":"tiny"}
+!waitfor /models "id":"tiny"[^{]*\{"value":"sleeping"
+GET /models
+POST /completion {"model":"tiny","prompt":"x","n_predict":1,"temperature":0}
+!waitfor /models "id":"tiny"[^{]*\{"value":"sleeping"
+!sseend
+GET /models
+
+# --- a reload measures again only what changed
+!fresh reload-a
+!server --models-preset $WORK/reload.ini -np 1 --no-jinja -lv 4 --models-memory-margin 1
+!fulllog
+!waitfor /models "id":"kept"(?:(?!"id":).)*"memory":\{"status":"measured"
+!waitfor /models "id":"changed"(?:(?!"id":).)*"memory":\{"status":"measured"
+GET /models
+!fresh reload-b
+!sse /models/sse
+# whether the measure has started when this answers is the clock's
+!waitfor /models?reload=1 "data"
+!waitfor /models "id":"changed"(?:(?!"id":).)*"memory":\{"status":"measured"
+!sseend
+GET /models
+
+# --- without the margin nothing is measured and the field is absent
+!server --models-dir $DATA/two -c 256 -np 1 --no-jinja -lv 4
+!fulllog
+GET /models

@@ -1,0 +1,2 @@
+{#- v0.8.0: caps_get's second content probe holds a text part: LFM3's template reads the parts only when there are some. -#}
+{% for message in messages %}{% if message['content'] %}{% if message['content'] is string %}{{ message['content'] }}{% else %}{% for part in message['content'] %}{{ part['text'] }}{% endfor %}{% endif %}{% endif %}{% endfor %}

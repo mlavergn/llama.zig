@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.7.0 (`620d2225c`).
+//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.8.0 (`8642541b2`).
 //!
 //! The C++ keeps each node's children in a `std::map<char, naive_trie>` and
 //! never iterates it, so the order of children is unobservable. Here every
@@ -18,7 +18,8 @@ fn oom() noreturn {
     impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
-/// Ports `naive_trie` (llama-vocab.cpp:29 @620d2225c).
+/// Ports `naive_trie` (llama-vocab.cpp:29 @8642541b2). Walking iteratively is
+/// what upstream's `insert` and `get_longest_prefix` do too since v0.8.0.
 pub const Trie = struct {
     pub const Node = struct {
         has_value: bool = false,

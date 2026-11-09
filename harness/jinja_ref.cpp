@@ -5,8 +5,8 @@
 // chat templates with; ours renders them through `zigjinja` (PLAN.md,
 // Decisions 25 and 27). This compiles the unmodified engine and renders a
 // template the way `common_chat_template` and
-// `common_chat_template_direct_apply_impl` do (chat.cpp:1245, 877
-// @620d2225c): `lexer::tokenize`, `parse_from_tokens`, a `context` over the
+// `common_chat_template_direct_apply_impl` do (chat.cpp:1425, 1042
+// @8642541b2): `lexer::tokenize`, `parse_from_tokens`, a `context` over the
 // lexer's source, `global_from_json` with input marking on, then `bos_token`
 // and `eos_token` set again unmarked -- they come from the model, not the
 // user -- `runtime::execute` and `gather_string_parts`.
@@ -94,18 +94,25 @@ extern "C" int jinja_ref_render(const char * tmpl, size_t tmpl_len, const char *
 }
 
 // The capabilities `jinja::caps_get` reads off `tmpl`, as
-// `common_chat_template`'s constructor computes them (chat.cpp:1245 @620d2225c),
-// in `caps::to_map`'s order: one byte each. Returns 1 if the template fails
-// to lex or parse.
-extern "C" int jinja_ref_caps(const char * tmpl, size_t tmpl_len, unsigned char * out) {
+// `common_chat_template`'s constructor computes them (chat.cpp:1425 @8642541b2),
+// in `caps::to_map`'s order: one byte each, and `levels` (holding `levels_cap`
+// bytes) the reasoning effort levels, comma-separated, NUL-terminated. Returns
+// 1 if the template fails to lex or parse.
+extern "C" int jinja_ref_caps(const char * tmpl, size_t tmpl_len, unsigned char * out, char * levels, size_t levels_cap) {
     try {
         jinja::lexer lexer;
         auto lexed = lexer.tokenize(std::string(tmpl, tmpl_len));
         jinja::program prog = jinja::parse_from_tokens(lexed);
         size_t i = 0;
-        for (const auto & [name, value] : jinja::caps_get(prog).to_map()) {
+        const jinja::caps c = jinja::caps_get(prog);
+        for (const auto & [name, value] : c.to_map()) {
             out[i++] = value ? 1 : 0;
         }
+        std::string joined;
+        for (const auto & level : c.reasoning_effort_levels) {
+            joined += (joined.empty() ? "" : ",") + level;
+        }
+        std::snprintf(levels, levels_cap, "%s", joined.c_str());
         return 0;
     } catch (const std::exception &) {
         return 1;

@@ -26,6 +26,7 @@ const std = @import("std");
 const harness_root = @import("harness_root");
 
 const A = harness_root.arch;
+const ext = harness_root.api.model;
 const c = harness_root.impl.c;
 
 extern fn ref_arch_unknown() c_int;
@@ -33,6 +34,11 @@ extern fn ref_arch_name(arch: c_int) [*:0]const u8;
 extern fn ref_arch_from_string(name: [*:0]const u8) c_int;
 extern fn ref_arch_all(out: [*]c_int, cap: c_int) c_int;
 extern fn ref_arch_flags(arch: c_int) c_int;
+extern fn ref_ext_arch_flags(arch: c_int) c_int;
+extern fn ref_ext_arch_name(arch: c_int) [*:0]const u8;
+extern fn ref_ext_arch_from_string(name: [*:0]const u8) c_int;
+extern fn ref_ext_arch_all(out: [*]c_int, cap: c_int) c_int;
+extern fn ref_ext_kv_name(arch: c_int, kv: c_int, buf: [*]u8, n: usize) c_int;
 extern fn ref_kv_name(arch: c_int, kv: c_int, suffix: ?[*:0]const u8, buf: [*]u8, n: usize) c_int;
 extern fn ref_tensor_name(arch: c_int, tensor: c_int, suffix: ?[*:0]const u8, bid: c_int, xid: c_int, buf: [*]u8, n: usize) c_int;
 extern fn ref_tensor_info(tensor: c_int, layer: *c_int, op: *c_int, buf: [*]u8, n: usize) c_int;
@@ -78,8 +84,46 @@ fn flags(a: A.Arch) c_int {
         @as(c_int, @intFromBool(A.supportsMixedBatch(a))) << 5;
 }
 
+/// `llama-ext.h`'s queries, as `api/model.zig` answers them.
+fn extFlags(a: A.Arch) c_int {
+    return @as(c_int, @intFromBool(ext.llama_arch_supports_sm_tensor(a))) |
+        @as(c_int, @intFromBool(ext.llama_arch_supports_mixed_batch(a))) << 1 |
+        @as(c_int, @intFromBool(ext.llama_arch_supports_save(a))) << 2;
+}
+
 // -----------------------------------------------------------------------------
 // Architectures
+
+/// `llama-ext.h`'s architecture queries: every architecture's flags and
+/// name, the list, every name back to its architecture, and every key.
+fn checkExt() void {
+    var all: [512]c_int = undefined;
+    const n_all = ref_ext_arch_all(&all, all.len);
+    const port_all = ext.llama_arch_all();
+    expectInt("llama_arch_all length", n_all, @intCast(port_all.len));
+    for (port_all, 0..) |a, i| {
+        if (i < n_all) expectInt("llama_arch_all entry", all[i], @backingInt(a));
+    }
+    var n_no_save: usize = 0;
+    for (std.enums.values(A.Arch)) |a| {
+        const i = @backingInt(a);
+        var what: [64]u8 = undefined;
+        const w = std.mem.print(&what, "llama_arch {d}", .{i}) catch unreachable;
+        expectInt(w, ref_ext_arch_flags(i), extFlags(a));
+        if (ref_ext_arch_flags(i) & 4 == 0) n_no_save += 1;
+        const name = ext.llama_arch_name(a);
+        expectStr(w, std.mem.span(ref_ext_arch_name(i)), name);
+        expectInt(w, ref_ext_arch_from_string(name.ptr), @backingInt(ext.llama_arch_from_string(name)));
+        for (std.enums.values(A.Kv)) |kv| {
+            var buf: [256]u8 = undefined;
+            const n = ref_ext_kv_name(i, @backingInt(kv), &buf, buf.len);
+            const k = ext.llama_arch_kv_name(a, kv);
+            expectStr("llama_arch_kv_name", buf[0..@intCast(n)], k.slice());
+        }
+    }
+    // A gate that saw every architecture as saveable would be seeing nothing.
+    if (n_no_save == 0) fail("no architecture refuses to save", .{});
+}
 
 fn checkArchs() void {
     const n = count(A.Arch);
@@ -253,9 +297,12 @@ pub fn main() void {
     checkKeys();
     const after_keys = checks;
     checkTensors();
+    const after_tensors = checks;
+    checkExt();
     std.debug.print("  architectures {d:>10} checks\n", .{after_archs});
     std.debug.print("  metadata keys {d:>10} checks\n", .{after_keys - after_archs});
-    std.debug.print("  tensors       {d:>10} checks\n", .{checks - after_keys});
+    std.debug.print("  tensors       {d:>10} checks\n", .{after_tensors - after_keys});
+    std.debug.print("  llama-ext.h   {d:>10} checks\n", .{checks - after_tensors});
     if (failures != 0) {
         std.debug.print("FAIL: {d} of {d} arch results differ, Zig vs llama-arch.cpp\n", .{ failures, checks });
         std.process.exit(1);

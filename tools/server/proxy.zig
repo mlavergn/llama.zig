@@ -5,8 +5,8 @@
 //! # Provenance
 //!
 //! Ports `server_http_proxy` from `llama.cpp/tools/server/server-models.cpp`
-//! and `llama.cpp/tools/server/server-models.h` (llama.cpp v0.7.0,
-//! `620d2225c`), with the helpers it calls: `to_lower_copy`,
+//! and `llama.cpp/tools/server/server-models.h` (llama.cpp v0.8.0,
+//! `8642541b2`), with the helpers it calls: `to_lower_copy`,
 //! `should_strip_proxy_header`, `generate_multipart_boundary` and
 //! `build_multipart_body`. Each declaration names what it ports and the
 //! line it began at.
@@ -32,7 +32,7 @@ const throw = common.throw;
 
 const gpa = std.heap.c_allocator;
 
-/// Ports `server_http_proxy`'s `msg_t` (server-models.h:415 @620d2225c): the
+/// Ports `server_http_proxy`'s `msg_t` (server-models.h:459 @8642541b2): the
 /// headers (first message only) or a chunk of the body.
 const Msg = struct {
     headers: http.StringMap = .{}, // a std::map: sorted, unique keys
@@ -55,6 +55,10 @@ const Msg = struct {
 const Shared = struct {
     pipe: common.Pipe(Msg),
     refs: std.atomic.Value(u32) = .init(2),
+    /// The client the thread drives, null once it is done with it: what
+    /// `cli->stop()` reaches from the response's destructor.
+    cli: ?*httplib_client.ClientImpl = null,
+    cli_mutex: std.c.pthread_mutex_t = .{},
     // true once response_handler has already forwarded the headers
     headers_sent: std.atomic.Value(bool) = .init(false),
 
@@ -68,12 +72,12 @@ const Shared = struct {
     }
 };
 
-/// Ports `to_lower_copy` (server-models.cpp:2398 @620d2225c).
+/// Ports `to_lower_copy` (server-models.cpp:2522 @8642541b2).
 fn toLowerCopy(a: Allocator, value: []const u8) ![]u8 {
     return std.ascii.allocLowerString(a, value);
 }
 
-/// Ports `should_strip_proxy_header` (server-models.cpp:2404 @620d2225c): headers
+/// Ports `should_strip_proxy_header` (server-models.cpp:2528 @8642541b2): headers
 /// the router would duplicate.
 fn shouldStripProxyHeader(header_name: []const u8) bool {
     // Headers that get duplicated when router forwards child responses
@@ -88,7 +92,7 @@ fn shouldStripProxyHeader(header_name: []const u8) bool {
     return std.mem.startsWith(u8, header_name, "access-control-");
 }
 
-/// Ports `generate_multipart_boundary` (server-models.cpp:2421 @620d2225c): 16
+/// Ports `generate_multipart_boundary` (server-models.cpp:2545 @8642541b2): 16
 /// characters from a `std::mt19937` seeded by `std::random_device`.
 fn generateMultipartBoundary(a: Allocator) ![]u8 {
     const chars = "0123456789abcdefghijklmnopqrstuvwxyz";
@@ -111,7 +115,7 @@ fn sanitizeField(a: Allocator, text: []const u8) ![]u8 {
     return result.items;
 }
 
-/// Ports `build_multipart_body` (server-models.cpp:2432 @620d2225c): the form
+/// Ports `build_multipart_body` (server-models.cpp:2556 @8642541b2): the form
 /// fields (from the JSON the HTTP layer made of them) and the files,
 /// re-encoded as `multipart/form-data`.
 fn buildMultipartBody(a: Allocator, form_fields: *Value, files: *const http.SortedMap(http.UploadedFile), boundary: []const u8) ![]u8 {
@@ -149,10 +153,10 @@ fn buildMultipartBody(a: Allocator, form_fields: *Value, files: *const http.Sort
     return body.items;
 }
 
-/// `common_http_format_host` (common/http.h:25 @620d2225c).
+/// `common_http_format_host` (common/http.h:27 @8642541b2).
 const formatHost = http.commonHttpFormatHost;
 
-/// Ports `server_http_proxy` (server-models.h:390 @620d2225c): the response
+/// Ports `server_http_proxy` (server-models.h:434 @8642541b2): the response
 /// whose `next` reads the pipe the client thread fills.
 pub const Proxy = struct {
     base: http.Res,
@@ -166,13 +170,19 @@ pub const Proxy = struct {
 
     const vtable: http.Res.VTable = .{ .on_complete = http.Res.noComplete, .destroy = destroyProxy };
 
-    /// Ports `server_http_proxy`'s destructor (server-models.h:404 @620d2225c): the pipe
-    /// closed both ways, then `cleanup`.
+    /// Ports `server_http_proxy`'s destructor (server-models.h:448 @8642541b2): the pipe
+    /// closed both ways and the client stopped, which drops the connection to
+    /// the child so a client's disconnect reaches it, then `cleanup`.
     fn destroyProxy(res: *http.Res) void {
         const self: *Proxy = @fieldParentPtr("base", res);
         // cleanup_pipes
         self.shared.pipe.closeRead();
         self.shared.pipe.closeWrite();
+        {
+            _ = std.c.pthread_mutex_lock(&self.shared.cli_mutex);
+            defer _ = std.c.pthread_mutex_unlock(&self.shared.cli_mutex);
+            if (self.shared.cli) |cli| cli.stop();
+        }
         if (self.cleanup) |c| c.func(c.ctx);
         self.shared.release();
         self.base.arena.deinit();
@@ -250,6 +260,11 @@ pub const Proxy = struct {
         /// 500 and a body, headers sent for a bodyless status.
         fn run(job: *Job) void {
             defer {
+                {
+                    _ = std.c.pthread_mutex_lock(&job.shared.cli_mutex);
+                    defer _ = std.c.pthread_mutex_unlock(&job.shared.cli_mutex);
+                    job.shared.cli = null;
+                }
                 job.shared.release();
                 job.cli.deinit();
                 job.arena.deinit();
@@ -275,7 +290,7 @@ pub const Proxy = struct {
         }
     };
 
-    /// Ports the constructor `server_http_proxy` (server-models.cpp:2492 @620d2225c):
+    /// Ports the constructor `server_http_proxy` (server-models.cpp:2616 @8642541b2):
     /// starts the client thread and waits for the target's status and
     /// headers.
     ///
@@ -301,6 +316,7 @@ pub const Proxy = struct {
         shared.* = .{ .pipe = common.Pipe(Msg).init(gpa) };
         job.shared = shared;
         job.cli = httplib_client.ClientImpl.init(ja, try ja.dupe(u8, host), port);
+        shared.cli = &job.cli;
         var started = false;
         errdefer if (!started) {
             shared.release();

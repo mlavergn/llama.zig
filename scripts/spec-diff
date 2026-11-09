@@ -29,6 +29,7 @@ Usage: scripts/spec-diff [case-substring ...]
 import os
 import re
 import shutil
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -106,8 +107,18 @@ CASES = [
                        "--spec-ngram-mod-n-match", "4", "--spec-ngram-mod-n-max", "8", "--spec-ngram-mod-n-min", "1"] + COMMON,
          {"LLAMA_TRACE": "1"}),
     case("ngram-cache", ["-m", Q, "--spec-type", "ngram-cache", "-p", T1, "-n", "40", "--temp", "0"] + COMMON),
+    # v0.8.0: the dynamic cache is saved on destruction, so each side gets its own copy, and the bytes are compared
     case("ngram-cache-files", ["-m", Q, "--spec-type", "ngram-cache", "-p", T3, "-n", "32", "--temp", "0"] + COMMON,
-         {"SPEC_LCS": "@TMP/cache_3.bin", "SPEC_LCD": "@TMP/merged_2.bin"}),
+         {"SPEC_LCS": "@TMP/cache_3.bin", "SPEC_LCD": "@TMP/dyn_@SIDE.bin", "_COPY": "merged_2.bin"}),
+    # v0.8.0: a missing dynamic cache starts empty, and destruction writes it
+    case("ngram-cache-dynamic-new", ["-m", Q, "--spec-type", "ngram-cache", "-p", T3, "-n", "32", "--temp", "0"] + COMMON,
+         {"SPEC_LCD": "@TMP/dyn_@SIDE.bin"}),
+    case("ngram-cache-dynamic-2seq", ["-m", Q, "--spec-type", "ngram-cache", "-np", "2", "-p", T1 + "|" + T3, "-n", "24",
+                                      "--temp", "0"] + COMMON,
+         {"SPEC_LCD": "@TMP/dyn_@SIDE.bin"}),
+    # a path that cannot be opened and is no missing file aborts
+    case("ngram-cache-dynamic-bad", ["-m", Q, "--spec-type", "ngram-cache", "-p", T3, "-n", "8", "--temp", "0"] + COMMON,
+         {"SPEC_LCD": "@TMP/unreadable.bin", "_UNREADABLE": "1"}),
     case("ngram-cache-missing", ["-m", Q, "--spec-type", "ngram-cache", "-p", T3, "-n", "8", "--temp", "0"] + COMMON,
          {"SPEC_LCS": "@TMP/nope.bin"}),
     case("chain", ["-m", Q, "-md", Q, "--spec-type", "ngram-mod,ngram-map-k,draft-simple", "-np", "2", "-p", T2 + "|" + T1,
@@ -141,6 +152,14 @@ CASES = [
          {"SPEC_SYNTH_LEN": "2"}),
     case("dflash2", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash2.gguf", "--spec-type", "draft-dflash", "-p", IDS,
                      "-n", "16", "--temp", "0", "--spec-draft-p-min", "0.2"] + FIXV),
+    # v0.8.0: DFlash2 samples its lattice and hands q to the verifier
+    case("dflash2-reject", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash2.gguf", "--spec-type", "draft-dflash",
+                            "--spec-draft-sampling", "probabilistic", "-p", IDS, "-n", "24", "--temp", "0.7", "--seed", "42"] + FIXV,
+         {"SPEC_REJECT": "1"}),
+    case("dflash2-reject-pmin", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash2.gguf", "--spec-type", "draft-dflash",
+                                 "--spec-draft-sampling", "probabilistic", "-p", IDS, "-n", "24", "--temp", "1.3", "--seed", "7",
+                                 "--spec-draft-p-min", "0.2", "--spec-draft-n-min", "2"] + FIXV,
+         {"SPEC_REJECT": "1"}),
     case("dspark", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-dspark.gguf", "--spec-type", "draft-dspark", "-p", IDS,
                     "-n", "16", "--temp", "0", "--spec-draft-p-min", "0.3"] + FIXV),
     case("dspark-bonus-2seq", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-dspark-bonus.gguf", "--spec-type",
@@ -216,7 +235,7 @@ CASES = [
 # Since v0.6.0 dflash-novocab is one: a draft without a mask token puts
 # LLAMA_TOKEN_NULL in the noise block, which common_batch takes for an
 # embedding entry with no data, and get_sub_batch aborts.
-EXPECT_ABORT = {"ngram-cache-missing", "dflash-novocab"}
+EXPECT_ABORT = {"ngram-cache-missing", "ngram-cache-dynamic-bad", "dflash-novocab"}
 
 # Each must appear in some reference transcript (stdout or stderr).
 PHRASES = [
@@ -273,6 +292,10 @@ PHRASES = [
     "exceeds the trained block size",
     "failed to open static lookup cache",
     "Couldn't read static lookup cache",
+    "dynamic lookup cache file does not exist",
+    "saving dynamic lookup cache at",
+    "failed to open dynamic lookup cache",
+    "Couldn't read dynamic lookup cache",
     "reasoning-budget accepted prefill token",
     "grammar accepted prefill token",
     "prefill token:",
@@ -297,6 +320,8 @@ PHRASES = [
 ]
 
 MASKS = [
+    # each side's own dynamic cache file
+    (re.compile(r"dyn_(?:ref|port)\.bin"), "dyn_SIDE.bin"),
     (re.compile(r"took [0-9.]+ (ms|seconds)"), "took T"),
     # v0.6.0's Metal backend compiles its libraries at start-up and says how long each took
     (re.compile(r"library in [0-9.]+ sec"), "library in T sec"),
@@ -412,32 +437,55 @@ def main():
     for name, mode, args, env in CASES:
         if picks and not any(p in name for p in picks):
             continue
-        res = {}
-        for side, exe in (("ref", "spec_ref"), ("port", "spec_diff")):
-            e = dict(os.environ)
-            e["SPEC_TMP"] = tmp
-            for k, v in env.items():
-                e[k] = v.replace("@TMP", tmp).replace("@FX", fxdir)
-            args = [a.replace("@FX", fxdir) for a in args]
-            if mode == "api":
-                # the same files on both sides
-                for f in os.listdir(tmp):
-                    os.unlink(os.path.join(tmp, f))
-            cmd = ["perl", "-e", "alarm shift; exec @ARGV", "300", f"{bindir}/{exe}", mode] + args
-            r = subprocess.run(cmd, capture_output=True, env=e)
-            o = r.stdout.decode("utf-8", "replace")
-            er = r.stderr.decode("utf-8", "replace")
-            with open(os.path.join(out, f"{name}.{side}.out"), "w") as fh:
-                fh.write(o)
-            with open(os.path.join(out, f"{name}.{side}.err"), "w") as fh:
-                fh.write(er)
-            res[side] = (r.returncode, [l for l in o.splitlines() if not GDB_LINE.match(l)], mask(er))
+        # An abort races upstream's log worker: what it had queued may be lost
+        # on either side, more often on a loaded machine, so such a case gets
+        # a few tries to show the whole transcript on both.
+        for attempt in range(6 if name in EXPECT_ABORT else 1):
+            res = {}
+            for side, exe in (("ref", "spec_ref"), ("port", "spec_diff")):
+                e = dict(os.environ)
+                e["SPEC_TMP"] = tmp
+                for k, v in env.items():
+                    e[k] = v.replace("@TMP", tmp).replace("@FX", fxdir).replace("@SIDE", side)
+                # the file a case's dynamic cache is written to, each side's own
+                dyn = os.path.join(tmp, f"dyn_{side}.bin")
+                if os.path.exists(dyn):
+                    os.unlink(dyn)
+                if "_COPY" in env:
+                    shutil.copy(os.path.join(tmp, env["_COPY"]), dyn)
+                if "_UNREADABLE" in env:
+                    bad = os.path.join(tmp, "unreadable.bin")
+                    if os.path.exists(bad):
+                        os.unlink(bad)
+                    open(bad, "w").close()
+                    os.chmod(bad, 0)
+                args = [a.replace("@FX", fxdir) for a in args]
+                if mode == "api":
+                    # the same files on both sides
+                    for f in os.listdir(tmp):
+                        os.unlink(os.path.join(tmp, f))
+                cmd = ["perl", "-e", "alarm shift; exec @ARGV", "300", f"{bindir}/{exe}", mode] + args
+                r = subprocess.run(cmd, capture_output=True, env=e)
+                o = r.stdout.decode("utf-8", "replace")
+                er = r.stderr.decode("utf-8", "replace")
+                with open(os.path.join(out, f"{name}.{side}.out"), "w") as fh:
+                    fh.write(o)
+                with open(os.path.join(out, f"{name}.{side}.err"), "w") as fh:
+                    fh.write(er)
+                res[side] = (r.returncode, [l for l in o.splitlines() if not GDB_LINE.match(l)], mask(er))
+            if res["ref"][2] == res["port"][2]:
+                break
         (rc_r, o_r, e_r), (rc_p, o_p, e_p) = res["ref"], res["port"]
+        saved = [os.path.join(tmp, f"dyn_{s}.bin") for s in ("ref", "port")]
+        dyn_differs = "SPEC_LCD" in env and "@SIDE" in env["SPEC_LCD"] and name not in EXPECT_ABORT and (
+            not all(os.path.exists(p) for p in saved) or open(saved[0], "rb").read() != open(saved[1], "rb").read())
         ref_text.append("\n".join(o_r) + "\n" + "\n".join(e_r))
         lines += len(o_r) + len(e_r)
         bad = []
         if rc_r != rc_p:
             bad.append(f"exit {rc_r} vs {rc_p}")
+        if dyn_differs:
+            bad.append("saved dynamic caches differ")
         if o_r != o_p:
             bad.append("stdout differs")
         if e_r != e_p:

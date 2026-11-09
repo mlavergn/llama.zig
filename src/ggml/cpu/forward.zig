@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.7.0, `620d2225c`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.8.0, `8642541b2`),
 //! `ggml_compute_forward` at line 1711.
 //!
 //! # The kernels are still C++
@@ -149,6 +149,7 @@ const kernels = struct {
     extern fn ggml_compute_forward_dsv4_hc_comb(params: *const ComputeParams, dst: *Tensor) void;
     extern fn ggml_compute_forward_dsv4_hc_pre(params: *const ComputeParams, dst: *Tensor) void;
     extern fn ggml_compute_forward_dsv4_hc_post(params: *const ComputeParams, dst: *Tensor) void;
+    extern fn ggml_compute_forward_top_k_mask(params: *const ComputeParams, dst: *Tensor) void;
     extern fn ggml_compute_forward_map_custom1(params: *const ComputeParams, dst: *Tensor) void;
     extern fn ggml_compute_forward_map_custom2(params: *const ComputeParams, dst: *Tensor) void;
     extern fn ggml_compute_forward_map_custom3(params: *const ComputeParams, dst: *Tensor) void;
@@ -159,7 +160,7 @@ const kernels = struct {
     extern fn ggml_compute_forward_opt_step_sgd(params: *const ComputeParams, dst: *Tensor) void;
 };
 
-/// Ports `ggml_compute_forward` (ggml-cpu.c:1740 @620d2225c).
+/// Ports `ggml_compute_forward` (ggml-cpu.c:1745 @8642541b2).
 ///
 /// Parameters:
 /// - `params`: this thread's index, count, and slice of the work buffer.
@@ -265,6 +266,7 @@ pub fn computeForward(params: *const ComputeParams, tensor: *Tensor) void {
         c.GGML_OP_DSV4_HC_COMB => kernels.ggml_compute_forward_dsv4_hc_comb(params, tensor),
         c.GGML_OP_DSV4_HC_PRE => kernels.ggml_compute_forward_dsv4_hc_pre(params, tensor),
         c.GGML_OP_DSV4_HC_POST => kernels.ggml_compute_forward_dsv4_hc_post(params, tensor),
+        c.GGML_OP_TOP_K_MASK => kernels.ggml_compute_forward_top_k_mask(params, tensor),
         c.GGML_OP_MAP_CUSTOM1 => kernels.ggml_compute_forward_map_custom1(params, tensor),
         c.GGML_OP_MAP_CUSTOM2 => kernels.ggml_compute_forward_map_custom2(params, tensor),
         c.GGML_OP_MAP_CUSTOM3 => kernels.ggml_compute_forward_map_custom3(params, tensor),

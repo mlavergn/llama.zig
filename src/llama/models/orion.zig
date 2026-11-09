@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/orion.cpp` at v0.7.0 (`620d2225c`):
+//! Ported from `llama.cpp/src/models/orion.cpp` at v0.8.0 (`8642541b2`):
 //! `llama_model_orion`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -19,7 +19,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_orion`'s `load_arch_hparams` (models/orion.cpp:3 @620d2225c).
+/// Ports `llama_model_orion`'s `load_arch_hparams` (models/orion.cpp:3 @8642541b2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_eps = (try ml.meta.getKey(f32, .attention_layernorm_eps, true, exc)).?;
@@ -30,7 +30,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_orion`'s `load_arch_tensors` (models/orion.cpp:12 @620d2225c).
+/// Ports `llama_model_orion`'s `load_arch_tensors` (models/orion.cpp:12 @8642541b2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
 
@@ -60,8 +60,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_orion`'s `build_arch_graph` (models/orion.cpp:39
-/// @620d2225c) and the constructor of its `graph` (models/orion.cpp:43
-/// @620d2225c).
+/// @8642541b2) and the constructor of its `graph` (models/orion.cpp:43
+/// @8642541b2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

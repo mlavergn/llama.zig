@@ -1,0 +1,1 @@
+{% set ns = namespace(x=1) %}{% for i in range(128) %}{% set ns.x = [ns.x] %}{% endfor %}{{ ns.x | tojson }}

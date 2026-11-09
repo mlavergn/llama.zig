@@ -53,12 +53,12 @@ extern void ggml_graph_optimize(struct ggml_cgraph * gf);
 #define EXTRA(f) extern size_t f(const struct ggml_tensor *); extern size_t ref_##f(const struct ggml_tensor *);
 EXTRA(ggml_metal_op_mul_mat_id_extra_tpe)
 EXTRA(ggml_metal_op_mul_mat_id_extra_ids)
-EXTRA(ggml_metal_op_mul_mat_id_extra_amax)
 EXTRA(ggml_metal_op_flash_attn_ext_extra_pad)
 EXTRA(ggml_metal_op_flash_attn_ext_extra_blk)
 EXTRA(ggml_metal_op_flash_attn_ext_extra_tmp)
 EXTRA(ggml_metal_op_flash_attn_ext_extra_kv_f16)
 EXTRA(ggml_metal_op_flash_attn_ext_extra_idx)
+EXTRA(ggml_metal_op_argmax_extra)
 #undef EXTRA
 extern bool ggml_metal_op_flash_attn_ext_use_vec(const struct ggml_tensor *);
 extern bool ref_ggml_metal_op_flash_attn_ext_use_vec(const struct ggml_tensor *);
@@ -580,6 +580,50 @@ static void mul_mat_id_extra_diff(ggml_backend_buffer_type_t bt_a, ggml_backend_
     if (by_entries == 0) { printf("  max_tiles never bounded by the entries\n"); fails++; }
 }
 
+/* The two-stage ARGMAX's scratch (v0.8.0): nothing up to N_ARGMAX_CHUNK, a
+ * max and an index per part per row past it, the parts capped at
+ * N_ARGMAX_NPART_MAX. Rows either side of every edge: the size is the only
+ * thing that says the scratch exists, and a kernel writing past a short one
+ * lands in the next tensor. */
+static void argmax_extra_diff(ggml_backend_buffer_type_t bt_a, ggml_backend_buffer_type_t bt_b) {
+    printf("=== Metal ARGMAX scratch: ported vs reference ===\n");
+
+    struct ggml_init_params ip = { 16u * 1024u * 1024u, NULL, true };
+    struct ggml_context * ctx = ggml_init(ip);
+    char lbl[160];
+
+    const int64_t ne00s[] = { 1, 32, 4095, 4096, 4097, 8191, 8192, 8193, 12288, 12289, 65536,
+                              1044480, 1044481, 1048575, 1048576, 1048577, 1052672, 1052673, 2097152, 16777216 };
+    const int64_t ne01s[] = { 1, 2, 3, 7, 512, 100000 };
+    int none = 0, split = 0, capped = 0;
+
+    for (size_t a = 0; a < sizeof ne00s / sizeof *ne00s; a++) {
+        for (size_t b = 0; b < sizeof ne01s / sizeof *ne01s; b++) {
+            const int64_t ne00 = ne00s[a], ne01 = ne01s[b];
+            struct ggml_tensor * x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne00, ne01);
+            struct ggml_tensor * t = ggml_argmax(ctx, x);
+
+            const size_t want = ref_ggml_metal_op_argmax_extra(t);
+            none   += want == 0;
+            split  += want != 0 && want < 8u*256u*(size_t) ne01;
+            capped += want == 8u*256u*(size_t) ne01;
+
+            snprintf(lbl, sizeof lbl, "argmax_extra(ne00=%lld ne01=%lld)", (long long) ne00, (long long) ne01);
+            cmp_sz(lbl, ggml_metal_op_argmax_extra(t), want);
+            snprintf(lbl, sizeof lbl, "argmax get_alloc_size(ne00=%lld ne01=%lld)", (long long) ne00, (long long) ne01);
+            cmp_sz(lbl, ggml_backend_buft_get_alloc_size(bt_a, t), ggml_backend_buft_get_alloc_size(bt_b, t));
+        }
+    }
+
+    ggml_free(ctx);
+
+    /* each arm of the part count must have been reached */
+    checks += 3;
+    if (none == 0)   { printf("  no row took one pass\n"); fails++; }
+    if (split == 0)  { printf("  no row split below the cap\n"); fails++; }
+    if (capped == 0) { printf("  no row reached the part cap\n"); fails++; }
+}
+
 static void fusion_diff(ggml_backend_buffer_type_t buft) {
     printf("=== Metal fusion table: ported vs reference ===\n");
 
@@ -788,8 +832,14 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
      *   sum: src[1] is right, only the src[0] check refuses it
      *   v16 no tokens (a no-output ubatch): since v0.6.0 both checks
      *   accept it, so the packing does not depend on the batch
+     *   v17, v18 the experts, then the weights, a leaf overlapping the
+     *   output (FULL): the memory-range check skips a leaf, so since
+     *   v0.8.0 only the reduction's own check refuses these
+     *   v19, v20 the same, sharing the output's address exactly, which
+     *   that check skips too
+     *   v21 both leaves, clear of the output: FULL must still fuse
      */
-    for (int variant = 0; variant < 17; variant++) {
+    for (int variant = 0; variant < 22; variant++) {
         for (int k = 1; k <= 9; k++) {
             if (variant >= 4 && k != 4 && k != 8) continue;
             struct ggml_context * ctx = fusion_ctx();
@@ -822,10 +872,15 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
 
             /* the expert outputs: a stand-in for mul_mat_id's [n_embd, k, n_tokens] */
             struct ggml_tensor * emb = ggml_new_tensor_3d(ctx, variant == 10 ? GGML_TYPE_F16 : GGML_TYPE_F32, n_embd, n_expert, n_tokens);
-            struct ggml_tensor * experts = ggml_get_rows(ctx, emb, selected);
+            const int leaf_experts = variant == 17 || variant == 19 || variant == 21;
+            const int leaf_weights = variant == 18 || variant == 20 || variant == 21;
+            struct ggml_tensor * experts = leaf_experts ? ggml_new_tensor_3d(ctx, GGML_TYPE_F32, n_embd, k, n_tokens)
+                                                        : ggml_get_rows(ctx, emb, selected);
             if (variant == 10) experts = ggml_cast(ctx, experts, GGML_TYPE_F16);
             ggml_build_forward_expand(gf, experts);
-            struct ggml_tensor * w3 = variant == 7 ? ggml_reshape_3d(ctx, weights, 1, k, n_tokens) : weights;
+            struct ggml_tensor * w3 = variant == 7 ? ggml_reshape_3d(ctx, weights, 1, k, n_tokens)
+                                    : leaf_weights ? ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 1, k, n_tokens)
+                                    : weights;
             struct ggml_tensor * mul = ggml_mul(ctx, experts, variant == 10 ? ggml_cast(ctx, w3, GGML_TYPE_F16) : w3);
             ggml_build_forward_expand(gf, mul);
             struct ggml_tensor * views[16];
@@ -846,9 +901,17 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
             ggml_build_forward_expand(gf, acc);
             if (variant == 12 && k > 1) ggml_build_forward_expand(gf, ggml_scale(ctx, views[1], 2.0f));
             ggml_build_forward_expand(gf, ggml_scale(ctx, acc, 1.5f));
+            /* room after the reduction's output: a tensor moved onto it must
+             * still end inside the buffer, or `ggml_metal_buffer_get_id`
+             * finds no buffer for it and it overlaps nothing */
+            if (variant >= 17) ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 16384);
             fusion_alloc(ctx, buft);
             if (variant == 11) logits->data = (char *) selected->src[0]->data + 4;
             if (variant == 13) experts->data = (char *) acc->data + 4;
+            if (variant == 17) experts->data = (char *) acc->data + 4;
+            if (variant == 18) w3->data = (char *) acc->data + 4;
+            if (variant == 19) experts->data = acc->data;
+            if (variant == 20) w3->data = acc->data;
             if (variant == 14) {
                 mul->data = (char *) acc->data + 4;
                 for (int i = 0; i < k; i++) views[i]->data = (char *) mul->data + views[i]->view_offs;
@@ -1056,8 +1119,8 @@ int main(void) {
     struct ggml_context *ctx = ggml_init(ip);
     if (!ctx) { printf("FAIL: no ggml context\n"); return 1; }
 
-    struct ggml_tensor *probes[64];
-    const char *labels[64];
+    struct ggml_tensor *probes[128];
+    const char *labels[128];
     int n = 0;
 
     /* plain, no extra */
@@ -1178,6 +1241,30 @@ int main(void) {
         }
     }
 
+    {
+        /* TOP_K_MASK (v0.8.0), each optional source on and off: no scratch,
+         * and `supports_op`'s arm is the `.m`'s. */
+        for (int bits = 0; bits < 16; bits++) {
+            const enum ggml_type type = bits & 8 ? GGML_TYPE_F32 : GGML_TYPE_F16;
+            struct ggml_tensor *m = ggml_new_tensor_2d(ctx, type, 256, 4);
+            struct ggml_tensor *k = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 16, 4);
+            struct ggml_tensor *bl = bits & 2 ? ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 4, 64) : NULL;
+            struct ggml_tensor *sc = bits & 1 ? ggml_new_tensor_2d(ctx, GGML_TYPE_F32, bl ? 64 : 256, 4) : NULL;
+            struct ggml_tensor *ex = bits & 4 ? ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 3, 4) : NULL;
+            static char buf[16][48];
+            snprintf(buf[bits], sizeof buf[bits], "TOP_K_MASK %s sc=%d bl=%d ex=%d", ggml_type_name(type),
+                     !!(bits & 1), !!(bits & 2), !!(bits & 4));
+            probes[n] = ggml_top_k_mask(ctx, m, k, sc, bl, ex); labels[n] = buf[bits]; n++;
+        }
+        /* ARGMAX either side of the two-stage threshold, through every vtable answer */
+        const int64_t ne00s[] = { 4096, 4097, 2000000 };
+        for (int i = 0; i < 3; i++) {
+            static char buf[3][48];
+            snprintf(buf[i], sizeof buf[i], "ARGMAX ne00=%lld", (long long) ne00s[i]);
+            probes[n] = ggml_argmax(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne00s[i], 3)); labels[n] = buf[i]; n++;
+        }
+    }
+
     char lbl[128];
     for (int i = 0; i < n; i++) {
         snprintf(lbl, sizeof lbl, "get_alloc_size(%s)", labels[i]);
@@ -1196,7 +1283,9 @@ int main(void) {
         if (probes[i]->op == GGML_OP_MUL_MAT_ID) {
             CMP_EXTRA(ggml_metal_op_mul_mat_id_extra_tpe)
             CMP_EXTRA(ggml_metal_op_mul_mat_id_extra_ids)
-            CMP_EXTRA(ggml_metal_op_mul_mat_id_extra_amax)
+        }
+        if (probes[i]->op == GGML_OP_ARGMAX) {
+            CMP_EXTRA(ggml_metal_op_argmax_extra)
         }
         if (probes[i]->op == GGML_OP_FLASH_ATTN_EXT) {
             CMP_EXTRA(ggml_metal_op_flash_attn_ext_extra_pad)
@@ -1235,6 +1324,7 @@ int main(void) {
 
     mma_predicates_diff();
     mul_mat_id_extra_diff(bt_a, bt_b);
+    argmax_extra_diff(bt_a, bt_b);
 
     backend_a = ggml_backend_dev_init(dev_a, NULL);
     backend_b = ggml_backend_dev_init(dev_b, NULL);

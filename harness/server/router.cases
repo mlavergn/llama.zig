@@ -10,10 +10,17 @@
 # a log timestamp in colour (--log-colors on)
 !mask \x1b\[34m\d+\.\d{2}\.\d{3}\.\d{3}\x1b\[0m
 !env LLAMA_CACHE=$CWD/cache
+# a child reports ready before its loop starts: whether a request gets there
+# before the loop's first idle pass is timing, on either side
+!droplog update_slots: all slots are idle
 # a stream session's byte count includes its timings
 !mask-key total_bytes
 !mask-key started_at
 !mask-key completed_at
+# a loaded child's free device memory, in the event stream's status_change:
+# read live as each side's child starts, and on a unified-memory GPU (the
+# GB10's CUDA0) never the same twice -- Metal's never differed
+!mask-key free
 
 # --- a models dir and a preset file, everything autoloaded
 !server --models-dir $DATA/models --models-preset $DATA/presets.ini -lv 4 --no-jinja
@@ -245,6 +252,25 @@ GET /models
 GET /models
 !noenv
 !env LLAMA_CACHE=$CWD/cache
+
+# --- v0.8.0: a client that hangs up before any byte of its answer: the router
+# stops its client, so the child's request is cancelled, not run to its end
+!server --models-dir $DATA/models -c 8192 -np 1 --no-jinja --metrics
+POST /models/load {"model":"qwen3"}
+!waitfor /models "id":"qwen3"[^{]*\{"value":"loaded"
+!abandon 1
+POST /completion {"model":"qwen3","prompt":"Count:","n_predict":8000,"ignore_eos":true,"temperature":0}
+!waitfor /slots?model=qwen3 "is_processing":false
+# a cancelled task counts what it got to; one run to its end counts 8000
+!waitfor /metrics?model=qwen3 tokens_predicted_total ([1-7]\d{3}|\d{1,3})\b
+# v0.8.0: /v1/realtime through the router: a websocket to the child, here one
+# whose model takes no audio, and the error events it answers by itself
+WS /v1/realtime?model=qwen3 [{"$read":1}]
+WS /v1/realtime?model=nope [{"$read":1}]
+WS /v1/realtime [{"$read":1}]
+POST /models/unload {"model":"qwen3"}
+!waitfor /models "id":"qwen3"[^{]*\{"value":"unloaded"
+WS /v1/realtime?model=qwen3&autoload=0 [{"$read":1}]
 
 # --- routers that cannot start
 !server --models-preset $DATA/bad-key.ini

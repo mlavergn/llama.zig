@@ -380,6 +380,22 @@ fn runResult(j: *const Value) !void {
         x.embedding = embs.items;
         x.n_tokens = try f.value("n_tokens", i32, 0);
         x.res_type = @fromBackingInt(@intCast(try f.value("res_type", c_int, 0)));
+    } else if (std.mem.eql(u8, kind, "realtime")) {
+        r = try result.Result.create(gpa, .realtime);
+        holder = r;
+        const a = r.alloc();
+        r.kind.realtime.text = try a.dupe(u8, try f.value("text", []const u8, ""));
+        r.kind.realtime.audio = if (f.contains("audio")) try (try f.at("audio")).getSlice(a, f32) else &.{};
+        r.kind.realtime.response_done = try f.value("response_done", bool, false);
+        r.kind.realtime.cancelled = try f.value("cancelled", bool, false);
+        r.kind.realtime.n_decoded = try f.value("n_decoded", i32, 0);
+    } else if (std.mem.eql(u8, kind, "tts")) {
+        r = try result.Result.create(gpa, .tts);
+        holder = r;
+        const a = r.alloc();
+        r.kind.tts.audio = try a.dupe(u8, try f.value("audio", []const u8, ""));
+        r.kind.tts.sample_rate = try f.value("sample_rate", i32, 0);
+        r.kind.tts.final = try f.value("final", bool, false);
     } else if (std.mem.eql(u8, kind, "rerank")) {
         r = try result.Result.create(gpa, .rerank);
         holder = r;
@@ -689,6 +705,10 @@ fn runOp(op: []const u8, j: *Value) !void {
         try guarded(opC(j));
     } else if (std.mem.eql(u8, op, "CS")) {
         try guarded(opCS(j));
+    } else if (std.mem.eql(u8, op, "RTOOLS")) {
+        try guarded(opRTOOLS(j));
+    } else if (std.mem.eql(u8, op, "TS")) {
+        try guarded(opTS(j));
     } else if (std.mem.eql(u8, op, "RC")) {
         try guarded(opRC(j));
     } else if (std.mem.eql(u8, op, "AC")) {
@@ -726,6 +746,8 @@ fn runOp(op: []const u8, j: *Value) !void {
         try guarded(opI(j));
     } else if (std.mem.eql(u8, op, "Q")) {
         try guarded(opQ(j));
+    } else if (std.mem.eql(u8, op, "RT")) {
+        try guarded(opRT(j));
     } else if (std.mem.eql(u8, op, "G")) {
         try guarded(opG(j));
     } else if (std.mem.eql(u8, op, "PC")) {
@@ -870,6 +892,28 @@ fn opCS(j: *Value) !void {
     try newStateQuiet(&session, try (try j.at("id")).get(i64));
 }
 
+fn opRTOOLS(j: *Value) !void {
+    try str("conv", try dumpV(&(try sd.convert.responsesTools(ra(), try j.at("tools")))));
+}
+
+/// `TS`: a `/tts` request through `eval_tts_schema`.
+fn opTS(j: *Value) !void {
+    var t = sd.task.Task.initType(.tts);
+    t.tts_inp = sd.task.TtsInp.init();
+    defer t.deinit(gpa);
+    try schema.evalTtsSchema(ra(), &params_base, &t, j);
+    var o = common.Obj.init(ra());
+    try o.put("top_k", t.tts_inp.data.top_k);
+    try o.put("top_p", t.tts_inp.data.top_p);
+    try o.put("seed", t.tts_inp.data.seed);
+    try o.put("n_predict", t.params.n_predict);
+    try o.put("repeat", t.params.sampling.penalty_repeat);
+    try o.put("stream", t.params.stream);
+    try o.put("sampling_seed", t.params.sampling.seed);
+    var v = o.done();
+    try str("tts_params", try dumpV(&v));
+}
+
 fn opRC(j: *Value) !void {
     try str("conv", try dumpV(&(try sd.convert.responsesToChatcmpl(ra(), j))));
 }
@@ -1001,9 +1045,21 @@ fn opI(j: *Value) !void {
 
 fn opQ(j: *Value) !void {
     const m = vocab_models.items[try j.value("v", usize, 0)];
-    var t = try tokens.formatPromptRerank(gpa, m, try vocabAt(j), null, try (try j.at("query")).get([]const u8), try (try j.at("doc")).get([]const u8), init_opt);
+    var qf: std.ArrayList([]u8) = .empty;
+    var df: std.ArrayList([]u8) = .empty;
+    for (0..try j.value("n_qf", usize, 0)) |_| try oaicompat.handleMedia(ra(), &qf, try (try j.at("media")).get([]const u8), "");
+    for (0..try j.value("n_df", usize, 0)) |_| try oaicompat.handleMedia(ra(), &df, try (try j.at("media")).get([]const u8), "");
+    const qs = try ra().alloc([]const u8, qf.items.len);
+    for (qf.items, 0..) |f, i| qs[i] = f;
+    const ds = try ra().alloc([]const u8, df.items.len);
+    for (df.items, 0..) |f, i| ds[i] = f;
+    var t = try tokens.formatPromptRerank(gpa, m, try vocabAt(j), if (try j.value("mtmd", bool, false)) mctx else null, try (try j.at("query")).get([]const u8), try (try j.at("doc")).get([]const u8), qs, ds, init_opt);
     defer t.deinit();
     try showTokens("rerank_prompt", &t);
+}
+
+fn opRT(j: *Value) !void {
+    try str("rerank_template", try tokens.formatRerankTemplate(ra(), try (try j.at("tmpl")).get([]const u8), try (try j.at("query")).get([]const u8), try (try j.at("doc")).get([]const u8)));
 }
 
 fn opG(j: *Value) !void {
@@ -1205,7 +1261,9 @@ pub fn main(init: std.process.Init) !u8 {
 
     for (argv[5..]) |p| {
         var mp = c.llama_model_default_params();
-        mp.vocab_only = true;
+        // a decision model's labels and classes are read past where a vocab-only load stops
+        mp.vocab_only = !std.mem.endsWith(u8, p, "-full.gguf");
+        mp.n_gpu_layers = 0;
         const m = c.llama_model_load_from_file(p.ptr, mp) orelse {
             std.debug.print("cannot load {s}\n", .{p});
             return 2;
@@ -1314,9 +1372,10 @@ fn chatLog(level: chat.msg.Level, text: []const u8) void {
 
 fn showDecisionTask(t: *const task.Task) !void {
     const d = &t.decision;
-    try linef("task {d} labels{s} markers{s} column{d} pointer{d} first{d} order{s} n_scores{d} embd{d} logits{d}", .{
-        t.id,         try toksStr(d.labels.items), try toksStr(d.markers.items), d.column,                   d.pointer,
-        d.posFirst(), try toksStr(d.order.items),  d.n_scores,                   @intFromBool(t.needEmbd()), @intFromBool(t.needLogits()),
+    try linef("task {d} labels{s} markers{s} column{d} pointer{d} first{d} order{s} n_scores{d} embd{d} logits{d} no_batching{d} pooled{d}", .{
+        t.id,                        try toksStr(d.labels.items), try toksStr(d.markers.items), d.column,                   d.pointer,
+        d.posFirst(),                try toksStr(d.order.items),  d.n_scores,                   @intFromBool(t.needEmbd()), @intFromBool(t.needLogits()),
+        @intFromBool(d.no_batching), @intFromBool(d.pooled),
     });
     try showTokens("prompt", &t.tokens);
 }
@@ -1332,7 +1391,7 @@ fn opD(j: *Value) !void {
     var dc: decision.DecisionContext = .{};
     defer dc.deinit();
     try dc.init(gpa, model);
-    try linef("flags share{d} joint{d} images{d} type{d}", .{ @intFromBool(dc.canSharePrompt()), @intFromBool(dc.isJoint()), @intFromBool(dc.canUseImages()), @backingInt(dc.type) });
+    try linef("flags share{d} joint{d} images{d} generate{d} lfm3{d} type{d}", .{ @intFromBool(dc.canSharePrompt()), @intFromBool(dc.isJoint()), @intFromBool(dc.canUseImages()), @intFromBool(dc.canGenerate()), @intFromBool(dc.isLfm3D1()), @backingInt(dc.type) });
     if (dc.type == .none) return;
 
     const body = try j.at("body");
@@ -1345,7 +1404,8 @@ fn opD(j: *Value) !void {
         try linef("variants {d}", .{dc.nVariants(q)});
     }
     var files: std.ArrayList([]u8) = .empty;
-    const state = try dc.parseState(a, body, &files);
+    const parsed_state = try dc.parseState(a, body, &files);
+    const state = try dc.prepareState(a, &parsed_state);
     try str("state", try dumpV(&state));
     for (files.items) |f| try linef("file {d} {d}", .{ f.len, fnv(f) });
     // the model is vocab-only: a request with files would tokenize them through mtmd
@@ -1456,7 +1516,7 @@ fn opDR(j: *Value) !void {
 /// `MA`: the architecture object of GET /models.
 fn opMA(j: *Value) !void {
     const ty: tools.common.DecisionType = @fromBackingInt(@intCast(try j.value("type", c_int, 0)));
-    const out_mod = common.serverModelOutputModalities(ty);
+    const out_mod = common.serverModelOutputModalities(ty, try j.value("chat", bool, true), try j.value("tts", bool, false));
     var v = try common.serverModelArchitectureJson(ra(), try j.value("image", bool, false), try j.value("audio", bool, false), try j.value("video", bool, false), out_mod);
     try str("arch", try dumpV(&v));
 }

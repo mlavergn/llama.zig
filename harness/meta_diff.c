@@ -596,6 +596,10 @@ static void graph_misc(graph_t * g, weights_t * w) {
     output(g, ggml_mul(g->ctx, W(w, "ax2_t"), ggml_reshape_3d(g->ctx, bc, 8, 4, 1)), "ax2_bcast");
     output(g, ggml_sum_rows(g->ctx, ggml_scale(g->ctx, W(w, "ax2_t"), 2.0f)), "ax2_sum");
     output(g, ggml_mean(g->ctx, x), "mean");
+    /* v0.8.0: mirrored in, mirrored out, by `handle_generic` with
+     * `scalar_only` */
+    output(g, ggml_top_k_mask(g->ctx, input(g, GGML_TYPE_F32, 2, 16, 4, "tk_mask"), input(g, GGML_TYPE_I32, 2, 3, 4, "tk"),
+                              NULL, NULL, NULL), "top_k_mask");
 }
 
 /* A weight with two segments as a mul_mat source. The reference's
@@ -744,6 +748,8 @@ static void fill_inputs(graph_t * g) {
         uint8_t * d = malloc(nb);
         if (strcmp(t->name, "ids") == 0) {
             for (int64_t k = 0; k < ggml_nelements(t); k++) ((int32_t *) d)[k] = (int32_t) ((k * 3 + 1) % 4);
+        } else if (strcmp(t->name, "tk") == 0) {
+            for (int64_t k = 0; k < ggml_nelements(t); k++) ((int32_t *) d)[k] = (int32_t) ((k * 5 + 1) % 18) - 1;
         } else if (strcmp(t->name, "pos") == 0) {
             for (int64_t k = 0; k < ggml_nelements(t); k++) ((int32_t *) d)[k] = (int32_t) k + 2;
         } else if (strcmp(t->name, "idx") == 0) {

@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/add-id.cu` at v0.7.0
-//! (`620d2225c`). The kernel, `add_id_kernel`, stays CUDA.
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/add-id.cu` at v0.8.0
+//! (`8642541b2`). The kernel, `add_id_kernel`, stays CUDA.
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -14,7 +14,7 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `ggml_cuda_op_add_id` (add-id.cu:28 @620d2225c), which launches with
+/// Ports `ggml_cuda_op_add_id` (add-id.cu:28 @8642541b2), which launches with
 /// `<<<>>>`.
 pub fn opAddId(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);

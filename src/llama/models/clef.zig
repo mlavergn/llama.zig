@@ -12,14 +12,14 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/clef.cpp` at v0.7.0 (`620d2225c`):
+//! Ported from `llama.cpp/src/models/clef.cpp` at v0.8.0 (`8642541b2`):
 //! `llama_model_clef`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, `clef_spans` and `clef_get_spans`, the graph inputs
 //! `input_decision` and `llm_graph_input_attn_clef`, and its `graph` with
 //! `build_attn_inp_causal`, `build_layer_attn`, `build_layer_attn_linear`,
 //! `build_head`, `build_head_norm`, `build_head_attn` and `build_head_ffn`;
-//! and from `llama.cpp/src/models/models.h` at v0.7.0, `llama_model_clef`'s
-//! members; and from `llama.cpp/src/llama-ext.h` at v0.7.0,
+//! and from `llama.cpp/src/models/models.h` at v0.8.0, `llama_model_clef`'s
+//! members; and from `llama.cpp/src/llama-ext.h` at v0.8.0,
 //! `llama_decision_order`.
 
 const std = @import("std");
@@ -44,7 +44,7 @@ fn oom() noreturn {
     impl.abort("models/clef.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_decision_order` (llama-ext.h:115 @620d2225c): what the
+/// Ports `llama_decision_order` (llama-ext.h:140 @8642541b2): what the
 /// decision head reads an entry as.
 const decision_order_none: i32 = 0;
 const decision_order_question_noul: i32 = 1;
@@ -52,10 +52,10 @@ const decision_order_question_choice: i32 = 2;
 const decision_order_question_score: i32 = 3;
 const decision_order_option: i32 = 4;
 
-/// `LLAMA_MAX_LAYERS` (llama-hparams.h:11 @620d2225c).
+/// `LLAMA_MAX_LAYERS` (llama-hparams.h:11 @8642541b2).
 const max_layers: u32 = 512;
 
-/// Mirrors `llama_model_clef`'s `attn` (src/models/models.h:2479 @620d2225c):
+/// Mirrors `llama_model_clef`'s `attn` (src/models/models.h:2668 @8642541b2):
 /// one attention of the head, every projection with a bias.
 pub const Attn = struct {
     wq: ?*Tensor = null,
@@ -68,15 +68,15 @@ pub const Attn = struct {
     bo: ?*Tensor = null,
 };
 
-/// Mirrors `llama_model_clef`'s `norm` (src/models/models.h:2490 @620d2225c): a
+/// Mirrors `llama_model_clef`'s `norm` (src/models/models.h:2679 @8642541b2): a
 /// LayerNorm with a bias.
 pub const Norm = struct {
     w: ?*Tensor = null,
     b: ?*Tensor = null,
 };
 
-/// Mirrors `llama_model_clef`'s `head_layer` (src/models/models.h:2496
-/// @620d2225c): one block of the head. The first `n_layer_routing` blocks
+/// Mirrors `llama_model_clef`'s `head_layer` (src/models/models.h:2685
+/// @8642541b2): one block of the head. The first `n_layer_routing` blocks
 /// have no self-attention, and only they have `cross_norm_kv`.
 pub const HeadLayer = struct {
     self_norm: Norm = .{},
@@ -91,8 +91,8 @@ pub const HeadLayer = struct {
     ffn_down_b: ?*Tensor = null,
 };
 
-/// The members `llama_model_clef` adds to its base (src/models/models.h:2474
-/// @620d2225c), kept on the `Model` as `clef`, which only this file reads
+/// The members `llama_model_clef` adds to its base (src/models/models.h:2663
+/// @8642541b2), kept on the `Model` as `clef`, which only this file reads
 /// or writes.
 pub const State = struct {
     n_layer_routing: u32 = 0,
@@ -129,7 +129,7 @@ pub const State = struct {
     }
 };
 
-/// Ports `llama_model_clef`'s `load_arch_hparams` (models/clef.cpp:7 @620d2225c).
+/// Ports `llama_model_clef`'s `load_arch_hparams` (models/clef.cpp:8 @8642541b2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     try qwen35.loadArchHparams(self, ml, exc);
 
@@ -170,7 +170,7 @@ fn loadAttn(self: *Model, a: *Attn, q: arch.Tensor, k: arch.Tensor, v: arch.Tens
     a.bo = try self.createTensor(.{ .tensor = o, .suffix = "bias", .bid = il }, &.{n_embd_h}, 0, exc);
 }
 
-/// Ports `llama_model_clef`'s `load_arch_tensors` (models/clef.cpp:25 @620d2225c).
+/// Ports `llama_model_clef`'s `load_arch_tensors` (models/clef.cpp:26 @8642541b2).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     try qwen35.loadArchTensors(self, ml, exc);
 
@@ -238,7 +238,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     st.scorer_out_b = try self.createTensor(.{ .tensor = .decision_scorer_out, .suffix = "bias" }, &.{1}, 0, exc);
 }
 
-/// Ports `llama_model_clef`'s `build_arch_graph` (models/clef.cpp:100 @620d2225c).
+/// Ports `llama_model_clef`'s `build_arch_graph` (models/clef.cpp:101 @8642541b2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
@@ -246,7 +246,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 // -----------------------------------------------------------------------------
 // The spans the head reads
 
-/// Ports `clef_spans` (models/clef.cpp:105 @620d2225c): the spans the head
+/// Ports `clef_spans` (models/clef.cpp:106 @8642541b2): the spans the head
 /// reads, `[start, end)` in ubatch token indices.
 const Spans = struct {
     const Question = struct {
@@ -271,7 +271,7 @@ const Spans = struct {
     }
 };
 
-/// Ports `clef_get_spans` (models/clef.cpp:123 @620d2225c): the spans of the
+/// Ports `clef_get_spans` (models/clef.cpp:124 @8642541b2): the spans of the
 /// batch's decision order (see `llama_batch_ext_set_decision_order`). A
 /// batch with no usable order gets one empty question with one empty
 /// option.
@@ -326,8 +326,8 @@ fn getSpans(ubatch: *const Ubatch) Spans {
     return res;
 }
 
-/// Ports `input_decision` (models/clef.cpp:176
-/// @620d2225c): the pooling matrices and indices computed from the spans.
+/// Ports `input_decision` (models/clef.cpp:177
+/// @8642541b2): the pooling matrices and indices computed from the spans.
 const InpDecision = struct {
     /// I32 `[n_tokens]`.
     tokens: ?*Tensor = null,
@@ -349,14 +349,14 @@ const InpDecision = struct {
     n_questions: usize,
     n_options: usize,
 
-    /// Ports `input_decision`'s constructor (models/clef.cpp:178 @620d2225c).
+    /// Ports `input_decision`'s constructor (models/clef.cpp:179 @8642541b2).
     fn init(ubatch: *const Ubatch) InpDecision {
         var spans = getSpans(ubatch);
         defer spans.deinit();
         return .{ .n_tokens = ubatch.n_tokens, .n_questions = spans.questions.items.len, .n_options = spans.options.items.len };
     }
 
-    /// Ports `input_decision`'s `set_input` (models/clef.cpp:184 @620d2225c).
+    /// Ports `input_decision`'s `set_input` (models/clef.cpp:185 @8642541b2).
     pub fn setInput(self: *InpDecision, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         const n_tokens: usize = @intCast(self.n_tokens);
@@ -372,7 +372,7 @@ const InpDecision = struct {
 
         var spans = getSpans(ubatch);
         defer spans.deinit();
-        impl.assert(spans.questions.items.len == nq and spans.options.items.len == no, "models/clef.cpp", 190, "spans.questions.size() == n_questions && spans.options.size() == n_options");
+        impl.assert(spans.questions.items.len == nq and spans.options.items.len == no, "models/clef.cpp", 191, "spans.questions.size() == n_questions && spans.options.size() == n_options");
 
         // The scores are NaN if the batch has a decision order that cannot be used.
         const status_data: f32 = if (spans.valid or ubatch.decision_order == null) 0.0 else std.math.nan(f32);
@@ -415,7 +415,7 @@ const InpDecision = struct {
         c.ggml_backend_tensor_set(self.option_mask, mask.ptr, 0, c.ggml_nbytes(self.option_mask));
     }
 
-    /// Ports `input_decision`'s `can_reuse` (models/clef.cpp:225 @620d2225c):
+    /// Ports `input_decision`'s `can_reuse` (models/clef.cpp:226 @8642541b2):
     /// `set_input` computes the values again, so only the shapes must match.
     pub fn canReuse(self: *InpDecision, params: *const graph.Params) bool {
         var spans = getSpans(&params.ubatch);
@@ -424,7 +424,7 @@ const InpDecision = struct {
     }
 };
 
-/// Ports `llm_graph_input_attn_clef` (models/clef.cpp:318 @620d2225c): a
+/// Ports `llm_graph_input_attn_clef` (models/clef.cpp:319 @8642541b2): a
 /// causal mask by batch order, since the tokens of an image share one
 /// position. The C++ derives from `llm_graph_input_attn_no_cache` and
 /// overrides `set_input`; here the base is a member the attention reads.
@@ -441,13 +441,13 @@ const InpAttnClef = struct {
         }
     }
 
-    /// Ports `llm_graph_input_attn_clef`'s `set_input` (models/clef.cpp:322
-    /// @620d2225c): the mask is `n_kv` wide, padded past the batch.
+    /// Ports `llm_graph_input_attn_clef`'s `set_input` (models/clef.cpp:323
+    /// @8642541b2): the mask is `n_kv` wide, padded past the batch.
     pub fn setInput(self: *InpAttnClef, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         const m = self.base.self_kq_mask.?;
         const n_kv: usize = @intCast(m.ne[0]);
-        impl.assert(c.ggml_backend_buffer_is_host(m.buffer), "models/clef.cpp", 335, "ggml_backend_buffer_is_host(self_kq_mask->buffer)");
+        impl.assert(c.ggml_backend_buffer_is_host(m.buffer), "models/clef.cpp", 336, "ggml_backend_buffer_is_host(self_kq_mask->buffer)");
         if (m.type == c.GGML_TYPE_F16) {
             fillMask(u16, @ptrCast(@alignCast(m.data)), ubatch, n_kv, c.ggml_fp32_to_fp16(0.0), c.ggml_fp32_to_fp16(-std.math.inf(f32)));
         } else {
@@ -460,7 +460,7 @@ const InpAttnClef = struct {
 // The graph
 
 /// Ports `llama_model_clef::graph`'s `build_attn_inp_causal`
-/// (models/clef.cpp:345 @620d2225c): `build_attn_inp_no_cache` with a
+/// (models/clef.cpp:346 @8642541b2): `build_attn_inp_no_cache` with a
 /// causal mask even when the batch takes the encoder path.
 fn buildAttnInpCausal(b: *const graph.Builder) *graph.InpAttnNoCache {
     const inp = allocator.create(InpAttnClef) catch oom();
@@ -480,7 +480,7 @@ fn buildAttnInpCausal(b: *const graph.Builder) *graph.InpAttnNoCache {
 }
 
 /// Ports the constructor of `llama_model_clef`'s `graph`
-/// (models/clef.cpp:245 @620d2225c): the backbone is
+/// (models/clef.cpp:246 @8642541b2): the backbone is
 /// `llama_model_qwen35::graph`'s without the memory module, and the head is
 /// always evaluated.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
@@ -488,7 +488,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/clef.cpp", 249, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/clef.cpp", 250, "n_embd_head == hparams.n_embd_head_k()");
 
     var sections: [4]c_int = undefined;
     @memcpy(&sections, hp.rope_sections[0..4]);
@@ -550,8 +550,8 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     c.ggml_build_forward_expand(b.gf, cur);
 }
 
-/// Ports `llama_model_clef::graph`'s `build_layer_attn` (models/clef.cpp:359
-/// @620d2225c): Qwen3.5's gated full attention, over the batch alone.
+/// Ports `llama_model_clef::graph`'s `build_layer_attn` (models/clef.cpp:360
+/// @8642541b2): Qwen3.5's gated full attention, over the batch alone.
 fn buildLayerAttn(model: *const Model, b: *const graph.Builder, inp: *graph.InpAttnNoCache, cur_: *Tensor, inp_pos: *Tensor, sections: *[4]c_int, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const layer = &model.layers[@intCast(il)];
@@ -600,7 +600,7 @@ fn buildLayerAttn(model: *const Model, b: *const graph.Builder, inp: *graph.InpA
 }
 
 /// Ports `llama_model_clef::graph`'s `build_layer_attn_linear`
-/// (models/clef.cpp:421 @620d2225c): the gated delta net over the whole
+/// (models/clef.cpp:422 @8642541b2): the gated delta net over the whole
 /// batch, its conv and recurrent states starting from zero and not kept.
 fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, cur_: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -654,7 +654,7 @@ fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, cur_: *Ten
 
     // An explicit repeat only without the fused GDN.
     if (num_k_heads != num_v_heads and (!b.cparams.fused_gdn_ar or !b.cparams.fused_gdn_ch)) {
-        impl.assert(@rem(num_v_heads, num_k_heads) == 0, "models/clef.cpp", 476, "num_v_heads % num_k_heads == 0");
+        impl.assert(@rem(num_v_heads, num_k_heads) == 0, "models/clef.cpp", 477, "num_v_heads % num_k_heads == 0");
         q_conv = c.ggml_repeat_4d(ctx, q_conv, head_k_dim, num_v_heads, n_tokens, n_seqs);
         k_conv = c.ggml_repeat_4d(ctx, k_conv, head_k_dim, num_v_heads, n_tokens, n_seqs);
     }
@@ -677,14 +677,14 @@ fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, cur_: *Ten
     return c.ggml_reshape_2d(ctx, cur, b.n_embd, n_tokens);
 }
 
-/// Ports `llama_model_clef::graph`'s `build_head_norm` (models/clef.cpp:499
-/// @620d2225c).
+/// Ports `llama_model_clef::graph`'s `build_head_norm` (models/clef.cpp:500
+/// @8642541b2).
 fn buildHeadNorm(b: *const graph.Builder, cur: *Tensor, n: *const Norm) *Tensor {
     return b.buildNorm(cur, n.w, n.b, .norm, -1);
 }
 
-/// Ports `llama_model_clef::graph`'s `build_head_attn` (models/clef.cpp:504
-/// @620d2225c): multi-head attention of `q` `[n_embd_h, n_q]` over `kv`
+/// Ports `llama_model_clef::graph`'s `build_head_attn` (models/clef.cpp:505
+/// @8642541b2): multi-head attention of `q` `[n_embd_h, n_q]` over `kv`
 /// `[n_embd_h, n_kv]`, without a mask.
 fn buildHeadAttn(model: *const Model, b: *const graph.Builder, q: *Tensor, kv: *Tensor, a: *const Attn) *Tensor {
     const ctx = b.ctx0;
@@ -712,8 +712,8 @@ fn buildHeadAttn(model: *const Model, b: *const graph.Builder, q: *Tensor, kv: *
     return c.ggml_add(ctx, c.ggml_mul_mat(ctx, a.wo, cur), a.bo);
 }
 
-/// Ports `llama_model_clef::graph`'s `build_head_ffn` (models/clef.cpp:529
-/// @620d2225c).
+/// Ports `llama_model_clef::graph`'s `build_head_ffn` (models/clef.cpp:530
+/// @8642541b2).
 fn buildHeadFfn(b: *const graph.Builder, cur_: *Tensor, layer: *const HeadLayer) *Tensor {
     const ctx = b.ctx0;
     var cur = buildHeadNorm(b, cur_, &layer.ffn_norm);
@@ -722,8 +722,8 @@ fn buildHeadFfn(b: *const graph.Builder, cur_: *Tensor, layer: *const HeadLayer)
     return c.ggml_add(ctx, c.ggml_mul_mat(ctx, layer.ffn_down, cur), layer.ffn_down_b);
 }
 
-/// Ports `llama_model_clef::graph`'s `build_head` (models/clef.cpp:537
-/// @620d2225c), `JointSchemaHead` in the model repository's
+/// Ports `llama_model_clef::graph`'s `build_head` (models/clef.cpp:538
+/// @8642541b2), `JointSchemaHead` in the model repository's
 /// `joint_schema_model.py`: `hidden` `[n_embd, n_tokens]` in, one score
 /// per option `[1, n_options]` out.
 fn buildHead(model: *const Model, b: *const graph.Builder, hidden_: *Tensor, inp: *InpDecision) *Tensor {

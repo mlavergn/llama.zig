@@ -1,0 +1,4 @@
+#!/bin/bash
+# The rerank cases use the decision models' media and the rerank template
+# decision.setup writes: scripts/server-diff rerank.
+exec "$(dirname "$0")/decision.setup"

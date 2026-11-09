@@ -158,16 +158,27 @@ void describe(const common_chat_schema & s, int depth, std::string & out) {
     out.append((size_t) depth, ' ');
     out += common_chat_schema::kind_name(s.kind());
     char buf[128];
-    const auto types = s.value_types();
-    std::string ts;
-    for (int t = common_chat_schema::TYPE_NULL; t <= common_chat_schema::TYPE_OBJECT; t++) {
-        if (types.has((common_chat_schema::value_type) t)) {
-            ts += common_chat_schema::type_name((common_chat_schema::value_type) t);
-            ts += ',';
+    // a $ref chain past COMMON_RECURSIVE_LIMIT throws out of both questions
+    try {
+        const auto types = s.value_types();
+        std::string ts;
+        for (int t = common_chat_schema::TYPE_NULL; t <= common_chat_schema::TYPE_OBJECT; t++) {
+            if (types.has((common_chat_schema::value_type) t)) {
+                ts += common_chat_schema::type_name((common_chat_schema::value_type) t);
+                ts += ',';
+            }
         }
+        snprintf(buf, sizeof buf, " types=%s empty=%d", ts.c_str(), (int) types.empty());
+        out += buf;
+    } catch (const std::invalid_argument & e) {
+        out += std::string(" types!") + e.what();
     }
-    snprintf(buf, sizeof buf, " types=%s empty=%d str=%d", ts.c_str(), (int) types.empty(), (int) s.may_be_string());
-    out += buf;
+    try {
+        snprintf(buf, sizeof buf, " str=%d", (int) s.may_be_string());
+        out += buf;
+    } catch (const std::invalid_argument & e) {
+        out += std::string(" str!") + e.what();
+    }
     switch (s.kind()) {
         case common_chat_schema::KIND_REF: {
             const auto & r = static_cast<const common_chat_schema_ref &>(s);

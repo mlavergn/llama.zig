@@ -4,6 +4,9 @@
 # A multipart body is re-encoded under a boundary drawn from a random
 # device, so the boundary is masked.
 !mask ----llama-cpp-proxy-[0-9a-z]{16}
+# v0.8.0: a finished response's destructor stops the client, which can reach
+# it before its thread has returned: upstream against itself logs this or not
+!droplog http client error: Connection handling canceled
 !server -m $QWEN3 -c 512 -np 1 --no-jinja
 GET /cors-proxy?url=http://127.0.0.1:$TPORT/echo
 POST /cors-proxy?url=http://127.0.0.1:$TPORT/echo {}

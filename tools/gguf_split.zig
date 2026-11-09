@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/gguf-split/gguf-split.cpp` at v0.7.0
-//! (`620d2225c`). Each declaration names the C++ it replaces and the line it
+//! Ported from `llama.cpp/tools/gguf-split/gguf-split.cpp` at v0.8.0
+//! (`8642541b2`). Each declaration names the C++ it replaces and the line it
 //! began at.
 //!
 //! # Upstream's output, byte for byte
@@ -32,16 +32,16 @@ comptime {
     _ = @import("llama");
 }
 
-/// `PATH_MAX`, or `MAX_PATH` on Windows (gguf-split.cpp:24 @620d2225c).
+/// `PATH_MAX`, or `MAX_PATH` on Windows (gguf-split.cpp:24 @8642541b2).
 const path_max = if (builtin.os.tag == .windows) 260 else if (builtin.os.tag.isDarwin()) 1024 else 4096;
 
-/// Mirrors `split_operation` (gguf-split.cpp:29 @620d2225c).
+/// Mirrors `split_operation` (gguf-split.cpp:29 @8642541b2).
 const Operation = enum { none, split, merge };
 
-/// Mirrors `split_mode` (gguf-split.cpp:35 @620d2225c).
+/// Mirrors `split_mode` (gguf-split.cpp:35 @8642541b2).
 const Mode = enum { none, tensor, size };
 
-/// Mirrors `split_params` (gguf-split.cpp:41 @620d2225c).
+/// Mirrors `split_params` (gguf-split.cpp:41 @8642541b2).
 const Params = struct {
     operation: Operation = .none,
     mode: Mode = .none,
@@ -54,7 +54,7 @@ const Params = struct {
     delete_splits: bool = false,
 };
 
-/// Ports `split_print_usage` (gguf-split.cpp:53 @620d2225c).
+/// Ports `split_print_usage` (gguf-split.cpp:53 @8642541b2).
 fn printUsage(executable: [*:0]const u8) void {
     const default_params: Params = .{};
     io.printf("\n", .{});
@@ -77,7 +77,7 @@ fn printUsage(executable: [*:0]const u8) void {
 
 /// What the C++ throws as `std::invalid_argument`: the message is printed,
 /// then the usage, and the process exits 1, as `split_params_parse`
-/// (gguf-split.cpp:183 @620d2225c) does.
+/// (gguf-split.cpp:183 @8642541b2) does.
 const ParseError = struct {
     buf: [512]u8 = undefined,
     len: usize = 0,
@@ -103,7 +103,7 @@ fn scanInt(s: []const u8) ?c_int {
     return @truncate(v);
 }
 
-/// Ports `split_str_to_n_bytes` (gguf-split.cpp:74 @620d2225c).
+/// Ports `split_str_to_n_bytes` (gguf-split.cpp:74 @8642541b2).
 ///
 /// Where `sscanf` converts nothing the C reads `n` uninitialised; here that
 /// is reported as a non-positive size, the C's next check.
@@ -125,7 +125,7 @@ fn strToNBytes(err: *ParseError, str: []const u8) error{Invalid}!usize {
     return n_bytes;
 }
 
-/// Ports `split_params_parse_ex` (gguf-split.cpp:92 @620d2225c).
+/// Ports `split_params_parse_ex` (gguf-split.cpp:92 @8642541b2).
 fn parseEx(argv: []const [:0]const u8, params: *Params, err: *ParseError, arena: std.mem.Allocator) error{ Invalid, OutOfMemory }!void {
     var arg: []u8 = &.{};
     var invalid_param = false;
@@ -205,7 +205,7 @@ fn parseEx(argv: []const [:0]const u8, params: *Params, err: *ParseError, arena:
     params.output = argv[arg_idx + 1];
 }
 
-/// Ports `split_params_parse` (gguf-split.cpp:183 @620d2225c).
+/// Ports `split_params_parse` (gguf-split.cpp:183 @8642541b2).
 fn parse(argv: []const [:0]const u8, params: *Params, arena: std.mem.Allocator) !void {
     var err: ParseError = .{};
     parseEx(argv, params, &err, arena) catch |e| switch (e) {
@@ -243,12 +243,13 @@ fn writeAll(f: *anyopaque, bytes: []const u8) void {
     }
 }
 
-/// `f_in.read(..)`: a short read leaves the rest of the buffer as it was.
-fn readInto(f: *anyopaque, buf: []u8) void {
-    _ = fread(buf.ptr, 1, buf.len, f);
+/// `f_in.read(..)` and the `!f_in` after it: false on a short read, which
+/// leaves the rest of the buffer as it was.
+fn readInto(f: *anyopaque, buf: []u8) bool {
+    return fread(buf.ptr, 1, buf.len, f) == buf.len;
 }
 
-/// Ports `zeros` (gguf-split.cpp:196 @620d2225c).
+/// Ports `zeros` (gguf-split.cpp:196 @8642541b2).
 fn zeros(f: *anyopaque, n: usize) void {
     const zero = [1]u8{0};
     for (0..n) |_| writeAll(f, &zero);
@@ -268,7 +269,7 @@ fn pad(x: usize) usize {
 // -----------------------------------------------------------------------------
 // Split
 
-/// Ports `split_strategy` (gguf-split.cpp:203 @620d2225c).
+/// Ports `split_strategy` (gguf-split.cpp:203 @8642541b2).
 const Strategy = struct {
     params: Params,
     f_input: *anyopaque,
@@ -327,7 +328,7 @@ const Strategy = struct {
         return self;
     }
 
-    /// The C++ constructor's `new_ctx_out` lambda (gguf-split.cpp:229 @620d2225c).
+    /// The C++ constructor's `new_ctx_out` lambda (gguf-split.cpp:229 @8642541b2).
     fn newCtxOut(self: *Strategy, i_split: *c_int, ctx_out: *?*c.gguf_context, allow_no_tensors: bool) !void {
         i_split.* += 1;
         if (ctx_out.*) |prev| {
@@ -352,7 +353,7 @@ const Strategy = struct {
         self.read_buf.deinit(self.allocator);
     }
 
-    /// Ports `should_split` (gguf-split.cpp:287 @620d2225c).
+    /// Ports `should_split` (gguf-split.cpp:287 @8642541b2).
     fn shouldSplit(self: *const Strategy, i_tensor: c_int, next_size: usize) bool {
         return switch (self.params.mode) {
             // split by max size per file
@@ -364,7 +365,7 @@ const Strategy = struct {
         };
     }
 
-    /// Ports `print_info` (gguf-split.cpp:299 @620d2225c).
+    /// Ports `print_info` (gguf-split.cpp:299 @8642541b2).
     fn printInfo(self: *const Strategy) void {
         io.printf("n_split: %zu\n", .{self.ctx_outs.items.len});
         var i_split: c_int = 0;
@@ -382,7 +383,7 @@ const Strategy = struct {
         }
     }
 
-    /// Ports `write` (gguf-split.cpp:315 @620d2225c).
+    /// Ports `write` (gguf-split.cpp:315 @8642541b2).
     fn write(self: *Strategy) !void {
         var i_split: c_int = 0;
         const n_split: c_int = @intCast(self.ctx_outs.items.len);
@@ -430,16 +431,19 @@ const Strategy = struct {
         }
     }
 
-    /// Ports `copy_file_to_file` (gguf-split.cpp:358 @620d2225c).
+    /// Ports `copy_file_to_file` (gguf-split.cpp:358 @8642541b2).
     fn copyFileToFile(self: *Strategy, f_out: *anyopaque, in_offset: usize, len: usize) !void {
         if (self.read_buf.items.len < len) try self.read_buf.resize(self.allocator, len);
         seek(self.f_input, in_offset);
-        readInto(self.f_input, self.read_buf.items[0..len]);
+        if (!readInto(self.f_input, self.read_buf.items[0..len])) {
+            io.eprintf("%s: failed to read %zu bytes at offset %zu, input file may be truncated\n", .{ "copy_file_to_file", len, in_offset });
+            common.cExit(1);
+        }
         writeAll(f_out, self.read_buf.items[0..len]);
     }
 };
 
-/// Ports `gguf_split` (gguf-split.cpp:369 @620d2225c).
+/// Ports `gguf_split` (gguf-split.cpp:373 @8642541b2).
 fn ggufSplit(allocator: std.mem.Allocator, split_params: Params) !void {
     var ctx_meta: ?*c.ggml_context = null;
 
@@ -473,7 +477,7 @@ fn ggufSplit(allocator: std.mem.Allocator, split_params: Params) !void {
     io.eprintf("%s: %d gguf split written with a total of %d tensors.\n", .{ "gguf_split", n_split, strategy.n_tensors });
 }
 
-/// Ports `gguf_merge` (gguf-split.cpp:407 @620d2225c).
+/// Ports `gguf_merge` (gguf-split.cpp:411 @8642541b2).
 fn ggufMerge(allocator: std.mem.Allocator, split_params: Params) !void {
     const func = "gguf_merge";
     io.eprintf("%s: %s -> %s\n", .{ func, split_params.input.ptr, split_params.output.ptr });
@@ -608,7 +612,10 @@ fn ggufMerge(allocator: std.mem.Allocator, split_params: Params) !void {
 
             const offset = c.gguf_get_data_offset(ctx_gguf) + c.gguf_get_tensor_offset(ctx_gguf, i_tensor);
             seek(f_input, offset);
-            readInto(f_input, read_data.items[0..n_bytes]);
+            if (!readInto(f_input, read_data.items[0..n_bytes])) {
+                io.eprintf("%s: failed to read %zu bytes at offset %zu, input file may be truncated\n", .{ func, n_bytes, offset });
+                common.cExit(1);
+            }
             if (!split_params.dry_run) {
                 // write tensor data + padding
                 writeAll(fout.?, read_data.items[0..n_bytes]);
@@ -648,7 +655,7 @@ fn ggufMerge(allocator: std.mem.Allocator, split_params: Params) !void {
     if (merge_error) common.cExit(1);
 }
 
-/// Ports `main` (gguf-split.cpp:593 @620d2225c).
+/// Ports `main` (gguf-split.cpp:601 @8642541b2).
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);

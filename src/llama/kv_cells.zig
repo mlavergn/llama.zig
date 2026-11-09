@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-kv-cells.h` at v0.7.0 (`620d2225c`):
+//! Ported from `llama.cpp/src/llama-kv-cells.h` at v0.8.0 (`8642541b2`):
 //! `llama_kv_cell_ext` and `llama_kv_cells`.
 //!
 //! # The ordered containers
@@ -22,7 +22,7 @@ const impl = @import("impl.zig");
 
 const allocator = impl.allocator;
 
-/// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @620d2225c).
+/// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @8642541b2).
 pub const max_seq = 256;
 
 /// `std::bitset<LLAMA_MAX_SEQ>`: which sequences hold a cell.
@@ -32,7 +32,7 @@ fn oom() noreturn {
     impl.abort("llama-kv-cells.h", 0, "out of memory");
 }
 
-/// Mirrors `llama_kv_cell_ext` (llama-kv-cells.h:13 @620d2225c): the 2D
+/// Mirrors `llama_kv_cell_ext` (llama-kv-cells.h:13 @8642541b2): the 2D
 /// position M-RoPE models give a cell, and the token it holds. It travels
 /// in a saved state as its raw bytes.
 pub const CellExt = extern struct {
@@ -42,7 +42,7 @@ pub const CellExt = extern struct {
     /// input; the n-gram embeddings hash it.
     tok: i32 = -1,
 
-    /// Ports `llama_kv_cell_ext`'s `is_2d_gt` (llama-kv-cells.h:23 @620d2225c).
+    /// Ports `llama_kv_cell_ext`'s `is_2d_gt` (llama-kv-cells.h:23 @8642541b2).
     pub fn is2dGt(self: CellExt, ox: i32, oy: i32) bool {
         return (self.y > oy) or (self.y == oy and self.x > ox);
     }
@@ -114,7 +114,7 @@ const PosSet = struct {
 /// A (position, cell) pair of a sequence, as `seqPosGet` returns them.
 pub const PosCell = PosSet.Key;
 
-/// Ports `llama_kv_cells` (llama-kv-cells.h:36 @620d2225c).
+/// Ports `llama_kv_cells` (llama-kv-cells.h:36 @8642541b2).
 pub const KvCells = struct {
     has_shift: bool = false,
     /// `used`: a bit per cell, and how many are set.
@@ -156,7 +156,7 @@ pub const KvCells = struct {
         }
     }
 
-    /// Ports `llama_kv_cells`'s `reset` (llama-kv-cells.h:40 @620d2225c).
+    /// Ports `llama_kv_cells`'s `reset` (llama-kv-cells.h:40 @8642541b2).
     pub fn reset(self: *KvCells) void {
         @memset(self.pos.items, -1);
         @memset(self.ext.items, .{});
@@ -168,18 +168,18 @@ pub const KvCells = struct {
         for (&self.seq_pos) |*sp| sp.items.clearRetainingCapacity();
     }
 
-    /// Ports `llama_kv_cells`'s `reset_shift` (llama-kv-cells.h:57 @620d2225c).
+    /// Ports `llama_kv_cells`'s `reset_shift` (llama-kv-cells.h:57 @8642541b2).
     pub fn resetShift(self: *KvCells) void {
         self.has_shift = false;
         @memset(self.shift.items, 0);
     }
 
-    /// Ports `llama_kv_cells`'s `size` (llama-kv-cells.h:65 @620d2225c).
+    /// Ports `llama_kv_cells`'s `size` (llama-kv-cells.h:65 @8642541b2).
     pub fn size(self: *const KvCells) u32 {
         return @intCast(self.pos.items.len);
     }
 
-    /// Ports `llama_kv_cells`'s `resize` (llama-kv-cells.h:69 @620d2225c).
+    /// Ports `llama_kv_cells`'s `resize` (llama-kv-cells.h:69 @8642541b2).
     pub fn resize(self: *KvCells, n: u32) void {
         self.pos.resize(allocator, n) catch oom();
         self.ext.resize(allocator, n) catch oom();
@@ -189,37 +189,37 @@ pub const KvCells = struct {
         self.reset();
     }
 
-    /// Ports `llama_kv_cells`'s `is_empty` (llama-kv-cells.h:78 @620d2225c).
+    /// Ports `llama_kv_cells`'s `is_empty` (llama-kv-cells.h:78 @8642541b2).
     pub fn isEmpty(self: *const KvCells, i: u32) bool {
         return self.pos.items[i] == -1;
     }
 
-    /// Ports `llama_kv_cells`'s `get_used` (llama-kv-cells.h:85 @620d2225c).
+    /// Ports `llama_kv_cells`'s `get_used` (llama-kv-cells.h:85 @8642541b2).
     pub fn getUsed(self: *const KvCells) u32 {
         return self.n_used;
     }
 
-    /// Ports `llama_kv_cells`'s `used_min` (llama-kv-cells.h:91 @620d2225c):
+    /// Ports `llama_kv_cells`'s `used_min` (llama-kv-cells.h:91 @8642541b2):
     /// the first used cell, or 0 when none is.
     pub fn usedMin(self: *const KvCells) u32 {
         if (self.n_used == 0) return 0;
         return @intCast(self.used.findFirstSet().?);
     }
 
-    /// Ports `llama_kv_cells`'s `used_max_p1` (llama-kv-cells.h:97 @620d2225c):
+    /// Ports `llama_kv_cells`'s `used_max_p1` (llama-kv-cells.h:97 @8642541b2):
     /// one past the last used cell, or 0 when none is.
     pub fn usedMaxP1(self: *const KvCells) u32 {
         if (self.n_used == 0) return 0;
         return @intCast(self.used.findLastSet().? + 1);
     }
 
-    /// Ports `llama_kv_cells`'s `get_has_shift` (llama-kv-cells.h:101 @620d2225c).
+    /// Ports `llama_kv_cells`'s `get_has_shift` (llama-kv-cells.h:101 @8642541b2).
     pub fn getHasShift(self: *const KvCells) bool {
         return self.has_shift;
     }
 
     /// Ports `llama_kv_cells`'s `cp` over a range (llama-kv-cells.h:126
-    /// @620d2225c): cells `[i, i + n)`, for saving the state.
+    /// @8642541b2): cells `[i, i + n)`, for saving the state.
     ///
     /// Return: the copy, the caller's to `deinit`.
     pub fn cpRange(self: *const KvCells, i: u32, n: u32) KvCells {
@@ -236,7 +236,7 @@ pub const KvCells = struct {
     }
 
     /// Ports `llama_kv_cells`'s `cp` over indices (llama-kv-cells.h:147
-    /// @620d2225c).
+    /// @8642541b2).
     ///
     /// Return: the copy, the caller's to `deinit`.
     pub fn cpIdxs(self: *const KvCells, idxs: []const u32) KvCells {
@@ -263,19 +263,19 @@ pub const KvCells = struct {
     }
 
     /// Ports `llama_kv_cells`'s `set` over a range (llama-kv-cells.h:166
-    /// @620d2225c): cells `[i, i + other.size())` take `other`'s state.
+    /// @8642541b2): cells `[i, i + other.size())` take `other`'s state.
     pub fn setRange(self: *KvCells, i: u32, other: *const KvCells) void {
         for (0..other.pos.items.len) |j| self.setOne(i + @as(u32, @intCast(j)), other, j);
     }
 
     /// Ports `llama_kv_cells`'s `set` over indices (llama-kv-cells.h:197
-    /// @620d2225c).
+    /// @8642541b2).
     pub fn setIdxs(self: *KvCells, idxs: []const u32, other: *const KvCells) void {
         std.debug.assert(idxs.len == other.pos.items.len);
         for (idxs, 0..) |idx, j| self.setOne(idx, other, j);
     }
 
-    /// Ports `llama_kv_cells`'s `rm` (llama-kv-cells.h:228 @620d2225c): clear a
+    /// Ports `llama_kv_cells`'s `rm` (llama-kv-cells.h:228 @8642541b2): clear a
     /// non-empty cell.
     pub fn rm(self: *KvCells, i: u32) void {
         std.debug.assert(self.pos.items[i] != -1);
@@ -287,7 +287,7 @@ pub const KvCells = struct {
         self.usedErase(i);
     }
 
-    /// Ports `llama_kv_cells`'s `seq_rm` (llama-kv-cells.h:244 @620d2225c).
+    /// Ports `llama_kv_cells`'s `seq_rm` (llama-kv-cells.h:244 @8642541b2).
     ///
     /// Return: true when the cell becomes empty.
     pub fn seqRm(self: *KvCells, i: u32, seq_id: i32) bool {
@@ -306,7 +306,7 @@ pub const KvCells = struct {
         return false;
     }
 
-    /// Ports `llama_kv_cells`'s `seq_keep` (llama-kv-cells.h:267 @620d2225c).
+    /// Ports `llama_kv_cells`'s `seq_keep` (llama-kv-cells.h:267 @8642541b2).
     ///
     /// Return: true when the cell becomes empty, i.e. did not hold `seq_id`.
     pub fn seqKeep(self: *KvCells, i: u32, seq_id: i32) bool {
@@ -331,26 +331,26 @@ pub const KvCells = struct {
         return false;
     }
 
-    /// Ports `llama_kv_cells`'s `seq_count` (llama-kv-cells.h:299 @620d2225c).
+    /// Ports `llama_kv_cells`'s `seq_count` (llama-kv-cells.h:299 @8642541b2).
     pub fn seqCount(self: *const KvCells, i: u32) c_int {
         std.debug.assert(self.pos.items[i] != -1);
         return @intCast(self.seq.items[i].count());
     }
 
     /// Ports `llama_kv_cells`'s `seq_get_all` (llama-kv-cells.h:307
-    /// @620d2225c): every sequence the cell is visible to.
+    /// @8642541b2): every sequence the cell is visible to.
     pub fn seqGetAll(self: *const KvCells, i: u32) SeqSet {
         return self.seq.items[i];
     }
 
-    /// Ports `llama_kv_cells`'s `seq_has` (llama-kv-cells.h:314 @620d2225c).
+    /// Ports `llama_kv_cells`'s `seq_has` (llama-kv-cells.h:314 @8642541b2).
     pub fn seqHas(self: *const KvCells, i: u32, seq_id: i32) bool {
         std.debug.assert(seq_id >= 0);
         return self.seq.items[i].isSet(@intCast(seq_id));
     }
 
     /// Ports `llama_kv_cells`'s `seq_pos_get` (llama-kv-cells.h:322
-    /// @620d2225c).
+    /// @8642541b2).
     ///
     /// Return: the sequence's (position, cell) pairs, ordered by position,
     /// then cell; borrowed until the cells next change.
@@ -360,7 +360,7 @@ pub const KvCells = struct {
     }
 
     /// Ports `llama_kv_cells`'s `seq_pos_tok_le` (llama-kv-cells.h:333
-    /// @620d2225c): the token of the sequence's cell at the largest
+    /// @8642541b2): the token of the sequence's cell at the largest
     /// position at or before `p`, the highest cell among equal positions;
     /// `LLAMA_TOKEN_NULL` when there is none. The n-gram input embeddings
     /// recover a ubatch's preceding tokens with it.
@@ -372,7 +372,7 @@ pub const KvCells = struct {
         return self.ext.items[sp.items.items[it - 1].cell].tok;
     }
 
-    /// Ports `llama_kv_cells`'s `seq_add` (llama-kv-cells.h:348 @620d2225c).
+    /// Ports `llama_kv_cells`'s `seq_add` (llama-kv-cells.h:348 @8642541b2).
     pub fn seqAdd(self: *KvCells, i: u32, seq_id: i32) void {
         const s: usize = @intCast(seq_id);
         std.debug.assert(self.pos.items[i] != -1);
@@ -381,7 +381,7 @@ pub const KvCells = struct {
         self.seqPosInc(s, i);
     }
 
-    /// Ports `llama_kv_cells`'s `seq_get` (llama-kv-cells.h:359 @620d2225c): the
+    /// Ports `llama_kv_cells`'s `seq_get` (llama-kv-cells.h:359 @8642541b2): the
     /// one sequence of a cell with exactly one.
     pub fn seqGet(self: *const KvCells, i: u32) i32 {
         std.debug.assert(self.seq.items[i].count() == 1);
@@ -389,7 +389,7 @@ pub const KvCells = struct {
         return -1;
     }
 
-    /// Ports `llama_kv_cells`'s `seq_pos_min` (llama-kv-cells.h:373 @620d2225c):
+    /// Ports `llama_kv_cells`'s `seq_pos_min` (llama-kv-cells.h:373 @8642541b2):
     /// -1 when the sequence is absent.
     pub fn seqPosMin(self: *const KvCells, seq_id: i32) i32 {
         const sp = &self.seq_pos[@intCast(seq_id)];
@@ -397,7 +397,7 @@ pub const KvCells = struct {
         return sp.items.items[0].pos;
     }
 
-    /// Ports `llama_kv_cells`'s `seq_pos_max` (llama-kv-cells.h:386 @620d2225c):
+    /// Ports `llama_kv_cells`'s `seq_pos_max` (llama-kv-cells.h:386 @8642541b2):
     /// -1 when the sequence is absent.
     pub fn seqPosMax(self: *const KvCells, seq_id: i32) i32 {
         const sp = &self.seq_pos[@intCast(seq_id)];
@@ -405,31 +405,31 @@ pub const KvCells = struct {
         return sp.items.items[sp.items.items.len - 1].pos;
     }
 
-    /// Ports `llama_kv_cells`'s `pos_get` (llama-kv-cells.h:398 @620d2225c).
+    /// Ports `llama_kv_cells`'s `pos_get` (llama-kv-cells.h:398 @8642541b2).
     pub fn posGet(self: *const KvCells, i: u32) i32 {
         std.debug.assert(self.pos.items[i] != -1);
         return self.pos.items[i];
     }
 
-    /// Ports `llama_kv_cells`'s `ext_get` (llama-kv-cells.h:405 @620d2225c).
+    /// Ports `llama_kv_cells`'s `ext_get` (llama-kv-cells.h:405 @8642541b2).
     pub fn extGet(self: *const KvCells, i: u32) CellExt {
         std.debug.assert(self.pos.items[i] != -1);
         return self.ext.items[i];
     }
 
-    /// Ports `llama_kv_cells`'s `get_shift` (llama-kv-cells.h:413 @620d2225c).
+    /// Ports `llama_kv_cells`'s `get_shift` (llama-kv-cells.h:413 @8642541b2).
     pub fn getShift(self: *const KvCells, i: u32) i32 {
         std.debug.assert(self.pos.items[i] != -1);
         return self.shift.items[i];
     }
 
-    /// Ports `llama_kv_cells`'s `pos_in` (llama-kv-cells.h:421 @620d2225c):
+    /// Ports `llama_kv_cells`'s `pos_in` (llama-kv-cells.h:421 @8642541b2):
     /// whether the cell's position is in `[p0, p1)`.
     pub fn posIn(self: *const KvCells, i: u32, p0: i32, p1: i32) bool {
         return self.pos.items[i] >= p0 and self.pos.items[i] < p1;
     }
 
-    /// Ports `llama_kv_cells`'s `pos_set` (llama-kv-cells.h:430 @620d2225c): the
+    /// Ports `llama_kv_cells`'s `pos_set` (llama-kv-cells.h:430 @8642541b2): the
     /// position of an empty cell.
     pub fn posSet(self: *KvCells, i: u32, p: i32) void {
         std.debug.assert(self.pos.items[i] == -1);
@@ -438,12 +438,12 @@ pub const KvCells = struct {
         self.usedInsert(i);
     }
 
-    /// Ports `llama_kv_cells`'s `ext_set` (llama-kv-cells.h:440 @620d2225c).
+    /// Ports `llama_kv_cells`'s `ext_set` (llama-kv-cells.h:440 @8642541b2).
     pub fn extSet(self: *KvCells, i: u32, p: CellExt) void {
         self.ext.items[i] = p;
     }
 
-    /// Ports `llama_kv_cells`'s `pos_add` (llama-kv-cells.h:448 @620d2225c):
+    /// Ports `llama_kv_cells`'s `pos_add` (llama-kv-cells.h:448 @8642541b2):
     /// shift a cell's position, emptying it when it goes negative.
     ///
     /// Return: true when the cell becomes empty.
@@ -464,7 +464,7 @@ pub const KvCells = struct {
         return false;
     }
 
-    /// Ports `llama_kv_cells`'s `pos_div` (llama-kv-cells.h:477 @620d2225c).
+    /// Ports `llama_kv_cells`'s `pos_div` (llama-kv-cells.h:477 @8642541b2).
     pub fn posDiv(self: *KvCells, i: u32, d: c_int) void {
         std.debug.assert(self.pos.items[i] != -1);
         const p_old = self.pos.items[i];
@@ -475,23 +475,23 @@ pub const KvCells = struct {
         self.has_shift = true;
     }
 
-    /// Ports `llama_kv_cells`'s `seq_pos_dec` (llama-kv-cells.h:536 @620d2225c).
+    /// Ports `llama_kv_cells`'s `seq_pos_dec` (llama-kv-cells.h:536 @8642541b2).
     fn seqPosDec(self: *KvCells, s: usize, i: u32) void {
         self.seq_pos[s].erase(.{ .pos = self.pos.items[i], .cell = i });
     }
 
-    /// Ports `llama_kv_cells`'s `seq_pos_inc` (llama-kv-cells.h:542 @620d2225c).
+    /// Ports `llama_kv_cells`'s `seq_pos_inc` (llama-kv-cells.h:542 @8642541b2).
     fn seqPosInc(self: *KvCells, s: usize, i: u32) void {
         self.seq_pos[s].insert(.{ .pos = self.pos.items[i], .cell = i });
     }
 
-    /// Ports `llama_kv_cells`'s `seq_pos_rm` (llama-kv-cells.h:547 @620d2225c).
+    /// Ports `llama_kv_cells`'s `seq_pos_rm` (llama-kv-cells.h:547 @8642541b2).
     fn seqPosRm(self: *KvCells, i: u32) void {
         var it = self.seq.items[i].iterator(.{});
         while (it.next()) |s| self.seqPosDec(s, i);
     }
 
-    /// Ports `llama_kv_cells`'s `seq_pos_add` (llama-kv-cells.h:556 @620d2225c).
+    /// Ports `llama_kv_cells`'s `seq_pos_add` (llama-kv-cells.h:556 @8642541b2).
     fn seqPosAdd(self: *KvCells, i: u32) void {
         var it = self.seq.items[i].iterator(.{});
         while (it.next()) |s| self.seqPosInc(s, i);

@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/lightning-indexer.cu` at v0.7.0
-//! (`620d2225c`), the host half. The kernels,
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/lightning-indexer.cu` at v0.8.0
+//! (`8642541b2`), the host half. The kernels,
 //! `lightning_indexer_kernel_wmma`, `lightning_indexer_kernel_vec` and
 //! (v0.6.0, for four heads) `lightning_indexer_kernel_tile`, stay CUDA. The
 //! HIP/MUSA arm, which always takes the vector kernel, is not compiled
@@ -69,11 +69,11 @@ fn shapeCase(comptime n_head: i64, use_wmma: bool, k_type: c.enum_ggml_type, n_k
     }
 }
 
-/// Ports `LIGHTNING_INDEXER_TILE_TOKENS` (lightning-indexer.cu:240 @620d2225c):
+/// Ports `LIGHTNING_INDEXER_TILE_TOKENS` (lightning-indexer.cu:240 @8642541b2):
 /// tokens scored per block by the tile kernel.
 const tile_tokens = 8;
 
-/// Ports `ggml_cuda_lightning_indexer` (lightning-indexer.cu:569 @620d2225c).
+/// Ports `ggml_cuda_lightning_indexer` (lightning-indexer.cu:569 @8642541b2).
 /// v0.7.0 dropped the tile arm's `#ifndef GGML_USE_MUSA` (MUSA now takes the tile
 /// kernel too, staging fewer heads per pass); nothing changed on CUDA.
 pub fn opLightningIndexer(ctx: *common.Context, dst: *Tensor) void {
@@ -151,7 +151,7 @@ pub fn opLightningIndexer(ctx: *common.Context, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_cuda_lightning_indexer_supported` (lightning-indexer.cu:743 @620d2225c).
+/// Ports `ggml_cuda_lightning_indexer_supported` (lightning-indexer.cu:743 @8642541b2).
 pub fn supported(device: c_int, dst: *const Tensor) bool {
     _ = device;
     const q = impl.one(Tensor, dst.src[0]);

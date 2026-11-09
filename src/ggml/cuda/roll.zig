@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/roll.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/roll.cuh` at v0.7.0 (`620d2225c`). The
+//! `llama.cpp/ggml/src/ggml-cuda/roll.cuh` at v0.8.0 (`8642541b2`). The
 //! kernel, `roll_f32_cuda` (a `__global__`, despite the name), stays CUDA.
 
 const std = @import("std");
@@ -14,10 +14,10 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_ROLL_BLOCK_SIZE` (roll.cuh:3 @620d2225c).
+/// Ports `CUDA_ROLL_BLOCK_SIZE` (roll.cuh:3 @8642541b2).
 const block_size = 256;
 
-/// Ports `ggml_cuda_op_roll` (roll.cu:49 @620d2225c), which launches with
+/// Ports `ggml_cuda_op_roll` (roll.cu:49 @8642541b2), which launches with
 /// `<<<>>>`. Since v0.7.0 the kernel reads the source through its byte
 /// strides, so a non-contiguous view rolls as it is.
 pub fn opRoll(ctx: *common.Context, dst: *Tensor) void {

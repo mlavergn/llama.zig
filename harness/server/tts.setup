@@ -1,0 +1,5 @@
+#!/bin/bash
+# The TTS cases send a WAV as the speaker reference, the vision cases' media
+# as a file that is not audio: scripts/server-diff tts.
+"$(dirname "$0")/vision.setup"
+"$(dirname "$0")/asr.setup"

@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/ernie4-5-moe.cpp` at v0.7.0
-//! (`620d2225c`): `llama_model_ernie4_5_moe`'s `build_arch_graph` and its
+//! Ported from `llama.cpp/src/models/ernie4-5-moe.cpp` at v0.8.0
+//! (`8642541b2`): `llama_model_ernie4_5_moe`'s `build_arch_graph` and its
 //! `graph`. Its loading is `llama_model_ernie4_5`'s, in `ernie4_5.zig`.
 
 const std = @import("std");
@@ -17,13 +17,13 @@ const c = impl.c;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_ernie4_5_moe`'s `build_arch_graph` (models/ernie4-5-moe.cpp:3 @620d2225c).
+/// Ports `llama_model_ernie4_5_moe`'s `build_arch_graph` (models/ernie4-5-moe.cpp:3 @8642541b2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_ernie4_5_moe`'s `graph`
-/// (models/ernie4-5-moe.cpp:7 @620d2225c).
+/// (models/ernie4-5-moe.cpp:7 @8642541b2).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

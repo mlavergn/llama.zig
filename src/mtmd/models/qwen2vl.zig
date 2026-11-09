@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/qwen2vl.cpp` at v0.7.0 (`620d2225c`).
+//! Ports `llama.cpp/tools/mtmd/models/qwen2vl.cpp` at v0.8.0 (`8642541b2`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -11,34 +11,6 @@ const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
 const model_mod = @import("../model.zig");
 const c = impl.c;
-
-/// Ports `build_inp_with_temporal_merge` (mtmd/models/qwen2vl.cpp:3 @620d2225c), a
-/// member of `clip_graph_qwen2vl`: Conv3D as two Conv2D, one per frame.
-pub fn buildInpWithTemporalMerge(g: *graph.Graph) graph.T {
-    const ctx0 = g.ctx0;
-    const model = g.model;
-    const patch_size = g.patch_size;
-    const inp_raw = g.buildInpRaw(3);
-
-    impl.ggmlAssert(@rem(g.img.nx(), patch_size * 2) == 0, "qwen2vl.cpp", 6, "img.nx() % (patch_size * 2) == 0");
-    impl.ggmlAssert(@rem(g.img.ny(), patch_size * 2) == 0, "qwen2vl.cpp", 7, "img.ny() % (patch_size * 2) == 0");
-
-    const nb1 = c.ggml_row_size(inp_raw.?.type, g.img.nx());
-    const nb2 = c.ggml_row_size(inp_raw.?.type, g.img.nx() * g.img.ny());
-
-    if (g.n_batch == 1) {
-        // still image input
-        return c.ggml_add(ctx0, c.ggml_conv_2d(ctx0, model.patch_embeddings_0, inp_raw, patch_size, patch_size, 0, 0, 1, 1), c.ggml_conv_2d(ctx0, model.patch_embeddings_1, inp_raw, patch_size, patch_size, 0, 0, 1, 1));
-    } else if (g.n_batch == 2) {
-        // 2 frames input (video input)
-        const inp_0 = c.ggml_view_3d(ctx0, inp_raw, g.img.nx(), g.img.ny(), 3, nb1, nb2, 0);
-        const inp_1 = c.ggml_view_3d(ctx0, inp_raw, g.img.nx(), g.img.ny(), 3, nb1, nb2, nb2 * 3); // move to the second frame
-        return c.ggml_add(ctx0, c.ggml_conv_2d(ctx0, model.patch_embeddings_0, inp_0, patch_size, patch_size, 0, 0, 1, 1), c.ggml_conv_2d(ctx0, model.patch_embeddings_1, inp_1, patch_size, patch_size, 0, 0, 1, 1));
-    } else {
-        impl.ggmlAssert(false, "qwen2vl.cpp", 28, "false && \"n_batch > 2 is not supported\"");
-        unreachable;
-    }
-}
 
 /// The "second conv dimension" / "spatial merge" reshape shared by the
 /// qwen-vl encoders (the block at qwen2vl.cpp line 51): 2x2 patch groups become
@@ -53,7 +25,7 @@ pub fn spatialMerge(g: *graph.Graph, inp_in: graph.T, batch_size: c_int) graph.T
     return inp;
 }
 
-/// Ports `build` (mtmd/models/qwen2vl.cpp:32 @620d2225c), a member of `clip_graph_qwen2vl`.
+/// Ports `build` (mtmd/models/qwen2vl.cpp:3 @8642541b2), a member of `clip_graph_qwen2vl`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
@@ -62,8 +34,8 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     const eps = g.eps;
     const d_head = g.d_head;
     const n_head = g.n_head;
-    impl.ggmlAssert(model.patch_bias == null, "qwen2vl.cpp", 33, "model.patch_bias == nullptr");
-    impl.ggmlAssert(model.class_embedding == null, "qwen2vl.cpp", 34, "model.class_embedding == nullptr");
+    impl.ggmlAssert(model.patch_bias == null, "qwen2vl.cpp", 4, "model.patch_bias == nullptr");
+    impl.ggmlAssert(model.class_embedding == null, "qwen2vl.cpp", 5, "model.class_embedding == nullptr");
 
     const batch_size = 1;
     const use_window_attn = hparams.n_wa_pattern > 0;
@@ -78,7 +50,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
 
     var mrope_sections = [4]c_int{ @divTrunc(d_head, 4), @divTrunc(d_head, 4), @divTrunc(d_head, 4), @divTrunc(d_head, 4) };
 
-    var inp = buildInpWithTemporalMerge(g);
+    var inp = g.buildInpTemporalMerge();
 
     // second conv dimension
     inp = spatialMerge(g, inp, batch_size);

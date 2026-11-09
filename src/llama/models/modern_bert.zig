@@ -11,8 +11,8 @@
 //! embedding added, each ending in the classifier, so the output is one
 //! score per question type.
 //!
-//! Ported from `llama.cpp/src/models/modern-bert.cpp` at v0.7.0
-//! (`620d2225c`): `N_DECISION_TYPES`, `llama_model_modern_bert`'s
+//! Ported from `llama.cpp/src/models/modern-bert.cpp` at v0.8.0
+//! (`8642541b2`): `N_DECISION_TYPES`, `llama_model_modern_bert`'s
 //! `load_arch_hparams`, `load_arch_tensors` and `build_arch_graph`, and
 //! its `graph` with `build_decision_head`; and from
 //! `llama.cpp/src/llama-model.cpp`, `llm_ffn_op_type_from_string`, which
@@ -31,11 +31,11 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `N_DECISION_TYPES` (models/modern-bert.cpp:4 @620d2225c): the
+/// Ports `N_DECISION_TYPES` (models/modern-bert.cpp:4 @8642541b2): the
 /// question types of a decision model -- choice, score and noul.
 const n_decision_types: u32 = 3;
 
-/// Ports `LLM_FFN_OP_TYPES_FROM_STRING` (llama-model.cpp:1091 @620d2225c):
+/// Ports `LLM_FFN_OP_TYPES_FROM_STRING` (llama-model.cpp:1120 @8642541b2):
 /// the GGUF activation names, mapped to the gated feed-forward op the graph
 /// builders use. `"gelu"` is the exact (erf) variant.
 const ffn_op_types_from_string = [_]struct { []const u8, graph.FfnOp }{
@@ -54,7 +54,7 @@ const ffn_op_types_from_string = [_]struct { []const u8, graph.FfnOp }{
     .{ "reglu", .reglu },
 };
 
-/// Ports `llm_ffn_op_type_from_string` (llama-model.cpp:1114 @620d2225c).
+/// Ports `llm_ffn_op_type_from_string` (llama-model.cpp:1143 @8642541b2).
 ///
 /// Parameters:
 /// - `name`: the activation's name.
@@ -66,7 +66,7 @@ fn ffnOpTypeFromString(name: []const u8, fallback: graph.FfnOp) graph.FfnOp {
     return fallback;
 }
 
-/// Ports `llama_model_modern_bert`'s `load_arch_hparams` (models/modern-bert.cpp:6 @620d2225c).
+/// Ports `llama_model_modern_bert`'s `load_arch_hparams` (models/modern-bert.cpp:6 @8642541b2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -121,7 +121,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_modern_bert`'s `load_arch_tensors` (models/modern-bert.cpp:61 @620d2225c).
+/// Ports `llama_model_modern_bert`'s `load_arch_tensors` (models/modern-bert.cpp:61 @8642541b2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -195,13 +195,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_modern_bert`'s `build_arch_graph` (models/modern-bert.cpp:134 @620d2225c).
+/// Ports `llama_model_modern_bert`'s `build_arch_graph` (models/modern-bert.cpp:134 @8642541b2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_modern_bert`'s `graph`
-/// (models/modern-bert.cpp:138 @620d2225c).
+/// (models/modern-bert.cpp:138 @8642541b2).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -294,7 +294,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_modern_bert::graph`'s `build_decision_head`
-/// (models/modern-bert.cpp:248 @620d2225c): one score per question type for
+/// (models/modern-bert.cpp:248 @8642541b2): one score per question type for
 /// each output token, read at the option markers by the caller. The
 /// question type is not a graph input, so the head is evaluated once per
 /// type.

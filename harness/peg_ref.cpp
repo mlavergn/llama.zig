@@ -521,6 +521,7 @@ void run_case(reader & r, writer & w) {
             cw.rec("I:" + input);
             if (modes & 1) parse_records(a, input, COMMON_PEG_PARSE_FLAG_NONE, "P0:", cw);
             if (modes & 2) parse_records(a, input, COMMON_PEG_PARSE_FLAG_LENIENT, "P1:", cw);
+            if (modes & 2) parse_records(a, input, COMMON_PEG_PARSE_FLAG_LENIENT | COMMON_PEG_PARSE_FLAG_COMPLETE, "P2:", cw);
             if (modes & 4) {
                 size_t stride = input.size() <= 160 ? 1 : input.size() / 120;
                 for (size_t k = 0; k < input.size(); k += stride) {

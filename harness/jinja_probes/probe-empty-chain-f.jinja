@@ -1,0 +1,1 @@
+{% macro f(v) %}{{- v | string | replace('<|', '< |') -}}{% endmacro %}{% for m in messages %}a{{ f(m.content | trim) }}b{% endfor %}

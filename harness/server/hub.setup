@@ -12,7 +12,7 @@ MM="$ROOT/zig-out/mmproj-fixtures"
 h="$DATA/hub"
 mkdir -p "$h/files" "$h/repos/test/tiny" "$h/repos/test/vision" "$h/repos/test/split" \
          "$h/repos/test/empty" "$h/repos/test/preset" "$h/repos/test/nested/sub" "$h/repos/test/badref"
-for n in tiny tiny2 tiny3 tiny4 tiny5 tiny6 tiny7; do cp "$FIX" "$h/files/$n.gguf"; done
+for n in tiny tiny2 tiny3 tiny4 tiny5 tiny6 tiny7 p1 p2 p3 p4 p5 p6 r1 r2 r3 lk; do cp "$FIX" "$h/files/$n.gguf"; done
 cp "$MM/gemma3.gguf" "$h/files/mmproj.gguf"
 cp "$FIX" "$h/files/parts-00001-of-00002.gguf"
 cp "$FIX" "$h/files/parts-00002-of-00002.gguf"
@@ -27,6 +27,17 @@ printf '# nothing here\n' > "$h/repos/test/empty/README.md"
 cp "$FIX" "$h/repos/test/nested/sub/deep-Q4_K_M.gguf"
 mkdir -p "$h/repos/test/slowpoke"
 cp "$FIX" "$h/repos/test/slowpoke/slow-Q4_K_M.gguf"
+# v0.8.0: a repository with every sidecar kind, one tag's draft shared by
+# name with no other, and two tags sharing a projector
+mkdir -p "$h/repos/test/side" "$h/repos/test/slowside" "$h/repos/test/shared"
+cp "$FIX" "$h/repos/test/side/side-Q4_K_M.gguf"
+cp "$MM/gemma3.gguf" "$h/repos/test/side/mmproj-side-f16.gguf"
+for k in mtp dflash eagle3 dspark; do cp "$FIX" "$h/repos/test/side/$k-side-Q4_K_M.gguf"; done
+cp "$FIX" "$h/repos/test/slowside/slow-Q4_K_M.gguf"
+cp "$MM/gemma3.gguf" "$h/repos/test/slowside/mmproj-slow-f16.gguf"
+cp "$FIX" "$h/repos/test/shared/shared-Q4_K_M.gguf"
+cp "$FIX2" "$h/repos/test/shared/shared-Q8_0.gguf"
+cp "$MM/gemma3.gguf" "$h/repos/test/shared/mmproj-shared-f16.gguf"
 cat > "$h/repos/test/preset/preset.ini" <<INI
 [from-hub]
 model = $FIX

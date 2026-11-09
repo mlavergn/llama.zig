@@ -39,6 +39,7 @@
 const std = @import("std");
 const input_tensor_order = @import("input_tensor_order.zig");
 const harness_root = @import("harness_root");
+const derive_hadamard = @import("derive_hadamard.zig");
 
 const c = harness_root.impl.c;
 const M = harness_root.model;
@@ -64,6 +65,13 @@ extern fn _Z24llama_memory_get_buffersP14llama_memory_i(mem: c.llama_memory_t) S
 extern fn _ZdlPv(p: ?*anyopaque) void;
 extern fn _Z26llama_set_embeddings_nextnP13llama_contextbb(ctx: ?*c.struct_llama_context, value: bool, masked: bool) void;
 extern fn _Z26llama_get_embeddings_nextnP13llama_context(ctx: ?*c.struct_llama_context) [*c]f32;
+extern fn _Z30llama_set_embeddings_layer_inpP13llama_contextjb(ctx: ?*c.struct_llama_context, lid: u32, value: bool) void;
+extern fn _Z30llama_get_embeddings_layer_inpP13llama_contextj(ctx: ?*c.struct_llama_context, lid: u32) [*c]f32;
+
+/// The architectures whose graph records its layers' inputs, the ones a
+/// `llama_set_embeddings_layer_inp` request does not abort on: every
+/// `res->t_layer_inp` in upstream's `src/models/`.
+const layer_inp_archs = [_][]const u8{ "bailingmoe3", "deepseek4", "deepseek41", "flint", "gemma4", "granite", "granite_swa", "granitemoe", "granitehybrid", "graniteswitch", "hunyuan_vl", "k2-horizon", "lfm2", "llama", "maion-coder", "mimo2", "minicpm", "minimax-m2", "minimax-01", "muse-glimmer", "muse-spark", "nanbeige", "nemotron_h", "gpt-oss", "qwen3", "qwen35", "qwen35moe", "qwen3moe", "qwen3next", "qwen4exp", "sensenova_u1" };
 
 /// Both sides' `llama_memory_get_buffers`, as the buffer names and sizes
 /// in the order returned -- which is the buffers' address order, so only
@@ -127,7 +135,8 @@ fn note(comptime fmt: []const u8, args: anytype) void {
 
 fn logCb(level: c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
     const r = rec orelse return;
-    _ = level;
+    // v0.8.0 demoted a warning to information, which the text alone cannot show.
+    if (level == c.GGML_LOG_LEVEL_WARN) r.appendSlice(gpa, "[W] ") catch unreachable;
     r.appendSlice(gpa, std.mem.span(@as([*:0]const u8, @ptrCast(text)))) catch unreachable;
 }
 
@@ -137,8 +146,32 @@ fn hashBytes(p: [*]const u8, n: usize) u64 {
 
 var scratch: std.ArrayList(u8) = .empty;
 
-fn tensorHash(t: *const c.ggml_tensor) u64 {
+/// The bytes of a node's output that its op writes: all of them, except
+/// for GATED_DELTA_NET with more snapshot slots than tokens. That op keeps
+/// K state snapshots after its attention rows, and token t writes slot
+/// n_tokens - 1 - t, so "when n_tokens < K only slots 0..n_tokens-1 are
+/// written; older slots are caller-owned" -- upstream's
+/// `ggml_compute_forward_gated_delta_net_one_chunk` (ops.cpp:11099
+/// @8642541b2). The rest is the allocator's leftovers. A one-token decode
+/// under `n_rs_seq 4` hashed them, and on the GB10 the port then differed
+/// from itself run to run while every node that reads the output matched.
+/// Only the written prefix is hashed.
+fn writtenBytes(t: *const c.ggml_tensor) usize {
     const n = c.ggml_nbytes(t);
+    if (t.op != c.GGML_OP_GATED_DELTA_NET) return n;
+    const k: i64 = t.op_params[0];
+    const v: *const c.ggml_tensor = t.src[2];
+    const s_v = v.ne[0];
+    const h = v.ne[1];
+    const n_tokens = v.ne[2];
+    const n_seqs = v.ne[3];
+    if (k <= 1 or n_tokens >= k) return n;
+    const elems = s_v * h * n_tokens * n_seqs + n_tokens * s_v * s_v * h * n_seqs;
+    return @intCast(elems * @sizeOf(f32));
+}
+
+fn tensorHash(t: *const c.ggml_tensor) u64 {
+    const n = writtenBytes(t);
     scratch.resize(gpa, n) catch unreachable;
     c.ggml_backend_tensor_get(t, scratch.items.ptr, 0, n);
     return hashBytes(scratch.items.ptr, n);
@@ -183,7 +216,7 @@ fn nodeCb(t: [*c]c.ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
     // A node without GGML_TENSOR_FLAG_COMPUTE -- an unselected branch of
     // `ggml_build_forward_select`, such as v0.6.0's mixed-batch input when
     // the ubatch is not mixed -- is skipped by every backend (ggml-cpu.c:3137,
-    // ggml-metal-ops.cpp:218 @620d2225c): its bytes are the allocator's
+    // ggml-metal-ops.cpp:218 @8642541b2): its bytes are the allocator's
     // leftovers on either side. The flags above are compared, so a node one
     // side computes and the other does not still differs.
     if ((node.flags & c.GGML_TENSOR_FLAG_COMPUTE) == 0) {
@@ -277,10 +310,18 @@ const Case = struct {
     /// (llama-context.cpp:1426) and that no output limit is below it
     /// (llama-context.cpp:2189).
     memoryless_ok: bool = true,
+    /// Asks for every layer's input (`llama_set_embeddings_layer_inp`,
+    /// DSpark's target features, `res->t_layer_inp`) and compares them after
+    /// the prompt. Only on `layer_inp_archs`: on the others the C++ asserts.
+    layer_inp: bool = false,
     /// Turns the KV cache's attention rotation off on the model before the
     /// context is made, through `llama_model_set_attn_rot` (v0.7.0), and
     /// back on after.
     attn_rot_off: bool = false,
+    /// Runs `sharedHistory` instead of the script.
+    shared_history: bool = false,
+    /// Only when named exactly: the script means nothing on most models.
+    explicit: bool = false,
 };
 
 const prompt_text = "The quick brown fox jumps over the lazy dog. In 1492, Columbus sailed the ocean blue; the capital of France is";
@@ -366,6 +407,81 @@ fn draftBatch(n: usize, width: usize, pos0: i32, logits: bool, salt: usize) c.ll
     return eb;
 }
 
+fn layerInpArch(arch: []const u8) bool {
+    for (layer_inp_archs) |a| {
+        if (std.mem.eql(u8, a, arch)) return true;
+    }
+    return false;
+}
+
+/// v0.8.0: DeepSeek-V4.1's Engram hashes the n-gram ending at each token, so
+/// `dsv41_shared_history_ok` refuses a token shared by sequences that disagree
+/// on its predecessors, in the cache or in the batch, and lets those that
+/// agree through. No other case decodes a token with two sequences over
+/// diverged histories.
+fn sharedHistory(comptime A: type, ctx: ?*c.struct_llama_context, t: []const i32) void {
+    const Row = struct { tok: i32, pos: i32, seqs: []const i32 };
+    const S = struct {
+        fn decode(what: []const u8, x: ?*c.struct_llama_context, rows: []const Row) void {
+            var b = c.llama_batch_init(@intCast(rows.len), 0, 2);
+            defer c.llama_batch_free(b);
+            b.n_tokens = @intCast(rows.len);
+            for (rows, 0..) |r, i| {
+                b.token[i] = r.tok;
+                b.pos[i] = r.pos;
+                b.n_seq_id[i] = @intCast(r.seqs.len);
+                for (r.seqs, 0..) |sq, j| b.seq_id[i][j] = sq;
+                b.logits[i] = @intFromBool(i + 1 == rows.len);
+            }
+            note("{s}: {d}", .{ what, A.llama_decode(x, b) });
+        }
+    };
+    const s0 = &[_]i32{0};
+    const s1 = &[_]i32{1};
+    const both = &[_]i32{ 0, 1 };
+    S.decode("seq 0", ctx, &.{ .{ .tok = t[0], .pos = 0, .seqs = s0 }, .{ .tok = t[1], .pos = 1, .seqs = s0 }, .{ .tok = t[2], .pos = 2, .seqs = s0 } });
+    S.decode("seq 1", ctx, &.{ .{ .tok = t[3], .pos = 0, .seqs = s1 }, .{ .tok = t[4], .pos = 1, .seqs = s1 }, .{ .tok = t[5], .pos = 2, .seqs = s1 } });
+    S.decode("cached histories differ", ctx, &.{.{ .tok = t[6], .pos = 3, .seqs = both }});
+    S.decode("batch histories differ", ctx, &.{ .{ .tok = t[6], .pos = 3, .seqs = s0 }, .{ .tok = t[7], .pos = 3, .seqs = s1 }, .{ .tok = t[8], .pos = 4, .seqs = both } });
+    A.llama_memory_clear(A.llama_get_memory(ctx), true);
+    S.decode("shared prompt", ctx, &.{ .{ .tok = t[0], .pos = 0, .seqs = both }, .{ .tok = t[1], .pos = 1, .seqs = both }, .{ .tok = t[2], .pos = 2, .seqs = both } });
+    S.decode("cached histories agree", ctx, &.{.{ .tok = t[3], .pos = 3, .seqs = both }});
+    S.decode("batch histories agree", ctx, &.{ .{ .tok = t[4], .pos = 4, .seqs = s0 }, .{ .tok = t[4], .pos = 4, .seqs = s1 }, .{ .tok = t[5], .pos = 5, .seqs = both } });
+}
+
+/// Whether the model configuration under test has `no_alloc` set.
+var model_no_alloc = false;
+
+extern fn context_ref_breakdown(ctx: ?*const c.struct_llama_context, bufts: [*]c.ggml_backend_buffer_type_t, sizes: [*]usize, cap: usize) usize;
+
+/// `llama_get_memory_breakdown`, by buffer type name, which unlike the
+/// `std::map`'s pointer keys is the same on both sides.
+fn noteBreakdown(comptime A: type, ctx: ?*c.struct_llama_context) void {
+    const Row = struct {
+        name: []const u8,
+        v: [3]usize,
+        fn less(_: void, a: @This(), b: @This()) bool {
+            return std.mem.lessThan(u8, a.name, b.name);
+        }
+    };
+    var rows: [16]Row = undefined;
+    var n: usize = 0;
+    if (A == c) {
+        var bufts: [16]c.ggml_backend_buffer_type_t = undefined;
+        var sizes: [48]usize = undefined;
+        n = context_ref_breakdown(ctx, &bufts, &sizes, 16);
+        for (0..n) |i| rows[i] = .{ .name = std.mem.span(c.ggml_backend_buft_name(bufts[i])), .v = sizes[3 * i ..][0..3].* };
+    } else {
+        const mb = harness_root.api.context.llama_get_memory_breakdown(ctx, gpa) catch unreachable;
+        defer gpa.free(mb);
+        n = mb.len;
+        for (mb, 0..) |e, i| rows[i] = .{ .name = std.mem.span(c.ggml_backend_buft_name(e.buft)), .v = .{ e.model, e.context, e.compute } };
+    }
+    std.mem.sort(Row, rows[0..n], {}, Row.less);
+    note("memory breakdown: {d} buffer types", .{n});
+    for (rows[0..n]) |r| note("  {s}: model {d} context {d} compute {d}", .{ r.name, r.v[0], r.v[1], r.v[2] });
+}
+
 /// Run the script through `A`, which is `c` (the C++) or `api` (the port).
 fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs: Case, tokens: []const i32, n_vocab: usize, n_embd: usize) void {
     var params = c.llama_context_default_params();
@@ -408,6 +524,24 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
     });
     const mem = A.llama_get_memory(ctx);
     note("memory {} can_shift {}", .{ mem != null, A.llama_memory_can_shift(mem) });
+
+    // v0.8.0: a model with `no_alloc` has no tensor data to decode with; what
+    // its memories report is the point.
+    if (model_no_alloc) {
+        noteBreakdown(A, ctx);
+        return;
+    }
+    if (cs.shared_history) {
+        sharedHistory(A, ctx, tokens);
+        return;
+    }
+
+    const MAl = if (A == c) c else harness_root.api.model;
+    const n_layer_inp: u32 = if (cs.layer_inp) @intCast(MAl.llama_model_n_layer(@ptrCast(model))) else 0;
+    const n_embd_row: usize = @intCast(MAl.llama_model_n_embd(@ptrCast(model)));
+    for (0..n_layer_inp) |lid| {
+        if (A == c) _Z30llama_set_embeddings_layer_inpP13llama_contextjb(ctx, @intCast(lid), true) else harness_root.api.context.llama_set_embeddings_layer_inp(ctx, @intCast(lid), true);
+    }
 
     const embeddings = params.embeddings;
     const pooled = embeddings and A.llama_pooling_type(ctx) != c.LLAMA_POOLING_TYPE_NONE;
@@ -483,6 +617,10 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
         // v0.7.0: a pooled embeddings context has no LM head, so no
         // logits buffer (#30255, #30445)
         note("logits buffer: {}", .{A.llama_get_logits(ctx) != null});
+        for (0..n_layer_inp) |lid| {
+            const row: [*c]f32 = if (A == c) _Z30llama_get_embeddings_layer_inpP13llama_contextj(ctx, @intCast(lid)) else harness_root.api.context.llama_get_embeddings_layer_inp(ctx, @intCast(lid));
+            Out.row("layer_inp", row, tokens.len * n_embd_row, @intCast(lid));
+        }
         // v0.7.0's `llama_memory_get_buffers`, on a memory holding the
         // prompt: an empty one reports none.
         if (round == 0) noteMemoryBuffers(A, mem);
@@ -781,8 +919,8 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
             }
         }
 
-        // `check_causal_attn_toggle` (tests/test-llama-archs.cpp:620
-        // @620d2225c): non-causal decodes of n_ubatch/2 and n_ubatch tokens,
+        // `check_causal_attn_toggle` (tests/test-llama-archs.cpp:839
+        // @8642541b2): non-causal decodes of n_ubatch/2 and n_ubatch tokens,
         // a flip that must not need a scheduler reserve.
         if (round == 1 and draft.kind == .none) {
             const AB = if (A == c) c else harness_root.api.batch;
@@ -861,6 +999,42 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
         rc = A.llama_decode(ctx, b);
         note("decode, embeddings on: {d}", .{rc});
         if (rc == 0) Out.row("embd_seq", A.llama_get_embeddings_seq(ctx, 0), n_embd, 0);
+    }
+
+    // A real K-shift: until v0.8.0 no case moved a position, so `update` and
+    // its shift graph ran only with nothing pending. On a model with no RoPE
+    // layer it builds no graph (`--model no-rope`).
+    if (mem != null and A.llama_memory_can_shift(mem) and draft.kind == .none and !enc_dec) {
+        const pos_end = A.llama_memory_seq_pos_max(mem, 0);
+        if (pos_end > 4) {
+            const removed = A.llama_memory_seq_rm(mem, 0, 1, 3);
+            note("seq_rm for the shift: {}", .{removed});
+            if (removed) {
+                A.llama_memory_seq_add(mem, 0, 3, -1, -2);
+                b.n_tokens = 0;
+                batchAdd(&b, tokens[1], A.llama_memory_seq_pos_max(mem, 0) + 1, &.{0}, true);
+                const rc = A.llama_decode(ctx, b);
+                note("decode after the shift: {d}", .{rc});
+                if (rc == 0 and !embeddings) Out.row("logits", A.llama_get_logits_ith(ctx, -1), n_vocab, -1);
+            }
+        }
+    }
+
+    // v0.8.0: with pooling NONE the toggle changes the reserve graph too --
+    // it outputs every token -- so it must reserve again.
+    if (!pooled and !embeddings and mem != null and draft.kind == .none and !enc_dec) {
+        A.llama_set_embeddings(ctx, true);
+        b.n_tokens = 0;
+        batchAdd(&b, tokens[2], A.llama_memory_seq_pos_max(mem, 0) + 1, &.{0}, true);
+        var rc = A.llama_decode(ctx, b);
+        note("decode, embeddings toggled on: {d}", .{rc});
+        if (rc == 0) Out.row("embd", A.llama_get_embeddings_ith(ctx, -1), n_embd, -1);
+        A.llama_set_embeddings(ctx, false);
+        b.n_tokens = 0;
+        batchAdd(&b, tokens[3], A.llama_memory_seq_pos_max(mem, 0) + 1, &.{0}, true);
+        rc = A.llama_decode(ctx, b);
+        note("decode, embeddings toggled off: {d}", .{rc});
+        if (rc == 0) Out.row("logits", A.llama_get_logits_ith(ctx, -1), n_vocab, -1);
     }
 
     // `llama_memory_get_buffers` (v0.7.0): the buffers a state write of the
@@ -1103,6 +1277,7 @@ const cases = [_]Case{
     .{ .name = "n_ubatch 7", .edit = Edits.smallUbatch, .memoryless_ok = false },
     .{ .name = "two sequences", .edit = Edits.twoSeqs, .multi_seq = true },
     .{ .name = "two sequences, embeddings", .edit = Edits.twoSeqsEmbd, .multi_seq = true },
+    .{ .name = "shared history", .edit = Edits.twoSeqs, .multi_seq = true, .shared_history = true, .explicit = true },
     .{ .name = "three sequences, unified", .edit = Edits.threeSeqsUnified, .multi_seq = true },
     .{ .name = "n_rs_seq 4", .edit = Edits.rsSeq, .multi_seq = true },
     .{ .name = "embeddings", .edit = Edits.embd },
@@ -1120,6 +1295,7 @@ const cases = [_]Case{
     .{ .name = "n_outputs_max 5", .edit = Edits.outputsMax, .memoryless_ok = false },
     .{ .name = "n_batch 0", .edit = Edits.badBatch },
     .{ .name = "n_seq_max 300", .edit = Edits.tooManySeqs },
+    .{ .name = "layer inputs", .edit = Edits.none, .layer_inp = true },
 };
 
 const ModelCfg = struct {
@@ -1131,6 +1307,8 @@ const ModelCfg = struct {
     /// Only for an explicit `--model`: a configuration the model at hand
     /// may not support (the MoE cache needs a MoE model).
     explicit: bool = false,
+    /// `no_alloc`: only the context's construction and memory breakdown.
+    no_alloc: bool = false,
     /// Whether `cb_eval` asks for every node. The meta device cannot
     /// compute a graph the scheduler has cut at every node -- the C++
     /// asserts `i_start == cgraph->n_nodes` -- so under tensor
@@ -1145,6 +1323,19 @@ const ModelEdits = struct {
     }
     fn partial(p: *c.llama_model_params) void {
         p.n_gpu_layers = 10;
+    }
+    /// Two layers on the GPU: a fixture's split falls among its layers, so
+    /// DeepSeek-V4.1's KV sources and readers land on different devices and
+    /// the mirrors are built.
+    fn partial2(p: *c.llama_model_params) void {
+        p.n_gpu_layers = 2;
+    }
+    /// A six-layer fixture split at layer 3: DeepSeek-V4.1's KV source layer 2
+    /// and layer 3, which reads it, land on different devices, the only case
+    /// with a compressed-KV mirror (`get_comp_read_layer`). Four layers offload
+    /// the last three and the output.
+    fn split3(p: *c.llama_model_params) void {
+        p.n_gpu_layers = 4;
     }
     var overrides: [2]c.llama_model_tensor_buft_override = undefined;
     /// The norm weights in host memory: the case where `graph_get_cb`'s
@@ -1178,15 +1369,34 @@ const ModelEdits = struct {
     var expert_overrides: [2]c.llama_model_tensor_buft_override = undefined;
     /// The experts in host memory, as `--cpu-moe` puts them: the layers
     /// the MoE cache (v0.7.0) caches on the GPU.
+    var no_rope_overrides: [2]c.llama_model_kv_override = undefined;
+    /// v0.8.0: a Granite with `rope_finetuned` off has no layer with RoPE, so
+    /// a K-shift has nothing to rotate and must build no graph.
+    fn noRope(p: *c.llama_model_params) void {
+        no_rope_overrides = std.mem.zeroes(@TypeOf(no_rope_overrides));
+        const key = "granite.rope.scaling.finetuned";
+        @memcpy(no_rope_overrides[0].key[0..key.len], key);
+        no_rope_overrides[0].tag = c.LLAMA_KV_OVERRIDE_TYPE_BOOL;
+        p.kv_overrides = &no_rope_overrides;
+    }
+    /// What `common_fit_params` measures with: dummy buffers, no mapping.
+    fn noAlloc(p: *c.llama_model_params) void {
+        p.no_alloc = true;
+        p.load_mode = c.LLAMA_LOAD_MODE_NONE;
+    }
+    fn noAllocHostExperts(p: *c.llama_model_params) void {
+        noAlloc(p);
+        hostExperts(p);
+    }
     fn hostExperts(p: *c.llama_model_params) void {
         expert_overrides[0] = .{ .pattern = "\\.ffn_(up|down|gate|gate_up)_exps", .buft = c.ggml_backend_cpu_buffer_type() };
         expert_overrides[1] = .{ .pattern = null, .buft = null };
         p.tensor_buft_overrides = &expert_overrides;
     }
-    /// A MoE cache too small for every expert, so the LRU evicts, and
+    /// A MoE cache too small for every expert, so the SLRU evicts, and
     /// ubatches of two tokens, so the cache is used: it reads the cache
     /// only for 32 tokens or fewer. `upstream`'s own test uses the same
-    /// n_ubatch (tests/test-llama-archs.cpp:526 @620d2225c).
+    /// n_ubatch (tests/test-llama-archs.cpp:752 @8642541b2).
     fn moeCacheCtx(p: *c.llama_context_params) void {
         p.moe_cache_size = moe_cache_size;
         // non-causal attention needs the whole batch in one ubatch (the
@@ -1265,104 +1475,6 @@ fn splitStates(rm: *c.struct_llama_model, pm: *M.Model) void {
 // -----------------------------------------------------------------------------
 // prism.hadamard (v0.7.0)
 
-/// The weight kinds `load_hparams_hadamard` accepts as folded
-/// (llama-model.cpp:2030 @620d2225c).
-const foldable_kinds = [_][]const u8{
-    "attn_q",           "attn_k",         "attn_v",       "attn_qkv",       "attn_gate",   "attn_output",
-    "ffn_gate",         "ffn_up",         "ffn_down",     "ffn_gate_exps",  "ffn_up_exps", "ffn_down_exps",
-    "ffn_gate_up_exps", "ffn_gate_shexp", "ffn_up_shexp", "ffn_down_shexp", "ssm_out",
-};
-
-fn foldable(name: []const u8) bool {
-    if (std.mem.eql(u8, name, "output.weight")) return true;
-    if (!std.mem.startsWith(u8, name, "blk.")) return false;
-    var pos: usize = 4;
-    while (pos < name.len and std.ascii.isDigit(name[pos])) pos += 1;
-    if (pos == 4 or pos >= name.len or name[pos] != '.') return false;
-    const rest = name[pos + 1 ..];
-    for (foldable_kinds) |k| {
-        if (rest.len == k.len + 7 and std.mem.startsWith(u8, rest, k) and std.mem.endsWith(u8, rest, ".weight")) return true;
-    }
-    return false;
-}
-
-/// `--hadamard`: `src` with `prism.hadamard` metadata added, written to
-/// `dst` -- every foldable weight whose input width the block of 8 divides
-/// marked folded, explicit signs per width, the token embedding as the
-/// latent table, and for a gated delta net the grouped value heads. The
-/// weights are not really folded, so the model computes nonsense; both
-/// sides compute the same nonsense, through the transforms the graph must
-/// apply, which is what is compared.
-///
-/// With `drop_output`, `output.weight` is left out, so the head is the
-/// token embedding: version 2's tied latent output.
-fn deriveHadamard(src: [:0]const u8, dst: [:0]const u8, drop_output: bool) void {
-    var data_ctx: ?*c.ggml_context = null;
-    const g = c.gguf_init_from_file(src.ptr, .{ .no_alloc = false, .ctx = &data_ctx }) orelse @panic("cannot read the model for --hadamard");
-    defer c.gguf_free(g);
-    defer c.ggml_free(data_ctx);
-    const out = c.gguf_init_empty().?;
-    defer c.gguf_free(out);
-    c.gguf_set_kv(out, g);
-
-    const block: u32 = 8;
-    var names: std.ArrayList([*:0]const u8) = .empty;
-    defer names.deinit(gpa);
-    var widths: std.ArrayList(i32) = .empty;
-    defer widths.deinit(gpa);
-    var has_output = false;
-    var inverse = false;
-    // The file's tensors in its order, not the context's: that also holds
-    // the data blob.
-    var ti: i64 = 0;
-    while (ti < c.gguf_get_n_tensors(g)) : (ti += 1) {
-        const t = c.ggml_get_tensor(data_ctx, c.gguf_get_tensor_name(g, ti)).?;
-        const name = std.mem.sliceTo(&t.*.name, 0);
-        if (drop_output and std.mem.eql(u8, name, "output.weight")) continue;
-        c.gguf_add_tensor(out, t);
-        const w: i32 = @intCast(t.*.ne[0]);
-        if (std.mem.eql(u8, name, "output.weight")) has_output = true;
-        const as_inverse = std.mem.eql(u8, name, "token_embd.weight");
-        if (!(foldable(name) or as_inverse) or @rem(w, @as(i32, block)) != 0) continue;
-        if (as_inverse) inverse = true else names.append(gpa, @ptrCast(&t.*.name)) catch unreachable;
-        if (std.mem.indexOfScalar(i32, widths.items, w) == null) widths.append(gpa, w) catch unreachable;
-    }
-    // A tied output (no output.weight) needs version 2 and tied_output.
-    const tied = inverse and !has_output;
-    c.gguf_set_val_u32(out, "prism.hadamard.version", if (tied) 2 else 1);
-    c.gguf_set_val_bool(out, "prism.hadamard.tied_output", tied);
-    c.gguf_set_val_u32(out, "prism.hadamard.block_size", block);
-    c.gguf_set_val_str(out, "prism.hadamard.transform", "normalized-sylvester-walsh-hadamard");
-    c.gguf_set_val_str(out, "prism.hadamard.axis", "input-last-dimension");
-    c.gguf_set_val_str(out, "prism.hadamard.sign_mode", "explicit");
-    c.gguf_set_arr_data(out, "prism.hadamard.sign_widths", c.GGUF_TYPE_INT32, widths.items.ptr, widths.items.len);
-    var values: std.ArrayList(i32) = .empty;
-    defer values.deinit(gpa);
-    for (widths.items) |w| {
-        for (0..@intCast(w)) |i| values.append(gpa, if ((i * 7 + @as(usize, @intCast(w))) % 3 == 0) -1 else 1) catch unreachable;
-    }
-    c.gguf_set_arr_data(out, "prism.hadamard.sign_values", c.GGUF_TYPE_INT32, values.items.ptr, values.items.len);
-    c.gguf_set_arr_str(out, "prism.hadamard.weight_names", @ptrCast(names.items.ptr), names.items.len);
-    if (inverse) {
-        const inv = [_][*:0]const u8{"token_embd.weight"};
-        c.gguf_set_arr_str(out, "prism.hadamard.inverse_weight_names", @ptrCast(@constCast(&inv)), inv.len);
-    }
-    // The gated delta net's value heads in grouped order, where the
-    // geometry allows it.
-    const arch_k = c.gguf_find_key(g, "general.architecture");
-    const arch = if (arch_k >= 0) std.mem.span(c.gguf_get_val_str(g, arch_k)) else "";
-    var kb: [96]u8 = undefined;
-    const dt_k = c.gguf_find_key(g, (std.fmt.bufPrintSentinel(&kb, "{s}.ssm.time_step_rank", .{arch}, 0) catch unreachable).ptr);
-    const ng_k = c.gguf_find_key(g, (std.fmt.bufPrintSentinel(&kb, "{s}.ssm.group_count", .{arch}, 0) catch unreachable).ptr);
-    if (dt_k >= 0 and ng_k >= 0) {
-        const n_v = c.gguf_get_val_u32(g, dt_k);
-        const n_k = c.gguf_get_val_u32(g, ng_k);
-        if (n_k > 0 and n_v > 0 and n_v % n_k == 0) c.gguf_set_val_bool(out, "prism.hadamard.gdn_v_grouped", true);
-    }
-    if (!c.gguf_write_to_file(out, dst.ptr, false)) @panic("cannot write the --hadamard model");
-    std.debug.print("  --hadamard: {d} folded weights, {d} widths, inverse {}, tied {}, written to {s}\n", .{ names.items.len, widths.items.len, inverse, tied, dst });
-}
-
 /// `--section-order <order>`: `src` with `<arch>.rope.section_order` set
 /// (v0.7.0, MiniCPM-V 4.7's `zyxt`), written to `dst`, for an M-RoPE model:
 /// the embedding rows of the mixed batches then have their positions
@@ -1394,11 +1506,16 @@ const model_cfgs = [_]ModelCfg{
     .{ .name = "cpu", .edit = ModelEdits.cpu },
     .{ .name = "partial", .edit = ModelEdits.partial },
     .{ .name = "proxy", .edit = ModelEdits.proxy },
+    .{ .name = "split3", .edit = ModelEdits.split3, .explicit = true },
     .{ .name = "norm-on-cpu", .edit = ModelEdits.normOnCpu },
     .{ .name = "tensor", .edit = ModelEdits.tensorSplit, .nodes = false },
     .{ .name = "tensor-uneven", .edit = ModelEdits.tensorSplitUneven, .nodes = false },
     .{ .name = "moe-cache", .edit = ModelEdits.hostExperts, .ctx_edit = ModelEdits.moeCacheCtx, .explicit = true },
     .{ .name = "host-experts", .edit = ModelEdits.hostExperts, .explicit = true },
+    .{ .name = "partial-2", .edit = ModelEdits.partial2, .explicit = true },
+    .{ .name = "no-rope", .edit = ModelEdits.noRope, .explicit = true },
+    .{ .name = "no-alloc", .edit = ModelEdits.noAlloc, .explicit = true, .no_alloc = true },
+    .{ .name = "no-alloc-moe-cache", .edit = ModelEdits.noAllocHostExperts, .ctx_edit = ModelEdits.moeCacheCtx, .explicit = true, .no_alloc = true },
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -1440,7 +1557,7 @@ pub fn main(init: std.process.Init) !void {
             skip_case = args[i + 1];
             i += 1;
         }
-        // The model with prism.hadamard metadata added, see deriveHadamard.
+        // The model with prism.hadamard metadata added, see derive_hadamard.zig.
         if (std.mem.eql(u8, args[i], "--hadamard")) hadamard = true;
         // A target model for a draft that needs one (see `script`).
         if (std.mem.eql(u8, args[i], "--target") and i + 1 < args.len) {
@@ -1468,7 +1585,7 @@ pub fn main(init: std.process.Init) !void {
     if (std.c.getenv("CONTEXT_DIFF_TMP")) |d| tmp_dir = std.mem.span(d);
     if (hadamard) {
         const dst = try std.fmt.allocPrintSentinel(gpa, "{s}/hadamard.gguf", .{tmp_dir}, 0);
-        deriveHadamard(path, dst, hadamard_tied);
+        derive_hadamard.deriveHadamard(path, dst, hadamard_tied);
         path = dst;
     }
     if (section_order) |so| {
@@ -1500,6 +1617,7 @@ pub fn main(init: std.process.Init) !void {
             if (!std.mem.eql(u8, mc.name, o)) continue;
         } else if (mc.explicit or (quick and !std.mem.eql(u8, mc.name, "gpu"))) continue;
         model_ctx_edit = mc.ctx_edit;
+        model_no_alloc = mc.no_alloc;
         var mp = c.llama_model_default_params();
         mc.edit(&mp);
         // What each side logs while loading, compared below.
@@ -1608,6 +1726,8 @@ pub fn main(init: std.process.Init) !void {
             std.process.exit(1);
         }
         const n_embd: usize = @intCast(if (load_ref) c.llama_model_n_embd_out(rm) else harness_root.api.model.llama_model_n_embd_out(rm));
+        var arch_buf: [256]u8 = undefined;
+        const model_arch = if (load_ref) metaStr(c, rm, "general.architecture", &arch_buf) else metaStr(harness_root.api.model, rm, "general.architecture", &arch_buf);
 
         // A first context initializes what each backend initializes once
         // per process, which logs.
@@ -1634,8 +1754,10 @@ pub fn main(init: std.process.Init) !void {
                 if (only_exact and !std.mem.eql(u8, cs.name, o)) continue;
                 if (!only_exact and std.mem.find(u8, cs.name, o) == null) continue;
             }
+            if (cs.explicit and !only_exact) continue;
             if (quick and !std.mem.eql(u8, cs.name, "default") and !cs.multi_seq) continue;
             if (!cs.tensor_ok and std.mem.startsWith(u8, mc.name, "tensor")) continue;
+            if (cs.layer_inp and !layerInpArch(model_arch)) continue;
             if (skip_case) |sk| if (std.mem.eql(u8, cs.name, sk)) {
                 skipped += 1;
                 continue;
@@ -1707,7 +1829,7 @@ pub fn main(init: std.process.Init) !void {
             const name = try std.fmt.bufPrint(&name_buf, "{s}: {s}", .{ mc.name, cs.name });
             const before = failures;
             checks += 1;
-            if (ref_nodes == 0 and std.mem.find(u8, ref.items, "init failed") == null) {
+            if (ref_nodes == 0 and !model_no_alloc and std.mem.find(u8, ref.items, "init failed") == null) {
                 failures += 1;
                 std.debug.print("FAIL {s}: the C++ computed no node\n", .{name});
             }

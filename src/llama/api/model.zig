@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-model.cpp` (v0.7.0, `620d2225c`): the
+//! Ported from `llama.cpp/src/llama-model.cpp` (v0.8.0, `8642541b2`): the
 //! C API at the end of the file, from `llama_model_default_params` through
 //! `llama_model_is_diffusion` -- its unmangled exports. The loading entry
 //! points are `llama.cpp/src/llama.cpp`'s, in `api/llama.zig`.
@@ -47,90 +47,90 @@ fn kvAt(m: *const Model, i: usize) struct { key: []const u8, value: [:0]u8 } {
     unreachable;
 }
 
-/// Ports `llama_model_default_params` (llama-model.cpp:3332 @620d2225c).
+/// Ports `llama_model_default_params` (llama-model.cpp:3382 @8642541b2).
 pub fn llama_model_default_params() callconv(.c) c.struct_llama_model_params {
     return model_mod.defaultParams();
 }
 
-/// Ports `llama_model_get_vocab` (llama-model.cpp:3356 @620d2225c): the
+/// Ports `llama_model_get_vocab` (llama-model.cpp:3406 @8642541b2): the
 /// port's `Vocab` inside the model, which `api/vocab.zig` takes back.
 pub fn llama_model_get_vocab(model: ?*const c.struct_llama_model) callconv(.c) ?*const c.struct_llama_vocab {
     return @ptrCast(&modelOf(model).vocab);
 }
 
-/// Ports `llama_free_model` (llama-model.cpp:3360 @620d2225c).
+/// Ports `llama_free_model` (llama-model.cpp:3410 @8642541b2).
 pub fn llama_free_model(model: ?*c.struct_llama_model) callconv(.c) void {
     llama_model_free(model);
 }
 
-/// Ports `llama_model_free` (llama-model.cpp:3364 @620d2225c): `delete`,
+/// Ports `llama_model_free` (llama-model.cpp:3414 @8642541b2): `delete`,
 /// which does nothing for null.
 pub fn llama_model_free(model: ?*c.struct_llama_model) callconv(.c) void {
     const m = model orelse return;
     model_mod.destroy(@ptrCast(@alignCast(m)));
 }
 
-/// Ports `llama_model_n_ctx_train` (llama-model.cpp:3368 @620d2225c).
+/// Ports `llama_model_n_ctx_train` (llama-model.cpp:3418 @8642541b2).
 pub fn llama_model_n_ctx_train(model: ?*const c.struct_llama_model) callconv(.c) i32 {
     return @bitCast(modelOf(model).hparams.n_ctx_train);
 }
 
-/// Ports `llama_model_n_embd` (llama-model.cpp:3372 @620d2225c).
+/// Ports `llama_model_n_embd` (llama-model.cpp:3422 @8642541b2).
 pub fn llama_model_n_embd(model: ?*const c.struct_llama_model) callconv(.c) i32 {
     return @bitCast(modelOf(model).hparams.n_embd);
 }
 
-/// Ports `llama_model_n_embd_inp` (llama-model.cpp:3376 @620d2225c).
+/// Ports `llama_model_n_embd_inp` (llama-model.cpp:3426 @8642541b2).
 pub fn llama_model_n_embd_inp(model: ?*const c.struct_llama_model) callconv(.c) i32 {
     return @bitCast(modelOf(model).hparams.nEmbdInp());
 }
 
-/// Ports `llama_model_n_embd_out` (llama-model.cpp:3380 @620d2225c).
+/// Ports `llama_model_n_embd_out` (llama-model.cpp:3430 @8642541b2).
 pub fn llama_model_n_embd_out(model: ?*const c.struct_llama_model) callconv(.c) i32 {
     return @bitCast(modelOf(model).hparams.nEmbdOut());
 }
 
-/// Ports `llama_model_n_layer` (llama-model.cpp:3384 @620d2225c).
+/// Ports `llama_model_n_layer` (llama-model.cpp:3434 @8642541b2).
 pub fn llama_model_n_layer(model: ?*const c.struct_llama_model) callconv(.c) i32 {
     return @bitCast(modelOf(model).hparams.nLayer());
 }
 
-/// Ports `llama_model_n_layer_nextn` (llama-model.cpp:3388 @620d2225c).
+/// Ports `llama_model_n_layer_nextn` (llama-model.cpp:3438 @8642541b2).
 pub fn llama_model_n_layer_nextn(model: ?*const c.struct_llama_model) callconv(.c) i32 {
     return @bitCast(modelOf(model).hparams.n_layer_nextn);
 }
 
-/// Ports `llama_model_dflash_selector_top_k` (llama-model.cpp:3392 @620d2225c),
+/// Ports `llama_model_dflash_selector_top_k` (llama-model.cpp:3442 @8642541b2),
 /// from `llama-ext.h`: a DFlash draft's selector width. C++ linkage upstream,
 /// so `exports.zig` does not export it.
 pub fn llama_model_dflash_selector_top_k(model: ?*const c.struct_llama_model) callconv(.c) i32 {
     return @bitCast(modelOf(model).hparams.dflash_selector_top_k);
 }
 
-/// Ports `llama_model_n_head` (llama-model.cpp:3396 @620d2225c): layer 0's.
+/// Ports `llama_model_n_head` (llama-model.cpp:3446 @8642541b2): layer 0's.
 pub fn llama_model_n_head(model: ?*const c.struct_llama_model) callconv(.c) i32 {
     return @bitCast(modelOf(model).hparams.nHead(0));
 }
 
-/// Ports `llama_model_n_head_kv` (llama-model.cpp:3400 @620d2225c): layer 0's.
+/// Ports `llama_model_n_head_kv` (llama-model.cpp:3450 @8642541b2): layer 0's.
 pub fn llama_model_n_head_kv(model: ?*const c.struct_llama_model) callconv(.c) i32 {
     return @bitCast(modelOf(model).hparams.nHeadKv(0));
 }
 
-/// Ports `llama_model_n_swa` (llama-model.cpp:3404 @620d2225c): DeepSeek-V4's
+/// Ports `llama_model_n_swa` (llama-model.cpp:3454 @8642541b2): DeepSeek-V4's
 /// cache has a window it cannot roll back through, so it reports none.
 pub fn llama_model_n_swa(model: ?*const c.struct_llama_model) callconv(.c) i32 {
     const m = modelOf(model);
-    if (m.arch == .deepseek4) return 0;
+    if (m.arch == .deepseek4 or m.arch == .deepseek41) return 0;
     return @bitCast(m.hparams.n_swa);
 }
 
-/// Ports `llama_model_n_cls_out` (llama-model.cpp:3414 @620d2225c).
+/// Ports `llama_model_n_cls_out` (llama-model.cpp:3464 @8642541b2).
 pub fn llama_model_n_cls_out(model: ?*const c.struct_llama_model) callconv(.c) u32 {
     return modelOf(model).hparams.n_cls_out;
 }
 
-/// Ports `llama_model_cls_label` (llama-model.cpp:3418 @620d2225c).
+/// Ports `llama_model_cls_label` (llama-model.cpp:3468 @8642541b2).
 ///
 /// Return: label `i`, borrowed from the model, or null past the last.
 pub fn llama_model_cls_label(model: ?*const c.struct_llama_model, i: u32) callconv(.c) [*c]const u8 {
@@ -139,38 +139,38 @@ pub fn llama_model_cls_label(model: ?*const c.struct_llama_model, i: u32) callco
     return null;
 }
 
-/// Ports `llama_n_ctx_train` (llama-model.cpp:3427 @620d2225c).
+/// Ports `llama_n_ctx_train` (llama-model.cpp:3485 @8642541b2).
 pub fn llama_n_ctx_train(model: ?*const c.struct_llama_model) callconv(.c) i32 {
     return llama_model_n_ctx_train(model);
 }
 
-/// Ports `llama_n_embd` (llama-model.cpp:3432 @620d2225c).
+/// Ports `llama_n_embd` (llama-model.cpp:3490 @8642541b2).
 pub fn llama_n_embd(model: ?*const c.struct_llama_model) callconv(.c) i32 {
     return llama_model_n_embd(model);
 }
 
-/// Ports `llama_n_layer` (llama-model.cpp:3437 @620d2225c).
+/// Ports `llama_n_layer` (llama-model.cpp:3495 @8642541b2).
 pub fn llama_n_layer(model: ?*const c.struct_llama_model) callconv(.c) i32 {
     return llama_model_n_layer(model);
 }
 
-/// Ports `llama_n_head` (llama-model.cpp:3442 @620d2225c).
+/// Ports `llama_n_head` (llama-model.cpp:3500 @8642541b2).
 pub fn llama_n_head(model: ?*const c.struct_llama_model) callconv(.c) i32 {
     return llama_model_n_head(model);
 }
 
-/// Ports `llama_model_rope_type` (llama-model.cpp:3446 @620d2225c); the
+/// Ports `llama_model_rope_type` (llama-model.cpp:3504 @8642541b2); the
 /// table is `Model.ropeType`'s.
 pub fn llama_model_rope_type(model: ?*const c.struct_llama_model) callconv(.c) c.enum_llama_rope_type {
     return modelOf(model).ropeType();
 }
 
-/// Ports `llama_model_rope_freq_scale_train` (llama-model.cpp:3642 @620d2225c).
+/// Ports `llama_model_rope_freq_scale_train` (llama-model.cpp:3707 @8642541b2).
 pub fn llama_model_rope_freq_scale_train(model: ?*const c.struct_llama_model) callconv(.c) f32 {
     return modelOf(model).hparams.rope_freq_scale_train;
 }
 
-/// Ports `llama_model_meta_val_str` (llama-model.cpp:3646 @620d2225c).
+/// Ports `llama_model_meta_val_str` (llama-model.cpp:3711 @8642541b2).
 ///
 /// Return: the value's length, however much of it fit; -1, with `buf`
 /// emptied, for a key the model does not have.
@@ -184,12 +184,12 @@ pub fn llama_model_meta_val_str(model: ?*const c.struct_llama_model, key: [*c]co
     return printTo(buf, buf_size, v.*);
 }
 
-/// Ports `llama_model_meta_count` (llama-model.cpp:3657 @620d2225c).
+/// Ports `llama_model_meta_count` (llama-model.cpp:3722 @8642541b2).
 pub fn llama_model_meta_count(model: ?*const c.struct_llama_model) callconv(.c) i32 {
     return @truncate(@as(i64, @intCast(modelOf(model).gguf_kv.count())));
 }
 
-/// Ports `llama_model_meta_key_str` (llama-model.cpp:3661 @620d2225c).
+/// Ports `llama_model_meta_key_str` (llama-model.cpp:3726 @8642541b2).
 ///
 /// Return: the key's name, static, or null for a value past the enum.
 pub fn llama_model_meta_key_str(key: c.enum_llama_model_meta_key) callconv(.c) [*c]const u8 {
@@ -210,7 +210,7 @@ pub fn llama_model_meta_key_str(key: c.enum_llama_model_meta_key) callconv(.c) [
     };
 }
 
-/// Ports `llama_model_meta_key_by_index` (llama-model.cpp:3679 @620d2225c).
+/// Ports `llama_model_meta_key_by_index` (llama-model.cpp:3744 @8642541b2).
 ///
 /// Return: the `i`-th key's length, in `gguf_kv`'s order; -1, with `buf`
 /// emptied, out of range.
@@ -223,7 +223,7 @@ pub fn llama_model_meta_key_by_index(model: ?*const c.struct_llama_model, i: i32
     return printTo(buf, buf_size, kvAt(m, @intCast(i)).key);
 }
 
-/// Ports `llama_model_meta_val_str_by_index` (llama-model.cpp:3691 @620d2225c).
+/// Ports `llama_model_meta_val_str_by_index` (llama-model.cpp:3756 @8642541b2).
 ///
 /// Return: the `i`-th value's length, in `gguf_kv`'s order; -1, with `buf`
 /// emptied, out of range.
@@ -236,22 +236,22 @@ pub fn llama_model_meta_val_str_by_index(model: ?*const c.struct_llama_model, i:
     return printTo(buf, buf_size, kvAt(m, @intCast(i)).value);
 }
 
-/// Ports `llama_model_desc` (llama-model.cpp:3703 @620d2225c).
+/// Ports `llama_model_desc` (llama-model.cpp:3768 @8642541b2).
 pub fn llama_model_desc(model: ?*const c.struct_llama_model, buf: [*c]u8, buf_size: usize) callconv(.c) i32 {
     return printTo(buf, buf_size, modelOf(model).desc());
 }
 
-/// Ports `llama_model_ftype` (llama-model.cpp:3707 @620d2225c).
+/// Ports `llama_model_ftype` (llama-model.cpp:3772 @8642541b2).
 pub fn llama_model_ftype(model: ?*const c.struct_llama_model) callconv(.c) c.enum_llama_ftype {
     return modelOf(model).ftype;
 }
 
-/// Ports `llama_model_size` (llama-model.cpp:3711 @620d2225c).
+/// Ports `llama_model_size` (llama-model.cpp:3776 @8642541b2).
 pub fn llama_model_size(model: ?*const c.struct_llama_model) callconv(.c) u64 {
     return modelOf(model).n_bytes;
 }
 
-/// Ports `llama_model_chat_template` (llama-model.cpp:3715 @620d2225c):
+/// Ports `llama_model_chat_template` (llama-model.cpp:3780 @8642541b2):
 /// `tokenizer.chat_template`, or `tokenizer.chat_template.<name>`, from the
 /// metadata; with no template, the one name the C++ hard-codes for
 /// Mistral-Small-2503.
@@ -262,10 +262,10 @@ pub fn llama_model_chat_template(model: ?*const c.struct_llama_model, name: [*c]
     var key: std.ArrayList(u8) = .empty;
     defer key.deinit(impl.allocator);
     const base = arch.kvName(m.arch, .tokenizer_chat_template, null);
-    key.appendSlice(impl.allocator, base.slice()) catch impl.abort("llama-model.cpp", 3716, "out of memory");
+    key.appendSlice(impl.allocator, base.slice()) catch impl.abort("llama-model.cpp", 3781, "out of memory");
     if (name != null) {
-        key.append(impl.allocator, '.') catch impl.abort("llama-model.cpp", 3716, "out of memory");
-        key.appendSlice(impl.allocator, std.mem.span(@as([*:0]const u8, @ptrCast(name)))) catch impl.abort("llama-model.cpp", 3716, "out of memory");
+        key.append(impl.allocator, '.') catch impl.abort("llama-model.cpp", 3781, "out of memory");
+        key.appendSlice(impl.allocator, std.mem.span(@as([*:0]const u8, @ptrCast(name)))) catch impl.abort("llama-model.cpp", 3781, "out of memory");
     }
     const v = m.gguf_kv.get(key.items) orelse {
         // One-off fix for very popular models: Mistral-Small-2503 has no
@@ -276,54 +276,54 @@ pub fn llama_model_chat_template(model: ?*const c.struct_llama_model, name: [*c]
     return v.*.ptr;
 }
 
-/// Ports `llama_model_n_params` (llama-model.cpp:3734 @620d2225c).
+/// Ports `llama_model_n_params` (llama-model.cpp:3799 @8642541b2).
 pub fn llama_model_n_params(model: ?*const c.struct_llama_model) callconv(.c) u64 {
     return modelOf(model).n_elements;
 }
 
-/// Ports `llama_model_has_encoder` (llama-model.cpp:3738 @620d2225c).
+/// Ports `llama_model_has_encoder` (llama-model.cpp:3803 @8642541b2).
 pub fn llama_model_has_encoder(model: ?*const c.struct_llama_model) callconv(.c) bool {
     return modelOf(model).hasEncoder();
 }
 
-/// Ports `llama_model_has_decoder` (llama-model.cpp:3748 @620d2225c).
+/// Ports `llama_model_has_decoder` (llama-model.cpp:3813 @8642541b2).
 pub fn llama_model_has_decoder(model: ?*const c.struct_llama_model) callconv(.c) bool {
     return modelOf(model).hasDecoder();
 }
 
-/// Ports `llama_model_decoder_start_token` (llama-model.cpp:3755 @620d2225c).
+/// Ports `llama_model_decoder_start_token` (llama-model.cpp:3820 @8642541b2).
 pub fn llama_model_decoder_start_token(model: ?*const c.struct_llama_model) callconv(.c) c.llama_token {
     return modelOf(model).hparams.dec_start_token_id;
 }
 
-/// Ports `llama_model_is_recurrent` (llama-model.cpp:3759 @620d2225c).
+/// Ports `llama_model_is_recurrent` (llama-model.cpp:3824 @8642541b2).
 pub fn llama_model_is_recurrent(model: ?*const c.struct_llama_model) callconv(.c) bool {
     return arch.isRecurrent(modelOf(model).arch);
 }
 
-/// Ports `llama_model_is_hybrid` (llama-model.cpp:3763 @620d2225c).
+/// Ports `llama_model_is_hybrid` (llama-model.cpp:3828 @8642541b2).
 pub fn llama_model_is_hybrid(model: ?*const c.struct_llama_model) callconv(.c) bool {
     return arch.isHybrid(modelOf(model).arch);
 }
 
-/// Ports `llama_model_is_diffusion` (llama-model.cpp:3767 @620d2225c).
+/// Ports `llama_model_is_diffusion` (llama-model.cpp:3832 @8642541b2).
 pub fn llama_model_is_diffusion(model: ?*const c.struct_llama_model) callconv(.c) bool {
     return arch.isDiffusion(modelOf(model).arch);
 }
 
-/// Ports `llama_model_n_expert` (llama-model.cpp:3775 @620d2225c), from
+/// Ports `llama_model_n_expert` (llama-model.cpp:3840 @8642541b2), from
 /// `llama-ext.h`.
 pub fn llama_model_n_expert(model: ?*const c.struct_llama_model) callconv(.c) i32 {
     return @bitCast(modelOf(model).hparams.n_expert);
 }
 
-/// Ports `llama_model_n_devices` (llama-model.cpp:3779 @620d2225c), from
+/// Ports `llama_model_n_devices` (llama-model.cpp:3844 @8642541b2), from
 /// `llama-ext.h`.
 pub fn llama_model_n_devices(model: ?*const c.struct_llama_model) callconv(.c) i32 {
     return @intCast(modelOf(model).devices.items.len);
 }
 
-/// Ports `llama_model_get_device` (llama-model.cpp:3783 @620d2225c), from
+/// Ports `llama_model_get_device` (llama-model.cpp:3848 @8642541b2), from
 /// `llama-ext.h`: the `i`-th device the model's layers may go to, or null
 /// when `i` is out of range.
 pub fn llama_model_get_device(model: ?*const c.struct_llama_model, i: c_int) callconv(.c) c.ggml_backend_dev_t {
@@ -332,7 +332,7 @@ pub fn llama_model_get_device(model: ?*const c.struct_llama_model, i: c_int) cal
     return devices[@intCast(i)].dev;
 }
 
-/// Ports `llama_model_set_attn_rot` (llama-model.cpp:3790 @620d2225c), from
+/// Ports `llama_model_set_attn_rot` (llama-model.cpp:3855 @8642541b2), from
 /// `llama-ext.h`: turns the KV cache attention rotation on or off for the
 /// contexts created from this model afterwards; for testing.
 pub fn llama_model_set_attn_rot(model: ?*c.struct_llama_model, value: bool) callconv(.c) void {
@@ -340,7 +340,7 @@ pub fn llama_model_set_attn_rot(model: ?*c.struct_llama_model, value: bool) call
     m.attn_rot = value;
 }
 
-/// Ports `llama_model_target_layer_ids` (llama-model.cpp:3896 @620d2225c),
+/// Ports `llama_model_target_layer_ids` (llama-model.cpp:3961 @8642541b2),
 /// from `llama-ext.h`: the target model's layers an eagle3 or DFlash draft
 /// reads, or null when there are none.
 pub fn llama_model_target_layer_ids(model: ?*const c.struct_llama_model) callconv(.c) [*c]const i32 {
@@ -348,13 +348,41 @@ pub fn llama_model_target_layer_ids(model: ?*const c.struct_llama_model) callcon
     return if (v.len == 0) null else v.ptr;
 }
 
-/// Ports `llama_model_target_layer_ids_n` (llama-model.cpp:3901 @620d2225c),
+/// Ports `llama_model_target_layer_ids_n` (llama-model.cpp:3966 @8642541b2),
 /// from `llama-ext.h`.
 pub fn llama_model_target_layer_ids_n(model: ?*const c.struct_llama_model) callconv(.c) u32 {
     return @truncate(modelOf(model).target_layer_ids.items.len);
 }
 
-/// Ports `llama_model_get_tok_embd` (llama-model.cpp:3905 @620d2225c),
+/// Ports `llama_tensor_rows_to_f32` (llama-model.cpp:3971 @8642541b2): rows
+/// `[row0, row0 + n_rows)` of a 2D tensor as F32.
+fn tensorRowsToF32(tensor: *const c.ggml_tensor, row0: i64, n_rows: i64, out: [*]f32) void {
+    const nelements: usize = @as(usize, @intCast(n_rows)) *% @as(usize, @intCast(tensor.ne[0]));
+    const offset: usize = @as(usize, @intCast(row0)) *% tensor.nb[1];
+    const nbytes: usize = c.ggml_row_size(tensor.type, tensor.ne[0]) *% @as(usize, @intCast(n_rows));
+
+    if (tensor.type == c.GGML_TYPE_F32) {
+        c.ggml_backend_tensor_get(tensor, out, offset, nbytes);
+        return;
+    }
+
+    const buf = impl.allocator.alloc(u8, nbytes) catch impl.abort("llama-model.cpp", 3981, "out of memory");
+    defer impl.allocator.free(buf);
+    c.ggml_backend_tensor_get(tensor, buf.ptr, offset, nbytes);
+
+    const traits = c.ggml_get_type_traits(tensor.type);
+    if (tensor.type == c.GGML_TYPE_F16) {
+        c.ggml_fp16_to_fp32_row(@ptrCast(@alignCast(buf.ptr)), out, @intCast(nelements));
+    } else if (tensor.type == c.GGML_TYPE_BF16) {
+        c.ggml_bf16_to_fp32_row(@ptrCast(@alignCast(buf.ptr)), out, @intCast(nelements));
+    } else if (c.ggml_is_quantized(tensor.type) and traits.*.to_float != null) {
+        traits.*.to_float.?(buf.ptr, out, @intCast(nelements));
+    } else {
+        _ = c.ggml_abort("llama-model.cpp", 3992, "unsupported tensor type for dequantization: %s", c.ggml_type_name(tensor.type));
+    }
+}
+
+/// Ports `llama_model_get_tok_embd` (llama-model.cpp:3996 @8642541b2),
 /// from `llama-ext.h`: the token embedding matrix as F32, or with `out`
 /// null its element count.
 pub fn llama_model_get_tok_embd(model: ?*const c.struct_llama_model, out: ?[*]f32) callconv(.c) u32 {
@@ -363,30 +391,97 @@ pub fn llama_model_get_tok_embd(model: ?*const c.struct_llama_model, out: ?[*]f3
 
     const tensor = m.tok_embd.?;
     const nelements: usize = @intCast(c.ggml_nelements(tensor));
-    if (nelements > std.math.maxInt(u32)) _ = c.ggml_abort("llama-model.cpp", 3912, "GGML_ASSERT(%s) failed", "nelements <= UINT32_MAX"); // for the return type
+    if (nelements > std.math.maxInt(u32)) _ = c.ggml_abort("llama-model.cpp", 4003, "GGML_ASSERT(%s) failed", "nelements <= UINT32_MAX"); // for the return type
 
     const dst = out orelse return @intCast(nelements);
 
-    if (tensor.type == c.GGML_TYPE_F32) {
-        c.ggml_backend_tensor_get(tensor, dst, 0, nelements * @sizeOf(f32));
-        return @intCast(nelements);
-    }
+    tensorRowsToF32(tensor, 0, tensor.ne[1], dst);
 
-    const buf = impl.allocator.alloc(u8, c.ggml_nbytes(tensor)) catch impl.abort("llama-model.cpp", 3923, "out of memory");
-    defer impl.allocator.free(buf);
-    c.ggml_backend_tensor_get(tensor, buf.ptr, 0, buf.len);
-
-    const traits = c.ggml_get_type_traits(tensor.type);
-    if (tensor.type == c.GGML_TYPE_F16) {
-        c.ggml_fp16_to_fp32_row(@ptrCast(@alignCast(buf.ptr)), dst, @intCast(nelements));
-    } else if (tensor.type == c.GGML_TYPE_BF16) {
-        c.ggml_bf16_to_fp32_row(@ptrCast(@alignCast(buf.ptr)), dst, @intCast(nelements));
-    } else if (c.ggml_is_quantized(tensor.type) and traits.*.to_float != null) {
-        traits.*.to_float.?(buf.ptr, dst, @intCast(nelements));
-    } else {
-        _ = c.ggml_abort("llama-model.cpp", 3934, "unsupported tensor type for dequantization: %s", c.ggml_type_name(tensor.type));
-    }
     return @intCast(nelements);
+}
+
+/// Ports `llama_model_n_tokens_delay` (llama-model.cpp:4014 @8642541b2), from
+/// `llama-ext.h`: for realtime models, the number of tokens the output lags
+/// behind the audio input, used by mtmd; 0 if not applicable.
+pub fn llama_model_n_tokens_delay(model: ?*const c.struct_llama_model) callconv(.c) u32 {
+    return modelOf(model).hparams.n_tokens_delay;
+}
+
+/// Ports `llama_model_get_tok_embd_rows` (llama-model.cpp:4018 @8642541b2),
+/// from `llama-ext.h`: as `llama_model_get_tok_embd`, but only the rows of
+/// the given tokens, in order (`n_tokens * n_embd` elements).
+///
+/// Return: the number of elements written, or 0 on error.
+pub fn llama_model_get_tok_embd_rows(model: ?*const c.struct_llama_model, tokens: ?[*]const c.llama_token, n_tokens: u32, out: ?[*]f32) callconv(.c) u32 {
+    const m = modelOf(model);
+    if (m.vocab.nTokens() == 0 or m.tok_embd == null or tokens == null or out == null) return 0;
+
+    const tensor = m.tok_embd.?;
+    const ne0: usize = @intCast(tensor.ne[0]);
+    for (0..n_tokens) |i| {
+        const tok = tokens.?[i];
+        if (tok < 0 or tok >= tensor.ne[1]) return 0;
+        tensorRowsToF32(tensor, tok, 1, out.? + i * ne0);
+    }
+
+    return n_tokens *% @as(u32, @truncate(ne0));
+}
+
+/// Ports `llama_model_decision_label` (llama-model.cpp:3476 @8642541b2), from
+/// `llama-ext.h`: the label of option `i` of a decision model
+/// (`<arch>.decision.labels`), null past the last one.
+pub fn llama_model_decision_label(model: ?*const c.struct_llama_model, i: u32) callconv(.c) [*c]const u8 {
+    const labels = modelOf(model).decision_labels.items;
+    if (i < labels.len) return labels[i].ptr;
+    return null;
+}
+
+/// Ports `llama_arch_all` (llama-arch.cpp:1382 @8642541b2), from
+/// `llama-ext.h`. The C++ returns a `std::vector`, so this has no C signature
+/// and is never exported; it is called as Zig.
+///
+/// Return: all the architectures known to the library, static.
+pub fn llama_arch_all() []const arch.Arch {
+    return arch.archAll();
+}
+
+/// Ports `llama_arch_name` (llama-arch.cpp:1386 @8642541b2), from
+/// `llama-ext.h`: the canonical name of an architecture, or "unknown".
+pub fn llama_arch_name(a: arch.Arch) [:0]const u8 {
+    return arch.archName(a);
+}
+
+/// Ports `llama_arch_from_string` (llama-arch.cpp:1390 @8642541b2), from
+/// `llama-ext.h`.
+///
+/// Return: the architecture with the given canonical name, or `.unknown`.
+pub fn llama_arch_from_string(name: []const u8) arch.Arch {
+    return arch.archFromString(name);
+}
+
+/// Ports `llama_arch_kv_name` (llama-arch.cpp:1394 @8642541b2), from
+/// `llama-ext.h`: the arch-resolved GGUF key of a KV id, e.g.
+/// `LLM_KV_CONTEXT_LENGTH` -> `llama.context_length`.
+pub fn llama_arch_kv_name(a: arch.Arch, key: arch.Kv) arch.Name {
+    return arch.kvName(a, key, null);
+}
+
+/// Ports `llama_arch_supports_sm_tensor` (llama-arch.cpp:1398 @8642541b2),
+/// from `llama-ext.h`.
+pub fn llama_arch_supports_sm_tensor(a: arch.Arch) bool {
+    return arch.supportsSmTensor(a);
+}
+
+/// Ports `llama_arch_supports_mixed_batch` (llama-arch.cpp:1402 @8642541b2),
+/// from `llama-ext.h`.
+pub fn llama_arch_supports_mixed_batch(a: arch.Arch) bool {
+    return arch.supportsMixedBatch(a);
+}
+
+/// Ports `llama_arch_supports_save` (llama-arch.cpp:1366 @8642541b2), from
+/// `llama-ext.h`.
+pub fn llama_arch_supports_save(a: arch.Arch) bool {
+    return arch.supportsSave(a);
 }
 
 // -----------------------------------------------------------------------------

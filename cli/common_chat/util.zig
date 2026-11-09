@@ -7,7 +7,7 @@
 //! lets one exception type propagate through another layer's code; the
 //! string helpers port `string_starts_with`, `string_ends_with` and
 //! `string_replace_all` from `llama.cpp/common/common.h` and
-//! `llama.cpp/common/common.cpp` (llama.cpp v0.7.0, `620d2225c`), each
+//! `llama.cpp/common/common.cpp` (llama.cpp v0.8.0, `8642541b2`), each
 //! cited where it is defined.
 
 const std = @import("std");
@@ -95,7 +95,7 @@ pub fn contains(s: []const u8, needle: []const u8) bool {
     return std.mem.indexOf(u8, s, needle) != null;
 }
 
-/// Ports `string_replace_all` (common/common.cpp:510 @620d2225c): every
+/// Ports `string_replace_all` (common/common.cpp:511 @8642541b2): every
 /// occurrence of `search`, left to right, never rescanning a replacement;
 /// an empty `search` changes nothing.
 ///

@@ -7,7 +7,7 @@
 //! `common_init_sampler_from_model`, `common_control_vector_load`,
 //! `common_set_adapter_lora`, `common_threadpools::init`,
 //! `ggml_threadpool_params_from_cpu_params` and `set_process_priority` from
-//! `llama.cpp/common/common.cpp` (v0.7.0, `620d2225c`). Each declaration
+//! `llama.cpp/common/common.cpp` (v0.8.0, `8642541b2`). Each declaration
 //! names what it ports and the line it began at.
 //!
 //! # The sampler, for the tools
@@ -48,7 +48,7 @@ fn comErr(comptime func: [*:0]const u8, comptime fmt: []const u8, args: anytype)
     log.err(comPrefix(fmt), .{ @as(c_int, 12), func } ++ args);
 }
 
-/// Ports `common_init_result` (common/common.h:987 @620d2225c).
+/// Ports `common_init_result` (common/common.h:1001 @8642541b2).
 pub const InitResult = struct {
     model: ?*c.llama_model = null,
     context: ?*c.llama_context = null,
@@ -57,12 +57,12 @@ pub const InitResult = struct {
     threadpool: ?*c.ggml_threadpool = null,
     threadpool_batch: ?*c.ggml_threadpool = null,
 
-    /// Ports `reset_samplers` (common/common.cpp:1399 @620d2225c), a member of `common_init_result`.
+    /// Ports `reset_samplers` (common/common.cpp:1428 @8642541b2), a member of `common_init_result`.
     fn resetSamplers(self: *InitResult) void {
         for (self.samplers.items) |s| c.llama_sampler_reset(s.get());
     }
 
-    /// Ports `sampler` (common/common.cpp:1392 @620d2225c), a member of
+    /// Ports `sampler` (common/common.cpp:1421 @8642541b2), a member of
     /// `common_init_result`.
     ///
     /// Return: the sampler for `seq_id`, or null past the last; owned by
@@ -82,7 +82,7 @@ pub const InitResult = struct {
     }
 };
 
-/// Ports `common_init_sampler_from_model` (common/common.cpp:1088 @620d2225c): the
+/// Ports `common_init_sampler_from_model` (common/common.cpp:1099 @8642541b2): the
 /// model's recommended sampling, where the command line set none.
 fn initSamplerFromModel(p: *Params, model: ?*const c.llama_model) !void {
     const sp = &p.sampling;
@@ -149,7 +149,7 @@ pub fn samplerInit(p: *Params, model: ?*const c.llama_model) !*sampling.Sampler 
     return sampling.init(model, &p.sampling);
 }
 
-/// Ports `ggml_threadpool_params_from_cpu_params` (common/common.cpp:1755 @620d2225c).
+/// Ports `ggml_threadpool_params_from_cpu_params` (common/common.cpp:1784 @8642541b2).
 fn threadpoolParams(cp: *const params_mod.CpuParams) c.ggml_threadpool_params {
     var tpp: c.ggml_threadpool_params = undefined;
     c.ggml_threadpool_params_init(&tpp, cp.n_threads); // setup the defaults
@@ -160,7 +160,7 @@ fn threadpoolParams(cp: *const params_mod.CpuParams) c.ggml_threadpool_params {
     return tpp;
 }
 
-/// Ports `init` (common/common.cpp:1779 @620d2225c), a member of `common_threadpools`.
+/// Ports `init` (common/common.cpp:1808 @8642541b2), a member of `common_threadpools`.
 fn threadpoolsInit(res: *InitResult, ctx: ?*c.llama_context, p: *const Params) void {
     const func = "init";
     comInf(func, "llama threadpool init, n_threads = %d\n", .{p.cpuparams.n_threads});
@@ -199,7 +199,7 @@ fn threadpoolsInit(res: *InitResult, ctx: ?*c.llama_context, p: *const Params) v
 extern fn setpriority(which: c_int, who: c_uint, prio: c_int) c_int;
 extern fn strerror(e: c_int) [*:0]const u8;
 
-/// Ports `set_process_priority` (common/common.cpp:263 @620d2225c), the POSIX arm;
+/// Ports `set_process_priority` (common/common.cpp:264 @8642541b2), the POSIX arm;
 /// Windows has its own, through `SetPriorityClass`.
 pub fn setProcessPriority(prio: c.ggml_sched_priority) bool {
     if (prio == c.GGML_SCHED_PRIO_NORMAL) return true;
@@ -237,10 +237,10 @@ pub fn setProcessPriority(prio: c.ggml_sched_priority) bool {
     return true;
 }
 
-/// Ports `common_control_vector_data` (common/common.h:1209 @620d2225c).
+/// Ports `common_control_vector_data` (common/common.h:1226 @8642541b2).
 const ControlVectorData = struct { n_embd: i32, data: std.ArrayList(f32) };
 
-/// Ports `common_control_vector_load_one` (common/common.cpp:1969 @620d2225c).
+/// Ports `common_control_vector_load_one` (common/common.cpp:1998 @8642541b2).
 fn controlVectorLoadOne(a: std.mem.Allocator, info: params_mod.ControlVectorLoadInfo) !ControlVectorData {
     const func = "common_control_vector_load_one";
     var result: ControlVectorData = .{ .n_embd = -1, .data = .empty };
@@ -320,7 +320,7 @@ fn controlVectorLoadOne(a: std.mem.Allocator, info: params_mod.ControlVectorLoad
     return result;
 }
 
-/// Ports `common_control_vector_load` (common/common.cpp:2054 @620d2225c).
+/// Ports `common_control_vector_load` (common/common.cpp:2083 @8642541b2).
 fn controlVectorLoad(a: std.mem.Allocator, infos: []const params_mod.ControlVectorLoadInfo) !ControlVectorData {
     const func = "common_control_vector_load";
     var result: ControlVectorData = .{ .n_embd = -1, .data = .empty };
@@ -353,7 +353,120 @@ fn controlVectorLoad(a: std.mem.Allocator, infos: []const params_mod.ControlVect
     return result;
 }
 
-/// Ports `common_init_result` (common/common.cpp:1239 @620d2225c), a member of `common_init_result`.
+/// Ports `common_fit_apply` (common/common.cpp:1258 @8642541b2): applies
+/// `--fit` to `mparams` and `cparams`, a no-op if `fit_params` is false.
+///
+/// Parameters:
+/// - `gpa`: for the measurements; `p.arena` holds what lives on.
+/// - `p`: the parameters.
+/// - `mparams`, `cparams`: what `--fit` writes to.
+pub fn fitApply(gpa: std.mem.Allocator, p: *Params, mparams: *c.llama_model_params, cparams: *c.llama_context_params) !void {
+    if (!p.fit_params) return;
+
+    const a = p.arena;
+    const model_path = try a.dupeSentinel(u8, p.model.path, 0);
+
+    comTrc("common_fit_apply", "%s", .{@as([*:0]const u8, "fitting params to device memory ...\n")});
+    comTrc("common_fit_apply", "%s", .{@as([*:0]const u8, "(for bugs during this step try to reproduce them with -fit off, or provide --verbose logs if the bug only occurs with -fit on)\n")});
+
+    // the draft context is created from the same base params and follows the main context, fit both together
+    const has_draft = p.speculative.hasDft();
+    const spec_mtp = for (p.speculative.types.items) |t| {
+        if (t == .draft_mtp) break true;
+    } else false;
+
+    var params_dft = @import("speculative.zig").baseParamsToSpeculative(p);
+
+    var mparams_dft = common.modelParamsToLlama(&params_dft);
+    var cparams_dft = common.contextParamsToLlama(&params_dft);
+    if (spec_mtp) cparams_dft.ctx_type = c.LLAMA_CONTEXT_TYPE_MTP;
+    cparams_dft.n_rs_seq = 0;
+
+    const path_dft = try a.dupeSentinel(u8, params_dft.model.path, 0);
+    const extra: fit.ExtraModel = .{
+        .path_model = path_dft.ptr,
+        .mparams = @ptrCast(&mparams_dft),
+        .cparams = @ptrCast(&cparams_dft),
+        .shares_model = !has_draft, // an MTP context runs on the weights of the main model
+    };
+
+    var patterns = try fit.Patterns.init(a);
+    _ = try fit.fitParams(
+        gpa,
+        &patterns,
+        .{ .verbosity = std.math.maxInt(i32), .sink = common.fitLogSink, .json = common.fitLogJson },
+        model_path.ptr,
+        @ptrCast(mparams),
+        @ptrCast(cparams),
+        &p.tensor_split,
+        @ptrCast(p.tensor_buft_overrides.items.ptr),
+        p.fit_params_target.items.ptr,
+        @bitCast(p.fit_params_min_ctx),
+        if (has_draft or spec_mtp) &extra else null,
+        if (p.verbosity >= log.level_debug) c.GGML_LOG_LEVEL_DEBUG else c.GGML_LOG_LEVEL_ERROR,
+    );
+}
+
+/// Ports `common_memory_reports` (fit.h:64 @8642541b2): the memory a model
+/// needs at the smallest and largest context `--fit` may pick.
+pub const MemoryReports = struct {
+    n_ctx_train: u32 = 0,
+    n_ctx_max: u32 = 0, // the largest context that fits the free device memory right now
+    n_ctx_min: u32 = 0, // --fit-ctx (the smallest context --fit may pick), with the placement set in params
+    info_max: []fit.MemoryBreakdownRow = &.{}, // breakdown at n_ctx_max
+    info_min: []fit.MemoryBreakdownRow = &.{}, // breakdown at n_ctx_min
+};
+
+/// Ports `common_measure_memory` (fit.cpp:199 @8642541b2): measures the
+/// smallest and largest context without allocating. `p` may be modified as
+/// with `--fit`.
+///
+/// Parameters:
+/// - `gpa`: for the measurements.
+/// - `p`: the parameters.
+/// - `what_out`: `what()` of the exception, on `error.Runtime`.
+///
+/// Return: the reports, their rows from `p.arena`.
+pub fn measureMemory(gpa: std.mem.Allocator, p: *Params, what_out: *[]const u8) !MemoryReports {
+    const log_level: c.enum_ggml_log_level = if (p.verbosity >= log.level_debug) c.GGML_LOG_LEVEL_DEBUG else c.GGML_LOG_LEVEL_ERROR;
+    const path_model = try p.arena.dupeSentinel(u8, p.model.path, 0);
+
+    var res: MemoryReports = .{};
+
+    const mparams = common.modelParamsToLlama(p);
+    var cparams = common.contextParamsToLlama(p);
+
+    // max: what --fit picks now, no-op with -fit off
+    {
+        var mparams_fit = mparams;
+        var cparams_fit = cparams;
+        try fitApply(gpa, p, &mparams_fit, &cparams_fit);
+        res.info_max = try fit.fitMeasure(p.arena, path_model.ptr, @ptrCast(&mparams_fit), @ptrCast(&cparams_fit), &res.n_ctx_train, &res.n_ctx_max, log_level, what_out);
+    }
+
+    // min: the smallest context --fit may pick (--fit only changes n_ctx when it is 0)
+    var n_ctx_min: u32 = cparams.n_ctx;
+    if (n_ctx_min == 0 and p.fit_params) {
+        const n_streams: u32 = if (cparams.kv_unified) 1 else @max(1, cparams.n_seq_max);
+        // -c 0 sets fit_params_min_ctx to UINT32_MAX, cap at n_ctx_train like --fit
+        n_ctx_min = @truncate(@min(
+            @as(u64, @as(u32, @bitCast(p.fit_params_min_ctx))) * n_streams,
+            @as(u64, res.n_ctx_train) * n_streams,
+        ));
+    }
+    if (n_ctx_min == 0 or n_ctx_min >= res.n_ctx_max) {
+        // nothing to reduce, or -fit off with the trained context
+        res.n_ctx_min = res.n_ctx_max;
+        res.info_min = res.info_max;
+    } else {
+        cparams.n_ctx = n_ctx_min;
+        res.info_min = try fit.fitMeasure(p.arena, path_model.ptr, @ptrCast(&mparams), @ptrCast(&cparams), null, &res.n_ctx_min, log_level, what_out);
+    }
+
+    return res;
+}
+
+/// Ports `common_init_result` (common/common.cpp:1296 @8642541b2), a member of `common_init_result`.
 fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitResult) !void {
     const a = p.arena;
     var mparams = common.modelParamsToLlama(p);
@@ -361,47 +474,7 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
 
     const model_path = try a.dupeSentinel(u8, p.model.path, 0);
 
-    if (p.fit_params) {
-        comTrc("common_init_result", "%s", .{@as([*:0]const u8, "fitting params to device memory ...\n")});
-        comTrc("common_init_result", "%s", .{@as([*:0]const u8, "(for bugs during this step try to reproduce them with -fit off, or provide --verbose logs if the bug only occurs with -fit on)\n")});
-
-        // the draft context is created from the same base params and follows the main context, fit both together
-        const has_draft = p.speculative.hasDft();
-        const spec_mtp = for (p.speculative.types.items) |t| {
-            if (t == .draft_mtp) break true;
-        } else false;
-
-        var params_dft = @import("speculative.zig").baseParamsToSpeculative(p);
-
-        var mparams_dft = common.modelParamsToLlama(&params_dft);
-        var cparams_dft = common.contextParamsToLlama(&params_dft);
-        if (spec_mtp) cparams_dft.ctx_type = c.LLAMA_CONTEXT_TYPE_MTP;
-        cparams_dft.n_rs_seq = 0;
-
-        const path_dft = try a.dupeSentinel(u8, params_dft.model.path, 0);
-        const extra: fit.ExtraModel = .{
-            .path_model = path_dft.ptr,
-            .mparams = @ptrCast(&mparams_dft),
-            .cparams = @ptrCast(&cparams_dft),
-            .shares_model = !has_draft, // an MTP context runs on the weights of the main model
-        };
-
-        var patterns = try fit.Patterns.init(a);
-        _ = try fit.fitParams(
-            gpa,
-            &patterns,
-            .{ .verbosity = std.math.maxInt(i32), .sink = common.fitLogSink, .json = common.fitLogJson },
-            model_path.ptr,
-            @ptrCast(&mparams),
-            @ptrCast(&cparams),
-            &p.tensor_split,
-            @ptrCast(p.tensor_buft_overrides.items.ptr),
-            p.fit_params_target.items.ptr,
-            @bitCast(p.fit_params_min_ctx),
-            if (has_draft or spec_mtp) &extra else null,
-            if (p.verbosity >= log.level_debug) c.GGML_LOG_LEVEL_DEBUG else c.GGML_LOG_LEVEL_ERROR,
-        );
-    }
+    try fitApply(gpa, p, &mparams, &cparams);
 
     const model = c.llama_model_load_from_file(model_path.ptr, mparams) orelse return;
     res.model = model;
@@ -413,14 +486,18 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
     // these decision models return a score for each token via the embeddings output
     // TODO: maybe improve this in the future
     const decision_type = common.getDecisionType(model);
+    // minicpm-ocr-jev reads its class scores from the pooled output, the pooling type is the one of the GGUF
     if (decision_type == .laya or decision_type == .kev or decision_type == .clef or
-        decision_type == .lfm2_d1_omni or decision_type == .vllm_decision2)
+        decision_type == .lfm2_d1_omni or decision_type == .vllm_decision2 or
+        decision_type == .minicpm_ocr_jev)
     {
+        const pooling_type = if (decision_type == .minicpm_ocr_jev) c.LLAMA_POOLING_TYPE_UNSPECIFIED else c.LLAMA_POOLING_TYPE_NONE;
+
         p.embedding = true;
-        p.pooling_type = c.LLAMA_POOLING_TYPE_NONE;
+        p.pooling_type = pooling_type;
 
         cparams.embeddings = true;
-        cparams.pooling_type = c.LLAMA_POOLING_TYPE_NONE;
+        cparams.pooling_type = pooling_type;
         cparams.n_outputs_max = cparams.n_batch;
         cparams.n_outputs_max_per_seq = 1;
 
@@ -512,7 +589,7 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
 
 const io_ = @import("io.zig");
 
-/// Ports `common_init_from_params` (common/common.cpp:1417 @620d2225c).
+/// Ports `common_init_from_params` (common/common.cpp:1446 @8642541b2).
 ///
 /// Return: the model and context, either null where loading failed, having
 /// logged why. The caller owns the result.
@@ -575,7 +652,7 @@ pub fn initFromParams(gpa: std.mem.Allocator, p: *Params, model_only: bool) !Ini
     }
 
     if (!p.lora_init_without_apply) {
-        // `common_set_adapter_lora` (common/common.cpp:1659 @620d2225c)
+        // `common_set_adapter_lora` (common/common.cpp:1688 @8642541b2)
         var loras: std.ArrayList(?*c.llama_adapter_lora) = .empty;
         var scales: std.ArrayList(f32) = .empty;
         for (p.lora_adapters.items) |la| {

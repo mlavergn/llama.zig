@@ -13,3 +13,6 @@ for m in qwen3-dense llama-dense; do
     mkdir -p "$DATA/$m"
     "$bin" "$ROOT/zig-out/arch-fixtures/$m.gguf" "$DATA/$m" >/dev/null
 done
+# v0.8.0's read check: an adapter and a base model missing their last 4 KiB
+head -c "$(($(wc -c <"$DATA/qwen3-dense/good.gguf") - 4096))" "$DATA/qwen3-dense/good.gguf" >"$DATA/qwen3-dense/trunc.gguf"
+head -c "$(($(wc -c <"$ROOT/zig-out/arch-fixtures/qwen3-dense.gguf") - 4096))" "$ROOT/zig-out/arch-fixtures/qwen3-dense.gguf" >"$DATA/qwen3-dense/trunc-base.gguf"

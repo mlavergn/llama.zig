@@ -5,7 +5,7 @@
 //!
 //! Ports `common_chat_parser_params`, `common_chat_parse` and
 //! `common_chat_peg_parse` from `llama.cpp/common/chat.h` and
-//! `llama.cpp/common/chat.cpp` (llama.cpp v0.7.0, `620d2225c`). Each
+//! `llama.cpp/common/chat.cpp` (llama.cpp v0.8.0, `8642541b2`). Each
 //! declaration names what it ports and the line it began at.
 
 const std = @import("std");
@@ -23,7 +23,7 @@ const Error = exception.Error;
 const Msg = msg_mod.Msg;
 const Input = input_mod.Input;
 
-/// Ports `common_chat_parser_params` (chat.h:341 @620d2225c): per-message
+/// Ports `common_chat_parser_params` (chat.h:347 @8642541b2): per-message
 /// parsing syntax, derived from `common_chat_params`.
 pub const ParserParams = struct {
     format: msg_mod.Format = .content_only,
@@ -34,7 +34,7 @@ pub const ParserParams = struct {
     parser: ?*const peg.Arena = null,
 };
 
-/// Ports `common_chat_parse` (chat.cpp:1599 @620d2225c).
+/// Ports `common_chat_parse` (chat.cpp:1781 @8642541b2).
 pub fn parse(gpa: Allocator, input: *const Input, is_partial: bool, params: *const ParserParams) Error!Msg {
     return pegParse(gpa, params.parser, input, is_partial, params);
 }
@@ -51,7 +51,7 @@ fn mapperKind(format: msg_mod.Format) chat_peg.Mapper.Kind {
     };
 }
 
-/// Ports `common_chat_peg_parse` (chat.cpp:1605 @620d2225c): the reply,
+/// Ports `common_chat_peg_parse` (chat.cpp:1787 @8642541b2): the reply,
 /// with the generation prompt in front, parsed leniently and mapped to an
 /// assistant message. A partial reply that fails past its start still maps
 /// what it matched; anything else that fails throws.
@@ -81,6 +81,7 @@ pub fn pegParse(gpa: Allocator, src_parser: ?*const peg.Arena, input: *const Inp
     if (params.generation_prompt) |gp| try effective_input.prependInput(gp);
 
     var flags: u32 = peg.Flags.lenient;
+    if (!is_partial) flags |= peg.Flags.complete;
     if (params.debug) flags |= peg.Flags.debug;
 
     var ctx = peg.ParseContext.initTokens(a, effective_input.text.items, effective_input.tokens.items, flags) catch |e| return util.fromPeg(e);

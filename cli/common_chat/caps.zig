@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/jinja/caps.h` and `llama.cpp/common/jinja/caps.cpp`
-//! (llama.cpp v0.7.0, `620d2225c`): `jinja`'s `caps`, `caps_get` and its
+//! (llama.cpp v0.8.0, `8642541b2`): `jinja`'s `caps`, `caps_get` and its
 //! `caps_try_execute`. `caps_apply_preserve_reasoning` and
 //! `caps_apply_reasoning_effort` live in `template.zig`, beside the
 //! rendering they set up. Each declaration names what it ports and the line
@@ -33,11 +33,11 @@ const Error = exception.Error;
 const Template = template.Template;
 const Render = template.Render;
 
-/// Ports `jinja`'s `caps` (caps.h:10 @620d2225c).
-/// `g_jinja_debug` (runtime.h:15 @620d2225c): the engine's debug switch,
+/// `g_jinja_debug` (runtime.h:15 @8642541b2): the engine's debug switch,
 /// off unless a debugger sets it.
 pub var jinja_debug: bool = false;
 
+/// Ports `jinja`'s `caps` (caps.h:11 @8642541b2).
 pub const Caps = struct {
     supports_tools: bool = true,
     supports_tool_calls: bool = true,
@@ -45,6 +45,10 @@ pub const Caps = struct {
     supports_parallel_tool_calls: bool = true,
     supports_preserve_reasoning: bool = false,
     supports_reasoning_effort: bool = false,
+    /// reasoning effort levels the template renders distinctly, from lowest
+    /// to highest; the template's `gpa` owns them, and `Template.deinit` frees
+    /// them
+    reasoning_effort_levels: []const []const u8 = &.{},
     supports_string_content: bool = true,
     supports_typed_content: bool = false,
     supports_object_arguments: bool = false,
@@ -52,7 +56,7 @@ pub const Caps = struct {
     /// One entry of `to_map`.
     pub const Entry = struct { name: []const u8, value: bool };
 
-    /// Ports `to_map` (caps.cpp:106 @620d2225c), in the `std`'s `map`'s order:
+    /// Ports `to_map` (caps.cpp:108 @8642541b2), in the `std`'s `map`'s order:
     /// sorted by name.
     pub fn toMap(self: Caps) [9]Entry {
         return .{
@@ -68,7 +72,7 @@ pub const Caps = struct {
         };
     }
 
-    /// Ports `to_string` (caps.cpp:120 @620d2225c).
+    /// Ports `to_string` (caps.cpp:122 @8642541b2).
     ///
     /// Return: owned by `a`.
     pub fn toString(self: Caps, a: Allocator) Error![]u8 {
@@ -109,9 +113,14 @@ const Probe = struct {
 };
 
 /// What a probe sets on the context after the JSON, as `ctx_fn` does.
-const CtxFn = enum { none, preserve_reasoning, reasoning_effort };
+const CtxFn = union(enum) {
+    none,
+    preserve_reasoning,
+    /// the effort `caps_apply_reasoning_effort` binds
+    reasoning_effort: []const u8,
+};
 
-/// Ports `caps_try_execute` (caps.cpp:35 @620d2225c): `messages` and
+/// Ports `caps_try_execute` (caps.cpp:37 @8642541b2): `messages` and
 /// `tools` bound with empty BOS and EOS and a generation prompt, the
 /// context adjusted, the template run with statistics on. A render that
 /// fails leaves an empty result, as upstream catches and ignores it -- but
@@ -144,9 +153,9 @@ fn tryExecute(p: *Probe, gpa: Allocator, tmpl: *const Template, messages_json: [
                 try p.r.set("enable_thinking", .{ .boolean = true });
                 try template.capsApplyPreserveReasoning(&p.r, true);
             },
-            .reasoning_effort => {
+            .reasoning_effort => |level| {
                 try p.r.set("enable_thinking", .{ .boolean = true });
-                effort = try template.capsApplyReasoningEffort(&p.r, "low");
+                effort = try template.capsApplyReasoningEffort(&p.r, level);
             },
         }
         p.messages = p.r.vars.get("messages").?;
@@ -173,7 +182,7 @@ fn tryExecute(p: *Probe, gpa: Allocator, tmpl: *const Template, messages_json: [
     }
 }
 
-/// The retry's edit inside `caps_try_execute` (caps.cpp:35 @620d2225c):
+/// The retry's edit inside `caps_try_execute` (caps.cpp:37 @8642541b2):
 /// `reasoning_content: ""` on every assistant message that has none.
 /// With `a` null it only reports whether there is one to add.
 ///
@@ -222,7 +231,57 @@ fn toolCallMessages(comptime args: []const u8, comptime second_call: bool) []con
         "{\"role\":\"user\",\"content\":\"User message\"}]";
 }
 
-/// Ports `caps_get` (caps.cpp:130 @620d2225c): the template rendered over
+/// `render` in `caps_get` (caps.cpp:132 @8642541b2): a single user turn with
+/// the given effort, nothing when the template raises.
+///
+/// Return: the text, owned by `gpa`, or null.
+fn renderEffort(gpa: Allocator, tmpl: *const Template, effort: []const u8) Error!?[]u8 {
+    var p: Probe = undefined;
+    _ = try tryExecute(&p, gpa, tmpl, "[{\"role\":\"user\",\"content\":\"User message\"}]", null, .{ .reasoning_effort = effort });
+    defer p.deinit();
+    return if (p.success) try gpa.dupe(u8, p.result) else null;
+}
+
+/// The reasoning effort levels of `caps_get` (caps.cpp:132 @8642541b2): an
+/// unknown level shows the render of the template fallback, a level that
+/// renders the same is not honored; levels sharing a render are aliases and
+/// the highest one is kept.
+///
+/// Return: the levels, owned by `gpa`; the strings are static.
+fn reasoningEffortLevels(gpa: Allocator, tmpl: *const Template) Error![]const []const u8 {
+    const candidates = [_][]const u8{ "minimal", "low", "medium", "high", "xhigh", "max" };
+
+    const unknown = try renderEffort(gpa, tmpl, "REASONING_EFFORT_UNKNOWN");
+    defer if (unknown) |u| gpa.free(u);
+    var renders: std.ArrayList([]u8) = .empty;
+    defer {
+        for (renders.items) |r| gpa.free(r);
+        renders.deinit(gpa);
+    }
+    var levels: std.ArrayList([]const u8) = .empty;
+    errdefer levels.deinit(gpa);
+    next: for (candidates) |level| {
+        const rendered = (try renderEffort(gpa, tmpl, level)) orelse continue;
+        if (unknown) |u| {
+            if (std.mem.eql(u8, rendered, u)) {
+                gpa.free(rendered);
+                continue;
+            }
+        }
+        for (renders.items, 0..) |r, i| {
+            if (std.mem.eql(u8, r, rendered)) {
+                levels.items[i] = level;
+                gpa.free(rendered);
+                continue :next;
+            }
+        }
+        try renders.append(gpa, rendered);
+        try levels.append(gpa, level);
+    }
+    return levels.toOwnedSlice(gpa);
+}
+
+/// Ports `caps_get` (caps.cpp:132 @8642541b2): the template rendered over
 /// the probes, each capability read off what the render touched.
 pub fn capsGet(tmpl: *const Template) Error!Caps {
     const gpa = tmpl.gpa;
@@ -247,7 +306,7 @@ pub fn capsGet(tmpl: *const Template) Error!Caps {
 
     if (checks_for_string) {
         var p: Probe = undefined;
-        _ = try tryExecute(&p, gpa, tmpl, "[{\"role\":\"user\",\"content\":[]}]", null, .none);
+        _ = try tryExecute(&p, gpa, tmpl, "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"" ++ content_marker ++ "\"}]}]", null, .none);
         defer p.deinit();
         const content = atKey(atIndex(p.messages, 0), "content");
         const used_as_array = p.hasOp(content, "selectattr") or p.hasOp(content, "array_access");
@@ -334,12 +393,16 @@ pub fn capsGet(tmpl: *const Template) Error!Caps {
     // case: reasoning effort level
     {
         var p: Probe = undefined;
-        const effort = try tryExecute(&p, gpa, tmpl, "[{\"role\":\"user\",\"content\":\"User message\"}]", null, .reasoning_effort);
+        const effort = try tryExecute(&p, gpa, tmpl, "[{\"role\":\"user\",\"content\":\"User message\"}]", null, .{ .reasoning_effort = "low" });
         defer p.deinit();
         result.supports_reasoning_effort = p.used(effort);
     }
 
-    // `JJ_DEBUG` (runtime.h:13 @620d2225c): printed only under the engine's own debug switch
+    if (result.supports_reasoning_effort) {
+        result.reasoning_effort_levels = try reasoningEffortLevels(gpa, tmpl);
+    }
+
+    // `JJ_DEBUG` (runtime.h:13 @8642541b2): printed only under the engine's own debug switch
     // (`g_jinja_debug`), which nothing sets -- never through `common_log`
     if (jinja_debug) {
         var arena_state = std.heap.ArenaAllocator.init(gpa);

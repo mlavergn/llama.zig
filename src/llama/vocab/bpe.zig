@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.7.0 (`620d2225c`): the
+//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.8.0 (`8642541b2`): the
 //! tokenizer and its pattern table, the session, and the two sessions that
 //! extend it, `hybriddna` and `whitespace`.
 //!
@@ -33,18 +33,29 @@ fn oom() noreturn {
     impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
-/// Ports `dna_kmer_marker` (llama-vocab.cpp:1777 @620d2225c): U+E000.
+/// Ports `dna_kmer_marker` (llama-vocab.cpp:1820 @8642541b2): U+E000.
 pub const dna_kmer_marker = "\xee\x80\x80";
+
+/// The hybriddna session's constants: `open_tag`, `close_tag` and `k`
+/// (llama-vocab.cpp:2010, 2011, 2012 @8642541b2).
+const dna_open_tag = "<dna>";
+const dna_close_tag = "</dna>";
+const dna_k = 6;
 
 const Patterns = struct {
     exprs: []const []const u8,
     byte_encode: bool,
 };
 
-/// Ports `llm_tokenizer_bpe`'s constructor's `switch` (llama-vocab.cpp:283
-/// @620d2225c), generated.
+/// Ports `llm_tokenizer_bpe`'s constructor's `switch` (llama-vocab.cpp:284
+/// @8642541b2), generated.
 fn patterns(pre: PreType) Patterns {
     return switch (pre) {
+        .flint => .{ .exprs = &.{
+            "\\p{N}{1,3}",
+            "[\xe4\xb8\x80-\xe9\xbe\xa5\xe3\x81\x80-\xe3\x82\x9f\xe3\x82\xa0-\xe3\x83\xbf]+",
+            "[^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}]*[\\p{Ll}\\p{Lm}\\p{Lo}\\p{M}]+(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])?|[^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}]+[\\p{Ll}\\p{Lm}\\p{Lo}\\p{M}]*(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])?| ?[\\p{P}\\p{S}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+",
+        }, .byte_encode = true },
         .llama3 => .{ .exprs = &.{
             "(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+",
         }, .byte_encode = true },
@@ -112,8 +123,8 @@ fn patterns(pre: PreType) Patterns {
             " ?[^(\\s|.,!?\xe2\x80\xa6\xe3\x80\x82\xef\xbc\x8c\xe3\x80\x81\xe0\xa5\xa4\xdb\x94\xd8\x8c)]+",
             "\\p{N}",
         }, .byte_encode = true },
-        .tekken => .{ .exprs = &.{
-            "[^\\r\\n\\p{L}\\p{N}]?((?=[\\p{L}])([^a-z]))*((?=[\\p{L}])([^A-Z]))+|[^\\r\\n\\p{L}\\p{N}]?((?=[\\p{L}])([^a-z]))+((?=[\\p{L}])([^A-Z]))*|\\p{N}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n/]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+",
+        .tekken, .nemotron_3_5_embd => .{ .exprs = &.{
+            "[^\\r\\n\\p{L}\\p{N}]?((?=[\\p{L}\\p{M}])([^a-z]))*((?=[\\p{L}\\p{M}])([^A-Z]))+|[^\\r\\n\\p{L}\\p{N}]?((?=[\\p{L}\\p{M}])([^a-z]))+((?=[\\p{L}\\p{M}])([^A-Z]))*|\\p{N}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n/]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+",
         }, .byte_encode = true },
         .chameleon => .{ .exprs = &.{
             "<sentinel:[0-9]+>",
@@ -124,7 +135,7 @@ fn patterns(pre: PreType) Patterns {
             "'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)",
         }, .byte_encode = true },
         .gpt4o, .minimax_m2 => .{ .exprs = &.{
-            "[^\\r\\n\\p{L}\\p{N}]?((?=[\\p{L}])([^a-z]))*((?=[\\p{L}])([^A-Z]))+(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])?|[^\\r\\n\\p{L}\\p{N}]?((?=[\\p{L}])([^a-z]))+((?=[\\p{L}])([^A-Z]))*(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])?|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n/]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+",
+            "[^\\r\\n\\p{L}\\p{N}]?((?=[\\p{L}\\p{M}])([^a-z]))*((?=[\\p{L}\\p{M}])([^A-Z]))+(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])?|[^\\r\\n\\p{L}\\p{N}]?((?=[\\p{L}\\p{M}])([^a-z]))+((?=[\\p{L}\\p{M}])([^A-Z]))*(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])?|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n/]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+",
         }, .byte_encode = true },
         .granite_emb_multi => .{ .exprs = &.{
             "[^\\r\\n\\p{L}\\p{N}]?((?=[\\p{L}\\p{M}])([^a-z]))*((?=[\\p{L}\\p{M}])([^A-Z]))+(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])?|[^\\r\\n\\p{L}\\p{N}]?((?=[\\p{L}\\p{M}])([^a-z]))+((?=[\\p{L}\\p{M}])([^A-Z]))*(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])?|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n/]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+",
@@ -171,7 +182,7 @@ fn patterns(pre: PreType) Patterns {
         .mmbert => .{ .exprs = &.{
             "[^\\n]+|[\\n]+",
         }, .byte_encode = false },
-        .sarvam_moe => .{ .exprs = &.{
+        .sarvam_moe, .domyn_small => .{ .exprs = &.{
             "[^\\n]+|[\\n]+",
         }, .byte_encode = false },
         .minicpm5 => .{ .exprs = &.{
@@ -181,6 +192,10 @@ fn patterns(pre: PreType) Patterns {
         .k2_horizon => .{ .exprs = &.{
             "(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])|[^\\r\\n\\p{L}\\p{N}]?(?:\\p{L}|\\p{M}|\\u200C|\\u200D)+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+",
         }, .byte_encode = true },
+        .soprano => .{ .exprs = &.{
+            "\\p{N}",
+            "\\s+|[\\p{L}\\p{N}_]+|[^\\p{L}\\p{N}_\\s]+",
+        }, .byte_encode = false },
         .whitespace => .{ .exprs = &.{
             "\\S+",
         }, .byte_encode = false },
@@ -193,7 +208,7 @@ fn patterns(pre: PreType) Patterns {
     };
 }
 
-/// Ports `llm_tokenizer_bpe` (llama-vocab.cpp:280 @620d2225c).
+/// Ports `llm_tokenizer_bpe` (llama-vocab.cpp:281 @8642541b2).
 pub const Tokenizer = struct {
     regex_exprs: []const []const u8,
     /// GPT-2 byte encoding; false for SPM-style BPE over raw UTF-8.
@@ -201,7 +216,7 @@ pub const Tokenizer = struct {
 
     /// Return: the tokenizer for `vocab`'s pre-tokenizer.
     pub fn init(vocab: *const Vocab) Tokenizer {
-        impl.assert(vocab.type == vm.vocab.type_bpe, "llama-vocab.cpp", 282, "vocab.get_type() == LLAMA_VOCAB_TYPE_BPE");
+        impl.assert(vocab.type == vm.vocab.type_bpe, "llama-vocab.cpp", 283, "vocab.get_type() == LLAMA_VOCAB_TYPE_BPE");
         const p = patterns(vocab.pre_type);
         return .{ .regex_exprs = p.exprs, .byte_encode = p.byte_encode };
     }
@@ -210,7 +225,7 @@ pub const Tokenizer = struct {
     pub fn deinit(_: *Tokenizer) void {}
 };
 
-/// Ports `llm_bigram_bpe` (llama-vocab.cpp:264 @620d2225c). `text` is a
+/// Ports `llm_bigram_bpe` (llama-vocab.cpp:265 @8642541b2). `text` is a
 /// span of the word, which the two symbols are adjacent parts of.
 const Bigram = struct {
     left: i32,
@@ -235,7 +250,7 @@ const Symbol = struct {
 /// Which session `llama_vocab::impl`'s `tokenize` builds.
 const Mode = enum { plain, hybriddna, whitespace };
 
-/// Ports `llm_tokenizer_bpe_session` (llama-vocab.cpp:589 @620d2225c),
+/// Ports `llm_tokenizer_bpe_session` (llama-vocab.cpp:603 @8642541b2),
 /// and through `mode` the two sessions derived from it.
 pub const Session = struct {
     vocab: *const Vocab,
@@ -245,8 +260,14 @@ pub const Session = struct {
     symbols_final: std.ArrayList(Symbol) = .empty,
     work_queue: libcxx.PriorityQueue(Bigram, void, bigramLess) = .{ .ctx = {} },
 
+    // `llm_tokenizer_hybriddna_session`'s members.
+    dna_begin_id: Token = token_null,
+    dna_end_id: Token = token_null,
+    dna_oov_id: Token = token_null,
+    pad_char: u8 = 'A',
+
     /// The session `llama_vocab::impl`'s `tokenize` makes for `vocab`'s
-    /// tokenizer model (llama-vocab.cpp:3635 @620d2225c).
+    /// tokenizer model (llama-vocab.cpp:3870 @8642541b2).
     ///
     /// Return: the session; free it with `deinit`.
     pub fn init(vocab: *const Vocab, tokenizer: *const Tokenizer) Session {
@@ -265,7 +286,7 @@ pub const Session = struct {
     /// Ports `llm_tokenizer_bpe_session`'s `append_bos`.
     pub fn appendBos(self: *const Session, output: *std.ArrayList(Token)) void {
         if (self.vocab.add_bos) {
-            impl.assert(self.vocab.special_bos_id != token_null, "llama-vocab.cpp", 600, "vocab.token_bos() != LLAMA_TOKEN_NULL");
+            impl.assert(self.vocab.special_bos_id != token_null, "llama-vocab.cpp", 614, "vocab.token_bos() != LLAMA_TOKEN_NULL");
             output.append(allocator, self.vocab.special_bos_id) catch oom();
         }
     }
@@ -273,7 +294,7 @@ pub const Session = struct {
     /// Ports `llm_tokenizer_bpe_session`'s `append_eos`.
     pub fn appendEos(self: *const Session, output: *std.ArrayList(Token)) void {
         if (self.vocab.add_eos) {
-            impl.assert(self.vocab.special_eos_id != token_null, "llama-vocab.cpp", 609, "vocab.token_eos() != LLAMA_TOKEN_NULL");
+            impl.assert(self.vocab.special_eos_id != token_null, "llama-vocab.cpp", 623, "vocab.token_eos() != LLAMA_TOKEN_NULL");
             output.append(allocator, self.vocab.special_eos_id) catch oom();
         }
     }
@@ -312,21 +333,57 @@ pub const Session = struct {
         self.work_queue.push(allocator, .{ .left = left, .right = right, .text = t, .rank = rank_found, .size = lt.len + rt.len }) catch oom();
     }
 
-    /// Ports `llm_tokenizer_bpe_session`'s `tokenize` (llama-vocab.cpp:631
-    /// @620d2225c). mmBERT's Metaspace pre-tokenizer: a text starts with an
-    /// escaped space, and each escaped space starts a new word.
+    /// Ports `llm_tokenizer_bpe_session`'s `tokenize` (llama-vocab.cpp:645
+    /// @8642541b2). Nemotron 3.5 Embed drops the zero-width non-joiner after
+    /// `[` and `<`; Soprano folds whitespace runs to one space and lowercases.
+    /// mmBERT's Metaspace pre-tokenizer: a text starts with an escaped space,
+    /// and each escaped space starts a new word.
     fn tokenizeBpe(self: *Session, text: []const u8, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
         const vocab = self.vocab;
-        var final_prev_index: i32 = -1;
-        var word_collection = unicode.regexSplit(text, self.tokenizer.regex_exprs, self.tokenizer.byte_encode) catch |err| return switch (err) {
+        const tok_pre = vocab.pre_type;
+
+        var normalized_text: std.ArrayList(u8) = .empty;
+        defer normalized_text.deinit(allocator);
+        var split_text = text;
+        if (tok_pre == .nemotron_3_5_embd) {
+            const zwnj = "\xe2\x80\x8c";
+            normalized_text.appendSlice(allocator, text) catch oom();
+            vm.vocab.replaceAll(&normalized_text, "[" ++ zwnj, "[");
+            vm.vocab.replaceAll(&normalized_text, "<" ++ zwnj, "<");
+            split_text = normalized_text.items;
+        } else if (tok_pre == .soprano) {
+            var space = false;
+            const cpts = unicode.cptsFromUtf8(text);
+            defer allocator.free(cpts);
+            for (cpts) |cpt| {
+                if (unicode.cptFlagsFromCpt(cpt).is_whitespace) {
+                    if (!space) normalized_text.append(allocator, ' ') catch oom();
+                    space = true;
+                } else {
+                    // Unicode full lowercase expands LATIN CAPITAL LETTER I
+                    // WITH DOT ABOVE.
+                    if (cpt == 0x0130) {
+                        normalized_text.appendSlice(allocator, "i\xcc\x87") catch oom();
+                    } else {
+                        unicode.appendCptUtf8(&normalized_text, unicode.tolower(cpt)) catch
+                            return exc.throw(.invalid_argument, "invalid codepoint", .{});
+                    }
+                    space = false;
+                }
+            }
+            split_text = normalized_text.items;
+        }
+
+        var word_collection = unicode.regexSplit(split_text, self.tokenizer.regex_exprs, self.tokenizer.byte_encode) catch |err| return switch (err) {
             error.RegexFailed => exc.throw(.runtime_error, "Failed to process regex", .{}),
             error.CategoryWithNonAscii => exc.throw(.runtime_error, "Regex includes both unicode categories and non-ASCII characters - not supported", .{}),
             error.InvalidCodepoint => exc.throw(.invalid_argument, "invalid codepoint", .{}),
         };
         defer word_collection.deinit();
 
+        var final_prev_index: i32 = -1;
+
         self.symbols_final.clearRetainingCapacity();
-        const tok_pre = vocab.pre_type;
 
         if (tok_pre == .mmbert) {
             const space = "\xe2\x96\x81";
@@ -444,7 +501,9 @@ pub const Session = struct {
                 const str = symbol.text;
                 const token = vocab.textToToken(str);
 
-                if (token == token_null) {
+                if (token == token_null and tok_pre == .soprano) {
+                    output.append(allocator, vocab.special_unk_id) catch oom();
+                } else if (token == token_null) {
                     for (str) |ch| {
                         var token_multibyte: Token = token_null;
                         if (self.tokenizer.byte_encode) {
@@ -463,76 +522,206 @@ pub const Session = struct {
         }
     }
 
-    /// Ports `llm_tokenizer_hybriddna_session`'s `tokenize` (llama-vocab.cpp:1782
-    /// @620d2225c): `<dna>` spans become fixed-length k-mers, the rest BPE.
+    /// Ports `llm_tokenizer_hybriddna_session`'s `tokenize` (llama-vocab.cpp:1827
+    /// @8642541b2), which mirrors HybridDNATokenizer.encode: text inside
+    /// `<dna>...</dna>` is cut into fixed 6-mers, everything else goes
+    /// through the base BPE, with optional tagging of untagged DNA
+    /// (`auto_dna_tags`, Carbon-14B) and tail="pad_n" vocabularies, whose
+    /// dedicated tokens pad a trailing partial k-mer with N instead of A.
     fn tokenizeHybridDna(self: *Session, text: []const u8, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
         const vocab = self.vocab;
-        const open_tag = "<dna>";
-        const close_tag = "</dna>";
 
-        const dna_begin_id = vocab.textToToken(open_tag);
-        const dna_end_id = vocab.textToToken(close_tag);
-        const dna_oov_id = vocab.textToToken("<oov>");
+        self.dna_begin_id = vocab.textToToken(dna_open_tag);
+        self.dna_end_id = vocab.textToToken(dna_close_tag);
+        self.dna_oov_id = vocab.textToToken("<oov>");
 
         // Fall back to plain BPE if the DNA pieces aren't in the vocab.
-        if (dna_begin_id == token_null or dna_end_id == token_null or dna_oov_id == token_null) {
+        if (self.dna_begin_id == token_null or self.dna_end_id == token_null or self.dna_oov_id == token_null) {
             return self.tokenizeBpe(text, output, exc);
         }
 
-        const k = 6;
+        self.pad_char = if (vocab.textToToken("ANNNNN" ++ dna_kmer_marker) != token_null) 'N' else 'A';
+
+        // split on explicit tags as HybridDNATokenizer._split_by_dna_tags
+        // does; only the text outside them is auto-tagged
+        const npos = std.math.maxInt(usize);
         var pos: usize = 0;
-
         while (pos < text.len) {
-            const start = std.mem.findPos(u8, text, pos, open_tag) orelse {
-                if (pos < text.len) try self.tokenizeBpe(text[pos..], output, exc);
+            const start = std.mem.findPos(u8, text, pos, dna_open_tag) orelse npos;
+            const end = std.mem.findPos(u8, text, pos, dna_close_tag) orelse npos;
+
+            if (start == npos and end == npos) {
+                try self.tokenizeDnaText(text[pos..], output, exc);
                 break;
-            };
-            if (start > pos) try self.tokenizeBpe(text[pos..start], output, exc);
-            output.append(allocator, dna_begin_id) catch oom();
+            }
+            if (start == npos or end < start) {
+                // as in _split_by_dna_tags, text before a </dna> without a
+                // matching <dna> is DNA (no begin token)
+                self.tokenizeDna(text[pos..end], false, true, output);
+                pos = end + dna_close_tag.len;
+                continue;
+            }
 
-            const content_start = start + open_tag.len;
-            const end = std.mem.findPos(u8, text, content_start, close_tag);
-            const content_end = end orelse text.len;
+            try self.tokenizeDnaText(text[pos..start], output, exc);
 
-            self.emitDnaKmers(text[content_start..content_end], k, dna_oov_id, output);
-
-            const e = end orelse break;
-            output.append(allocator, dna_end_id) catch oom();
-            pos = e + close_tag.len;
+            const content_start = start + dna_open_tag.len;
+            if (end == npos) {
+                // an unterminated <dna> runs to the end of the text (no end
+                // token)
+                self.tokenizeDna(text[content_start..], true, false, output);
+                break;
+            }
+            self.tokenizeDna(text[content_start..end], true, true, output);
+            pos = end + dna_close_tag.len;
         }
     }
 
-    /// Ports `llm_tokenizer_hybriddna_session`'s `emit_dna_kmers`.
-    fn emitDnaKmers(self: *Session, raw: []const u8, k: usize, oov_id: Token, output: *std.ArrayList(Token)) void {
-        const seq = allocator.dupe(u8, raw) catch oom();
-        defer allocator.free(seq);
-        for (seq) |*ch| {
-            if (ch.* >= 'a' and ch.* <= 'z') ch.* -= 32;
+    /// `is_letter`.
+    fn isLetter(ch: u8) bool {
+        return (ch >= 'A' and ch <= 'Z') or (ch >= 'a' and ch <= 'z');
+    }
+
+    /// `is_acgt`.
+    fn isAcgt(ch: u8) bool {
+        return ch == 'A' or ch == 'C' or ch == 'G' or ch == 'T';
+    }
+
+    /// `to_upper`.
+    fn toUpper(ch: u8) u8 {
+        return if (ch >= 'a' and ch <= 'z') ch - 32 else ch;
+    }
+
+    /// `is_iupac`: IUPAC nucleotide codes, either case
+    /// (HybridDNATokenizer.IUPAC_RUN_RE).
+    fn isIupac(ch: u8) bool {
+        return std.mem.findScalar(u8, "ACGTRYSWKMBDHVN", toUpper(ch)) != null;
+    }
+
+    /// Ports `llm_tokenizer_hybriddna_session`'s `normalize_spaced_dna`, which
+    /// is HybridDNATokenizer._normalize_spaced_dna: join displays like
+    /// "ACGTA CGTAC ..." when they hold at least twelve bases (at least six
+    /// chunks of 1-5 uppercase ACGT separated by spaces or tabs, not touching
+    /// a letter).
+    fn normalizeSpacedDna(text: []const u8, out: *std.ArrayList(u8)) void {
+        const isBlank = struct {
+            fn f(ch: u8) bool {
+                return ch == ' ' or ch == '\t';
+            }
+        }.f;
+        var seq: std.ArrayList(u8) = .empty;
+        defer seq.deinit(allocator);
+        var p: usize = 0;
+        while (p < text.len) {
+            if (isAcgt(text[p]) and (p == 0 or !isLetter(text[p - 1]))) {
+                var match_end: ?usize = null;
+                var chunk = p;
+                var n_chunks: usize = 1;
+                while (true) : (n_chunks += 1) {
+                    var chunk_end = chunk;
+                    while (chunk_end < text.len and chunk_end - chunk < 5 and isAcgt(text[chunk_end])) chunk_end += 1;
+                    if (chunk_end == chunk) break;
+                    if (n_chunks >= 6 and (chunk_end == text.len or !isLetter(text[chunk_end]))) {
+                        match_end = chunk_end; // the regex is greedy, so the last valid end wins
+                    }
+                    var next = chunk_end;
+                    while (next < text.len and isBlank(text[next])) next += 1;
+                    if (next == chunk_end) break;
+                    chunk = next;
+                }
+                if (match_end) |me| {
+                    seq.clearRetainingCapacity();
+                    for (text[p..me]) |ch| {
+                        if (!isBlank(ch)) seq.append(allocator, ch) catch oom();
+                    }
+                    out.appendSlice(allocator, if (seq.items.len >= 12) seq.items else text[p..me]) catch oom();
+                    p = me;
+                    continue;
+                }
+            }
+            out.append(allocator, text[p]) catch oom();
+            p += 1;
+        }
+    }
+
+    /// Ports `llm_tokenizer_hybriddna_session`'s `tokenize_text`: text outside
+    /// explicit tags. With `auto_dna_tags`, tag DNA runs as
+    /// HybridDNATokenizer._auto_tag_text_segment does (pure ACGT runs of at
+    /// least 6 bases, or runs of at least 12 with at most 20% IUPAC ambiguity
+    /// codes).
+    fn tokenizeDnaText(self: *Session, raw: []const u8, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
+        if (!self.vocab.dna_auto_tags) {
+            if (raw.len != 0) try self.tokenizeBpe(raw, output, exc);
+            return;
         }
 
-        var kmer: std.ArrayList(u8) = .empty;
-        defer kmer.deinit(allocator);
+        var normalized: std.ArrayList(u8) = .empty;
+        defer normalized.deinit(allocator);
+        normalizeSpacedDna(raw, &normalized);
+        const text = normalized.items;
+
+        var prev: usize = 0;
         var i: usize = 0;
-        while (i + k <= seq.len) : (i += k) {
-            output.append(allocator, self.kmerToken(&kmer, seq[i..][0..k], 0, oov_id)) catch oom();
+        while (i < text.len) {
+            if (!isIupac(text[i])) {
+                i += 1;
+                continue;
+            }
+            var j = i;
+            var n_ambiguous: usize = 0;
+            while (j < text.len and isIupac(text[j])) : (j += 1) {
+                n_ambiguous += @intFromBool(!isAcgt(toUpper(text[j])));
+            }
+            const len = j - i;
+            if ((n_ambiguous == 0 and len >= 6) or (n_ambiguous > 0 and len >= 12 and 5 * n_ambiguous <= len)) {
+                if (i > prev) try self.tokenizeBpe(text[prev..i], output, exc);
+                self.tokenizeDna(text[i..j], true, true, output);
+                prev = j;
+            }
+            i = j;
         }
-        if (i < seq.len) {
-            output.append(allocator, self.kmerToken(&kmer, seq[i..], k - (seq.len - i), oov_id)) catch oom();
-        }
+        if (text.len > prev) try self.tokenizeBpe(text[prev..], output, exc);
     }
 
-    /// `kmer_token`: the k-mer, padded with `pad` 'A's, plus the marker.
-    fn kmerToken(self: *Session, buf: *std.ArrayList(u8), kmer: []const u8, pad: usize, oov_id: Token) Token {
-        buf.clearRetainingCapacity();
-        buf.appendSlice(allocator, kmer) catch oom();
-        buf.appendNTimes(allocator, 'A', pad) catch oom();
-        buf.appendSlice(allocator, dna_kmer_marker) catch oom();
-        const tok = self.vocab.textToToken(buf.items);
-        return if (tok != token_null) tok else oov_id;
+    /// Ports `llm_tokenizer_hybriddna_session`'s `tokenize_dna`, which is
+    /// HybridDNATokenizer._process_dna_sequence: strip, uppercase, then one
+    /// token per k bases. A k-mer with anything but ACGT is `<oov>`, and a
+    /// trailing partial k-mer is right-padded with `pad_char`.
+    fn tokenizeDna(self: *Session, content: []const u8, has_start: bool, has_end: bool, output: *std.ArrayList(Token)) void {
+        if (has_start) output.append(allocator, self.dna_begin_id) catch oom();
+
+        const cpts = unicode.cptsFromUtf8(content);
+        defer allocator.free(cpts);
+        var first: usize = 0;
+        var last: usize = cpts.len;
+        while (first < last and unicode.cptFlagsFromCpt(cpts[first]).is_whitespace) first += 1;
+        while (last > first and unicode.cptFlagsFromCpt(cpts[last - 1]).is_whitespace) last -= 1;
+
+        var i = first;
+        while (i + dna_k <= last) : (i += dna_k) {
+            output.append(allocator, self.kmerToken(cpts[i .. i + dna_k])) catch oom();
+        }
+        if (i < last) output.append(allocator, self.kmerToken(cpts[i..last])) catch oom();
+
+        if (has_end) output.append(allocator, self.dna_end_id) catch oom();
     }
 
-    /// Ports `llm_tokenizer_whitespace_session`'s `tokenize` (llama-vocab.cpp:1859
-    /// @620d2225c): whitespace dropped, each run between lowercased if the
+    /// `kmer_token`: the k-mer's token, carrying the reserved marker suffix so
+    /// it never resolves to a base-vocab token.
+    fn kmerToken(self: *const Session, kmer_cpts: []const u32) Token {
+        var kmer: [dna_k + dna_kmer_marker.len]u8 = undefined;
+        for (kmer_cpts, 0..) |cpt, i| {
+            const ch: u32 = if (cpt < 128) toUpper(@intCast(cpt)) else cpt;
+            if (ch > 127 or !isAcgt(@intCast(ch))) return self.dna_oov_id;
+            kmer[i] = @intCast(ch);
+        }
+        @memset(kmer[kmer_cpts.len..dna_k], self.pad_char);
+        kmer[dna_k..].* = dna_kmer_marker.*;
+        const tok = self.vocab.textToToken(&kmer);
+        return if (tok != token_null) tok else self.dna_oov_id;
+    }
+
+    /// Ports `llm_tokenizer_whitespace_session`'s `tokenize` (llama-vocab.cpp:2025
+    /// @8642541b2): whitespace dropped, each run between lowercased if the
     /// normalizer says so, and BPE'd alone.
     fn tokenizeWhitespace(self: *Session, text: []const u8, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
         const lowercase = self.vocab.normalizer_opts.lowercase;

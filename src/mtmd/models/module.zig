@@ -1,6 +1,6 @@
 //! The per-model encoder graphs (`llama.cpp/tools/mtmd/models/`), and
-//! `clip_get_graph_builder` (`llama.cpp/tools/mtmd/clip.cpp`, v0.7.0,
-//! `620d2225c`), which picks one by projector type.
+//! `clip_get_graph_builder` (`llama.cpp/tools/mtmd/clip.cpp`, v0.8.0,
+//! `8642541b2`), which picks one by projector type.
 //!
 //! Each file here ports the `models/*.cpp` of the same name (hyphens become
 //! underscores) and exposes `build(g, params)`: the class's `build()`, run
@@ -35,6 +35,9 @@ pub const hunyuanvl = @import("hunyuanvl.zig");
 pub const internvl = @import("internvl.zig");
 pub const kimik25 = @import("kimik25.zig");
 pub const kimivl = @import("kimivl.zig");
+pub const lfm3a = @import("lfm3a.zig");
+pub const lfm3a_gen = @import("lfm3a_gen.zig");
+pub const lfm3vl = @import("lfm3vl.zig");
 pub const llama4 = @import("llama4.zig");
 pub const ling3vl = @import("ling3vl.zig");
 pub const llava = @import("llava.zig");
@@ -44,6 +47,7 @@ pub const minicpmv = @import("minicpmv.zig");
 pub const minimax_m3 = @import("minimax_m3.zig");
 pub const mobilenetv5 = @import("mobilenetv5.zig");
 pub const muse_glimmer = @import("muse_glimmer.zig");
+pub const muse_spark_audio = @import("muse_spark_audio.zig");
 pub const nemotron_omni = @import("nemotron_omni.zig");
 pub const nemotron_v2_vl = @import("nemotron_v2_vl.zig");
 pub const paddleocr = @import("paddleocr.zig");
@@ -57,8 +61,11 @@ pub const qwen3a = @import("qwen3a.zig");
 pub const qwen3tts_gen = @import("qwen3tts_gen.zig");
 pub const qwen3tts_spkenc = @import("qwen3tts_spkenc.zig");
 pub const qwen3vl = @import("qwen3vl.zig");
+pub const sensenova_u1 = @import("sensenova_u1.zig");
 pub const siglip = @import("siglip.zig");
+pub const soprano = @import("soprano.zig");
 pub const step3vl = @import("step3vl.zig");
+pub const voxtral_rt = @import("voxtral_rt.zig");
 pub const whisper_enc = @import("whisper_enc.zig");
 pub const yasa2 = @import("yasa2.zig");
 pub const youtuvl = @import("youtuvl.zig");
@@ -78,7 +85,7 @@ pub const Built = struct {
     }
 };
 
-/// The `support_batch()` override of each builder (models.h @620d2225c),
+/// The `support_batch()` override of each builder (models.h @8642541b2),
 /// or null for a projector `clip_get_graph_builder` has no builder for.
 pub fn supportBatch(t: names.ProjectorType) ?bool {
     return switch (t) {
@@ -98,7 +105,7 @@ pub fn supportBatch(t: names.ProjectorType) ?bool {
         .muse_glimmer => false,
         .step3vl => false,
         .minicpmv => false,
-        .minicpmv4_6, .minicpmv4_7 => false,
+        .minicpmv4_6, .minicpmv4_7, .minicpm_ocr_1_0 => false,
         .internvl => true,
         .nemotron_v2_vl => false,
         .nemotron_omni => false,
@@ -107,7 +114,7 @@ pub fn supportBatch(t: names.ProjectorType) ?bool {
         .kimivl => false,
         .paddleocr => false,
         .kimik25 => false,
-        .deepseek4v => false,
+        .deepseek4v, .deepseek41v => false,
         .cogvlm => false,
         .hunyuanvl => false,
         .mlp, .mlp_norm, .ldp, .ldpv2, .glm_edge => false,
@@ -128,11 +135,18 @@ pub fn supportBatch(t: names.ProjectorType) ?bool {
         .yasa2 => false,
         .parakeet => false,
         .granite4_vision => false,
+        .lfm3a => false,
+        .soprano => false,
+        .sensenova_u1 => false,
+        .lfm3vl => false,
+        .voxtral_rt => false,
+        .muse_spark_audio => false,
+        .lfm3a_gen => false,
         else => null,
     };
 }
 
-/// Ports `clip_get_graph_builder` (mtmd/clip.cpp:953 @620d2225c) and the
+/// Ports `clip_get_graph_builder` (mtmd/clip.cpp:979 @8642541b2) and the
 /// builder's `build()`.
 pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*const clip.EncodeParams) clip.Error!Built {
     const img = &imgs.entries.items[0];
@@ -157,7 +171,7 @@ pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*con
         .muse_glimmer => try muse_glimmer.build(&g, params),
         .step3vl => try step3vl.build(&g, params),
         .minicpmv => try minicpmv.build(&g, params),
-        .minicpmv4_6, .minicpmv4_7 => try minicpmv.build4_6(&g, params),
+        .minicpmv4_6, .minicpmv4_7, .minicpm_ocr_1_0 => try minicpmv.build4_6(&g, params),
         .internvl => try internvl.build(&g, params),
         .nemotron_v2_vl => try nemotron_v2_vl.build(&g, params),
         .nemotron_omni => try nemotron_omni.build(&g, params),
@@ -166,7 +180,7 @@ pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*con
         .kimivl => try kimivl.build(&g, params),
         .paddleocr => try paddleocr.build(&g, params),
         .kimik25 => try kimik25.build(&g, params),
-        .deepseek4v => try deepseek4v.build(&g, params),
+        .deepseek4v, .deepseek41v => try deepseek4v.build(&g, params),
         .cogvlm => try cogvlm.build(&g, params),
         .hunyuanvl => try hunyuanvl.build(&g, params),
         .mlp, .mlp_norm, .ldp, .ldpv2, .glm_edge => try llava.build(&g, params),
@@ -187,12 +201,19 @@ pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*con
         .yasa2 => try yasa2.build(&g, params),
         .parakeet => try parakeet.build(&g, params),
         .granite4_vision => try granite4_vision.build(&g, params),
-        else => impl.abort("clip.cpp", 1179, "missing cgraph builder"),
+        .lfm3a => try lfm3a.build(&g, params),
+        .soprano => try soprano.build(&g, params),
+        .sensenova_u1 => try sensenova_u1.build(&g, params),
+        .lfm3vl => try lfm3vl.build(&g, params),
+        .voxtral_rt => try voxtral_rt.build(&g, params),
+        .muse_spark_audio => try muse_spark_audio.build(&g, params),
+        .lfm3a_gen => try lfm3a_gen.build(&g, params),
+        else => impl.abort("clip.cpp", 1250, "missing cgraph builder"),
     };
     return .{ .gf = gf, .support_batch = supportBatch(ctx.projType()).?, .ctx0 = g.ctx0 };
 }
 
-/// Ports `c2w_state_slot` (models/qwen3tts-gen.cpp @620d2225c): a persisted
+/// Ports `c2w_state_slot` (mtmd/models/models.h:423 @8642541b2): a persisted
 /// state slot of a gen-audio decoder.
 pub const StateSlot = struct {
     name: [:0]const u8,
@@ -200,12 +221,14 @@ pub const StateSlot = struct {
     ne1: i64,
 };
 
-/// Ports `list_gen_state_slots` (mtmd/clip.cpp:4580 @620d2225c). The caller
+/// Ports `list_gen_state_slots` (mtmd/clip.cpp:5082 @8642541b2): the persisted
+/// state slots of the gen-audio decoders. The caller
 /// frees the slice with `freeSlots`.
 pub fn genStateSlots(hparams: *const model_mod.Hparams, model: *const model_mod.Model) clip.Error![]StateSlot {
     return switch (model.proj_type) {
         .qwen3tts_gen => qwen3tts_gen.listStateSlots(hparams, model),
         .pockettts_gen => pockettts_gen.listStateSlots(hparams, model),
+        .lfm3a_gen => lfm3a_gen.listStateSlots(hparams, model),
         else => &.{},
     };
 }

@@ -22,7 +22,12 @@
 #
 # What it cannot see
 # ------------------
-# The multi-device paths, which need a second device.
+# The multi-device paths, which need a second device. Shapes upstream's
+# list lacks are `extra_cases` in the harness, run first; they follow `-o`
+# as test-backend-ops does -- a comma list, a regex (`harness/op_filter.h`)
+# -- where before v0.8.0's pickup a list or regex ran none of them. Since
+# then they include one-column MUL_MAT at the K where MMVQ's `vdr` changes
+# the warps per row: a Q6_K `vdr` of 1 passed every upstream case.
 #
 # Until the swap, ops whose host code was not ported yet were refused by the
 # port's `supports_op` and counted ("not ported yet"), not failed. Since the

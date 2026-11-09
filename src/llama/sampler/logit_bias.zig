@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-sampler.cpp` (v0.7.0, `620d2225c`).
+//! Ported from `llama.cpp/src/llama-sampler.cpp` (v0.8.0, `8642541b2`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 
 const std = @import("std");
@@ -16,7 +16,7 @@ const TokenDataArray = core.TokenDataArray;
 const Backend = core.Backend;
 const src = core.src;
 
-/// Ports `llama_sampler_logit_bias` (llama-sampler.cpp:3892 @620d2225c).
+/// Ports `llama_sampler_logit_bias` (llama-sampler.cpp:3916 @8642541b2).
 const LogitBias = struct {
     base: Backend,
 
@@ -30,12 +30,12 @@ const LogitBias = struct {
     inp_logit_idxs: ?*c.struct_ggml_tensor,
 };
 
-/// Ports `llama_sampler_logit_bias_name` (llama-sampler.cpp:3903 @620d2225c).
+/// Ports `llama_sampler_logit_bias_name` (llama-sampler.cpp:3927 @8642541b2).
 fn logitBiasName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
     return core.ctxOf(LogitBias, smpl).base.getName();
 }
 
-/// Ports `llama_sampler_logit_bias_apply` (llama-sampler.cpp:3908 @620d2225c).
+/// Ports `llama_sampler_logit_bias_apply` (llama-sampler.cpp:3932 @8642541b2).
 ///
 /// A bias whose token sits at its own index is applied directly; the rest
 /// are searched for, each candidate taking the first bias that names it.
@@ -66,13 +66,13 @@ fn logitBiasApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) voi
     }
 }
 
-/// Ports `llama_sampler_logit_bias_clone` (llama-sampler.cpp:3941 @620d2225c).
+/// Ports `llama_sampler_logit_bias_clone` (llama-sampler.cpp:3965 @8642541b2).
 fn logitBiasClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
     const ctx = core.ctxOf(LogitBias, smpl);
     return llama_sampler_init_logit_bias(ctx.n_vocab, @intCast(ctx.logit_bias.len), ctx.logit_bias.ptr);
 }
 
-/// Ports `llama_sampler_logit_bias_free` (llama-sampler.cpp:3946 @620d2225c).
+/// Ports `llama_sampler_logit_bias_free` (llama-sampler.cpp:3970 @8642541b2).
 fn logitBiasFree(smpl: [*c]Sampler) callconv(.c) void {
     const ctx = core.ctxOf(LogitBias, smpl);
     impl.allocator.free(ctx.logit_bias);
@@ -80,7 +80,7 @@ fn logitBiasFree(smpl: [*c]Sampler) callconv(.c) void {
     core.destroy(LogitBias, ctx);
 }
 
-/// Ports `llama_sampler_logit_bias_backend_apply` (llama-sampler.cpp:3950 @620d2225c).
+/// Ports `llama_sampler_logit_bias_backend_apply` (llama-sampler.cpp:3974 @8642541b2).
 ///
 /// Scatters the biases into a zero tensor shaped like the logits and adds it.
 fn logitBiasBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.struct_ggml_cgraph, data: [*c]c.struct_llama_sampler_data) callconv(.c) void {
@@ -92,7 +92,7 @@ fn logitBiasBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*
     const n: i64 = @intCast(sctx.logit_bias.len);
 
     if (sctx.inp_logit_bias == null) {
-        impl.assert(sctx.inp_logit_idxs == null, src, 3960, "sctx->inp_logit_idxs == nullptr");
+        impl.assert(sctx.inp_logit_idxs == null, src, 3990, "sctx->inp_logit_idxs == nullptr");
 
         sctx.inp_logit_bias = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, 1, n);
         _ = c.ggml_set_name(sctx.inp_logit_bias, "logit_bias");
@@ -112,13 +112,13 @@ fn logitBiasBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*
     data.*.logits = c.ggml_add(ctx, data.*.logits, cur);
 }
 
-/// Ports `llama_sampler_logit_bias_backend_set_input` (llama-sampler.cpp:3986 @620d2225c).
+/// Ports `llama_sampler_logit_bias_backend_set_input` (llama-sampler.cpp:4010 @8642541b2).
 fn logitBiasBackendSetInput(smpl: [*c]Sampler) callconv(.c) void {
     const sctx = core.ctxOf(LogitBias, smpl);
     if (sctx.logit_bias.len == 0) return;
 
-    impl.assert(sctx.inp_logit_bias != null, src, 3986, "sctx->inp_logit_bias != nullptr");
-    impl.assert(sctx.inp_logit_idxs != null, src, 3987, "sctx->inp_logit_idxs != nullptr");
+    impl.assert(sctx.inp_logit_bias != null, src, 4016, "sctx->inp_logit_bias != nullptr");
+    impl.assert(sctx.inp_logit_idxs != null, src, 4017, "sctx->inp_logit_idxs != nullptr");
 
     const n = sctx.logit_bias.len;
 
@@ -127,7 +127,7 @@ fn logitBiasBackendSetInput(smpl: [*c]Sampler) callconv(.c) void {
     const data_logit_idxs = impl.allocator.alloc(i32, n) catch impl.abort(src, 3992, "out of memory");
     defer impl.allocator.free(data_logit_idxs);
     for (sctx.logit_bias, 0..) |lb, i| {
-        impl.assert(lb.token >= 0 and lb.token < sctx.n_vocab, src, 3995, "lb.token >= 0 && lb.token < (int32_t) sctx->n_vocab");
+        impl.assert(lb.token >= 0 and lb.token < sctx.n_vocab, src, 4025, "lb.token >= 0 && lb.token < (int32_t) sctx->n_vocab");
         data_logit_bias[i] = lb.bias;
         data_logit_idxs[i] = lb.token;
     }
@@ -136,14 +136,14 @@ fn logitBiasBackendSetInput(smpl: [*c]Sampler) callconv(.c) void {
     c.ggml_backend_tensor_set(sctx.inp_logit_idxs, data_logit_idxs.ptr, 0, c.ggml_nbytes(sctx.inp_logit_idxs));
 }
 
-/// Ports `llama_sampler_logit_bias_backend_reset` (llama-sampler.cpp:4010 @620d2225c).
+/// Ports `llama_sampler_logit_bias_backend_reset` (llama-sampler.cpp:4034 @8642541b2).
 fn logitBiasBackendReset(smpl: [*c]Sampler) callconv(.c) void {
     const sctx = core.ctxOf(LogitBias, smpl);
     sctx.inp_logit_bias = null;
     sctx.inp_logit_idxs = null;
 }
 
-/// Ports `llama_sampler_logit_bias_backend_init` (llama-sampler.cpp:4016 @620d2225c).
+/// Ports `llama_sampler_logit_bias_backend_init` (llama-sampler.cpp:4040 @8642541b2).
 ///
 /// Always claims the backend: its ops are the fill, scatter and add every
 /// device has.
@@ -163,7 +163,7 @@ fn logitBiasCopyState(src_smpl: [*c]const Sampler, dst_smpl: [*c]Sampler) callco
     _ = dst_smpl;
 }
 
-/// Ports `llama_sampler_logit_bias_i` (llama-sampler.cpp:4034 @620d2225c).
+/// Ports `llama_sampler_logit_bias_i` (llama-sampler.cpp:4058 @8642541b2).
 var logit_bias_iface: SamplerI = .{
     .name = logitBiasName,
     .accept = null,
@@ -179,7 +179,7 @@ var logit_bias_iface: SamplerI = .{
     .copy_state = logitBiasCopyState,
 };
 
-/// Ports `llama_sampler_init_logit_bias` (llama-sampler.cpp:4049 @620d2225c).
+/// Ports `llama_sampler_init_logit_bias` (llama-sampler.cpp:4073 @8642541b2).
 ///
 /// Parameters:
 /// - `n_vocab`: the vocabulary size; the backend input needs it.

@@ -8,7 +8,7 @@
 // each projector type's keys and tensor shapes here are read off
 // `llama.cpp/tools/mtmd/clip.cpp` (`load_hparams`, `load_tensors`,
 // `clip_n_mmproj_embd`) and the graph builders under `models/`, at
-// v0.7.0 (`620d2225c`). Weights are small and random (fixed seed per
+// v0.8.0 (`8642541b2`). Weights are small and random (fixed seed per
 // type), so a fixture checks plumbing and numerics, not output quality.
 //
 // Every projector targets n_embd 256, the arch fixtures' width. The text
@@ -23,11 +23,12 @@
 //
 // Manifest: one fixture per line, tab-separated:
 //   projector  mmproj-path  text-model-path  modality  inputs
-// where modality is vision|audio|vision+audio|tts-qwen3|tts-pocket, or
+// where modality is vision|audio|vision+audio|tts-qwen3|tts-pocket|tts-soprano|tts-lfm3a, or
 // expect-fail for a type upstream declares but cannot load, and inputs lists
 // what to feed, `;`-separated: `img:WxH,...` for images, `vid:WxHxN,...` for
 // N mergeable frames of one video (v0.7.0), `aud:N,...` audio sample counts,
-// `tts:N` generation steps. `check` runs each line in a
+// `tts:N` generation steps, `strm:N,...` PCM samples through
+// `mtmd_audio_stream` (v0.8.0). `check` runs each line in a
 // child process (`one`), so an upstream abort is reported, not fatal.
 
 #include "ggml.h"
@@ -39,6 +40,7 @@
 // the KEY_* / TN_* names the loader reads, from the header that defines them
 #include "clip-impl.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -252,7 +254,7 @@ static constexpr int N_TEXT = 256; // every text fixture's n_embd
 struct Fixture {
     std::string type;     // projector name, as the manifest names it
     std::string text;     // text model key (see `text_models`)
-    std::string modality; // vision | audio | tts-qwen3 | tts-pocket
+    std::string modality; // vision | audio | tts-qwen3 | tts-pocket | tts-soprano | tts-lfm3a
     std::string inputs;
     std::function<void(G &)> build;
 };
@@ -1893,7 +1895,7 @@ static std::vector<Fixture> fixtures() {
     variant("minicpmv4_6", "minicpmv4_6-insert-oob", [](G & g) { g.ai32(KEY_WIN_ATTN_LAYER_INDEXES, {2}); });
     variant("minicpmv4_6", "minicpmv4_6-insert-neg", [](G & g) { g.ai32(KEY_WIN_ATTN_LAYER_INDEXES, {-1}); });
 
-    // --- added at v0.7.0 (`620d2225c`): the five new projector types, last
+    // --- added at v0.8.0 (`8642541b2`): the five new projector types, last
     // so every earlier fixture keeps its seed. Three are an older type's
     // fixture with the projector renamed and what the new arm adds.
     auto build_of = [&f](const std::string & base) -> std::function<void(G &)> {
@@ -1989,6 +1991,360 @@ static std::vector<Fixture> fixtures() {
         m47(g);
     }});
 
+    // ---- v0.8.0 ----
+    // minicpm_ocr_1_0: MiniCPM-V 4.6's encoder, its own slice alignment
+    f.push_back({"minicpm_ocr_1_0", "qwen3", "vision", "img:64x64,96x48,40x100,200x160", [m46 = build_of("minicpmv4_6")](G & g) {
+        m46(g);
+        g.str(KEY_PROJ_TYPE, "minicpm_ocr_1_0");
+    }});
+    // deepseek41v: deepseek4v's encoder and aligner, a plain reading-order
+    // block, no IMAGE_PAD tensor, gray padding
+    f.push_back({"deepseek41v", "qwen3", "vision", "img:64x64,100x60,16x16,400x40,480x480", [d4 = build_of("deepseek4v")](G & g) {
+        g.drop.insert(TN_TOK_IMG_PAD);
+        d4(g);
+        g.str(KEY_PROJ_TYPE, "deepseek41v");
+    }});
+    // sensenova_u1: no transformer, a patch embedding with adjacent-pair
+    // RoPE, downsampled by a strided conv; decoded with M-RoPE
+    f.push_back({"sensenova_u1", "qwen3vl", "vision", "img:64x64,96x48,40x80", [](G & g) {
+        const int E = 32, P = 8;
+        vision(g, "sensenova_u1", 64, P);
+        hp(g, "vision", E, 64, 2, 0, N_TEXT);
+        g.u32(KEY_SPATIAL_MERGE_SIZE, 2);
+        g.u32(KEY_IMAGE_MIN_PIXELS, 4 * P * P * 4);
+        g.u32(KEY_IMAGE_MAX_PIXELS, 64 * P * P * 4);
+        patch_embd(g, P, E, 0);
+        g.t(fmt(TN_LLAVA_PROJ, 0, "weight"), {2, 2, E, N_TEXT}, 0.1f);
+        g.bias(fmt(TN_LLAVA_PROJ, 0, "bias"), N_TEXT);
+    }});
+    // lfm3vl: conv and attention layers in raster order, a temporally merged
+    // patchifier (video frames in pairs), RMS norms, torchvision resize
+    auto lfm3vl_tensors = [](G & g) {
+        const int E = 64, P = 8, F = 128, NH = 4, NKV = 2, DH = 16, H = 128;
+        hp(g, "vision", E, F, NH, 4, N_TEXT);
+        g.u32(fmt(KEY_N_HEAD_KV, "vision"), NKV);
+        g.str(KEY_IMAGE_RESIZE_ALGO, "bicubic");
+        g.u32(KEY_SPATIAL_MERGE_SIZE, 2);
+        g.u32(KEY_IMAGE_MIN_PIXELS, 4 * P * P * 4);
+        g.u32(KEY_IMAGE_MAX_PIXELS, 64 * P * P * 4);
+        g.t(TN_PATCH_EMBD, {P, P, 3, E}, 1.0f / std::sqrt((float) (P * P * 3)));
+        g.t(TN_PATCH_EMBD_1, {P, P, 3, E}, 1.0f / std::sqrt((float) (P * P * 3)));
+        g.norm(fmt(TN_LFM3VL_EMBEDDING_NORM, "v", "weight"), E);
+        for (int il = 0; il < 4; il++) {
+            const char * p = "v";
+            g.norm(fmt(TN_LN_1, p, il, "weight"), E);
+            g.norm(fmt(TN_LN_2, p, il, "weight"), E);
+            g.w(fmt(TN_FFN_UP, p, il, "weight"), E, F);
+            g.w(fmt(TN_FFN_DOWN, p, il, "weight"), F, E);
+            if (il % 2 == 0) {
+                g.w(fmt(TN_LFM3VL_CONV2D_IN_PROJ, p, il, "weight"), E, 3 * E);
+                if (il == 0) g.t(fmt(TN_LFM3VL_CONV2D_SPATIAL, p, il, "weight"), {3, 3, 1, E}, 0.2f);
+                g.w(fmt(TN_LFM3VL_CONV2D_OUT_PROJ, p, il, "weight"), E, E);
+            } else {
+                g.w(fmt(TN_ATTN_Q, p, il, "weight"), E, NH * DH);
+                g.w(fmt(TN_ATTN_K, p, il, "weight"), E, NKV * DH);
+                g.w(fmt(TN_ATTN_V, p, il, "weight"), E, NKV * DH);
+                g.w(fmt(TN_ATTN_OUTPUT, p, il, "weight"), NH * DH, E);
+                g.norm(fmt(TN_ATTN_Q_NORM, p, il, "weight"), DH);
+                g.norm(fmt(TN_ATTN_K_NORM, p, il, "weight"), DH);
+            }
+        }
+        g.norm(TN_MM_INP_NORM, E);
+        g.bias(TN_MM_INP_NORM_B, E);
+        g.w(fmt(TN_LLAVA_PROJ, 0, "weight"), E * 4, H);
+        g.bias(fmt(TN_LLAVA_PROJ, 0, "bias"), H);
+        g.w(fmt(TN_LLAVA_PROJ, 2, "weight"), H, N_TEXT);
+        g.bias(fmt(TN_LLAVA_PROJ, 2, "bias"), N_TEXT);
+    };
+    f.push_back({"lfm3vl", "qwen3-lfm3", "vision", "img:64x64,100x60,40x96,300x200;vid:64x48x3,70x50x4,200x180x3,20x16x2", [lfm3vl_tensors](G & g) {
+        vision(g, "lfm3vl", 64, 8);
+        lfm3vl_tensors(g);
+    }});
+    f.push_back({"lfm3vl-no-tm", "qwen3-lfm3", "vision", "img:64x64,100x60", [lfm3vl_tensors](G & g) {
+        vision(g, "lfm3vl", 64, 8);
+        g.drop.insert(TN_PATCH_EMBD_1);
+        lfm3vl_tensors(g);
+    }});
+    // muse-spark-audio: a causal conv pyramid over the raw waveform
+    f.push_back({"muse-spark-audio", "qwen3", "audio", "aud:1000,4000,4007", [](G & g) {
+        const std::vector<int32_t> hidden = {16, 32}, patches = {4, 5}, depths = {1, 2};
+        const int K = 3, F = 48;
+        audio(g, "muse-spark-audio", 1);
+        hp(g, "audio", 32, F, 2, 3, N_TEXT);
+        g.u32(KEY_A_CONV_KERNEL_SIZE, K);
+        g.ai32(KEY_A_HIDDEN_SIZES, hidden);
+        g.ai32(KEY_A_PATCH_SIZES, patches);
+        g.ai32(KEY_A_DEPTHS, depths);
+        int in = 1, il = 0;
+        for (size_t s = 0; s < hidden.size(); s++) {
+            g.w(fmt(TN_A_PATCH, (int) s, "weight"), in * patches[s], hidden[s]);
+            g.bias(fmt(TN_A_PATCH, (int) s, "bias"), hidden[s]);
+            g.norm(fmt(TN_A_PATCH_NORM, (int) s, "weight"), hidden[s]);
+            for (int d = 0; d < depths[s]; d++, il++) {
+                const char * a = "a";
+                g.t(fmt(TN_CONV1D, il, "weight"), {K, 1, hidden[s]}, 0.3f);
+                g.bias(fmt(TN_CONV1D, il, "bias"), hidden[s]);
+                g.norm(fmt(TN_A_CONV1D_NORM, il, "weight"), hidden[s]);
+                g.w(fmt(TN_FFN_UP, a, il, "weight"), hidden[s], F);
+                g.bias(fmt(TN_FFN_UP, a, il, "bias"), F);
+                g.w(fmt(TN_FFN_DOWN, a, il, "weight"), F, hidden[s]);
+                g.bias(fmt(TN_FFN_DOWN, a, il, "bias"), hidden[s]);
+            }
+            in = hidden[s];
+        }
+        g.norm(fmt(TN_LN_PRE, "a", "weight"), in);
+        g.w(fmt(TN_MM_AUDIO_FC, "weight"), in, N_TEXT);
+        g.bias(fmt(TN_MM_AUDIO_FC, "bias"), N_TEXT);
+        g.norm(fmt(TN_LN_POST, "a", "weight"), N_TEXT);
+    }});
+    // voxtral_rt: a causal whisper-like encoder over a sliding window of
+    // past keys and values; only usable through mtmd_audio_stream, its text
+    // model conditions on a token delay
+    f.push_back({"voxtral_rt", "mistral3-rt", "audio", "strm:0,1,3000,40000", [](G & g) {
+        const int E = 64, NH = 4, NKV = 2, DH = 16, F = 128, NM = 32, ST = 4, H = 128;
+        audio(g, "voxtral_rt", NM);
+        hp(g, "audio", E, F, NH, 2, N_TEXT, 1e-5f);
+        g.u32(fmt(KEY_N_HEAD_KV, "audio"), NKV);
+        g.u32(KEY_A_PROJ_STACK_FACTOR, ST);
+        g.u32(KEY_A_ATTN_WINDOW_SIZE, 24);
+        g.t(fmt(TN_CONV1D, 1, "weight"), {3, NM, E}, 0.1f);
+        g.t(fmt(TN_CONV1D, 1, "bias"), {1, E}, 0.02f);
+        g.t(fmt(TN_CONV1D, 2, "weight"), {3, E, E}, 0.1f);
+        g.t(fmt(TN_CONV1D, 2, "bias"), {1, E}, 0.02f);
+        for (int il = 0; il < 2; il++) {
+            const char * a = "a";
+            g.w(fmt(TN_ATTN_Q, a, il, "weight"), E, NH * DH);
+            g.bias(fmt(TN_ATTN_Q, a, il, "bias"), NH * DH);
+            g.w(fmt(TN_ATTN_K, a, il, "weight"), E, NKV * DH);
+            g.w(fmt(TN_ATTN_V, a, il, "weight"), E, NKV * DH);
+            g.bias(fmt(TN_ATTN_V, a, il, "bias"), NKV * DH);
+            g.w(fmt(TN_ATTN_OUTPUT, a, il, "weight"), NH * DH, E);
+            g.bias(fmt(TN_ATTN_OUTPUT, a, il, "bias"), E);
+            g.norm(fmt(TN_LN_1, a, il, "weight"), E);
+            g.norm(fmt(TN_LN_2, a, il, "weight"), E);
+            g.w(fmt(TN_FFN_UP, a, il, "weight"), E, F);
+            g.w(fmt(TN_FFN_GATE, a, il, "weight"), E, F);
+            g.w(fmt(TN_FFN_DOWN, a, il, "weight"), F, E);
+            g.bias(fmt(TN_FFN_DOWN, a, il, "bias"), E);
+        }
+        g.norm(fmt(TN_LN_POST, "a", "weight"), E);
+        g.w(fmt(TN_MM_AUDIO_MLP, 1, "weight"), E * ST, H);
+        g.w(fmt(TN_MM_AUDIO_MLP, 2, "weight"), H, N_TEXT);
+    }});
+    // lfm3a: a stride-2 conv downsampler into a causal LFM2 stack of short
+    // convs and windowed attention, then an MLP projector
+    auto lfm3a_tensors = [](G & g) {
+        const int E = 64, NH = 4, NKV = 2, DH = 16, F = 128, NM = 32, C = 8, H = 96, KC = 3;
+        hp(g, "audio", E, F, NH, 3, N_TEXT, 1e-5f);
+        g.u32(fmt(KEY_N_HEAD_KV, "audio"), NKV);
+        g.u32(KEY_A_NUM_MEL_BINS, NM);
+        g.u32(KEY_A_ATTN_WINDOW_SIZE, 10);
+        g.t(fmt(TN_CONV1D, 0, "weight"), {3, 3, 1, C}, 0.3f);
+        g.t(fmt(TN_CONV1D, 0, "bias"), {1, 1, C}, 0.02f);
+        for (int i : {2, 5}) {
+            g.t(fmt(TN_CONV1D, i, "weight"), {3, 3, 1, C}, 0.3f);
+            g.t(fmt(TN_CONV1D, i, "bias"), {1, 1, C}, 0.02f);
+        }
+        for (int i : {3, 6}) {
+            g.t(fmt(TN_CONV1D, i, "weight"), {1, 1, C, C}, 0.25f);
+            g.t(fmt(TN_CONV1D, i, "bias"), {1, 1, C}, 0.02f);
+        }
+        g.w(fmt(TN_PRE_ENCODE_OUT, "weight"), C * (NM / 8), E);
+        g.bias(fmt(TN_PRE_ENCODE_OUT, "bias"), E);
+        for (int il = 0; il < 3; il++) {
+            const char * a = "a";
+            g.norm(fmt(TN_LN_1, a, il, "weight"), E);
+            g.norm(fmt(TN_LN_2, a, il, "weight"), E);
+            g.w(fmt(TN_FFN_UP, a, il, "weight"), E, F);
+            g.w(fmt(TN_FFN_GATE, a, il, "weight"), E, F);
+            g.w(fmt(TN_FFN_DOWN, a, il, "weight"), F, E);
+            if (il == 1) {
+                g.w(fmt(TN_ATTN_Q, a, il, "weight"), E, NH * DH);
+                g.w(fmt(TN_ATTN_K, a, il, "weight"), E, NKV * DH);
+                g.w(fmt(TN_ATTN_V, a, il, "weight"), E, NKV * DH);
+                g.w(fmt(TN_ATTN_OUTPUT, a, il, "weight"), NH * DH, E);
+                g.norm(fmt(TN_ATTN_Q_NORM, a, il, "weight"), DH);
+                g.norm(fmt(TN_ATTN_K_NORM, a, il, "weight"), DH);
+            } else {
+                g.w(fmt(TN_CONV_PW1, a, il, "weight"), E, 3 * E);
+                g.t(fmt(TN_CONV_DW, a, il, "weight"), {KC, E}, 0.3f);
+                g.w(fmt(TN_CONV_PW2, a, il, "weight"), E, E);
+            }
+        }
+        g.norm(fmt(TN_LN_POST, "a", "weight"), E);
+        g.norm(fmt(TN_MM_AUDIO_MLP, 0, "weight"), E);
+        g.bias(fmt(TN_MM_AUDIO_MLP, 0, "bias"), E);
+        g.w(fmt(TN_MM_AUDIO_MLP, 1, "weight"), E, H);
+        g.bias(fmt(TN_MM_AUDIO_MLP, 1, "bias"), H);
+        g.w(fmt(TN_MM_AUDIO_MLP, 3, "weight"), H, N_TEXT);
+        g.bias(fmt(TN_MM_AUDIO_MLP, 3, "bias"), N_TEXT);
+    };
+    f.push_back({"lfm3a", "qwen3-lfm3", "audio", "aud:16000,40000,300;strm:0,1,3000,40000,100000", [lfm3a_tensors](G & g) {
+        audio(g, "lfm3a", 32);
+        lfm3a_tensors(g);
+    }});
+    // lfm3a_gen: the depthformer (12 codebooks, MaskGIT) and the codec
+    // decoder, whose width and depth clip.cpp hardcodes; beside an lfm3a
+    // encoder, since only soprano's mmproj holds a decoder alone
+    auto lfm3a_gen_tensors = [](G & g, int V, bool silence_eos) {
+        const int E = 32, NH = 2, NKV = 1, DH = 16, F = 64, NCB = 12, NL = 2;
+        const int DE = 512, DF = 96, DNH = 8, DNKV = 2, DDH = 64, NLVL = 4, D = 48, NB = 641, KC = 3;
+        g.b(KEY_HAS_GEN_AUDIO_ENC, true);
+        g.str(KEY_GEN_AUDIO_PROJ_TYPE, "lfm3a_gen");
+        hp(g, "gen.audio", E, F, NH, NL, N_TEXT);
+        g.u32(fmt(KEY_N_HEAD_KV, "gen.audio"), NKV);
+        for (int il = 0; il < NL; il++) {
+            const char * p = "a.gen.code";
+            g.w(fmt(TN_ATTN_Q, p, il, "weight"), E, NH * DH);
+            g.w(fmt(TN_ATTN_K, p, il, "weight"), E, NKV * DH);
+            g.w(fmt(TN_ATTN_V, p, il, "weight"), E, NKV * DH);
+            g.w(fmt(TN_ATTN_OUTPUT, p, il, "weight"), NH * DH, E);
+            g.w(fmt(TN_ATTN_GATE, p, il, "weight"), E, NH);
+            g.norm(fmt(TN_ATTN_Q_NORM, p, il, "weight"), DH);
+            g.norm(fmt(TN_ATTN_K_NORM, p, il, "weight"), DH);
+            g.norm(fmt(TN_LN_1, p, il, "weight"), E);
+            g.norm(fmt(TN_LN_2, p, il, "weight"), E);
+            g.w(fmt(TN_FFN_GATE, p, il, "weight"), E, F);
+            g.w(fmt(TN_FFN_UP, p, il, "weight"), E, F);
+            g.w(fmt(TN_FFN_DOWN, p, il, "weight"), F, E);
+        }
+        g.w(fmt(TN_A_GEN_CODE_PROJ_IN, "weight"), N_TEXT, E * NCB);
+        g.bias(fmt(TN_A_GEN_CODE_PROJ_IN, "bias"), E * NCB);
+        ggml_tensor * embd = g.t(fmt(TN_A_GEN_CODE_EMBD, "weight"), {E, V, NCB}, 0.2f);
+        if (silence_eos) {
+            // a zero row scores 0, so the end-of-audio code stays rare and the audio runs
+            for (int cb = 0; cb < NCB; cb++) memset((float *) embd->data + ((size_t) cb * V + V - 1) * E, 0, E * sizeof(float));
+        }
+        g.t(fmt(TN_A_GEN_CODE_OUT_EMBD, "weight"), {N_TEXT, V * NCB}, 0.05f);
+        g.norm(fmt(TN_A_GEN_CODE_NORM, "weight"), E);
+        g.t(fmt(TN_A_GEN_CODE_HEAD_NORM, "weight"), {E, NCB}, 0.1f, 1.0f);
+        g.t(TN_A_GEN_CODE_MASK_EMBD, {E}, 0.1f);
+        // codec decoder, the end-of-audio code has no row in the level table
+        g.t(fmt(TN_A_GEN_WAV_QUANT_FIRST_CB, "weight"), {NLVL, V - 1}, 0.5f);
+        g.w(fmt(TN_A_GEN_WAV_QUANT_FIRST_OUT, "weight"), NLVL * NCB, D);
+        g.bias(fmt(TN_A_GEN_WAV_QUANT_FIRST_OUT, "bias"), D);
+        g.w(fmt(TN_A_GEN_WAV_TFM_IN_PROJ, "weight"), D, DE);
+        g.bias(fmt(TN_A_GEN_WAV_TFM_IN_PROJ, "bias"), DE);
+        g.w(fmt(TN_A_GEN_WAV_TFM_OUT_PROJ, "weight"), DE, 2 * NB);
+        g.bias(fmt(TN_A_GEN_WAV_TFM_OUT_PROJ, "bias"), 2 * NB);
+        g.norm(fmt(TN_A_GEN_WAV_TFM_OUT_NORM, "weight"), DE);
+        for (int il = 0; il < 8; il++) {
+            const char * p = "a.gen.wav.tfm";
+            g.norm(fmt(TN_LN_1, p, il, "weight"), DE);
+            g.norm(fmt(TN_ATTN_POST_NORM, p, il, "weight"), DE);
+            g.norm(fmt(TN_LN_2, p, il, "weight"), DE);
+            g.norm(fmt(TN_FFN_POST_NORM, p, il, "weight"), DE);
+            g.w(fmt(TN_FFN_GATE, p, il, "weight"), DE, DF);
+            g.w(fmt(TN_FFN_UP, p, il, "weight"), DE, DF);
+            g.w(fmt(TN_FFN_DOWN, p, il, "weight"), DF, DE);
+            if (il % 4 == 3) {
+                g.w(fmt(TN_ATTN_Q, p, il, "weight"), DE, DNH * DDH);
+                g.w(fmt(TN_ATTN_K, p, il, "weight"), DE, DNKV * DDH);
+                g.w(fmt(TN_ATTN_V, p, il, "weight"), DE, DNKV * DDH);
+                g.w(fmt(TN_ATTN_OUTPUT, p, il, "weight"), DNH * DDH, DE);
+                g.w(fmt(TN_ATTN_GATE, p, il, "weight"), DE, DNH);
+                g.norm(fmt(TN_ATTN_Q_NORM, p, il, "weight"), DDH);
+                g.norm(fmt(TN_ATTN_K_NORM, p, il, "weight"), DDH);
+            } else {
+                g.w(fmt(TN_CONV_PW1, p, il, "weight"), DE, 3 * DE);
+                g.t(fmt(TN_CONV_DW, p, il, "weight"), {KC, DE}, 0.3f);
+                g.w(fmt(TN_CONV_PW2, p, il, "weight"), DE, DE);
+            }
+        }
+    };
+    f.push_back({"lfm3a_gen", "qwen3-lfm3", "tts-lfm3a", "tts:6", [lfm3a_tensors, lfm3a_gen_tensors](G & g) {
+        g.b(KEY_HAS_AUDIO_ENC, true);
+        g.str(KEY_AUDIO_PROJ_TYPE, "lfm3a");
+        lfm3a_tensors(g);
+        lfm3a_gen_tensors(g, 65, true);
+    }});
+    // a small codebook: the end-of-audio code fires within a few frames
+    f.push_back({"lfm3a_gen-eos", "qwen3-lfm3", "tts-lfm3a-eos", "tts:8", [lfm3a_tensors, lfm3a_gen_tensors](G & g) {
+        g.b(KEY_HAS_AUDIO_ENC, true);
+        g.str(KEY_AUDIO_PROJ_TYPE, "lfm3a");
+        lfm3a_tensors(g);
+        lfm3a_gen_tensors(g, 9, false);
+    }});
+    // lfm3-omni: LFM3-VL and LFM3-Audio in one file, each with its own
+    // projector type; video frames take the audio span of the image markers
+    f.push_back({"lfm3-omni", "qwen3-lfm3", "vision+audio", "img:64x64;aud:16000,3000;strm:3000,40000", [lfm3vl_tensors, lfm3a_tensors](G & g) {
+        g.b(KEY_HAS_VISION_ENC, true);
+        g.b(KEY_HAS_AUDIO_ENC, true);
+        g.str(KEY_VISION_PROJ_TYPE, "lfm3vl");
+        g.str(KEY_AUDIO_PROJ_TYPE, "lfm3a");
+        g.u32(KEY_IMAGE_SIZE, 64);
+        g.u32(KEY_PATCH_SIZE, 8);
+        g.af32(KEY_IMAGE_MEAN, {0.5f, 0.45f, 0.4f});
+        g.af32(KEY_IMAGE_STD, {0.25f, 0.26f, 0.27f});
+        g.b(KEY_USE_GELU, true);
+        lfm3vl_tensors(g);
+        lfm3a_tensors(g);
+    }});
+    // soprano: the Vocos decoder alone, hidden states to STFT frames
+    auto soprano_tensors = [](G & g, bool conv_input) {
+        const int E = 32, F = 64, K = 7, NL = 2, NB = 1025;
+        g.b(KEY_HAS_GEN_AUDIO_ENC, true);
+        g.str(KEY_GEN_AUDIO_PROJ_TYPE, "soprano");
+        hp(g, "gen.audio", E, F, 2, NL, N_TEXT);
+        if (conv_input) {
+            g.t(fmt(TN_A_GEN_WAV_INPUT, "weight"), {3, N_TEXT, E}, 0.05f);
+        } else {
+            g.w(fmt(TN_A_GEN_WAV_INPUT, "weight"), N_TEXT, E);
+        }
+        g.bias(fmt(TN_A_GEN_WAV_INPUT, "bias"), E);
+        g.norm(fmt(TN_A_GEN_WAV_NORM, "weight"), E);
+        g.bias(fmt(TN_A_GEN_WAV_NORM, "bias"), E);
+        for (int il = 0; il < NL; il++) {
+            g.t(fmt(TN_A_GEN_WAV_UP_DWCONV, il, "weight"), {K, 1, E}, 0.2f);
+            g.bias(fmt(TN_A_GEN_WAV_UP_DWCONV, il, "bias"), E);
+            g.norm(fmt(TN_A_GEN_WAV_UP_NORM, il, "weight"), E);
+            g.bias(fmt(TN_A_GEN_WAV_UP_NORM, il, "bias"), E);
+            g.w(fmt(TN_A_GEN_WAV_UP_PW1, il, "weight"), E, F);
+            g.bias(fmt(TN_A_GEN_WAV_UP_PW1, il, "bias"), F);
+            g.w(fmt(TN_A_GEN_WAV_UP_PW2, il, "weight"), F, E);
+            g.bias(fmt(TN_A_GEN_WAV_UP_PW2, il, "bias"), E);
+            g.t(fmt(TN_A_GEN_WAV_UP_GAMMA, il), {E}, 0.1f, 0.5f);
+        }
+        g.norm(fmt(TN_A_GEN_WAV_OUTPUT_NORM, "weight"), E);
+        g.bias(fmt(TN_A_GEN_WAV_OUTPUT_NORM, "bias"), E);
+        g.w(fmt(TN_A_GEN_WAV_OUTPUT, "weight"), E, 2 * NB);
+        g.bias(fmt(TN_A_GEN_WAV_OUTPUT, "bias"), 2 * NB);
+    };
+    f.push_back({"soprano", "qwen3-soprano", "tts-soprano", "tts:4", [soprano_tensors](G & g) { soprano_tensors(g, true); }});
+    f.push_back({"soprano-linear", "qwen3-soprano", "tts-soprano", "tts:4", [soprano_tensors](G & g) { soprano_tensors(g, false); }});
+    // the 2x merge, where the slice alignment is not the 4x one's
+    f.push_back({"minicpm_ocr_1_0-2x", "qwen3", "vision", "img:64x64,96x48,40x100,200x160,333x211", [m = build_of("minicpm_ocr_1_0")](G & g) {
+        m(g);
+        g.u32(KEY_PROJ_SCALE_FACTOR, 2);
+    }});
+    // Gemma 4's exact gelu is the arm's, whatever the keys say
+    f.push_back({"gemma4uv-nogelu", "qwen3", "vision", "img:64x64,120x80", [m = build_of("gemma4uv")](G & g) {
+        m(g);
+        g.b(KEY_USE_GELU, false);
+    }});
+    // audio through the tokenizer on a stream-only model: upstream's assert
+    f.push_back({"voxtral_rt-media", "mistral3-rt", "expect-fail-run", "aud:16000", [v = build_of("voxtral_rt")](G & g) { v(g); }});
+    // the new load errors
+    variant("lfm3vl", "lfm3vl-bad-algo", [](G & g) { g.str(KEY_IMAGE_RESIZE_ALGO, "lanczos"); });
+    variant("lfm3vl", "lfm3vl-bad-merge", [](G & g) { g.u32(KEY_SPATIAL_MERGE_SIZE, 3); });
+    variant("lfm3vl", "lfm3vl-bad-pixels", [](G & g) { g.u32(KEY_IMAGE_MAX_PIXELS, 1); });
+    variant("lfm3a", "lfm3a-bad-window", [](G & g) { g.u32(KEY_A_ATTN_WINDOW_SIZE, 0); });
+    variant("sensenova_u1", "sensenova_u1-bad-merge", [](G & g) { g.u32(KEY_SPATIAL_MERGE_SIZE, 3); });
+    variant("muse-spark-audio", "muse-spark-audio-bad-depths", [](G & g) { g.ai32(KEY_A_DEPTHS, {1, 1}); });
+    // LFM2's tiling from the GGUF: smaller tiles, a wider tile count
+    f.push_back({"lfm2-tiles", "qwen3", "vision", "img:64x64,200x120,600x300", [lfm2 = build_of("lfm2")](G & g) {
+        lfm2(g);
+        g.u32(KEY_PREPROC_MIN_TILES, 3);
+        g.u32(KEY_PREPROC_MAX_TILES, 6);
+        g.u32(KEY_PREPROC_TILE_SIZE, 128);
+        g.f32(KEY_PREPROC_MAX_PIXELS_TOLERANCE, 1.5f);
+    }});
+    // Pixtral's longest-edge path
+    f.push_back({"pixtral-longest", "qwen3", "vision", "img:64x64,96x48,300x120", [px = build_of("pixtral")](G & g) {
+        px(g);
+        g.u32(KEY_PREPROC_IMAGE_SIZE, 96);
+    }});
+
     return f;
 }
 
@@ -2020,8 +2376,19 @@ static const std::vector<std::string> k_specials_c2v = {
     "<|START_OF_IMG|>", "<|END_OF_IMG|>", "<|IMG_LINE_BREAK|>",
 };
 
+// v0.8.0: LFM3's control tokens, the stream's and the pipeline's
+static const std::vector<std::string> k_specials_lfm3 = {
+    "<|audio_start|>", "<|mixed_start|>", "<|text_end|>", "<|mixed_end|>", "<|im_start|>", "<|im_end|>",
+    "<|endoftext|>", "<|vision_start|>", "<|vision_end|>",
+};
+// soprano's prompt tokens (mtmd-helper-gen.cpp)
+static const std::vector<std::string> k_specials_soprano = { "[TEXT]", "[START]", "[STOP]" };
+// voxtral realtime's pad (mtmd.cpp's stream init)
+static const std::vector<std::string> k_specials_voxtral = { "[STREAMING_PAD]" };
+
 static bool write_text_model(const std::string & in, const std::string & out, bool codec, int deepstack = 0, bool mrope = false,
-                             bool c2v = false) {
+                             const std::vector<std::string> * extra = nullptr, int delay = 0, const char * tmpl = nullptr,
+                             const char * tmpl_tts = nullptr) {
     ggml_context * ctx = nullptr;
     gguf_init_params ip = { false, &ctx };
     gguf_context * src = gguf_init_from_file(in.c_str(), ip);
@@ -2042,13 +2409,13 @@ static bool write_text_model(const std::string & in, const std::string & out, bo
     add("\xe2\x96\x81", 1);
     for (int ch = 0x21; ch <= 0x7e; ch++) add(std::string(1, (char) ch), 1);
     add("<0x0A>", 6);
-    if (c2v) {
-        // every special up to the first TTS one, then cohere2v's
+    if (extra) {
+        // every special up to the first TTS one, then the model's own
         for (const auto & s : k_specials) {
             if (s == "<|codec_bos|>") break;
             add(s, 3);
         }
-        for (const auto & s : k_specials_c2v) add(s, 3);
+        for (const auto & s : *extra) add(s, 3);
     } else {
         for (const auto & s : k_specials) add(s, 3);
     }
@@ -2086,6 +2453,9 @@ static bool write_text_model(const std::string & in, const std::string & out, bo
         const int32_t sections[4] = { 4, 4, 4, 4 };
         gguf_set_arr_data(dst, (std::string(arch) + ".rope.dimension_sections").c_str(), GGUF_TYPE_INT32, sections, 4);
     }
+    if (delay > 0) gguf_set_val_u32(dst, (std::string(arch) + ".realtime_delay_tokens").c_str(), delay);
+    if (tmpl) gguf_set_val_str(dst, "tokenizer.chat_template", tmpl);
+    if (tmpl_tts) gguf_set_val_str(dst, "tokenizer.chat_template.tts", tmpl_tts);
     for (int64_t i = 0; i < gguf_get_n_tensors(src); i++) {
         gguf_add_tensor(dst, ggml_get_tensor(ctx, gguf_get_tensor_name(src, i)));
     }
@@ -2097,7 +2467,13 @@ static bool write_text_model(const std::string & in, const std::string & out, bo
 }
 
 static int cmd_gen(const std::string & arch_dir, const std::string & out_dir, const std::string & filter) {
-    struct Text { const char * key; const char * fixture; bool codec; int deepstack; bool mrope = false; bool c2v = false; };
+    struct Text {
+        const char * key; const char * fixture; bool codec; int deepstack; bool mrope = false;
+        const std::vector<std::string> * extra = nullptr; int delay = 0; const char * tmpl = nullptr; const char * tmpl_tts = nullptr;
+    };
+    const char * lfm3_chat = "{% for m in messages %}<|im_start|>{{ m.role }}\n{{ m.content }}<|im_end|>\n{% endfor %}"
+                             "{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}";
+    const char * lfm3_tts = "<|im_start|>user\n{{ messages[0].content }}<|im_end|>\n<|im_start|>assistant\n<|audio_start|>";
     const Text texts[] = {
         { "qwen3", "qwen3-dense", false, 0 },
         { "qwen2vl", "qwen2vl-dense", false, 0 },
@@ -2112,11 +2488,15 @@ static int cmd_gen(const std::string & arch_dir, const std::string & out_dir, co
         { "qwen35", "qwen35-dense", false, 0 },
         { "gemma3", "gemma3-dense", false, 0 },
         // v0.7.0: cohere2v's image tokens in the vocabulary
-        { "qwen3-c2v", "qwen3-dense", false, 0, false, true },
+        { "qwen3-c2v", "qwen3-dense", false, 0, false, &k_specials_c2v },
+        // v0.8.0: LFM3-Audio's and Soprano's tokens, Voxtral Realtime's pad and delay
+        { "qwen3-lfm3", "qwen3-dense", false, 0, false, &k_specials_lfm3, 0, lfm3_chat, lfm3_tts },
+        { "qwen3-soprano", "qwen3-dense", false, 0, false, &k_specials_soprano },
+        { "mistral3-rt", "mistral3-dense", false, 0, false, &k_specials_voxtral, 6 },
     };
     for (const auto & t : texts) {
         const std::string out = out_dir + "/text-" + t.key + ".gguf";
-        if (!write_text_model(arch_dir + "/" + t.fixture + ".gguf", out, t.codec, t.deepstack, t.mrope, t.c2v)) return 1;
+        if (!write_text_model(arch_dir + "/" + t.fixture + ".gguf", out, t.codec, t.deepstack, t.mrope, t.extra, t.delay, t.tmpl, t.tmpl_tts)) return 1;
     }
 
     FILE * man = fopen((out_dir + "/manifest.txt").c_str(), "w");
@@ -2219,7 +2599,61 @@ static std::string run_media(mtmd_context * mctx, llama_model * model, std::vect
     return err;
 }
 
-static std::string run_tts(mtmd_context * mctx, llama_model * model, bool qwen, int steps) {
+// feed PCM to an audio stream in uneven pieces and sample nothing: the rows
+// of every step must be finite, and the stream must end
+static std::string run_stream(mtmd_context * mctx, llama_model * model, int n, bool prompted) {
+    if (!mtmd_support_audio_stream(mctx)) return "no audio stream";
+    const llama_vocab * vocab = llama_model_get_vocab(model);
+    std::vector<llama_token> prompt;
+    mtmd_audio_stream_params sp = mtmd_audio_stream_params_default();
+    if (prompted) {
+        prompt = { 5, 6, 7 };
+        sp.prompt = prompt.data();
+        sp.n_prompt = prompt.size();
+    }
+    mtmd_audio_stream * s = mtmd_audio_stream_init(mctx, sp);
+    if (!s) return "stream init failed";
+    std::vector<float> pcm(n);
+    for (int i = 0; i < n; i++) pcm[i] = 0.4f * std::sin(0.05f * i);
+    const int n_embd = llama_model_n_embd_inp(model);
+    llama_token text_end = LLAMA_TOKEN_NULL;
+    for (llama_token t = 0; t < llama_vocab_n_tokens(vocab); t++) {
+        if (std::string(llama_vocab_get_text(vocab, t)) == "<|text_end|>") { text_end = t; break; }
+    }
+    std::string err;
+    int fed = 0, step = 0;
+    bool flushed = false;
+    llama_token tok = LLAMA_TOKEN_NULL;
+    for (int it = 0; it < 100000 && err.empty(); it++) {
+        const int32_t r = mtmd_audio_stream_step(s, tok);
+        if (r == -1) break;
+        if (r == -2) { err = "step error"; break; }
+        if (r == 0) {
+            if (fed < n) {
+                const int cnt = std::min(n - fed, 1000 + 317 * (step++ % 5));
+                mtmd_audio_stream_push(s, pcm.data() + fed, cnt);
+                fed += cnt;
+            } else if (!flushed) {
+                mtmd_audio_stream_flush(s, true);
+                flushed = true;
+            } else {
+                err = "stream did not end";
+            }
+            continue;
+        }
+        std::string why;
+        if (!check_embd(mtmd_audio_stream_get_output_embd(s), (size_t) r * n_embd, why)) err = why;
+        tok = prompted ? text_end : 5;
+    }
+    mtmd_audio_stream_free(s);
+    return err;
+}
+
+static std::string run_tts(mtmd_context * mctx, llama_model * model, const std::string & modality, int steps) {
+    const bool qwen = modality == "tts-qwen3";
+    const bool soprano = modality == "tts-soprano";
+    const bool lfm3a = modality == "tts-lfm3a" || modality == "tts-lfm3a-eos";
+    const bool may_end_silent = modality == "tts-lfm3a-eos";
     llama_context_params cp = llama_context_default_params();
     cp.n_ctx = 512;
     cp.n_batch = 512;
@@ -2236,11 +2670,11 @@ static std::string run_tts(mtmd_context * mctx, llama_model * model, bool qwen, 
     std::vector<float> spk(24000);
     for (size_t i = 0; i < spk.size(); i++) spk[i] = 0.3f * std::sin(0.03f * i) + 0.1f * std::sin(0.31f * i);
     mtmd_bitmap * spk_bm = mtmd_bitmap_init_from_audio(spk.size(), spk.data());
-    mtmd_helper_gen_audio_inp inp{};
+    mtmd_helper_gen_audio_inp inp = mtmd_helper_gen_audio_inp_default();
     inp.seq_id = 0;
-    inp.prompt = "hello there, test.";
+    inp.prompt = lfm3a ? "hello<|audio_start|>" : "hello there, test.";
     inp.prompt_len = strlen(inp.prompt);
-    inp.speaker_ref = spk_bm;
+    inp.speaker_ref = soprano ? nullptr : spk_bm;
     inp.lang = "";
     inp.top_k = 8;
     inp.top_p = 1.0f;
@@ -2260,7 +2694,7 @@ static std::string run_tts(mtmd_context * mctx, llama_model * model, bool qwen, 
     const float * h = llama_get_embeddings_ith(lctx, -1);
     for (int s = 0; err.empty() && s < steps; s++) {
         // the backbone's token: a codec token for qwen3-tts, none for pocket-tts
-        const llama_token sampled = qwen ? codec_0 + 7 * (s + 1) : LLAMA_TOKEN_NULL;
+        const llama_token sampled = qwen ? codec_0 + 7 * (s + 1) : soprano ? 10 + s : LLAMA_TOKEN_NULL;
         const float * h_next = nullptr;
         bool stop = false;
         if (mtmd_helper_gen_audio_step_gen(gen, sampled, h, &h_next, &stop) != 0) {
@@ -2277,6 +2711,8 @@ static std::string run_tts(mtmd_context * mctx, llama_model * model, bool qwen, 
         int64_t n_samples = 0;
         if (mtmd_helper_gen_audio_get_output(gen, &sr, &data, &len, &n_samples) != 0) {
             err = "get_output failed";
+        } else if (may_end_silent && n_samples == 0) {
+            // the first frame was already the end of audio
         } else if (len <= 44 || n_samples <= 0 || sr <= 0) {
             err = fmt("empty output (len %zu, samples %lld, sr %d)", len, (long long) n_samples, sr);
         } else {
@@ -2339,6 +2775,7 @@ static std::string check_one(const std::vector<std::string> & m, bool gpu) {
                     for (auto & p : px) p = (unsigned char) (rng() & 0xff);
                     bms.push_back(mtmd_bitmap_init(W, H, px.data()));
                     mtmd_bitmap_set_mergeable(bms.back(), true);
+                    mtmd_bitmap_set_is_video(bms.back(), true);
                 }
                 err = run_media(mctx, model, bms, true);
                 for (auto * b : bms) mtmd_bitmap_free(b);
@@ -2361,7 +2798,18 @@ static std::string check_one(const std::vector<std::string> & m, bool gpu) {
                 }
             }
         } else if (kv[0] == "tts") {
-            err = run_tts(mctx, model, modality == "tts-qwen3", atoi(kv[1].c_str()));
+            err = run_tts(mctx, model, modality, atoi(kv[1].c_str()));
+        } else if (kv[0] == "strm") {
+            for (const auto & ns : split(kv[1], ',')) {
+                err = run_stream(mctx, model, atoi(ns.c_str()), false);
+                if (err.empty() && std::string(m[0]).find("lfm3") != std::string::npos) {
+                    err = run_stream(mctx, model, atoi(ns.c_str()), true);
+                }
+                if (!err.empty()) {
+                    err = "strm " + ns + ": " + err;
+                    break;
+                }
+            }
         }
     }
     mtmd_free(mctx);
@@ -2440,7 +2888,7 @@ static int cmd_check(const std::string & manifest, const std::string & devs, con
             if ((gpu && devs == "cpu") || (!gpu && devs == "gpu")) continue;
             n++;
             std::string err = run_child(m, gpu);
-            if (m[3] == "expect-fail") {
+            if (m[3] == "expect-fail" || m[3] == "expect-fail-run") {
                 // a type upstream declares and cannot load: it must fail
                 err = err.empty() ? "loaded, but upstream has no implementation to load it with" : "";
             }

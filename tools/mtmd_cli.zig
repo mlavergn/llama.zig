@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/mtmd/mtmd-cli.cpp` at v0.7.0 (`620d2225c`).
+//! Ported from `llama.cpp/tools/mtmd/mtmd-cli.cpp` at v0.8.0 (`8642541b2`).
 //! Each declaration names the C++ it replaces and the line it began at.
 //!
 //! # What differs
@@ -45,7 +45,7 @@ extern fn _exit(code: c_int) noreturn;
 const lc_numeric: c_int = if (builtin.os.tag.isDarwin()) 4 else if (builtin.os.tag == .windows) 4 else 1;
 
 // Ports `g_is_generating`, `g_is_interrupted` (mtmd-cli.cpp:31, 32
-// @620d2225c): volatile, because of signal being an interrupt
+// @8642541b2): volatile, because of signal being an interrupt
 var g_is_generating_: bool = false;
 var g_is_interrupted_: bool = false;
 
@@ -59,7 +59,7 @@ fn isInterrupted() bool {
     return @as(*volatile bool, &g_is_interrupted_).*;
 }
 
-/// Ports `show_additional_info` (mtmd-cli.cpp:40 @620d2225c).
+/// Ports `show_additional_info` (mtmd-cli.cpp:40 @8642541b2).
 fn showAdditionalInfo(argv: []const [:0]const u8) void {
     log.out("Experimental CLI for multimodal\n\n" ++
         "Usage: %s [options] -m <model> --mmproj <mmproj> --image <image> --audio <audio> -p <prompt>\n\n" ++
@@ -69,7 +69,7 @@ fn showAdditionalInfo(argv: []const [:0]const u8) void {
         "  to disable using GPU for mmproj model, add --no-mmproj-offload\n", .{argv[0].ptr});
 }
 
-/// Ports `sigint_handler` (mtmd-cli.cpp:53 @620d2225c).
+/// Ports `sigint_handler` (mtmd-cli.cpp:53 @8642541b2).
 fn sigintHandler(signo: std.posix.SIG) callconv(.c) void {
     if (signo == std.posix.SIG.INT) {
         if (isGenerating()) {
@@ -82,16 +82,17 @@ fn sigintHandler(signo: std.posix.SIG) callconv(.c) void {
     }
 }
 
-/// Ports `inject_test_response_marker` (mtmd-cli.cpp:69 @620d2225c): only
+/// Ports `inject_test_response_marker` (mtmd-cli.cpp:69 @8642541b2): only
 /// used by upstream's tests.sh to capture the response.
 fn injectTestResponseMarker() void {
     if (getenv("MTMD_TEST_RESPONSE_MARKER")) |env| log.out("%s\n", .{env});
 }
 
-/// Ports `mtmd_cli_context` (mtmd-cli.cpp:76 @620d2225c).
+/// Ports `mtmd_cli_context` (mtmd-cli.cpp:76 @8642541b2).
 const CliContext = struct {
     a: std.mem.Allocator,
     ctx_vision: ?*c.mtmd_context = null,
+    mtmd_cap: c.mtmd_helper_cap = std.mem.zeroes(c.mtmd_helper_cap),
     llama_init: tc.init.InitResult,
 
     model: ?*c.llama_model,
@@ -106,8 +107,6 @@ const CliContext = struct {
     init_opt: c.mtmd_helper_init_opt = undefined, // mtmd_helper_init_opt_default(), set in `init`
     video_ffmpeg_bin_dir: [:0]const u8 = "",
 
-    mbatch: ?*c.mtmd_batch = null,
-
     // chat template
     tmpls: chat.templates.Templates = undefined,
     chat_history: std.ArrayList(chat.Msg) = .empty,
@@ -119,7 +118,7 @@ const CliContext = struct {
     n_threads: c_int = 1,
     n_past: c.llama_pos = 0,
 
-    /// Ports the constructor `mtmd_cli_context` (mtmd-cli.cpp:109 @620d2225c). Every failure is the
+    /// Ports the constructor `mtmd_cli_context` (mtmd-cli.cpp:108 @8642541b2). Every failure is the
     /// C++'s `exit(1)`, which runs no destructor.
     fn init(self: *CliContext, gpa: std.mem.Allocator, a: std.mem.Allocator, params: *tc.params.Params) !void {
         const llama_init = try tc.init.initFromParams(gpa, params, false);
@@ -141,7 +140,9 @@ const CliContext = struct {
 
         self.initVisionContext(params);
 
-        if (!c.mtmd_helper_model_can_chat(self.lctx, self.ctx_vision)) {
+        self.mtmd_cap = c.mtmd_helper_get_capabilities(self.model, self.ctx_vision);
+        // a realtime transcription model has no chat, it streams the audio below
+        if (!self.mtmd_cap.chat and !self.mtmd_cap.audio_stream) {
             log.err("Model does not support chat mode\n", .{});
             log.err("Hint: for TTS models, please use llama-tts\n", .{});
             tc.cExit(1);
@@ -181,18 +182,17 @@ const CliContext = struct {
         };
     }
 
-    /// Ports the destructor of `mtmd_cli_context` (mtmd-cli.cpp:150 @620d2225c), then the members in
+    /// Ports the destructor of `mtmd_cli_context` (mtmd-cli.cpp:151 @8642541b2), then the members in
     /// reverse order of declaration.
     fn deinit(self: *CliContext) void {
         self.smpl.destroy();
-        if (self.mbatch) |b| c.mtmd_batch_free(b);
         for (self.bitmaps.items) |b| c.mtmd_bitmap_free(b);
         self.batch.deinit();
         self.llama_init.deinit();
         if (self.ctx_vision) |v| c.mtmd_free(v);
     }
 
-    /// Ports `init_vision_context` (mtmd-cli.cpp:154 @620d2225c).
+    /// Ports `init_vision_context` (mtmd-cli.cpp:155 @8642541b2).
     fn initVisionContext(self: *CliContext, params: *tc.params.Params) void {
         const clip_path = self.a.dupeSentinel(u8, params.mmproj.path, 0) catch tc.cExit(1);
         var mparams = c.mtmd_context_params_default();
@@ -233,13 +233,13 @@ const CliContext = struct {
         self.init_opt.video_params.ffmpeg_bin_dir = if (self.video_ffmpeg_bin_dir.len == 0) null else self.video_ffmpeg_bin_dir.ptr;
     }
 
-    /// Ports `check_antiprompt` (mtmd-cli.cpp:193 @620d2225c).
+    /// Ports `check_antiprompt` (mtmd-cli.cpp:194 @8642541b2).
     fn checkAntiprompt(self: *const CliContext, generated_tokens: []const c.llama_token) bool {
         if (self.antiprompt_tokens.len == 0 or generated_tokens.len < self.antiprompt_tokens.len) return false;
         return std.mem.eql(c.llama_token, generated_tokens[generated_tokens.len - self.antiprompt_tokens.len ..], self.antiprompt_tokens);
     }
 
-    /// Ports `load_media` (mtmd-cli.cpp:204 @620d2225c).
+    /// Ports `load_media` (mtmd-cli.cpp:205 @8642541b2).
     fn loadMedia(self: *CliContext, fname: []const u8) !bool {
         const f = try self.a.dupeSentinel(u8, fname, 0);
         const res = c.mtmd_helper_bitmap_init_from_file(self.ctx_vision, f.ptr, false, self.init_opt);
@@ -249,7 +249,7 @@ const CliContext = struct {
     }
 };
 
-/// Ports `generate_response` (mtmd-cli.cpp:217 @620d2225c).
+/// Ports `generate_response` (mtmd-cli.cpp:218 @8642541b2).
 fn generateResponse(ctx: *CliContext, n_predict: c_int) !c_int {
     const a = ctx.a;
     var generated_tokens: std.ArrayList(c.llama_token) = .empty;
@@ -293,7 +293,98 @@ fn generateResponse(ctx: *CliContext, n_predict: c_int) !c_int {
     return 0;
 }
 
-/// Ports `chat_add_and_format` (mtmd-cli.cpp:260 @620d2225c).
+/// Ports `run_audio_stream` (mtmd-cli.cpp:262 @8642541b2): feeds an audio file
+/// to a realtime model chunk by chunk, printing the transcript as it is
+/// produced.
+fn runAudioStream(ctx: *CliContext, fname_in: []const u8, n_predict: c_int) !c_int {
+    const a = ctx.a;
+    const func = "run_audio_stream";
+    const fname = try a.dupeSentinel(u8, fname_in, 0);
+    const res = c.mtmd_helper_bitmap_init_from_file(ctx.ctx_vision, fname.ptr, false, ctx.init_opt);
+    const bmp = res.bitmap orelse return 1; // error is already printed by libmtmd
+    defer c.mtmd_bitmap_free(bmp);
+    if (!c.mtmd_bitmap_is_audio(bmp)) {
+        log.err("%s: %s is not an audio file\n", .{ func, fname.ptr });
+        return 1;
+    }
+    const samples: [*]const f32 = @ptrCast(@alignCast(c.mtmd_bitmap_get_data(bmp)));
+    const n_samples: usize = c.mtmd_bitmap_get_n_bytes(bmp) / @sizeOf(f32);
+    const rate = c.mtmd_get_audio_sample_rate(ctx.ctx_vision);
+
+    const sparams = c.mtmd_audio_stream_params_default();
+    const stream = c.mtmd_audio_stream_init(ctx.ctx_vision, sparams) orelse return 1;
+    defer c.mtmd_audio_stream_free(stream);
+
+    const n_chunk: usize = @as(usize, @intCast(rate)) * @as(usize, @intCast(sparams.step_ms)) / 1000;
+    const n_embd: usize = @intCast(c.llama_model_n_embd_inp(ctx.model));
+    const audio_s = @as(f64, @floatFromInt(n_samples)) / @as(f64, @floatFromInt(rate));
+
+    log.out("Transcribing %.1f s of audio, fed in chunks of %d ms\n\n", .{ audio_s, sparams.step_ms });
+
+    var n_fed: usize = 0;
+    var n_gen: c_int = 0;
+    var tok: c.llama_token = -1; // LLAMA_TOKEN_NULL
+    const t_start = c.ggml_time_us();
+    var t_enc: i64 = 0; // time spent in the stream (mel + encoder)
+    var t_dec: i64 = 0; // time spent in the decoder
+    while (!isInterrupted()) {
+        const t0 = c.ggml_time_us();
+        const n = c.mtmd_audio_stream_step(stream, tok);
+        t_enc += c.ggml_time_us() - t0;
+        if (n < 0) {
+            if (n == -2) {
+                log.err("%s: stream error\n", .{func});
+                return 1;
+            }
+            break; // end of stream
+        }
+        if (n == 0) {
+            if (n_fed < n_samples) {
+                const cnt = @min(n_chunk, n_samples - n_fed);
+                _ = c.mtmd_audio_stream_push(stream, samples + n_fed, cnt);
+                n_fed += cnt;
+            } else if (c.mtmd_audio_stream_flush(stream, true) != 0) {
+                break; // already ended
+            }
+            continue;
+        }
+
+        const t1 = c.ggml_time_us();
+        const rows: [*]const f32 = c.mtmd_audio_stream_get_output_embd(stream);
+        ctx.batch.clear();
+        var i: i32 = 0;
+        while (i < n) : (i += 1) {
+            var pos = [4]c.llama_pos{ ctx.n_past, ctx.n_past, ctx.n_past, 0 };
+            ctx.n_past += 1;
+            _ = ctx.batch.addEmbd(.{ .data = rows + @as(usize, @intCast(i)) * n_embd, .n_rows = 1, .n_embd = n_embd }, &pos, 0, i == n - 1);
+        }
+        if (c.llama_process(ctx.lctx, c.LLAMA_PROCESS_TYPE_DECODE, ctx.batch.get()) != 0) {
+            log.err("%s: failed to decode\n", .{func});
+            return 1;
+        }
+
+        tok = try ctx.smpl.sample(ctx.lctx, -1, false);
+        ctx.smpl.accept(tok, true);
+        t_dec += c.ggml_time_us() - t1;
+        if (c.llama_vocab_is_eog(ctx.vocab, tok)) break;
+        // the model emits pad and word-boundary tokens between words
+        if (!c.llama_vocab_is_control(ctx.vocab, tok)) {
+            log.out("%s", .{(try tc.common.tokenToPiece(a, ctx.vocab, tok, true)).ptr});
+            tc.io.flushStdout();
+        }
+        n_gen += 1;
+        if (n_gen >= n_predict) break;
+    }
+
+    const t_total = @as(f64, @floatFromInt(c.ggml_time_us() - t_start)) / 1e6;
+    log.out("\n\n%s: %d tokens, %.2f s audio in %.2f s (%.2fx realtime)\n", .{ func, n_gen, audio_s, t_total, audio_s / t_total });
+    log.out("%s: encoder %.2f s, decoder %.2f s, %.1f ms per 80 ms step\n", .{ func, @as(f64, @floatFromInt(t_enc)) / 1e6, @as(f64, @floatFromInt(t_dec)) / 1e6, @as(f64, @floatFromInt(t_enc + t_dec)) / 1e3 / @as(f64, @floatFromInt(@max(n_gen, 1))) });
+    c.llama_perf_context_print(ctx.lctx);
+
+    return 0;
+}
+
+/// Ports `chat_add_and_format` (mtmd-cli.cpp:354 @8642541b2).
 fn chatAddAndFormat(ctx: *CliContext, new_msg: chat.Msg) ![]const u8 {
     const a = ctx.a;
     log.dbg("chat_add_and_format: new_msg.role='%s', new_msg.content='%s'\n", .{ (try a.dupeSentinel(u8, new_msg.role, 0)).ptr, (try a.dupeSentinel(u8, new_msg.content, 0)).ptr });
@@ -302,7 +393,7 @@ fn chatAddAndFormat(ctx: *CliContext, new_msg: chat.Msg) ![]const u8 {
     return formatted;
 }
 
-/// Ports `eval_message` (mtmd-cli.cpp:270 @620d2225c).
+/// Ports `eval_message` (mtmd-cli.cpp:364 @8642541b2).
 fn evalMessage(ctx: *CliContext, msg: chat.Msg) !c_int {
     const a = ctx.a;
     injectTestResponseMarker();
@@ -348,6 +439,9 @@ fn evalMessage(ctx: *CliContext, msg: chat.Msg) !c_int {
 
     const chunks = c.mtmd_input_chunks_init();
     defer c.mtmd_input_chunks_free(chunks);
+    // mbatch must not outlive the chunks it references
+    var mbatch: ?*c.mtmd_batch = null;
+    defer if (mbatch) |mb| c.mtmd_batch_free(mb);
     var res = c.mtmd_tokenize_from_parts(ctx.ctx_vision, chunks, parts_ptr.items.ptr, parts_ptr.items.len, add_bos);
     if (res != 0) {
         log.err("Unable to tokenize prompt, res = %d\n", .{res});
@@ -376,7 +470,7 @@ fn evalMessage(ctx: *CliContext, msg: chat.Msg) !c_int {
         } else {
             // media chunk: try to get embd from existing batch, or create a new batch
             var embd: ?[*]f32 = null;
-            if (ctx.mbatch) |mb| {
+            if (mbatch) |mb| {
                 embd = c.mtmd_batch_get_output_embd(mb, chunk);
                 if (embd != null) {
                     log.dbg("found embd for media chunk %zu in existing batch\n", .{i});
@@ -387,10 +481,10 @@ fn evalMessage(ctx: *CliContext, msg: chat.Msg) !c_int {
 
             if (embd == null) {
                 // create and encode a new batch with as many media chunks as possible
-                if (ctx.mbatch) |mb| c.mtmd_batch_free(mb);
-                ctx.mbatch = c.mtmd_batch_init(ctx.ctx_vision);
-                res = c.mtmd_batch_add_chunk(ctx.mbatch, chunk);
-                if (res != 0) _ = c.ggml_abort("mtmd-cli.cpp", 368, "GGML_ASSERT(%s) failed", "res == 0"); // first chunk must always succeed
+                if (mbatch) |mb| c.mtmd_batch_free(mb);
+                mbatch = c.mtmd_batch_init(ctx.ctx_vision);
+                res = c.mtmd_batch_add_chunk(mbatch, chunk);
+                if (res != 0) _ = c.ggml_abort("mtmd-cli.cpp", 464, "GGML_ASSERT(%s) failed", "res == 0"); // first chunk must always succeed
 
                 var n_added: c_int = 1;
                 // add as many subsequent media chunks as possible
@@ -399,24 +493,24 @@ fn evalMessage(ctx: *CliContext, msg: chat.Msg) !c_int {
                     const next_chunk = c.mtmd_input_chunks_get(chunks, j);
                     const next_type = c.mtmd_input_chunk_get_type(next_chunk);
                     if (next_type == c.MTMD_INPUT_CHUNK_TYPE_TEXT) break; // text chunk splits the batch
-                    res = c.mtmd_batch_add_chunk(ctx.mbatch, next_chunk);
+                    res = c.mtmd_batch_add_chunk(mbatch, next_chunk);
                     if (res != 0) break; // batch full or incompatible
                     n_added += 1;
                 }
 
                 const time_start = c.ggml_time_ms();
                 log.inf("encoding mtmd batch, n_chunks = %d (done = %zu, total = %zu)\n", .{ n_added, i, n_chunks });
-                res = c.mtmd_batch_encode(ctx.mbatch);
+                res = c.mtmd_batch_encode(mbatch);
                 if (res != 0) {
                     log.err("Failed to encode mtmd batch, res = %d\n", .{res});
                     return 1;
                 }
                 log.inf("mtmd batch encoding done in %d ms\n", .{@as(c_int, @truncate(c.ggml_time_ms() - time_start))});
 
-                embd = c.mtmd_batch_get_output_embd(ctx.mbatch, chunk);
+                embd = c.mtmd_batch_get_output_embd(mbatch, chunk);
             }
 
-            if (embd == null) _ = c.ggml_abort("mtmd-cli.cpp", 397, "GGML_ASSERT(%s) failed", "embd != nullptr");
+            if (embd == null) _ = c.ggml_abort("mtmd-cli.cpp", 493, "GGML_ASSERT(%s) failed", "embd != nullptr");
 
             var new_n_past = ctx.n_past;
             res = c.mtmd_helper_decode_image_chunk(ctx.ctx_vision, ctx.lctx, chunk, embd, ctx.n_past, 0, ctx.n_batch, &new_n_past, null, null);
@@ -534,9 +628,20 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
 
     if (isInterrupted()) return 130;
 
+    // realtime transcription models (no chat) transcribe while they listen, the others answer after the audio
+    const transcribes = ctx.mtmd_cap.audio_stream and !ctx.mtmd_cap.chat;
+
+    if (transcribes) {
+        if (params.image.items.len != 1) {
+            log.err("This model transcribes audio in realtime, pass exactly one --audio file\n", .{});
+            return 1;
+        }
+        return @intCast(try runAudioStream(&ctx, params.image.items[0], n_predict));
+    }
+
     const System = struct {
-        /// The `eval_system_prompt_if_present` lambda (mtmd-cli.cpp:475
-        /// @620d2225c).
+        /// The `eval_system_prompt_if_present` lambda (mtmd-cli.cpp:582
+        /// @8642541b2).
         fn evalIfPresent(cx: *CliContext, p: *const tc.params.Params) !c_int {
             if (p.system_prompt.len == 0) return 0;
             return evalMessage(cx, .{ .role = "system", .content = p.system_prompt });
@@ -569,7 +674,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
         log.out("\n Running in chat mode, available commands:", .{});
         if (c.mtmd_support_vision(ctx.ctx_vision)) log.out("\n   /image <path>    load an image", .{});
         if (c.mtmd_support_audio(ctx.ctx_vision)) log.out("\n   /audio <path>    load an audio", .{});
-        if (c.mtmd_helper_support_video(ctx.ctx_vision)) log.out("\n   /video <path>    load a video", .{});
+        if (ctx.mtmd_cap.video) log.out("\n   /video <path>    load a video", .{});
         log.out("\n   /clear           clear the chat history", .{});
         log.out("\n   /quit or /exit   exit the program", .{});
         log.out("\n", .{});
@@ -641,7 +746,7 @@ const win32 = struct {
 };
 
 /// The Windows arm of the Ctrl+C handling, `console_ctrl_handler`
-/// (mtmd-cli.cpp:466 @620d2225c).
+/// (mtmd-cli.cpp:562 @8642541b2).
 fn consoleCtrlHandler(ctrl_type: u32) callconv(.winapi) c_int {
     const ctrl_c_event: u32 = 0;
     if (ctrl_type == ctrl_c_event) {
@@ -651,7 +756,7 @@ fn consoleCtrlHandler(ctrl_type: u32) callconv(.winapi) c_int {
     return 0;
 }
 
-/// Ports `main` (mtmd-cli.cpp:424 @620d2225c).
+/// Ports `main` (mtmd-cli.cpp:520 @8642541b2).
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);

@@ -11,7 +11,7 @@
 //! over `cli/json/`'s `common_trie` and JSON schema converter; each names
 //! its own.
 //!
-//! It imports `json` and `llama` (for `regex.zig` and `libcxx.zig`) by
+//! It imports `json` and `llama` (for `libcxx.zig`) by
 //! module name, so whatever builds it -- the server, a gate -- supplies
 //! both.
 //!

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/internvl.cpp` at v0.7.0 (`620d2225c`).
+//! Ports `llama.cpp/tools/mtmd/models/internvl.cpp` at v0.8.0 (`8642541b2`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -12,7 +12,7 @@ const graph = @import("../graph.zig");
 const model_mod = @import("../model.zig");
 const c = impl.c;
 
-/// Ports `build` (internvl.cpp:3 @620d2225c), a member of `clip_graph_internvl`.
+/// Ports `build` (internvl.cpp:3 @8642541b2), a member of `clip_graph_internvl`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/qwen3vl.cpp` at v0.7.0 (`620d2225c`).
+//! Ports `llama.cpp/tools/mtmd/models/qwen3vl.cpp` at v0.8.0 (`8642541b2`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -14,7 +14,7 @@ const model_mod = @import("../model.zig");
 const qwen2vl = @import("qwen2vl.zig");
 const c = impl.c;
 
-/// Ports `build` (mtmd/models/qwen3vl.cpp:3 @620d2225c), a member of `clip_graph_qwen3vl`.
+/// Ports `build` (mtmd/models/qwen3vl.cpp:3 @8642541b2), a member of `clip_graph_qwen3vl`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
@@ -36,7 +36,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
 
     var mrope_sections = [4]c_int{ @divTrunc(d_head, 4), @divTrunc(d_head, 4), @divTrunc(d_head, 4), @divTrunc(d_head, 4) };
 
-    var inp = qwen2vl.buildInpWithTemporalMerge(g);
+    var inp = g.buildInpTemporalMerge();
 
     // spatial merge
     inp = qwen2vl.spatialMerge(g, inp, batch_size);

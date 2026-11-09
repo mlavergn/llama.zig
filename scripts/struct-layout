@@ -7,8 +7,8 @@
 # every ported file sees. The struct is 18 fields of which the port reads
 # seven; the rest exist only to place those seven correctly.
 #
-# It also checks two generated files for the same reason: the 136
-# `FC_*`/`OP_*`/`N_*` constants in `metal/impl_c.zig`, and the 71
+# It also checks two generated files for the same reason: the 138
+# `FC_*`/`OP_*`/`N_*` constants in `metal/impl_c.zig`, and the 72
 # `ggml_metal_kargs_*` structs in `metal/kargs.zig` -- the fields the
 # Metal kernels read **by offset**, where one wrong offset feeds a kernel
 # a different number with nothing in the ported code able to notice.
@@ -23,7 +23,7 @@ set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
 
-LIB=zig-out/lib/libggml.a
+LIB="${METAL_DIFF_LIB:-zig-out/lib/libggml.a}"
 [ -f "$LIB" ] || { echo "missing $LIB -- run 'zig build reference --release=fast'" >&2; exit 2; }
 
 tmp="$(mktemp -d)"

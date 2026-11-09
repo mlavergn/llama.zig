@@ -3,8 +3,8 @@
 //!
 //! **Not a port.** Upstream gives each architecture a class deriving from
 //! `llama_model_base` and overriding three virtuals -- `load_arch_hparams`,
-//! `load_arch_tensors` and `build_arch_graph` (llama-model.h:893, 894, 895
-//! @620d2225c) -- and `llama_model_mapping` (llama-model.cpp:43 @620d2225c) picks the
+//! `load_arch_tensors` and `build_arch_graph` (llama-model.h:922, 923, 924
+//! @8642541b2) -- and `llama_model_mapping` (llama-model.cpp:43 @8642541b2) picks the
 //! class. Here a class is a file exporting those three functions, and
 //! `forArch` is the mapping. An architecture with no entry is one the port
 //! has not reached: loading it stops at `error.Unported`, which
@@ -30,6 +30,7 @@ pub const baichuan = @import("baichuan.zig");
 pub const bailingmoe = @import("bailingmoe.zig");
 pub const bailingmoe2 = @import("bailingmoe2.zig");
 pub const bailingmoe3 = @import("bailingmoe3.zig");
+pub const beam = @import("beam.zig");
 pub const bert = @import("bert.zig");
 pub const bitnet = @import("bitnet.zig");
 pub const bloom = @import("bloom.zig");
@@ -49,6 +50,7 @@ pub const deepseek2 = @import("deepseek2.zig");
 pub const deepseek2ocr = @import("deepseek2ocr.zig");
 pub const deepseek32 = @import("deepseek32.zig");
 pub const deepseek4 = @import("deepseek4.zig");
+pub const deepseek41 = @import("deepseek41.zig");
 pub const delta_net = @import("delta_net.zig");
 pub const dflash = @import("dflash.zig");
 pub const dots1 = @import("dots1.zig");
@@ -63,6 +65,7 @@ pub const exaone4 = @import("exaone4.zig");
 pub const exaone_moe = @import("exaone_moe.zig");
 pub const falcon = @import("falcon.zig");
 pub const falcon_h1 = @import("falcon_h1.zig");
+pub const flint = @import("flint.zig");
 pub const gemma = @import("gemma.zig");
 pub const gemma2 = @import("gemma2.zig");
 pub const gemma3 = @import("gemma3.zig");
@@ -73,8 +76,8 @@ pub const gemma_embedding = @import("gemma_embedding.zig");
 pub const gemma_embedding2 = @import("gemma_embedding2.zig");
 pub const glm4 = @import("glm4.zig");
 pub const glm4_moe = @import("glm4_moe.zig");
-pub const glm_dsa = @import("glm_dsa.zig");
 pub const glm5_next = @import("glm5_next.zig");
+pub const glm_dsa = @import("glm_dsa.zig");
 pub const gpt2 = @import("gpt2.zig");
 pub const gptneox = @import("gptneox.zig");
 pub const granite = @import("granite.zig");
@@ -99,9 +102,12 @@ pub const jina_bert_v3 = @import("jina_bert_v3.zig");
 pub const k2_horizon = @import("k2_horizon.zig");
 pub const kimi_k3 = @import("kimi_k3.zig");
 pub const kimi_linear = @import("kimi_linear.zig");
+pub const kolibri1 = @import("kolibri1.zig");
 pub const laguna = @import("laguna.zig");
 pub const lfm2 = @import("lfm2.zig");
 pub const lfm2moe = @import("lfm2moe.zig");
+pub const lfm3 = @import("lfm3.zig");
+pub const lfm_base = @import("lfm_base.zig");
 pub const llada = @import("llada.zig");
 pub const llada_moe = @import("llada_moe.zig");
 pub const llama = @import("llama.zig");
@@ -124,6 +130,7 @@ pub const mistral4 = @import("mistral4.zig");
 pub const modern_bert = @import("modern_bert.zig");
 pub const mpt = @import("mpt.zig");
 pub const muse_glimmer = @import("muse_glimmer.zig");
+pub const muse_spark = @import("muse_spark.zig");
 pub const nanbeige = @import("nanbeige.zig");
 pub const nemotron = @import("nemotron.zig");
 pub const nemotron_h = @import("nemotron_h.zig");
@@ -152,7 +159,6 @@ pub const qwen2 = @import("qwen2.zig");
 pub const qwen2moe = @import("qwen2moe.zig");
 pub const qwen2vl = @import("qwen2vl.zig");
 pub const qwen3 = @import("qwen3.zig");
-pub const vllm_decision2 = @import("vllm_decision2.zig");
 pub const qwen35 = @import("qwen35.zig");
 pub const qwen35moe = @import("qwen35moe.zig");
 pub const qwen3moe = @import("qwen3moe.zig");
@@ -168,6 +174,7 @@ pub const rwkv6qwen2 = @import("rwkv6qwen2.zig");
 pub const rwkv7 = @import("rwkv7.zig");
 pub const rwkv7_base = @import("rwkv7_base.zig");
 pub const seed_oss = @import("seed_oss.zig");
+pub const sensenova_u1 = @import("sensenova_u1.zig");
 pub const smallthinker = @import("smallthinker.zig");
 pub const smollm3 = @import("smollm3.zig");
 pub const spark2_5 = @import("spark2_5.zig");
@@ -178,6 +185,7 @@ pub const step35 = @import("step35.zig");
 pub const t5 = @import("t5.zig");
 pub const t5encoder = @import("t5encoder.zig");
 pub const talkie = @import("talkie.zig");
+pub const vllm_decision2 = @import("vllm_decision2.zig");
 pub const wavtokenizer_dec = @import("wavtokenizer_dec.zig");
 pub const xverse = @import("xverse.zig");
 
@@ -213,6 +221,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .bailingmoe => entryOf(bailingmoe),
         .bailingmoe2 => entryOf(bailingmoe2),
         .bailingmoe3 => entryOf(bailingmoe3),
+        .beam => entryOf(beam),
         .bert => entryOf(bert),
         .bitnet => entryOf(bitnet),
         .bloom => entryOf(bloom),
@@ -232,6 +241,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .deepseek2ocr => entryOf(deepseek2ocr),
         .deepseek32 => entryOf(deepseek32),
         .deepseek4 => entryOf(deepseek4),
+        .deepseek41 => entryOf(deepseek41),
         .dflash => entryOf(dflash),
         .dots1 => entryOf(dots1),
         .dots3note => entryOf(dots3note),
@@ -245,6 +255,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .exaone_moe => entryOf(exaone_moe),
         .falcon => entryOf(falcon),
         .falcon_h1 => entryOf(falcon_h1),
+        .flint => entryOf(flint),
         .gemma => entryOf(gemma),
         .gemma2 => entryOf(gemma2),
         .gemma3 => entryOf(gemma3),
@@ -255,8 +266,8 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .gemma_embedding2 => entryOf(gemma_embedding2),
         .glm4 => entryOf(glm4),
         .glm4_moe => entryOf(glm4_moe),
-        .glm_dsa => entryOf(glm_dsa),
         .glm5_next => entryOf(glm5_next),
+        .glm_dsa => entryOf(glm_dsa),
         .gpt2 => entryOf(gpt2),
         .gptneox => entryOf(gptneox),
         .granite => entryOf(granite),
@@ -266,8 +277,8 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .granite_switch => entryOf(granite_switch),
         .grok => entryOf(grok),
         .grovemoe => entryOf(grovemoe),
-        .hunyuan_dense => .{ .loadArchHparams = hunyuan_vl.loadArchHparams, .loadArchTensors = hunyuan_vl.loadArchTensors, .buildArchGraph = hunyuan_dense.buildArchGraph },
         .hrm_text => entryOf(hrm_text),
+        .hunyuan_dense => .{ .loadArchHparams = hunyuan_vl.loadArchHparams, .loadArchTensors = hunyuan_vl.loadArchTensors, .buildArchGraph = hunyuan_dense.buildArchGraph },
         .hunyuan_moe => entryOf(hunyuan_moe),
         .hunyuan_vl => entryOf(hunyuan_vl),
         .hy_v3 => entryOf(hy_v3),
@@ -281,9 +292,11 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .k2_horizon => entryOf(k2_horizon),
         .kimi_k3 => entryOf(kimi_k3),
         .kimi_linear => entryOf(kimi_linear),
+        .kolibri1 => entryOf(kolibri1),
         .laguna => entryOf(laguna),
         .lfm2 => entryOf(lfm2),
         .lfm2moe => entryOf(lfm2moe),
+        .lfm3 => entryOf(lfm3),
         .llada => entryOf(llada),
         .llada_moe => entryOf(llada_moe),
         .llama => entryOf(llama),
@@ -306,6 +319,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .modern_bert => entryOf(modern_bert),
         .mpt => entryOf(mpt),
         .muse_glimmer => entryOf(muse_glimmer),
+        .muse_spark => entryOf(muse_spark),
         .nanbeige => entryOf(nanbeige),
         .nemotron => entryOf(nemotron),
         .nemotron_h => entryOf(nemotron_h),
@@ -334,7 +348,6 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .qwen2moe => entryOf(qwen2moe),
         .qwen2vl => entryOf(qwen2vl),
         .qwen3 => entryOf(qwen3),
-        .vllm_decision2 => entryOf(vllm_decision2),
         .qwen35 => entryOf(qwen35),
         .qwen35moe => entryOf(qwen35moe),
         .qwen3moe => entryOf(qwen3moe),
@@ -349,6 +362,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .rwkv6qwen2 => entryOf(rwkv6qwen2),
         .rwkv7 => entryOf(rwkv7),
         .seed_oss => entryOf(seed_oss),
+        .sensenova_u1 => entryOf(sensenova_u1),
         .smallthinker => entryOf(smallthinker),
         .smollm3 => entryOf(smollm3),
         .spark2_5 => entryOf(spark2_5),
@@ -359,6 +373,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .t5 => entryOf(t5),
         .t5encoder => entryOf(t5encoder),
         .talkie => entryOf(talkie),
+        .vllm_decision2 => entryOf(vllm_decision2),
         .wavtokenizer_dec => entryOf(wavtokenizer_dec),
         .xverse => entryOf(xverse),
         else => null,

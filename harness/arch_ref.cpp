@@ -11,6 +11,7 @@
 // which only a separate process can observe; the harness forks for those.
 
 #include "llama-arch.h"
+#include "llama-ext.h"
 
 #include <cstring>
 #include <stdexcept>
@@ -56,6 +57,34 @@ int ref_arch_flags(int arch) {
            (llm_arch_supports_rs_rollback(a) ? 8  : 0) |
            (llm_arch_supports_sm_tensor(a)   ? 16 : 0) |
            (llm_arch_supports_mixed_batch(a) ? 32 : 0);
+}
+
+// llama-ext.h's architecture queries, which forward to the llm_* functions.
+int ref_ext_arch_flags(int arch) {
+    const llm_arch a = (llm_arch) arch;
+    return (llama_arch_supports_sm_tensor(a)   ? 1 : 0) |
+           (llama_arch_supports_mixed_batch(a) ? 2 : 0) |
+           (llama_arch_supports_save(a)        ? 4 : 0);
+}
+
+const char * ref_ext_arch_name(int arch) {
+    return llama_arch_name((llm_arch) arch);
+}
+
+int ref_ext_arch_from_string(const char * name) {
+    return llama_arch_from_string(name);
+}
+
+int ref_ext_arch_all(int * out, int cap) {
+    std::vector<llm_arch> all = llama_arch_all();
+    for (size_t i = 0; i < all.size() && (int) i < cap; i++) {
+        out[i] = all[i];
+    }
+    return (int) all.size();
+}
+
+int ref_ext_kv_name(int arch, int kv, char * buf, size_t n) {
+    return put(llama_arch_kv_name((llm_arch) arch, (llm_kv) kv), buf, n);
 }
 
 // LLM_KV(arch, suffix)(kv). Returns the name's length, or -1 with what() in buf.

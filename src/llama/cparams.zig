@@ -7,22 +7,22 @@
 //! - `llama.cpp/src/llama-cparams.h` -- `LLAMA_MAX_SEQ` and `llama_cparams`
 //! - `llama.cpp/src/llama-cparams.cpp` -- `llama_max_parallel_sequences`
 //!
-//! All at v0.7.0 (`620d2225c`).
+//! All at v0.8.0 (`8642541b2`).
 
 const std = @import("std");
 const impl = @import("impl.zig");
 
 const c = impl.c;
 
-/// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @620d2225c).
+/// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @8642541b2).
 pub const max_seq: u32 = 256;
 
-/// Ports `llama_max_parallel_sequences` (llama-cparams.cpp:3 @620d2225c).
+/// Ports `llama_max_parallel_sequences` (llama-cparams.cpp:3 @8642541b2).
 pub fn maxParallelSequences() usize {
     return max_seq;
 }
 
-/// Mirrors `llama_cparams` (llama-cparams.h:10 @620d2225c).
+/// Mirrors `llama_cparams` (llama-cparams.h:10 @8642541b2).
 pub const Cparams = struct {
     /// Context size used during inference.
     n_ctx: u32 = 0,
@@ -71,6 +71,9 @@ pub const Cparams = struct {
     fused_dsv4_hc_comb: bool = false,
     fused_dsv4_hc_post: bool = false,
     auto_fhc: bool = false,
+    /// Use the fused top-k sparse attention mask.
+    fused_top_k_mask: bool = false,
+    auto_ftkm: bool = false,
     no_perf: bool = false,
     warmup: bool = false,
     op_offload: bool = false,

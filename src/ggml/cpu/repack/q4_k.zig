@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v0.7.0
-//! (`620d2225c`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v0.8.0
+//! (`8642541b2`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # The super-block scales are unpacked first
@@ -58,7 +58,7 @@ inline fn unpackScales(utmp: *[32]u32, bl: *const blocks.block_q4_Kx8) void {
 
 /// Ports `ggml_gemv_q4_K_8x4_q8_K_generic` and
 /// `ggml_gemv_q4_K_8x8_q8_K_generic`
-/// (ggml-cpu/repack.cpp:887, 958 @620d2225c).
+/// (ggml-cpu/repack.cpp:887, 958 @8642541b2).
 fn gemv(
     comptime blocklen: i32,
     n: c_int,
@@ -141,7 +141,7 @@ fn gemv(
 
 /// Ports `ggml_gemm_q4_K_8x4_q8_K_generic` and
 /// `ggml_gemm_q4_K_8x8_q8_K_generic`
-/// (ggml-cpu/repack.cpp:1949, 2032 @620d2225c).
+/// (ggml-cpu/repack.cpp:1949, 2032 @8642541b2).
 fn gemm(
     comptime blocklen: i32,
     n: c_int,

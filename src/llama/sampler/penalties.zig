@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-sampler.cpp` (v0.7.0, `620d2225c`).
+//! Ported from `llama.cpp/src/llama-sampler.cpp` (v0.8.0, `8642541b2`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # Hash containers whose order is not observable
@@ -46,7 +46,7 @@ const src = core.src;
 // -----------------------------------------------------------------------------
 // penalties
 
-/// Ports `llama_sampler_penalties` (llama-sampler.cpp:2862 @620d2225c).
+/// Ports `llama_sampler_penalties` (llama-sampler.cpp:2863 @8642541b2).
 const Penalties = struct {
     base: Backend,
 
@@ -71,7 +71,7 @@ const Penalties = struct {
     host_token_ids: std.ArrayList(i32) = .empty,
     host_counts: std.ArrayList(i32) = .empty,
 
-    /// Ports `llama_sampler_penalties`'s `copy_state` (llama-sampler.cpp:2885 @620d2225c).
+    /// Ports `llama_sampler_penalties`'s `copy_state` (llama-sampler.cpp:2886 @8642541b2).
     fn copyState(self: *Penalties, other: *const Penalties) void {
         self.prev.assign(&other.prev);
         self.copyCounts(other);
@@ -82,24 +82,24 @@ const Penalties = struct {
         self.token_count = other.token_count.clone(impl.allocator) catch impl.abort(src, 2882, "out of memory");
     }
 
-    /// Ports `llama_sampler_penalties`'s static `is_disabled` (llama-sampler.cpp:2891 @620d2225c).
+    /// Ports `llama_sampler_penalties`'s static `is_disabled` (llama-sampler.cpp:2892 @8642541b2).
     fn isDisabledParams(penalty_last_n: i32, penalty_repeat: f32, penalty_freq: f32, penalty_present: f32) bool {
         return penalty_last_n == 0 or
             (penalty_repeat == 1.0 and penalty_freq == 0.0 and penalty_present == 0.0);
     }
 
-    /// Ports `llama_sampler_penalties`'s member `is_disabled` (llama-sampler.cpp:2900 @620d2225c).
+    /// Ports `llama_sampler_penalties`'s member `is_disabled` (llama-sampler.cpp:2901 @8642541b2).
     fn isDisabled(self: *const Penalties) bool {
         return isDisabledParams(self.penalty_last_n, self.penalty_repeat, self.penalty_freq, self.penalty_present);
     }
 };
 
-/// Ports `llama_sampler_penalties_name` (llama-sampler.cpp:2920 @620d2225c).
+/// Ports `llama_sampler_penalties_name` (llama-sampler.cpp:2921 @8642541b2).
 fn penaltiesName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
     return core.ctxOf(Penalties, smpl).base.getName();
 }
 
-/// Ports `llama_sampler_penalties_accept` (llama-sampler.cpp:2925 @620d2225c).
+/// Ports `llama_sampler_penalties_accept` (llama-sampler.cpp:2926 @8642541b2).
 ///
 /// Counts the token in, and the token falling out of the window out.
 fn penaltiesAccept(smpl: [*c]Sampler, token: Token) callconv(.c) void {
@@ -125,7 +125,7 @@ fn penaltiesAccept(smpl: [*c]Sampler, token: Token) callconv(.c) void {
     ctx.prev.pushBack(token);
 }
 
-/// Ports `llama_sampler_penalties_apply` (llama-sampler.cpp:2956 @620d2225c).
+/// Ports `llama_sampler_penalties_apply` (llama-sampler.cpp:2957 @8642541b2).
 ///
 /// The repeat penalty multiplies a non-positive logit and divides a positive
 /// one; the frequency and presence terms are fused -- see the file header.
@@ -150,14 +150,14 @@ fn penaltiesApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) voi
     cur_p.*.sorted = false;
 }
 
-/// Ports `llama_sampler_penalties_reset` (llama-sampler.cpp:2988 @620d2225c).
+/// Ports `llama_sampler_penalties_reset` (llama-sampler.cpp:2989 @8642541b2).
 fn penaltiesReset(smpl: [*c]Sampler) callconv(.c) void {
     const ctx = core.ctxOf(Penalties, smpl);
     ctx.prev.clear();
     ctx.token_count.clearRetainingCapacity();
 }
 
-/// Ports `llama_sampler_penalties_clone` (llama-sampler.cpp:2994 @620d2225c).
+/// Ports `llama_sampler_penalties_clone` (llama-sampler.cpp:2995 @8642541b2).
 fn penaltiesClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
     const ctx = core.ctxOf(Penalties, smpl);
     const result = llama_sampler_init_penalties(ctx.n_vocab, ctx.penalty_last_n, ctx.penalty_repeat, ctx.penalty_freq, ctx.penalty_present);
@@ -169,7 +169,7 @@ fn penaltiesClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
     return result;
 }
 
-/// Ports `llama_sampler_penalties_free` (llama-sampler.cpp:3014 @620d2225c).
+/// Ports `llama_sampler_penalties_free` (llama-sampler.cpp:3015 @8642541b2).
 fn penaltiesFree(smpl: [*c]Sampler) callconv(.c) void {
     const ctx = core.ctxOf(Penalties, smpl);
     ctx.prev.deinit();
@@ -179,7 +179,7 @@ fn penaltiesFree(smpl: [*c]Sampler) callconv(.c) void {
     core.destroy(Penalties, ctx);
 }
 
-/// Ports `llama_sampler_penalties_backend_init` (llama-sampler.cpp:3018 @620d2225c).
+/// Ports `llama_sampler_penalties_backend_init` (llama-sampler.cpp:3019 @8642541b2).
 ///
 /// Declines the backend when a sequence can have more than one output: the
 /// counts would have to advance between outputs inside one graph.
@@ -198,7 +198,7 @@ fn penaltiesBackendInit(smpl: [*c]Sampler, buft: c.ggml_backend_buffer_type_t, n
     return res;
 }
 
-/// Ports `llama_sampler_penalties_backend_apply` (llama-sampler.cpp:3036 @620d2225c).
+/// Ports `llama_sampler_penalties_backend_apply` (llama-sampler.cpp:3037 @8642541b2).
 fn penaltiesBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.struct_ggml_cgraph, data: [*c]c.struct_llama_sampler_data) callconv(.c) void {
     _ = gf;
 
@@ -206,7 +206,7 @@ fn penaltiesBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*
 
     if (sctx.isDisabled()) return;
 
-    impl.assert(sctx.n_vocab > 0, src, 3043, "sctx->n_vocab > 0");
+    impl.assert(sctx.n_vocab > 0, src, 3050, "sctx->n_vocab > 0");
 
     sctx.has_candidates = data.*.candidates != null;
     sctx.n_max = libcxx.min(i32, sctx.penalty_last_n, sctx.n_vocab);
@@ -234,7 +234,7 @@ fn penaltiesBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*
     if (sctx.has_candidates) {
         const candidates = c.ggml_reshape_1d(ctx, data.*.candidates, c.ggml_nelements(data.*.candidates));
         const n_candidates = candidates[0].ne[0];
-        impl.assert(n_candidates == c.ggml_nelements(logits), src, 3070, "n_candidates == ggml_nelements(logits)");
+        impl.assert(n_candidates == c.ggml_nelements(logits), src, 3077, "n_candidates == ggml_nelements(logits)");
 
         var counts_rows = c.ggml_fill(ctx, c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, 1, sctx.n_vocab), 0.0);
         const scatter_rows = c.ggml_reshape_2d(ctx, counts_f32, 1, sctx.n_max);
@@ -288,13 +288,13 @@ fn penaltiesBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*
 
 const IdCount = struct { id: i32, count: i32 };
 
-/// The comparator of the `sort` (llama-sampler.cpp:3156 @620d2225c) in
+/// The comparator of the `sort` (llama-sampler.cpp:3157 @8642541b2) in
 /// `llama_sampler_penalties_backend_set_input`.
 fn lessId(_: void, a: IdCount, b: IdCount) bool {
     return a.id < b.id;
 }
 
-/// Ports `llama_sampler_penalties_backend_set_input` (llama-sampler.cpp:3129 @620d2225c).
+/// Ports `llama_sampler_penalties_backend_set_input` (llama-sampler.cpp:3130 @8642541b2).
 ///
 /// Writes the active ids, sorted, and pads to `n_max` with a filler id that
 /// is not active, so `ggml_set_rows` never sees a duplicate index.
@@ -309,7 +309,7 @@ fn penaltiesBackendSetInput(smpl: [*c]Sampler) callconv(.c) void {
 
     var it = sctx.token_count.iterator();
     while (it.next()) |kv| {
-        impl.assert(n_active < sctx.n_max, src, 3138, "n_active < sctx->n_max");
+        impl.assert(n_active < sctx.n_max, src, 3145, "n_active < sctx->n_max");
         sctx.host_token_ids.items[@intCast(n_active)] = kv.key_ptr.*;
         sctx.host_counts.items[@intCast(n_active)] = kv.value_ptr.*;
         n_active += 1;
@@ -327,7 +327,7 @@ fn penaltiesBackendSetInput(smpl: [*c]Sampler) callconv(.c) void {
     var filler: i32 = 0;
     if (n_active < sctx.n_max) {
         while (sctx.token_count.contains(filler)) filler += 1;
-        impl.assert(filler < sctx.n_vocab, src, 3166, "filler < sctx->n_vocab");
+        impl.assert(filler < sctx.n_vocab, src, 3173, "filler < sctx->n_vocab");
     }
 
     var i: usize = @intCast(n_active);
@@ -340,7 +340,7 @@ fn penaltiesBackendSetInput(smpl: [*c]Sampler) callconv(.c) void {
     c.ggml_backend_tensor_set(sctx.inp_counts, sctx.host_counts.items.ptr, 0, @as(usize, @intCast(sctx.n_max)) * @sizeOf(i32));
 }
 
-/// Ports `llama_sampler_penalties_backend_reset` (llama-sampler.cpp:3188 @620d2225c).
+/// Ports `llama_sampler_penalties_backend_reset` (llama-sampler.cpp:3189 @8642541b2).
 fn penaltiesBackendReset(smpl: [*c]Sampler) callconv(.c) void {
     const sctx = core.ctxOf(Penalties, smpl);
     sctx.inp_token_ids = null;
@@ -351,7 +351,7 @@ fn penaltiesCopyState(src_smpl: [*c]const Sampler, dst_smpl: [*c]Sampler) callco
     core.ctxOf(Penalties, dst_smpl).copyState(core.ctxOf(Penalties, src_smpl));
 }
 
-/// Ports `llama_sampler_penalties_i` (llama-sampler.cpp:3194 @620d2225c).
+/// Ports `llama_sampler_penalties_i` (llama-sampler.cpp:3195 @8642541b2).
 var penalties_iface: SamplerI = .{
     .name = penaltiesName,
     .accept = penaltiesAccept,
@@ -367,7 +367,7 @@ var penalties_iface: SamplerI = .{
     .copy_state = penaltiesCopyState,
 };
 
-/// Ports `llama_sampler_init_penalties` (llama-sampler.cpp:3209 @620d2225c).
+/// Ports `llama_sampler_init_penalties` (llama-sampler.cpp:3210 @8642541b2).
 ///
 /// Parameters:
 /// - `n_vocab`: the vocabulary size; the backend graph needs it.
@@ -437,7 +437,7 @@ fn addBreaker(b: *Breakers, head: Token, tail: []const Token) void {
     gop.value_ptr.append(impl.allocator, t) catch impl.abort(src, 3334, "out of memory");
 }
 
-/// Ports `llama_sampler_dry` (llama-sampler.cpp:3323 @620d2225c).
+/// Ports `llama_sampler_dry` (llama-sampler.cpp:3324 @8642541b2).
 const Dry = struct {
     dry_multiplier: f32,
     dry_base: f32,
@@ -454,7 +454,7 @@ const Dry = struct {
 /// tokens removed, special tokens rendered.
 fn detokenizeOne(vocab: ?*const c.struct_llama_vocab, token: Token, buf: *std.ArrayList(u8)) []const u8 {
     // Mirrors the vector overload of `llama_vocab`'s `detokenize`
-    // (llama-vocab.cpp:4425 @620d2225c): start at max(capacity, n_tokens).
+    // (llama-vocab.cpp:4682 @8642541b2): start at max(capacity, n_tokens).
     var text_len: usize = @max(buf.capacity, 1);
     buf.resize(impl.allocator, text_len) catch impl.abort(src, 3332, "out of memory");
     var n_chars = c.llama_detokenize(vocab, &token, 1, buf.items.ptr, @intCast(text_len), false, true);
@@ -462,7 +462,7 @@ fn detokenizeOne(vocab: ?*const c.struct_llama_vocab, token: Token, buf: *std.Ar
         text_len = @intCast(-n_chars);
         buf.resize(impl.allocator, text_len) catch impl.abort(src, 3332, "out of memory");
         n_chars = c.llama_detokenize(vocab, &token, 1, buf.items.ptr, @intCast(text_len), false, true);
-        impl.assert(n_chars <= @as(i32, @intCast(text_len)), "llama-vocab.cpp", 4432, "n_chars <= (int32_t)text.size()");
+        impl.assert(n_chars <= @as(i32, @intCast(text_len)), "llama-vocab.cpp", 4689, "n_chars <= (int32_t)text.size()");
     }
     return buf.items[0..@intCast(n_chars)];
 }
@@ -480,21 +480,57 @@ fn tokenizeNoSpecial(vocab: ?*const c.struct_llama_vocab, text: []const u8, out:
     out.shrinkRetainingCapacity(@intCast(n));
 }
 
-/// Ports `get_overlapping_token_sequences` (llama-sampler.cpp:3336 @620d2225c).
+/// `vocab_words`: every token's detokenized text, built once by
+/// `llama_sampler_init_dry` instead of rescanning the vocabulary for every
+/// breaker.
+const VocabWords = struct {
+    buf: std.ArrayList(u8) = .empty,
+    /// Word `i` is `buf[ends[i - 1]..ends[i]]`.
+    ends: std.ArrayList(usize) = .empty,
+
+    fn init(vocab: ?*const c.struct_llama_vocab) VocabWords {
+        var self: VocabWords = .{};
+        var word_buf: std.ArrayList(u8) = .empty;
+        defer word_buf.deinit(impl.allocator);
+        const n_tokens = c.llama_vocab_n_tokens(vocab);
+        self.ends.ensureTotalCapacity(impl.allocator, @intCast(n_tokens)) catch impl.abort(src, 3674, "out of memory");
+        var token_id: Token = 0;
+        while (token_id < n_tokens) : (token_id += 1) {
+            self.buf.appendSlice(impl.allocator, detokenizeOne(vocab, token_id, &word_buf)) catch impl.abort(src, 3675, "out of memory");
+            self.ends.appendAssumeCapacity(self.buf.items.len);
+        }
+        return self;
+    }
+
+    fn deinit(self: *VocabWords) void {
+        self.buf.deinit(impl.allocator);
+        self.ends.deinit(impl.allocator);
+    }
+
+    fn get(self: *const VocabWords, i: usize) []const u8 {
+        return self.buf.items[if (i == 0) 0 else self.ends.items[i - 1]..self.ends.items[i]];
+    }
+};
+
+/// Ports `get_overlapping_token_sequences` (llama-sampler.cpp:3337 @8642541b2).
 ///
 /// For a breaker string, records every token whose text contains it -- a
 /// single-token breaker -- and every token whose text ends with a prefix of
-/// it, with the tokenization of the rest as the tail to match.
-fn getOverlappingTokenSequences(vocab: ?*const c.struct_llama_vocab, str: []const u8, token_sequences: *Breakers, max_tail_len: i32) void {
-    var word_buf: std.ArrayList(u8) = .empty;
-    defer word_buf.deinit(impl.allocator);
-    var tokenization: std.ArrayList(Token) = .empty;
-    defer tokenization.deinit(impl.allocator);
+/// it, with the tokenization of the rest as the tail to match. The tail
+/// depends only on how many characters of `str` were matched, so each one is
+/// computed at most once.
+fn getOverlappingTokenSequences(vocab: ?*const c.struct_llama_vocab, vocab_words: *const VocabWords, str: []const u8, token_sequences: *Breakers, max_tail_len: i32) void {
+    const tail_cache = impl.allocator.alloc(std.ArrayList(Token), str.len + 1) catch impl.abort(src, 3339, "out of memory");
+    defer impl.allocator.free(tail_cache);
+    @memset(tail_cache, .empty);
+    defer for (tail_cache) |*t| t.deinit(impl.allocator);
+    const tail_cached = impl.allocator.alloc(bool, str.len + 1) catch impl.abort(src, 3340, "out of memory");
+    defer impl.allocator.free(tail_cached);
+    @memset(tail_cached, false);
 
-    const n_tokens = c.llama_vocab_n_tokens(vocab);
-    var token_id: Token = 0;
-    while (token_id < n_tokens) : (token_id += 1) {
-        const word = detokenizeOne(vocab, token_id, &word_buf);
+    for (0..vocab_words.ends.items.len) |ti| {
+        const token_id: Token = @intCast(ti);
+        const word = vocab_words.get(ti);
         if (std.mem.find(u8, word, str) != null) {
             addBreaker(token_sequences, token_id, &.{});
         } else {
@@ -512,22 +548,26 @@ fn getOverlappingTokenSequences(vocab: ?*const c.struct_llama_vocab, str: []cons
                     }
                 }
                 if (match) {
-                    tokenizeNoSpecial(vocab, str[i..], &tokenization);
-                    if (max_tail_len >= 0 and tokenization.items.len > @as(usize, @intCast(max_tail_len))) {
-                        tokenization.shrinkRetainingCapacity(@intCast(max_tail_len));
+                    if (!tail_cached[i]) {
+                        tokenizeNoSpecial(vocab, str[i..], &tail_cache[i]);
+                        if (max_tail_len >= 0 and tail_cache[i].items.len > @as(usize, @intCast(max_tail_len))) {
+                            tail_cache[i].shrinkRetainingCapacity(@intCast(max_tail_len));
+                        }
+                        tail_cached[i] = true;
                     }
+                    const tokenization = tail_cache[i].items;
 
                     var found = false;
                     if (token_sequences.get(token_id)) |tails| {
                         for (tails.items) |t| {
-                            if (std.mem.eql(Token, t.items, tokenization.items)) {
+                            if (std.mem.eql(Token, t.items, tokenization)) {
                                 found = true;
                                 break;
                             }
                         }
                     }
                     if (!found) {
-                        addBreaker(token_sequences, token_id, tokenization.items);
+                        addBreaker(token_sequences, token_id, tokenization);
                     }
                 }
             }
@@ -535,13 +575,13 @@ fn getOverlappingTokenSequences(vocab: ?*const c.struct_llama_vocab, str: []cons
     }
 }
 
-/// Ports `llama_sampler_dry_name` (llama-sampler.cpp:3378 @620d2225c).
+/// Ports `llama_sampler_dry_name` (llama-sampler.cpp:3387 @8642541b2).
 fn dryName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
     _ = smpl;
     return "dry";
 }
 
-/// Ports `llama_sampler_dry_accept` (llama-sampler.cpp:3382 @620d2225c).
+/// Ports `llama_sampler_dry_accept` (llama-sampler.cpp:3391 @8642541b2).
 fn dryAccept(smpl: [*c]Sampler, token: Token) callconv(.c) void {
     const ctx = core.ctxOf(Dry, smpl);
     if (ctx.dry_multiplier == 0.0 or ctx.dry_base < 1.0 or ctx.dry_penalty_last_n == 0) return;
@@ -549,7 +589,7 @@ fn dryAccept(smpl: [*c]Sampler, token: Token) callconv(.c) void {
     ctx.last_tokens.pushBack(token);
 }
 
-/// Ports `llama_sampler_dry_apply` (llama-sampler.cpp:3392 @620d2225c).
+/// Ports `llama_sampler_dry_apply` (llama-sampler.cpp:3401 @8642541b2).
 ///
 /// Penalises the tokens that would extend a repeat of the recent context,
 /// by `multiplier * base^(length - allowed)`. Restart sequences cap how far
@@ -683,7 +723,7 @@ fn dryApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
     cur_p.*.sorted = false;
 }
 
-/// Ports `llama_sampler_dry_reset` (llama-sampler.cpp:3599 @620d2225c).
+/// Ports `llama_sampler_dry_reset` (llama-sampler.cpp:3608 @8642541b2).
 fn dryReset(smpl: [*c]Sampler) callconv(.c) void {
     const ctx = core.ctxOf(Dry, smpl);
     ctx.last_tokens.clear();
@@ -691,7 +731,7 @@ fn dryReset(smpl: [*c]Sampler) callconv(.c) void {
     ctx.dry_max_token_repeat.clearRetainingCapacity();
 }
 
-/// Ports `llama_sampler_dry_clone` (llama-sampler.cpp:3606 @620d2225c).
+/// Ports `llama_sampler_dry_clone` (llama-sampler.cpp:3615 @8642541b2).
 ///
 /// The C++ builds the clone through `llama_sampler_init_dry` with a dummy,
 /// empty `llama_vocab` and no breakers, only to overwrite every field. The
@@ -714,7 +754,7 @@ fn dryClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
     return result;
 }
 
-/// Ports `llama_sampler_dry_free` (llama-sampler.cpp:3626 @620d2225c).
+/// Ports `llama_sampler_dry_free` (llama-sampler.cpp:3635 @8642541b2).
 fn dryFree(smpl: [*c]Sampler) callconv(.c) void {
     const ctx = core.ctxOf(Dry, smpl);
     freeBreakers(&ctx.dry_processed_breakers);
@@ -724,7 +764,7 @@ fn dryFree(smpl: [*c]Sampler) callconv(.c) void {
     core.destroy(Dry, ctx);
 }
 
-/// Ports `llama_sampler_dry_i` (llama-sampler.cpp:3630 @620d2225c).
+/// Ports `llama_sampler_dry_i` (llama-sampler.cpp:3639 @8642541b2).
 var dry_iface: SamplerI = .{
     .name = dryName,
     .accept = dryAccept,
@@ -750,10 +790,12 @@ fn initDry(dry_multiplier: f32, dry_base: f32, dry_allowed_length: i32, dry_pena
     }));
 }
 
-/// Ports `llama_sampler_init_dry` (llama-sampler.cpp:3645 @620d2225c).
+/// Ports `llama_sampler_init_dry` (llama-sampler.cpp:3654 @8642541b2).
 ///
 /// Each breaker is truncated to 40 bytes and matched against every token's
-/// text; tails are cut to 20 tokens.
+/// text; tails are cut to 20 tokens. Each distinct breaker costs a full
+/// vocabulary scan, so duplicates are dropped and the scan stops at
+/// `LLAMA_DRY_MAX_SEQ_BREAKERS` distinct ones.
 ///
 /// Parameters:
 /// - `vocab`: the vocabulary the breakers are matched against.
@@ -763,7 +805,7 @@ fn initDry(dry_multiplier: f32, dry_base: f32, dry_allowed_length: i32, dry_pena
 /// - `dry_penalty_last_n_in`: the window; negative counts as 0, which
 ///   disables it.
 /// - `seq_breakers`: the restart strings; null and empty entries are skipped
-///   with a warning.
+///   with a warning, and duplicates, compared after truncation, silently.
 /// - `num_breakers`: how many.
 ///
 /// Return: the sampler, or the `?dry` placeholder when disabled.
@@ -786,6 +828,12 @@ pub export fn llama_sampler_init_dry(
     if (!dry_enabled) return core.initEmpty("?dry");
 
     if (dry_enabled and seq_breakers != null and num_breakers > 0) {
+        var seen_breakers: std.StringHashMapUnmanaged(void) = .empty;
+        defer seen_breakers.deinit(impl.allocator);
+
+        var vocab_words = VocabWords.init(vocab);
+        defer vocab_words.deinit();
+
         for (0..num_breakers) |i| {
             if (seq_breakers[i] == null or std.mem.len(seq_breakers[i]) == 0) {
                 impl.logWarn("skipping null or empty DRY sequence breaker at index %zu\n", .{i});
@@ -799,7 +847,15 @@ pub export fn llama_sampler_init_dry(
                 sequence_break = sequence_break[0..MAX_CHAR_LEN];
             }
 
-            getOverlappingTokenSequences(vocab, sequence_break, &processed_breakers, MAX_SEQ_LEN);
+            const seen = seen_breakers.getOrPut(impl.allocator, sequence_break) catch impl.abort(src, 3690, "out of memory");
+            if (seen.found_existing) continue;
+
+            if (seen_breakers.count() > c.LLAMA_DRY_MAX_SEQ_BREAKERS) {
+                impl.logWarn("ignoring DRY sequence breaker at index %zu: more than %d distinct breakers\n", .{ i, @as(c_int, c.LLAMA_DRY_MAX_SEQ_BREAKERS) });
+                break;
+            }
+
+            getOverlappingTokenSequences(vocab, &vocab_words, sequence_break, &processed_breakers, MAX_SEQ_LEN);
         }
     }
 

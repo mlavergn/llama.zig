@@ -8,18 +8,18 @@
 //! `src/llama/api/llama.zig`) to the submodule's `HEAD`.
 
 /// The release tag the submodule is checked out at.
-pub const tag = "v0.7.0";
+pub const tag = "v0.8.0";
 
 /// `LLAMA_VERSION` with `LLAMA_BUILD_IS_DEV` off, as for a release tag
 /// (llama.cpp/CMakeLists.txt:6-21).
-pub const version = "0.7.0";
+pub const version = "0.8.0";
 
 /// `GGML_VERSION`: ggml's own version, not llama.cpp's
 /// (llama.cpp/ggml/CMakeLists.txt:6-31).
-pub const ggml_version = "0.27.0";
+pub const ggml_version = "0.28.0";
 
 /// `git rev-parse --short HEAD`, as cmake/build-info.cmake takes it.
-pub const commit = "620d2225c";
+pub const commit = "8642541b2";
 
 /// The build tag's number (`git describe --tags --match 'b*'`).
-pub const build_number = 11669;
+pub const build_number = 11960;

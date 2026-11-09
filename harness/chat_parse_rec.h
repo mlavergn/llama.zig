@@ -91,7 +91,7 @@ inline common_json msg(const common_chat_msg & m) {
     j["content"] = m.content;
     common_json parts = common_json::array();
     for (const auto & p : m.content_parts) {
-        parts.push_back(common_json::array({ p.type, p.text }));
+        parts.push_back(common_json::array({ p.type, p.text, p.name }));
     }
     j["parts"] = parts;
     common_json calls = common_json::array();
@@ -102,6 +102,7 @@ inline common_json msg(const common_chat_msg & m) {
     j["reasoning_content"] = m.reasoning_content;
     j["tool_name"]         = m.tool_name;
     j["tool_call_id"]      = m.tool_call_id;
+    j["extra_json"]        = m.extra_json;
     return j;
 }
 
@@ -119,7 +120,7 @@ inline common_json inputs(const common_chat_templates_inputs & in) {
     j["use_jinja"]             = in.use_jinja;
     common_json tools = common_json::array();
     for (const auto & t : in.tools) {
-        tools.push_back(common_json::array({ t.name, t.description, t.parameters }));
+        tools.push_back(common_json::array({ t.name, t.description, t.parameters, t.defer_loading }));
     }
     j["tools"]            = tools;
     j["tool_choice"]      = (int) in.tool_choice;

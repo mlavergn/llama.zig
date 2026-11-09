@@ -1,0 +1,3 @@
+{#- v0.8.0's lexer: \xHH is a code point, in UTF-8; exactly two digits; an escaped backslash stays literal. -#}
+{{ 'A\x41|\xE9|\xe9|\x7f|\xff' }}{{ "\x09" }}{{ '\x414' }}{{ '\\xE9' }}{{ 'a\x00b' | length }}
+{%- for m in messages -%}{{ (m.role + '\x00') | replace("\x00", "") }}{%- endfor -%}

@@ -24,7 +24,9 @@
 //!
 //! The vocabulary types no real file covers -- RWKV, PLaMo-2, PLaMo-3,
 //! `hybriddna`, `test`, `whitespace`, `none` -- the pre-tokenizers and
-//! normalizer options no real file sets (K2 Horizon, Unigram NFC), and the
+//! normalizer options no real file sets (K2 Horizon, Unigram NFC, Flint,
+//! Domyn Small, Nemotron 3.5 Embed, Soprano, the Metaspace prepend scheme,
+//! `clean_spaces` as a key, tail="pad_n" and `dna_auto_tags`), and the
 //! load-time error paths are synthesized from upstream's files with the gguf
 //! writer, into the directory given.
 //!
@@ -182,7 +184,76 @@ const pool = [_][]const u8{
     "\u{0F73}",
     // v0.7.0: K2 Horizon's letter runs and long s.
                "\u{200C}",       "\u{200D}",                                                                        "\u{017F}",         "'\u{017F}",
+    // v0.8.0: Nemotron 3.5 Embed's zero-width non-joiner after `[` and `<`,
+    // Soprano's full lowercase of U+0130 and its whitespace runs, and the
+    // spaces clean_spaces eats.
+                   "[\u{200C}",
+    "<\u{200C}",           "\u{200C}[",      "[\u{200C}\u{200C}",                                                               "\u{0130}x",        "X\u{0130}",                " \t\n ",
+    "\u{3000} \u{00A0}",   " ,",             " .",                                                                              " !",               " ?",                       " 's",
+    " 'm",                 " 're",           " 've",                                                                            " ' ",              " 't",
 };
+
+/// v0.8.0's hybriddna: spaced displays either side of each threshold, runs
+/// either side of the auto-tagging's, unmatched and empty tags, whitespace
+/// and non-ASCII inside a span.
+const dna_corpus = [_][]const u8{
+    "ACGTA CGTAC GTACG TACGT ACGTA CGTAC",
+    "AC GT AC GT AC GT",
+    "AC GT AC GT AC G",
+    "A C G T A C",
+    "A C G T A C G T A C G T",
+    "xACGTA CGTAC GTACG TACGT ACGTA CGTAC",
+    "ACGTA CGTAC GTACG TACGT ACGTA CGTACx",
+    "ACGTA CGTAC GTACG TACGT ACGTA CGTAC GTACGx",
+    "ACGTA\tCGTAC\t  GTACG TACGT ACGTA CGTAC",
+    "ACGTAC GTACGT ACGTAC GTACGT ACGTAC GTACGT",
+    "1ACGTA CGTAC GTACG TACGT ACGTA CGTAC 2",
+    "see ACGTA CGTAC GTACG TACGT ACGTA CGTAC ok",
+    "ACGTA",
+    "ACGTAC",
+    "acgtac",
+    "AcGtAc",
+    "ACGTACG",
+    "ACGTACGTACGTACG",
+    "ACGTNACGTNAC",
+    "ACGTNACGTNA",
+    "ACGTNNACGTNN",
+    "ACGTNACGTNACGTN",
+    "ACGTNNACGTNACGT",
+    "ACGTNNNACGTNACGT",
+    "acgtnacgtnac",
+    "NNNNNNNNNNNN",
+    "RYSWKMBDHVNA",
+    "RYSWKM",
+    "the ACGTACGT sequence",
+    "ACGTACGTxyz",
+    "xyzACGTACGT",
+    "ACGT ACGTAC, ACGTAC.",
+    "<dna>  ACGT \n</dna>",
+    "<dna>AC\u{00A0}GT</dna>",
+    "<dna>\u{3000}ACGT\u{3000}</dna>",
+    "<dna>\u{00E9}CGTAC</dna>",
+    "<dna>ACGTA\u{00E9}</dna>",
+    "</dna>",
+    "ACGT</dna>",
+    "ACGT</dna>tail",
+    "a</dna><dna>C",
+    "<dna>ACGT",
+    "<dna>",
+    "<dna></dna>",
+    "<dna> </dna>",
+    "<dna>CT</dna>",
+    "<dna>CTNNNN</dna>",
+    "<dna>NNNNNN</dna>",
+    "<dna>A</dna>",
+    "<dna>acgtac</dna>",
+    "<dna>ACGTACGTAC</dna>x<dna>G</dna>",
+    "ACGTAC<dna>ACGTAC</dna>ACGTAC",
+    "ACGTAC</dna>ACGTAC<dna>ACGTAC",
+};
+
+/// What a random DNA text is built from.
+const dna_pieces = [_][]const u8{ "A", "C", "G", "T", "a", "c", "g", "t", "N", "R", "Y", "n", " ", " ", "\t", "\n", "ACGTA", "CGTAC", "<dna>", "</dna>", "\u{00E9}", "x", "1", "\u{3000}" };
 
 fn randomText(r: std.Random, buf: *std.ArrayList(u8), specials: []const []const u8) []const u8 {
     buf.clearRetainingCapacity();
@@ -239,8 +310,16 @@ fn compareCase(cs: Case, upstream: []const []const u8, r: std.Random) void {
     var vocab = Vocab.init() catch unreachable;
     defer vocab.deinit();
     var exc: harness_root.impl.Exception = .{};
-    const loaded = if (vocab.load(&meta, &exc)) |_| true else |_| false;
-    if (loaded) vocab.printInfo();
+    var loaded = if (vocab.load(&meta, &exc)) |_| true else |_| false;
+    // A throw out of `print_info` is caught further out than the vocabulary
+    // load's, and says so differently.
+    var info_failed = false;
+    if (loaded) {
+        vocab.printInfo(&exc) catch {
+            loaded = false;
+            info_failed = true;
+        };
+    }
     log_target = null;
 
     checks += 1;
@@ -251,7 +330,7 @@ fn compareCase(cs: Case, upstream: []const []const u8, r: std.Random) void {
         }
         var want: std.ArrayList(u8) = .empty;
         defer want.deinit(gpa);
-        want.print(gpa, "llama_model_load: error loading model: error loading model vocabulary: {s}\n", .{exc.what()}) catch unreachable;
+        want.print(gpa, "{s}{s}\n", .{ if (info_failed) "error loading model: " else "llama_model_load: error loading model: error loading model vocabulary: ", exc.what() }) catch unreachable;
         if (std.mem.find(u8, ref_log.items, want.items) == null) {
             fail("{s}: error differs: port \"{f}\"", .{ cs.name, std.zig.fmtString(exc.what()) });
         }
@@ -314,6 +393,14 @@ fn compareCase(cs: Case, upstream: []const []const u8, r: std.Random) void {
         rbuf.clearRetainingCapacity();
         for (0..r.uintLessThan(usize, 40) + 4) |_| rbuf.append(gpa, "klmn"[r.uintLessThan(usize, 4)]) catch unreachable;
         texts.append(gpa, gpa.dupe(u8, rbuf.items) catch unreachable) catch unreachable;
+    }
+
+    if (std.mem.eql(u8, vocab.tokenizer_model.items, "hybriddna")) {
+        for (0..600) |_| {
+            rbuf.clearRetainingCapacity();
+            for (0..r.uintLessThan(usize, 24) + 1) |_| rbuf.appendSlice(gpa, dna_pieces[r.uintLessThan(usize, dna_pieces.len)]) catch unreachable;
+            texts.append(gpa, gpa.dupe(u8, rbuf.items) catch unreachable) catch unreachable;
+        }
     }
 
     for (texts.items) |t| compareText(cs, rv, &vocab, t);
@@ -611,6 +698,208 @@ const edits = struct {
         appendTokens(ctx, &.{ "<dna>", "</dna>", "<oov>", "AAAAAA\xee\x80\x80", "ACGTAC\xee\x80\x80", "GTAAAA\xee\x80\x80", "CCCCCC\xee\x80\x80" });
     }
 
+    /// The model name alone: no DNA pieces, so it falls back to plain BPE.
+    fn hybriddnaBare(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "hybriddna");
+    }
+
+    /// Every 6-mer, as a real tail="pad_a" vocabulary has.
+    fn dnaKmers(toks: *std.ArrayList([]const u8)) void {
+        for (0..4096) |v| {
+            var w: [9]u8 = undefined;
+            for (w[0..6], 0..) |*ch, i| ch.* = "ACGT"[(v >> @intCast(2 * i)) & 3];
+            w[6..9].* = "\xee\x80\x80".*;
+            toks.append(gpa, gpa.dupe(u8, &w) catch unreachable) catch unreachable;
+        }
+    }
+
+    fn hybriddnaFull(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "hybriddna");
+        var toks: std.ArrayList([]const u8) = .empty;
+        toks.appendSlice(gpa, &.{ "<dna>", "</dna>", "<oov>" }) catch unreachable;
+        dnaKmers(&toks);
+        appendTokens(ctx, toks.items);
+    }
+
+    /// ... and tail="pad_n": every shorter k-mer padded with N, the k-mer of
+    /// N alone, which has no base to strip back to, and a token past the
+    /// k-mers ending in N whose text is not DNA.
+    fn hybriddnaPadN(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "hybriddna");
+        var toks: std.ArrayList([]const u8) = .empty;
+        toks.appendSlice(gpa, &.{ "<dna>", "</dna>", "<oov>" }) catch unreachable;
+        dnaKmers(&toks);
+        for (1..6) |len| {
+            for (0..@as(usize, 1) << @intCast(2 * len)) |v| {
+                var w: [9]u8 = @splat('N');
+                for (w[0..len], 0..) |*ch, i| ch.* = "ACGT"[(v >> @intCast(2 * i)) & 3];
+                w[6..9].* = "\xee\x80\x80".*;
+                toks.append(gpa, gpa.dupe(u8, &w) catch unreachable) catch unreachable;
+            }
+        }
+        toks.appendSlice(gpa, &.{ "NNNNNN\xee\x80\x80", "xNNN\xee\x80\x80", "\xee\x80\x80" }) catch unreachable;
+        appendTokens(ctx, toks.items);
+    }
+
+    fn hybriddnaAuto(ctx: *c.gguf_context) void {
+        hybriddnaFull(ctx);
+        c.gguf_set_val_bool(ctx, "tokenizer.ggml.dna_auto_tags", true);
+    }
+
+    fn hybriddnaPadNAuto(ctx: *c.gguf_context) void {
+        hybriddnaPadN(ctx);
+        c.gguf_set_val_bool(ctx, "tokenizer.ggml.dna_auto_tags", true);
+    }
+
+    fn hybriddnaAutoOff(ctx: *c.gguf_context) void {
+        hybriddnaFull(ctx);
+        c.gguf_set_val_bool(ctx, "tokenizer.ggml.dna_auto_tags", false);
+    }
+
+    fn dnaAutoWrongType(ctx: *c.gguf_context) void {
+        hybriddna(ctx);
+        c.gguf_set_val_u32(ctx, "tokenizer.ggml.dna_auto_tags", 1);
+    }
+
+    /// One pre-tokenizer's name on the GPT-2 vocabulary: its flags --
+    /// `clean_spaces`, which only detokenizing shows, `add_bos`,
+    /// `ignore_merges` -- and its split patterns.
+    fn pre(comptime name: [:0]const u8) fn (*c.gguf_context) void {
+        return struct {
+            fn f(ctx: *c.gguf_context) void {
+                c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", name);
+            }
+        }.f;
+    }
+
+    /// ... and with whole-word tokens no merge reaches, which only
+    /// `ignore_merges` emits.
+    fn preWhole(comptime name: [:0]const u8) fn (*c.gguf_context) void {
+        return struct {
+            fn f(ctx: *c.gguf_context) void {
+                c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", name);
+                appendNormal(ctx, &.{ "zqzq", "\u{120}zqzq" });
+            }
+        }.f;
+    }
+
+    /// v0.8.0: Flint's turn tokens end generation, and only under its own
+    /// pre-tokenizer.
+    fn preFlintTurns(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "flint");
+        appendNormal(ctx, &.{ "<|user|>", "<|observation|>" });
+    }
+
+    fn flintTurnsOtherPre(ctx: *c.gguf_context) void {
+        appendNormal(ctx, &.{ "<|user|>", "<|observation|>" });
+    }
+
+    /// v0.8.0: Domyn Small is Sarvam's SPM-style BPE, on a vocabulary whose
+    /// tokens carry U+2581.
+    fn preDomyn(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "gpt2");
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "domyn-small");
+    }
+
+    /// v0.8.0: Soprano lowercases and folds whitespace, keeps raw UTF-8,
+    /// emits UNK for what is not a token, and its EOS always ends generation.
+    /// A real UNK, because a text with no vocabulary token puts its id in the
+    /// output.
+    fn preSoprano(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "soprano");
+        c.gguf_set_val_u32(ctx, "tokenizer.ggml.unknown_token_id", 0);
+        appendNormal(ctx, &.{ " ", "i\xcc\x87", "\xcf\x83", "zq zq", "\xe2\x96\x81x" });
+    }
+
+    /// ... with an EOS out of range, so the id it inserts is the null token.
+    fn preSopranoNoEos(ctx: *c.gguf_context) void {
+        tinyBpe(ctx);
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "soprano");
+        c.gguf_set_val_u32(ctx, "tokenizer.ggml.unknown_token_id", 0);
+    }
+
+    /// v0.8.0's end-of-turn tokens: muse-spark's ...
+    fn eotMuse(ctx: *c.gguf_context) void {
+        appendNormal(ctx, &.{"<|eot|>"});
+    }
+
+    /// ... and beam's tool-call marker, which makes `</s>` a normal token
+    /// from outside the EOG list.
+    fn beamMarker(ctx: *c.gguf_context) void {
+        appendNormal(ctx, &.{ "</s>", "<rfl:parameter name=\"" });
+    }
+
+    fn sNoMarker(ctx: *c.gguf_context) void {
+        appendNormal(ctx, &.{"</s>"});
+    }
+
+    /// v0.8.0's `tokenizer.ggml.clean_spaces`, which overrides whatever the
+    /// pre-tokenizer set.
+    fn cleanOn(ctx: *c.gguf_context) void {
+        c.gguf_set_val_bool(ctx, "tokenizer.ggml.clean_spaces", true);
+    }
+
+    fn cleanOff(ctx: *c.gguf_context) void {
+        c.gguf_set_val_bool(ctx, "tokenizer.ggml.clean_spaces", false);
+    }
+
+    fn cleanOnPre(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "qwen2");
+        c.gguf_set_val_bool(ctx, "tokenizer.ggml.clean_spaces", true);
+    }
+
+    fn cleanWrongType(ctx: *c.gguf_context) void {
+        c.gguf_set_val_u32(ctx, "tokenizer.ggml.clean_spaces", 1);
+    }
+
+    /// v0.8.0's Metaspace prepend scheme.
+    fn scheme(comptime name: [:0]const u8) fn (*c.gguf_context) void {
+        return struct {
+            fn f(ctx: *c.gguf_context) void {
+                c.gguf_set_val_str(ctx, "tokenizer.ggml.metaspace.prepend_scheme", name);
+            }
+        }.f;
+    }
+
+    /// "first" where it matters: tokens carry U+2581 and a BOS is added, so
+    /// a skipped BOS must not take the space off the first rendered piece.
+    fn schemeFirstBos(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.metaspace.prepend_scheme", "first");
+        c.gguf_set_val_bool(ctx, "tokenizer.ggml.add_bos_token", true);
+    }
+
+    fn schemeFirstMmbert(ctx: *c.gguf_context) void {
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "gpt2");
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "mmbert");
+        c.gguf_set_val_str(ctx, "tokenizer.ggml.metaspace.prepend_scheme", "first");
+    }
+
+    fn schemeWrongType(ctx: *c.gguf_context) void {
+        c.gguf_set_val_u32(ctx, "tokenizer.ggml.metaspace.prepend_scheme", 1);
+    }
+
+    /// Every text `eot` auto-detection takes, among tokens enough to fill
+    /// `n`. Which one becomes EOT is the first in `token_to_id`'s order, and
+    /// v0.8.0's `reserve` set that order: a power of two stays one, where
+    /// growing only ever reached primes.
+    fn eotOrder(comptime n: usize) fn (*c.gguf_context) void {
+        return struct {
+            fn f(ctx: *c.gguf_context) void {
+                var toks: std.ArrayList([]const u8) = .empty;
+                toks.appendSlice(gpa, &.{
+                    "<|eot_id|>",     "<|im_end|>",   "<|end|>",      "<end_of_turn>", "<|endoftext|>",   "<|end_of_text|>", "<EOT>", "_<EOT>", "[EOT]", "<end_of_utterance>",
+                    "<|fim_prefix|>", "<fim-prefix>", "<fim_prefix>", "<PRE>",         "<|code_prefix|>", "<|prefix|>",
+                }) catch unreachable;
+                while (toks.items.len < n) toks.append(gpa, gpa.print("tok{d}", .{toks.items.len}) catch unreachable) catch unreachable;
+                setStrs(ctx, "tokenizer.ggml.tokens", toks.items);
+                _ = c.gguf_remove_key(ctx, "tokenizer.ggml.token_type");
+                _ = c.gguf_remove_key(ctx, "tokenizer.ggml.bos_token_id");
+                _ = c.gguf_remove_key(ctx, "tokenizer.ggml.eos_token_id");
+                _ = c.gguf_remove_key(ctx, "tokenizer.ggml.unknown_token_id");
+            }
+        }.f;
+    }
+
     /// User-defined tokens of equal length that overlap in text, so which
     /// one the special-token cache tries first decides the result.
     fn overlap(ctx: *c.gguf_context) void {
@@ -902,6 +1191,13 @@ pub fn main(init: std.process.Init) !void {
         "x\n\n\n\nx",
         "x\n\n\n\n\nx",
     }) |t| try corpus.append(gpa, t);
+    for (dna_corpus) |t| try corpus.append(gpa, t);
+    // each ambiguity code, and a letter that is not one, joining two runs
+    for ("RYSWKMBDHVNrysnvEFIJLOPQUXZ") |ch| {
+        try corpus.append(gpa, try gpa.print("ACGTACGT{c}ACGTACGT", .{ch}));
+    }
+    // what `clean_spaces` rewrites, in a sentence
+    try corpus.append(gpa, "a , b . c ! d ? e 's f 'm g 're h 've i ' j 't k 'd l 'll");
     const synthetic = [_]Case{
         .{ .name = "synthetic-rwkv", .path = derive(dir, gpt2, "rwkv", edits.rwkv) },
         .{ .name = "synthetic-plamo2", .path = derive(dir, gpt2, "plamo2", edits.plamo2) },
@@ -931,6 +1227,54 @@ pub fn main(init: std.process.Init) !void {
         .{ .name = "synthetic-pre-k2-horizon", .path = derive(dir, gpt2, "pre-k2-horizon", edits.preK2Horizon) },
         .{ .name = "synthetic-test-bpe", .path = derive(dir, gpt2, "test-bpe", edits.testType) },
         .{ .name = "synthetic-test-spm", .path = derive(dir, spm, "test-spm", edits.testType) },
+        .{ .name = "synthetic-dna-bare", .path = derive(dir, gpt2, "dna-bare", edits.hybriddnaBare) },
+        .{ .name = "synthetic-dna-full", .path = derive(dir, gpt2, "dna-full", edits.hybriddnaFull) },
+        .{ .name = "synthetic-dna-padn", .path = derive(dir, gpt2, "dna-padn", edits.hybriddnaPadN) },
+        .{ .name = "synthetic-dna-auto", .path = derive(dir, gpt2, "dna-auto", edits.hybriddnaAuto) },
+        .{ .name = "synthetic-dna-padn-auto", .path = derive(dir, gpt2, "dna-padn-auto", edits.hybriddnaPadNAuto) },
+        .{ .name = "synthetic-dna-auto-off", .path = derive(dir, gpt2, "dna-auto-off", edits.hybriddnaAutoOff) },
+        .{ .name = "synthetic-pre-flint", .path = derive(dir, gpt2, "pre-flint", edits.pre("flint")) },
+        .{ .name = "synthetic-pre-flint-turns", .path = derive(dir, gpt2, "pre-flint-turns", edits.preFlintTurns) },
+        .{ .name = "synthetic-flint-turns-other", .path = derive(dir, gpt2, "flint-turns-other", edits.flintTurnsOtherPre) },
+        .{ .name = "synthetic-pre-domyn", .path = derive(dir, gemma4, "pre-domyn", edits.preDomyn) },
+        .{ .name = "synthetic-pre-domyn-gpt2", .path = derive(dir, gpt2, "pre-domyn-gpt2", edits.pre("domyn-small")) },
+        .{ .name = "synthetic-pre-nemotron", .path = derive(dir, gpt2, "pre-nemotron", edits.preWhole("nemotron-3.5-embed")) },
+        .{ .name = "synthetic-pre-soprano", .path = derive(dir, gpt2, "pre-soprano", edits.preSoprano) },
+        .{ .name = "synthetic-pre-soprano-no-eos", .path = derive(dir, gpt2, "pre-soprano-no-eos", edits.preSopranoNoEos) },
+        .{ .name = "synthetic-pre-tekken", .path = derive(dir, gpt2, "pre-tekken", edits.pre("tekken")) },
+        .{ .name = "synthetic-pre-pixtral", .path = derive(dir, gpt2, "pre-pixtral", edits.preWhole("pixtral")) },
+        .{ .name = "synthetic-pre-gpt-4o", .path = derive(dir, gpt2, "pre-gpt-4o", edits.pre("gpt-4o")) },
+        .{ .name = "synthetic-pre-minimax-m2", .path = derive(dir, gpt2, "pre-minimax-m2", edits.pre("minimax-m2")) },
+        .{ .name = "synthetic-pre-llama3", .path = derive(dir, gpt2, "pre-llama3", edits.pre("llama3")) },
+        .{ .name = "synthetic-pre-lfm2", .path = derive(dir, gpt2, "pre-lfm2", edits.preWhole("lfm2")) },
+        .{ .name = "synthetic-pre-minicpm5", .path = derive(dir, gpt2, "pre-minicpm5", edits.pre("minicpm5")) },
+        .{ .name = "synthetic-pre-gemma4-name", .path = derive(dir, gpt2, "pre-gemma4-name", edits.pre("gemma4")) },
+        .{ .name = "synthetic-pre-granite-311m", .path = derive(dir, gpt2, "pre-granite-311m", edits.pre("granite-embed-multi-311m")) },
+        .{ .name = "synthetic-pre-dbrx", .path = derive(dir, gpt2, "pre-dbrx", edits.pre("dbrx")) },
+        .{ .name = "synthetic-pre-chatglm-bpe", .path = derive(dir, gpt2, "pre-chatglm-bpe", edits.pre("chatglm-bpe")) },
+        .{ .name = "synthetic-pre-exaone4", .path = derive(dir, gpt2, "pre-exaone4", edits.pre("exaone4")) },
+        .{ .name = "synthetic-pre-mellum2", .path = derive(dir, gpt2, "pre-mellum2", edits.pre("mellum2")) },
+        .{ .name = "synthetic-eot-muse", .path = derive(dir, gpt2, "eot-muse", edits.eotMuse) },
+        .{ .name = "synthetic-beam-marker", .path = derive(dir, gpt2, "beam-marker", edits.beamMarker) },
+        .{ .name = "synthetic-s-no-marker", .path = derive(dir, gpt2, "s-no-marker", edits.sNoMarker) },
+        .{ .name = "synthetic-clean-on-spm", .path = derive(dir, spm, "clean-on-spm", edits.cleanOn) },
+        .{ .name = "synthetic-clean-off-bpe", .path = derive(dir, gpt2, "clean-off-bpe", edits.cleanOff) },
+        .{ .name = "synthetic-clean-on-pre", .path = derive(dir, gpt2, "clean-on-pre", edits.cleanOnPre) },
+        .{ .name = "synthetic-scheme-first-gemma4", .path = derive(dir, gemma4, "scheme-first-gemma4", edits.scheme("first")) },
+        .{ .name = "synthetic-scheme-first-mmbert", .path = derive(dir, gemma4, "scheme-first-mmbert", edits.schemeFirstMmbert) },
+        .{ .name = "synthetic-scheme-first-gpt2", .path = derive(dir, gpt2, "scheme-first-gpt2", edits.scheme("first")) },
+        .{ .name = "synthetic-scheme-first-bos", .path = derive(dir, gpt2, "scheme-first-bos", edits.schemeFirstBos) },
+        .{ .name = "synthetic-scheme-first-spm", .path = derive(dir, spm, "scheme-first-spm", edits.scheme("first")) },
+        .{ .name = "synthetic-scheme-always-spm", .path = derive(dir, spm, "scheme-always-spm", edits.scheme("always")) },
+        .{ .name = "synthetic-scheme-never", .path = derive(dir, gemma4, "scheme-never", edits.scheme("never")) },
+        .{ .name = "synthetic-eot-order-pow2", .path = derive(dir, gpt2, "eot-order-pow2", edits.eotOrder(1024)) },
+        .{ .name = "synthetic-eot-order-pow2-small", .path = derive(dir, gpt2, "eot-order-pow2-small", edits.eotOrder(64)) },
+        .{ .name = "synthetic-eot-order", .path = derive(dir, gpt2, "eot-order", edits.eotOrder(1000)) },
+        .{ .name = "error-scheme-always-bpe", .path = derive(dir, gpt2, "scheme-always-bpe", edits.scheme("always")) },
+        .{ .name = "error-scheme-unknown", .path = derive(dir, gpt2, "scheme-unknown", edits.scheme("sometimes")) },
+        .{ .name = "error-scheme-type", .path = derive(dir, gpt2, "scheme-type", edits.schemeWrongType) },
+        .{ .name = "error-clean-type", .path = derive(dir, gpt2, "clean-type", edits.cleanWrongType) },
+        .{ .name = "error-dna-auto-type", .path = derive(dir, gpt2, "dna-auto-type", edits.dnaAutoWrongType) },
         .{ .name = "error-model", .path = derive(dir, gpt2, "bad-model", edits.badModel) },
         .{ .name = "error-pre", .path = derive(dir, gpt2, "bad-pre", edits.badPre) },
         .{ .name = "error-merges", .path = derive(dir, gpt2, "no-merges", edits.noMerges) },

@@ -144,7 +144,11 @@ fn readMsg(a: Allocator, j: *const Value) !Msg {
     m.role = try str(j, "role");
     m.content = try str(j, "content");
     for ((try j.at("parts")).array.items) |*p| {
-        try m.content_parts.append(a, .{ .type = try (try p.atIndex(0)).get([]const u8), .text = try (try p.atIndex(1)).get([]const u8) });
+        try m.content_parts.append(a, .{
+            .type = try (try p.atIndex(0)).get([]const u8),
+            .text = try (try p.atIndex(1)).get([]const u8),
+            .name = if (p.size() > 2) try (try p.atIndex(2)).get([]const u8) else "",
+        });
     }
     for ((try j.at("tool_calls")).array.items) |*tc| {
         try m.tool_calls.append(a, .{
@@ -156,6 +160,7 @@ fn readMsg(a: Allocator, j: *const Value) !Msg {
     m.reasoning_content = try str(j, "reasoning_content");
     m.tool_name = try str(j, "tool_name");
     m.tool_call_id = try str(j, "tool_call_id");
+    if (j.contains("extra_json")) m.extra_json = try str(j, "extra_json");
     return m;
 }
 
@@ -168,6 +173,7 @@ fn readInputs(a: Allocator, j: *const Value) !chat.templates.TemplatesInputs {
             .name = try (try t.atIndex(0)).get([]const u8),
             .description = try (try t.atIndex(1)).get([]const u8),
             .parameters = try (try t.atIndex(2)).get([]const u8),
+            .defer_loading = t.size() > 3 and try (try t.atIndex(3)).get(bool),
         });
     }
     var kwargs: std.ArrayList(chat.templates.KwArg) = .empty;
@@ -360,12 +366,27 @@ fn tmplRecord(st: *State, a: Allocator, r: *const Value) !void {
     try st.tmpls.put(gpa, id, t);
     const tp = st.tmpls.getPtr(id).?;
     for (chat.templates.getCaps(tp)) |e| try line("caps {s}={s}", .{ e.name, if (e.value) "1" else "0" });
+    {
+        var caps = try chat.templates.getCapsJson(a, tp);
+        try kv("caps_json", try json.dump(a, &caps, -1));
+    }
     try kv("source", chat.templates.source(tp, ""));
     try kv("tool_use_source", chat.templates.source(tp, "tool_use"));
     try flag("explicit", chat.templates.wasExplicit(tp));
-    const asr = chat.templates.getAsrPrompt(tp);
-    try kv("asr.system", asr.system);
-    try kv("asr.user", asr.user);
+    for ([_][]const u8{ "", "fr", "FR", "xx" }) |language| {
+        const asr = try chat.templates.getAsrPrompt(a, tp, language);
+        try kv("asr.system", asr.system);
+        try kv("asr.user", asr.user);
+        try flag("asr.has_language", asr.has_language);
+    }
+    try guarded(blk: {
+        const s = chat.templates.getTtsPrompt(a, tp, "Say this", "", "") catch |e| break :blk e;
+        break :blk kv("tts", s);
+    });
+    try guarded(blk: {
+        const s = chat.templates.getTtsPrompt(a, tp, "Say \"that\"", "fr", "alice") catch |e| break :blk e;
+        break :blk kv("tts", s);
+    });
     try guarded(blk: {
         const b = chat.templates.supportEnableThinking(gpa, tp) catch |e| break :blk e;
         break :blk flag("enable_thinking", b);

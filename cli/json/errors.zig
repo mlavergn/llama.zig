@@ -6,7 +6,7 @@
 //! Ports `nlohmann::detail::exception::name`, `parse_error::create` and its
 //! `position_string` from `llama.cpp/vendor/nlohmann/json.hpp`, and the
 //! wrapping of `common_json`'s `guard` from `llama.cpp/common/json.cpp`
-//! (llama.cpp v0.7.0, `620d2225c`). Each declaration names what it ports
+//! (llama.cpp v0.8.0, `8642541b2`). Each declaration names what it ports
 //! and the line it began at.
 //!
 //! # Why the message lives beside the error
@@ -47,7 +47,7 @@ pub fn what() []const u8 {
     return what_buf.items;
 }
 
-/// Ports `exception`'s `name` (json.hpp:4535 @620d2225c) and the
+/// Ports `exception`'s `name` (json.hpp:4535 @8642541b2) and the
 /// `type_error::create` family: sets `what()` to
 /// `[json.exception.<kind>.<id>] <message>`, cut at its first NUL byte as
 /// `std::runtime_error(const char *)` cuts it.
@@ -94,8 +94,8 @@ pub const Position = struct {
     lines_read: usize = 0,
 };
 
-/// Ports `parse_error`'s `create` (json.hpp:4648 @620d2225c) and
-/// `position_string` (json.hpp:4679 @620d2225c): a `parse_error` with its
+/// Ports `parse_error`'s `create` (json.hpp:4648 @8642541b2) and
+/// `position_string` (json.hpp:4679 @8642541b2): a `parse_error` with its
 /// line and column.
 ///
 /// Parameters:

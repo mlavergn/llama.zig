@@ -281,6 +281,41 @@ int main(int argc, char ** argv) {
         return json_res({{"bye", true}});
     }));
 
+    // v0.8.0: a websocket route. It greets with what the request said, then
+    // echoes each message until the peer closes; "binary:x" answers x as a
+    // binary frame, "close" closes from here, "open" reports is_open
+    ctx_http.ws  ("/ws/:name", [](const server_http_req & req, server_http_context::ws_conn & conn) {
+        json j = echo_json("ws", req);
+        j["stop"] = req.should_stop();
+        conn.send(safe_json_to_str(j));
+        std::string msg;
+        while (true) {
+            const int type = conn.read(msg);
+            if (type == 0) {
+                LOG_INF("harness: ws closed, open=%d stop=%d\n", conn.is_open() ? 1 : 0, req.should_stop() ? 1 : 0);
+                return;
+            }
+            LOG_INF("harness: ws read type=%d len=%zu\n", type, msg.size());
+            if (msg == "close") {
+                conn.close();
+                continue;
+            }
+            if (msg == "open") {
+                conn.send(conn.is_open() ? "open=1" : "open=0");
+                continue;
+            }
+            if (msg.rfind("binary:", 0) == 0) {
+                conn.send_binary(msg.substr(7));
+                continue;
+            }
+            if (type == 1) {
+                conn.send(msg);
+            } else {
+                conn.send_binary(msg);
+            }
+        }
+    });
+
     ctx_http.register_gcp_compat();
 
     if (!ctx_http.start()) {

@@ -1,0 +1,11 @@
+#!/bin/bash
+# Writes truncated files for gguf-split's v0.8.0 read checks into $DATA: a model
+# for --split, and a one-file split for --merge, each missing its last 4 KiB.
+# Run by scripts/tools-diff.
+set -eu
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cut_tail() { head -c "$(($(wc -c <"$1") - 4096))" "$1" >"$2"; }
+cut_tail "$ROOT/zig-out/arch-fixtures/qwen3-dense.gguf" "$DATA/trunc.gguf"
+cd "$DATA"
+"$ROOT/zig-out/tools-ref/bin/llama-gguf-split" --split-max-tensors 1000 "$ROOT/zig-out/arch-fixtures/mamba-dense.gguf" whole >/dev/null 2>&1
+cut_tail whole-00001-of-00001.gguf trunc-merge-00001-of-00001.gguf

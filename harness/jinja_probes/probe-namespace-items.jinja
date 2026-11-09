@@ -1,0 +1,3 @@
+{#- v0.8.0: a namespace has no methods: ns.items is the attribute. -#}
+{% set ns = namespace(items=[]) %}{{ 'yes' if ns.items else 'no' }}{% set ns.items = ns.items + [1] %}{{ ns.items | length }}{{ 'yes' if ns.items else 'no' }}
+{%- set d = dict(items=1) %}{% for k, v in d.items() %}{{ k }}={{ v }}{% endfor %}

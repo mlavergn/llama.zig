@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/top-k.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/top-k.cuh` at v0.7.0 (`620d2225c`). The
+//! `llama.cpp/ggml/src/ggml-cuda/top-k.cuh` at v0.8.0 (`8642541b2`). The
 //! radix-select kernels -- `top_k_radix_init`, `top_k_radix_histogram`,
 //! `top_k_radix_select`, `top_k_radix_reset_counters`,
 //! `top_k_radix_gather` -- stay CUDA; the argsort arms sort with
@@ -31,21 +31,21 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `GGML_CUDA_TOP_K_NCOLS_THRESHOLD_BITONIC` (top-k.cu:10 @620d2225c),
+/// Ports `GGML_CUDA_TOP_K_NCOLS_THRESHOLD_BITONIC` (top-k.cu:10 @8642541b2),
 /// the CUDA arm.
 const ncols_threshold_bitonic = 512;
-/// Ports `GGML_CUDA_TOP_K_NCOLS_THRESHOLD_ARGSORT` (top-k.cu:15 @620d2225c).
+/// Ports `GGML_CUDA_TOP_K_NCOLS_THRESHOLD_ARGSORT` (top-k.cu:15 @8642541b2).
 const ncols_threshold_argsort = 4096;
 /// Ports `GGML_CUDA_TOP_K_NCOLS_THRESHOLD_BITONIC_FEW_ROWS` (top-k.cu:23
-/// @620d2225c), the CUDA arm: bitonic up to this width while nrows fits in
+/// @8642541b2), the CUDA arm: bitonic up to this width while nrows fits in
 /// one wave of SMs.
 const ncols_threshold_bitonic_few_rows = 1024;
-/// Ports `GGML_CUDA_TOP_K_NROWS_THRESHOLD` (top-k.cu:45 @620d2225c), the arm
+/// Ports `GGML_CUDA_TOP_K_NROWS_THRESHOLD` (top-k.cu:45 @8642541b2), the arm
 /// without `CUB_TOP_K_AVAILABLE`: max rows for the per-row CUB path before
 /// switching to radix or bitonic.
 const nrows_threshold = 1;
 
-/// Ports `top_k_radix_state` (top-k.cu:91 @620d2225c), for its size: the
+/// Ports `top_k_radix_state` (top-k.cu:91 @8642541b2), for its size: the
 /// host only allocates the states.
 const RadixState = extern struct {
     prefix: u32,
@@ -59,7 +59,7 @@ comptime {
     if (@sizeOf(RadixState) != 20) @compileError("top_k_radix_state is five 4-byte fields");
 }
 
-/// Ports `top_k_radix_cuda` (top-k.cu:212 @620d2225c), which launches with
+/// Ports `top_k_radix_cuda` (top-k.cu:212 @8642541b2), which launches with
 /// `<<<>>>`. Since v0.7.0 the rows go in chunks that bound the histograms
 /// to 64 MB.
 fn topKRadixCuda(pool: *common.Pool, src_in: [*]const f32, dst_in: [*]c_int, ncols: c_int, nrows: i64, k: c_int, stream: cu.cudaStream_t) void {
@@ -109,7 +109,7 @@ fn topKRadixCuda(pool: *common.Pool, src_in: [*]const f32, dst_in: [*]c_int, nco
     }
 }
 
-/// Ports `top_k_argsort_cuda` (top-k.cu:253 @620d2225c): argsort each chunk
+/// Ports `top_k_argsort_cuda` (top-k.cu:253 @8642541b2): argsort each chunk
 /// of rows into a scratch buffer, bitonic or CUB, and copy the first `k`
 /// columns out.
 fn topKArgsortCuda(pool: *common.Pool, src_in: [*]const f32, dst_in: [*]c_int, ncols: c_int, nrows: i64, k: c_int, use_cub: bool, stream: cu.cudaStream_t) void {
@@ -148,9 +148,9 @@ fn topKArgsortCuda(pool: *common.Pool, src_in: [*]const f32, dst_in: [*]c_int, n
     }
 }
 
-/// Ports `ggml_cuda_op_top_k` (top-k.cu:281 @620d2225c), the
+/// Ports `ggml_cuda_op_top_k` (top-k.cu:281 @8642541b2), the
 /// `GGML_CUDA_USE_CUB` arm without `CUB_TOP_K_AVAILABLE`, with
-/// `next_power_of_2` (top-k.cu:77 @620d2225c), which is `argsort.cu`'s.
+/// `next_power_of_2` (top-k.cu:77 @8642541b2), which is `argsort.cu`'s.
 pub fn opTopK(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_d: [*]const f32 = @ptrCast(@alignCast(src0.data.?));

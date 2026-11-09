@@ -8,7 +8,7 @@
 //! - `llama.cpp/src/unicode.h`
 //! - `llama.cpp/src/unicode-data.h`
 //!
-//! All at v0.7.0 (`620d2225c`). The tables of `llama.cpp/src/unicode-data.cpp`
+//! All at v0.8.0 (`8642541b2`). The tables of `llama.cpp/src/unicode-data.cpp`
 //! are generated into `unicode_data.zig` by `scripts/gen-unicode-data`.
 //!
 //! # Contract
@@ -42,10 +42,10 @@ fn oom() noreturn {
     impl.abort("unicode", 0, "out of memory");
 }
 
-/// Ports `MAX_CODEPOINTS` (unicode-data.h:19 @620d2225c).
+/// Ports `MAX_CODEPOINTS` (unicode-data.h:19 @8642541b2).
 pub const max_codepoints: u32 = 0x110000;
 
-/// Ports `unicode_cpt_flags` (src/unicode.h:8 @620d2225c).
+/// Ports `unicode_cpt_flags` (src/unicode.h:8 @8642541b2).
 ///
 /// The C++ is a bit-field over a `uint16_t`, read and written through a
 /// `reinterpret_cast` on little-endian targets; a packed struct puts its
@@ -94,7 +94,7 @@ pub const CptFlags = packed struct(u16) {
 // -----------------------------------------------------------------------------
 // UTF-8
 
-/// Ports `unicode_len_utf8` (src/unicode.cpp:16 @620d2225c): a sequence's length
+/// Ports `unicode_len_utf8` (src/unicode.cpp:16 @8642541b2): a sequence's length
 /// from its lead byte's high nibble. A continuation byte reads as 1.
 ///
 /// Parameters:
@@ -106,7 +106,7 @@ pub fn lenUtf8(src: u8) usize {
     return lookup[src >> 4];
 }
 
-/// Ports `unicode_cpt_from_utf8` (src/unicode.cpp:30 @620d2225c): decodes one
+/// Ports `unicode_cpt_from_utf8` (src/unicode.cpp:30 @8642541b2): decodes one
 /// sequence and advances `offset` past it.
 ///
 /// Since v0.7.0 an overlong form, and a four-byte form above U+10FFFF, is
@@ -154,7 +154,7 @@ pub fn cptFromUtf8(utf8: []const u8, offset: *usize) error{InvalidCharacter}!u32
     return error.InvalidCharacter;
 }
 
-/// Ports `unicode_cpt_to_utf8` (src/unicode.cpp:1249 @620d2225c).
+/// Ports `unicode_cpt_to_utf8` (src/unicode.cpp:1262 @8642541b2).
 ///
 /// Parameters:
 /// - `cpt`: the code point.
@@ -196,10 +196,10 @@ pub fn appendCptUtf8(out: *std.ArrayList(u8), cpt: u32) error{InvalidCodepoint}!
     out.appendSlice(allocator, try cptToUtf8(cpt, &buf)) catch oom();
 }
 
-// `unicode_cpts_to_utf8` (src/unicode.cpp:22 @620d2225c) is a `static`
+// `unicode_cpts_to_utf8` (src/unicode.cpp:22 @8642541b2) is a `static`
 // nothing calls, and is not ported.
 
-/// Ports `unicode_cpts_from_utf8` (src/unicode.cpp:1377 @620d2225c): every
+/// Ports `unicode_cpts_from_utf8` (src/unicode.cpp:1390 @8642541b2): every
 /// sequence decoded, a malformed byte becoming U+FFFD and decoding resuming
 /// at the next byte.
 ///
@@ -234,7 +234,7 @@ var flags_table: [max_codepoints]CptFlags = undefined;
 var flags_ready: std.atomic.Value(bool) = .init(false);
 var flags_mutex: impl.CxxMutex = .{};
 
-/// Ports `unicode_cpt_flags_array` (src/unicode.cpp:125 @620d2225c): each
+/// Ports `unicode_cpt_flags_array` (src/unicode.cpp:125 @8642541b2): each
 /// range's flags, then the whitespace bit, then the case and NFD bits on
 /// every code point some mapping *produces*.
 fn buildFlagsTable() void {
@@ -254,7 +254,7 @@ fn buildFlagsTable() void {
     for (data.ranges_nfd) |range| flags_table[range.nfd].is_nfd = true;
 }
 
-/// Ports `unicode_cpt_flags_from_cpt` (src/unicode.cpp:1394 @620d2225c).
+/// Ports `unicode_cpt_flags_from_cpt` (src/unicode.cpp:1407 @8642541b2).
 ///
 /// Parameters:
 /// - `cpt`: any value.
@@ -272,7 +272,7 @@ pub fn cptFlagsFromCpt(cpt: u32) CptFlags {
     return if (cpt < max_codepoints) flags_table[cpt] else CptFlags.fromUint(CptFlags.undefined_);
 }
 
-/// Ports `unicode_cpt_flags_from_utf8` (src/unicode.cpp:1400 @620d2225c): the
+/// Ports `unicode_cpt_flags_from_utf8` (src/unicode.cpp:1413 @8642541b2): the
 /// flags of the first code point.
 ///
 /// Return: the flags, `UNDEFINED` for an empty string, or
@@ -283,7 +283,7 @@ pub fn cptFlagsFromUtf8(utf8: []const u8) error{InvalidCharacter}!CptFlags {
     return cptFlagsFromCpt(try cptFromUtf8(utf8, &offset));
 }
 
-/// Ports `unicode_tolower` (src/unicode.cpp:1419 @620d2225c): a binary search
+/// Ports `unicode_tolower` (src/unicode.cpp:1440 @8642541b2): a binary search
 /// of the lowercase map.
 ///
 /// Return: the mapped code point, or `cpt` when it has none.
@@ -298,7 +298,7 @@ pub fn tolower(cpt: u32) u32 {
     return cpt;
 }
 
-/// Ports `unicode_cpt_is_han` (src/unicode.cpp:1431 @620d2225c).
+/// Ports `unicode_cpt_is_han` (src/unicode.cpp:1452 @8642541b2).
 pub fn cptIsHan(cpt: u32) bool {
     if (cpt >= 0x4E00 and cpt <= 0x9FFF) return true;
     if (cpt >= 0x3400 and cpt <= 0x4DBF) return true;
@@ -312,7 +312,7 @@ pub fn cptIsHan(cpt: u32) bool {
     return false;
 }
 
-/// Ports `unicode_cpts_normalize_nfd` (src/unicode.cpp:1278 @620d2225c): each
+/// Ports `unicode_cpts_normalize_nfd` (src/unicode.cpp:1291 @8642541b2): each
 /// code point through the last NFD range starting at or below it.
 ///
 /// Parameters:
@@ -336,7 +336,7 @@ pub fn cptsNormalizeNfd(cpts: []const u32) []u32 {
     return result;
 }
 
-/// Ports `unicode_canonical_class` (src/unicode.cpp:1291 @620d2225c).
+/// Ports `unicode_canonical_class` (src/unicode.cpp:1304 @8642541b2).
 ///
 /// Return: the canonical combining class, 0 for a code point the table lacks.
 fn canonicalClass(cpt: u32) u8 {
@@ -362,7 +362,7 @@ fn decompositionOf(cpt: u32) ?[2]u32 {
     return null;
 }
 
-/// Ports `unicode_canonical_decompose` (src/unicode.cpp:1296 @620d2225c): the
+/// Ports `unicode_canonical_decompose` (src/unicode.cpp:1309 @8642541b2): the
 /// full canonical decomposition of `cpt` appended to `result`, through an
 /// explicit stack.
 fn canonicalDecompose(cpt_in: u32, result: *std.ArrayList(u32), pending: *std.ArrayList(u32)) void {
@@ -386,7 +386,7 @@ fn canonicalDecompose(cpt_in: u32, result: *std.ArrayList(u32), pending: *std.Ar
     }
 }
 
-/// Ports `unicode_canonical_compose` (src/unicode.cpp:1323 @620d2225c).
+/// Ports `unicode_canonical_compose` (src/unicode.cpp:1336 @8642541b2).
 ///
 /// Return: the primary composite of the pair, or 0.
 fn canonicalCompose(first: u32, second: u32) u32 {
@@ -407,7 +407,7 @@ fn canonicalCompose(first: u32, second: u32) u32 {
     return 0;
 }
 
-/// Ports `unicode_cpts_normalize_nfc` (src/unicode.cpp:1334 @620d2225c):
+/// Ports `unicode_cpts_normalize_nfc` (src/unicode.cpp:1347 @8642541b2):
 /// canonical decomposition, each run of combining marks stably sorted by
 /// class, then canonical composition.
 ///
@@ -500,8 +500,8 @@ const cpt_byte: [256 + 68]?u8 = blk: {
     break :blk t;
 };
 
-/// Ports `unicode_byte_to_utf8` (src/unicode.cpp:1409 @620d2225c), with
-/// `unicode_byte_to_utf8_map` (src/unicode.cpp:157 @620d2225c) built at
+/// Ports `unicode_byte_to_utf8` (src/unicode.cpp:1422 @8642541b2), with
+/// `unicode_byte_to_utf8_map` (src/unicode.cpp:157 @8642541b2) built at
 /// compile time.
 ///
 /// Return: the byte's UTF-8 stand-in, static.
@@ -509,8 +509,8 @@ pub fn byteToUtf8(byte: u8) []const u8 {
     return byte_utf8[byte];
 }
 
-/// Ports `unicode_utf8_to_byte` (src/unicode.cpp:1414 @620d2225c), with
-/// `unicode_utf8_to_byte_map` (src/unicode.cpp:181 @620d2225c) as the inverse
+/// Ports `unicode_utf8_to_byte` (src/unicode.cpp:1427 @8642541b2), with
+/// `unicode_utf8_to_byte_map` (src/unicode.cpp:181 @8642541b2) as the inverse
 /// of the byte map. The C++'s keys are exactly the 256 canonical encodings
 /// `byteToUtf8` returns, so a string is a key iff it is one of them.
 ///
@@ -526,6 +526,16 @@ pub fn utf8ToByte(utf8: []const u8) error{OutOfRange}!u8 {
     const byte = cpt_byte[cpt] orelse return error.OutOfRange;
     if (!std.mem.eql(u8, byte_utf8[byte], utf8)) return error.OutOfRange;
     return byte;
+}
+
+/// Ports `unicode_cpt_to_byte` (src/unicode.cpp:1432 @8642541b2), with
+/// `unicode_cpt_to_byte_map` (src/unicode.cpp:205 @8642541b2) as `cpt_byte`.
+///
+/// Return: the byte a code point of the byte map stands for, or
+/// `error.OutOfRange` where the C++ throws `std::out_of_range`.
+pub fn cptToByte(cpt: u32) error{OutOfRange}!u8 {
+    if (cpt >= cpt_byte.len) return error.OutOfRange;
+    return cpt_byte[cpt] orelse error.OutOfRange;
 }
 
 // -----------------------------------------------------------------------------
@@ -570,7 +580,7 @@ fn isContractionOne(a: u32) bool {
     return a == 's' or a == 't' or a == 'm' or a == 'd';
 }
 
-/// Ports `unicode_regex_split_custom_gpt2` (src/unicode.cpp:224 @620d2225c):
+/// Ports `unicode_regex_split_custom_gpt2` (src/unicode.cpp:237 @8642541b2):
 /// `'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+`.
 fn splitCustomGpt2(cpts: []const u32, offsets: []const usize, out: *std.ArrayList(usize)) void {
     var start: usize = 0;
@@ -657,16 +667,16 @@ fn splitCustomGpt2(cpts: []const u32, offsets: []const usize, out: *std.ArrayLis
 
 /// Which variant of the llama3 family `splitCustomLlama3Like` runs.
 const Llama3Kind = enum {
-    /// `unicode_regex_split_custom_llama3` (src/unicode.cpp:342 @620d2225c):
+    /// `unicode_regex_split_custom_llama3` (src/unicode.cpp:355 @8642541b2):
     /// `\p{N}{1,3}`.
     llama3,
-    /// `unicode_regex_split_custom_qwen2` (src/unicode.cpp:630 @620d2225c):
+    /// `unicode_regex_split_custom_qwen2` (src/unicode.cpp:643 @8642541b2):
     /// `\p{N}`.
     qwen2,
-    /// `unicode_regex_split_custom_qwen35` (src/unicode.cpp:766 @620d2225c):
+    /// `unicode_regex_split_custom_qwen35` (src/unicode.cpp:779 @8642541b2):
     /// `\p{N}`, and letter runs take combining marks.
     qwen35,
-    /// `unicode_regex_split_custom_k2_horizon` (src/unicode.cpp:482 @620d2225c):
+    /// `unicode_regex_split_custom_k2_horizon` (src/unicode.cpp:495 @8642541b2):
     /// llama3's, with letter runs taking combining marks, U+200C and U+200D
     /// (but punctuation runs not excluding marks), and `'ſ` read as `'s`.
     k2_horizon,
@@ -811,7 +821,7 @@ fn splitCustomLlama3Like(comptime kind: Llama3Kind, cpts: []const u32, offsets: 
     }
 }
 
-/// K2 Horizon's `_is_k2_letter` lambda (src/unicode.cpp:505 @620d2225c):
+/// K2 Horizon's `_is_k2_letter` lambda (src/unicode.cpp:518 @8642541b2):
 /// a letter, a combining mark, ZWNJ or ZWJ.
 fn isK2Letter(sp: *const Span, pos: usize) bool {
     const c = sp.cpt(pos);
@@ -820,7 +830,7 @@ fn isK2Letter(sp: *const Span, pos: usize) bool {
     return f.is_letter or f.is_accent_mark;
 }
 
-/// Ports `unicode_regex_split_custom_kimi_k2` (src/unicode.cpp:933 @620d2225c):
+/// Ports `unicode_regex_split_custom_kimi_k2` (src/unicode.cpp:946 @8642541b2):
 /// all of Kimi K2's patterns at once, Han runs first.
 fn splitCustomKimiK2(cpts: []const u32, offsets: []const usize, out: *std.ArrayList(usize)) void {
     var start: usize = 0;
@@ -949,7 +959,7 @@ fn splitCustomKimiK2(cpts: []const u32, offsets: []const usize, out: *std.ArrayL
     }
 }
 
-/// Ports `unicode_regex_split_custom_afmoe` (src/unicode.cpp:1104 @620d2225c):
+/// Ports `unicode_regex_split_custom_afmoe` (src/unicode.cpp:1117 @8642541b2):
 /// digit runs split into groups of three from the right, everything else
 /// left whole. A digit run's first group also takes any non-digits since
 /// the last token, as there.
@@ -994,7 +1004,7 @@ fn splitCustomAfmoe(cpts: []const u32, offsets: []const usize, out: *std.ArrayLi
     }
 }
 
-/// Ports `unicode_regex_split_custom_newlines` (src/unicode.cpp:1179 @620d2225c):
+/// Ports `unicode_regex_split_custom_newlines` (src/unicode.cpp:1192 @8642541b2):
 /// `[^\n]+|[\n]+`.
 fn splitCustomNewlines(cpts: []const u32, offsets: []const usize, out: *std.ArrayList(usize)) void {
     var start: usize = 0;
@@ -1013,7 +1023,7 @@ fn splitCustomNewlines(cpts: []const u32, offsets: []const usize, out: *std.Arra
     }
 }
 
-/// Ports `unicode_regex_split_custom` (src/unicode.cpp:1206 @620d2225c): the
+/// Ports `unicode_regex_split_custom` (src/unicode.cpp:1219 @8642541b2): the
 /// hand-written splitter for a pattern, chosen by exact string.
 ///
 /// Return: the offsets, empty when no splitter matches the pattern -- or
@@ -1049,7 +1059,7 @@ fn splitCustom(cpts: []const u32, regex_expr: []const u8, offsets: []const usize
 // -----------------------------------------------------------------------------
 // The std::regex fallback
 
-/// Ports `unicode_regex_split_stl` (src/unicode.cpp:895 @620d2225c): each span
+/// Ports `unicode_regex_split_stl` (src/unicode.cpp:908 @8642541b2): each span
 /// of `offsets` cut at every match of `pattern`, compiled with
 /// `optimize | nosubs`, the text between matches kept as its own piece.
 /// An empty match yields an empty piece, as there.
@@ -1171,7 +1181,7 @@ pub const SplitError = error{
     InvalidCodepoint,
 };
 
-/// Ports `unicode_byte_encoding_process` (src/unicode.cpp:205 @620d2225c):
+/// Ports `unicode_byte_encoding_process` (src/unicode.cpp:218 @8642541b2):
 /// every byte of every piece replaced by its GPT-2 stand-in. The C++ first
 /// re-decodes and re-encodes each piece; the pieces are already the
 /// encoding of their code points, so that round trip is the identity, but
@@ -1192,7 +1202,7 @@ fn byteEncodingProcess(words: *const Words) Words {
     return out;
 }
 
-/// Ports `unicode_regex_split` (src/unicode.cpp:1463 @620d2225c): the text cut
+/// Ports `unicode_regex_split` (src/unicode.cpp:1484 @8642541b2): the text cut
 /// by each pattern in turn, every pattern refining the previous pieces.
 ///
 /// Since v0.7.0 an empty text returns no pieces before any pattern is
@@ -1377,6 +1387,17 @@ test "the byte map round-trips every byte" {
         try std.testing.expectEqual(@as(u8, @intCast(b)), try utf8ToByte(byteToUtf8(@intCast(b))));
     }
     try std.testing.expectError(error.OutOfRange, utf8ToByte("ab"));
+}
+
+test "cptToByte inverts the byte map and refuses the rest" {
+    for (0..256) |b| {
+        var off: usize = 0;
+        const cpt = try cptFromUtf8(byteToUtf8(@intCast(b)), &off);
+        try std.testing.expectEqual(@as(u8, @intCast(b)), try cptToByte(cpt));
+    }
+    try std.testing.expectError(error.OutOfRange, cptToByte(0x7F));
+    try std.testing.expectError(error.OutOfRange, cptToByte(0x144));
+    try std.testing.expectError(error.OutOfRange, cptToByte(0xFFFFFFFF));
 }
 
 test "the gpt2 splitter keeps a contraction and a space-led word" {

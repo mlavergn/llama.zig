@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.7.0
-//! (`620d2225c`): `ggml_backend_vk_device_supports_op`. The device vtable
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.8.0
+//! (`8642541b2`): `ggml_backend_vk_device_supports_op`. The device vtable
 //! answers this AND-ed with `ops.ported`, so the scheduler sends nothing to
 //! host code the port does not have yet.
 
@@ -38,7 +38,7 @@ const quant_types = [_]c.ggml_type{
 /// The types a CPY converts f32 to and from.
 const cpy_types = [_]c.ggml_type{ c.GGML_TYPE_Q1_0, c.GGML_TYPE_Q2_0, c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q4_1, c.GGML_TYPE_Q5_0, c.GGML_TYPE_Q5_1, c.GGML_TYPE_Q8_0, c.GGML_TYPE_IQ4_NL };
 
-/// Ports `ggml_backend_vk_device_supports_op` (ggml-vulkan.cpp:15412 @620d2225c).
+/// Ports `ggml_backend_vk_device_supports_op` (ggml-vulkan.cpp:15505 @8642541b2).
 pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
     const device = m.device.getDevice(dev_idx);
 
@@ -102,12 +102,11 @@ pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
                 const ti: usize = @intCast(t0);
                 // Not enough shared memory for row_ids and the result tile: fall back to CPU
                 if (!device.mul_mat_id_s[ti] and !device.mul_mat_id_m[ti] and !device.mul_mat_id_l[ti]) return false;
-                if (op.op_params[3] == c.GGML_PREC_F32) return false;
             }
+            if (c.ggml_prec_get_src(op, 1) == c.GGML_PREC_F32) return false;
             if (!(isAny(t0, &.{ F32, F16, BF16 }) or isAny(t0, &quant_types))) return false;
-            const a = if (op.op == c.GGML_OP_MUL_MAT) s(op, 0) else s(op, 2);
-            const b = s(op, 1);
-            if (a.ne[3] != b.ne[3]) return false;
+            // MUL_MAT broadcasts src0 over dim 3 like dim 2, MUL_MAT_ID needs the ids to match src1
+            if (op.op == c.GGML_OP_MUL_MAT_ID and s(op, 2).ne[3] != s(op, 1).ne[3]) return false;
             if (!(m.op_pipeline.dim01Contiguous(s(op, 0)) or isAny(t0, &.{ F32, F16, BF16 })) or
                 !(m.op_pipeline.dim01Contiguous(s(op, 1)) or isAny(s(op, 1).type, &.{ F32, F16 }))) return false;
             // No bf16 x f16 shader, nor an fp16->bf16 copy shader.
@@ -199,7 +198,8 @@ pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
         c.GGML_OP_DIAG_MASK_INF => return c.ggml_is_contiguous(s(op, 0)) and s(op, 0).type == F32,
         c.GGML_OP_SOFT_MAX => return c.ggml_is_contiguous(s(op, 0)) and s(op, 0).type == F32 and (op.src[1] == null or s(op, 1).type == F32 or s(op, 1).type == F16),
         c.GGML_OP_SOFT_MAX_BACK => return c.ggml_is_contiguous(s(op, 0)) and s(op, 0).type == F32 and c.ggml_is_contiguous(s(op, 1)) and s(op, 1).type == F32,
-        c.GGML_OP_SUM, c.GGML_OP_SUM_ROWS, c.GGML_OP_MEAN => return s(op, 0).type == F32 and c.ggml_is_contiguous_rows(s(op, 0)),
+        c.GGML_OP_SUM => return s(op, 0).type == F32 and c.ggml_is_contiguously_allocated(s(op, 0)),
+        c.GGML_OP_SUM_ROWS, c.GGML_OP_MEAN => return s(op, 0).type == F32 and c.ggml_is_contiguous_rows(s(op, 0)),
         c.GGML_OP_CUMSUM => {
             if (device.subgroup_arithmetic and device.subgroup_require_full_support) return s(op, 0).type == F32 and c.ggml_is_contiguous_rows(s(op, 0));
             return false;

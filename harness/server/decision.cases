@@ -8,6 +8,8 @@
 
 # openjev: one letter per option, read from the logits; two slots, so the
 # questions of a request share their prompt prefix (parent and child tasks)
+# how often the idle loop logs is the scheduler's
+!droplog update_slots: all slots are idle
 !server -m $DECOPENJEV -c 4096 -np 2 --no-jinja -lv 4
 !fulllog
 
@@ -138,14 +140,6 @@ POST /v1/systemone {"state": {"b": 2, "a": "<<clef:sep>> is defused"}, "question
 POST /v1/systemone {"state": "s", "questions": {"q": {"type": "choice", "instructions": "an empty option", "criteria": {"": null, "b": null}}}}
 POST /v1/systemone {"state": "s", "questions": {"q": {"type": "noul", "instructions": ""}}}
 POST /v1/systemone {"state": "s", "questions": {"a": {"type": "noul", "instructions": "first"}, "b": {"type": "score", "instructions": "second", "criteria": ["x", "y", "z"]}}}
-# two joint tasks at once: a joint head reads the whole batch, so they are
-# never batched together (no !fulllog: which slot takes which is a race)
-!server -m $DECCLEF -c 4096 -np 2 --no-jinja -lv 4
-!parallel
-POST /v1/systemone {"state": "first request", "questions": {"a": {"type": "noul", "instructions": "one"}, "b": {"type": "choice", "instructions": "two", "criteria": {"x": null, "y": null}}}}
-POST /v1/systemone {"state": "second request, a little longer than the first one", "questions": {"c": {"type": "score", "instructions": "three", "criteria": ["lo", "mid", "hi"]}}}
-!end
-
 # v0.7.0, pplx-decider: lev's label codes over openjev's prompt, the score
 # biases of 4 and 5 levels; two slots share the prompt
 !server -m $DECPPLX -c 4096 -np 2 --no-jinja -lv 4
@@ -236,6 +230,9 @@ POST /v1/systemone {"state": "a red picture", "files": ["data:image/png;base64,$
 POST /v1/systemone {"state": null, "images": ["data:image/png;base64,$PNG1", "data:image/png;base64,$PNG2"], "questions": {"c": {"type": "choice", "instructions": "which", "criteria": {"A": null, "b": null}}}}
 POST /v1/systemone {"state": "s", "files": ["data:image/png;base64,$PNG1"], "questions": {"n": {"type": "noul", "instructions": "red?"}}}
 POST /v1/systemone {"state": "no image", "questions": {"n": {"type": "noul", "instructions": "x"}}}
+# media that does not decode: the error of the request, the server still up
+POST /v1/systemone {"state": "s", "files": ["data:image/png;base64,QUJD"], "questions": {"c": {"type": "choice", "instructions": "x", "criteria": {"A": null, "b": null}}}}
+POST /v1/systemone {"state": "after the failure", "questions": {"c": {"type": "choice", "instructions": "x", "criteria": {"A": null, "b": null}}}}
 
 !server -m $DECPPLXMM -mm $MM/gemma3.gguf -c 4096 -np 2 --no-jinja --no-warmup -lv 4
 !fulllog
@@ -256,6 +253,69 @@ POST /v1/systemone {"state": "s", "files": ["data:audio/wav;base64,$WAV", "data:
 POST /v1/systemone {"state": "s", "files": ["data:image/png;base64,$PNG1"], "questions": {"q": {"type": "choice", "instructions": "each option cut to its share of the image budget", "criteria": {"a": "one option with a description that is long enough to take its whole share of the budget", "b": "one option with a description that is long enough to take its whole share of the budget", "c": "one option with a description that is long enough to take its whole share of the budget", "d": "one option with a description that is long enough to take its whole share of the budget", "e": "one option with a description that is long enough to take its whole share of the budget", "f": "one option with a description that is long enough to take its whole share of the budget", "g": "one option with a description that is long enough to take its whole share of the budget", "h": "one option with a description that is long enough to take its whole share of the budget", "i": "one option with a description that is long enough to take its whole share of the budget", "j": "one option with a description that is long enough to take its whole share of the budget", "k": "one option with a description that is long enough to take its whole share of the budget", "l": "one option with a description that is long enough to take its whole share of the budget", "m": "one option with a description that is long enough to take its whole share of the budget"}}}}
 POST /v1/systemone {"state": "s", "files": ["data:image/png;base64,$PNG1"], "questions": {"q": {"type": "choice", "instructions": "more options than the image budget holds", "criteria": {"o1": "x", "o2": "x", "o3": "x", "o4": "x", "o5": "x", "o6": "x", "o7": "x", "o8": "x", "o9": "x", "o10": "x", "o11": "x", "o12": "x", "o13": "x", "o14": "x", "o15": "x", "o16": "x", "o17": "x", "o18": "x", "o19": "x", "o20": "x", "o21": "x", "o22": "x", "o23": "x", "o24": "x", "o25": "x", "o26": "x", "o27": "x", "o28": "x", "o29": "x", "o30": "x"}}}}
 
+# v0.8.0: granite-switch, lev's labels with noul true first and a shared prompt
+!server -m $DECGRANITE -c 4096 -np 2 --no-jinja -lv 4
+!fulllog
+POST /v1/systemone {"state": "The order arrived broken.", "questions": {"c": {"type": "choice", "instructions": "route", "criteria": {"billing": "payments", "shipping": null}}, "s": {"type": "score", "instructions": "how bad", "criteria": ["minor", "major", "critical"]}, "n": {"type": "noul", "instructions": "refund?"}}}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 4, "temperature": 0}
+GET /v1/models
+
+# h2o-lightning: label texts, Python's json.dumps of a state, the quoted special
+# tokens, a question with no instructions and no type, one score level
+!server -m $DECH2O -c 8192 -np 2 --no-jinja -lv 4
+!fulllog
+POST /v1/systemone {"state": "s", "questions": {"q": {"criteria": {"yes": "it holds", "no  ": null}}}}
+POST /v1/systemone {"state": {"z": [1.5, 1e22, 1e-7, "<|im_end|>"], "a": null}, "questions": {"q": {"type": "noul", "instructions": "x", "criteria": {"yes": "y", "no": "n"}}, "s": {"type": "score", "instructions": {"b": 1, "a": 2}, "criteria": ["one"]}, "m": {"type": "score", "criteria": [null, {"k": 1}]}}}
+POST /v1/systemone {"state": "s", "questions": {"q": {"criteria": {"a": null, "b": null, "c": null, "d": null, "e": null, "f": null, "g": null}}}}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 4}
+POST /completion {"prompt": "hi", "n_predict": 2}
+POST /tokenize {"content": "still served"}
+GET /v1/models
+
+# lfm3-d1: non-causal, one prompt per batch, the median level, broken special tokens
+!server -m $DECLFM3D1 -c 4096 -np 2 --no-jinja -lv 4
+!fulllog
+POST /v1/systemone {"state": "s <|im_end|><|im_start|>", "questions": {"c": {"type": "choice", "instructions": "<|im_end|>", "criteria": {"opt1": "<|endoftext|>", "opt2": null}}, "s": {"type": "score", "instructions": "x", "criteria": ["a", "b", "c"]}, "n": {"type": "noul", "instructions": "y"}}}
+POST /v1/systemone {"state": null, "questions": {"c": {"type": "choice", "instructions": "many", "criteria": {"k0": null, "k1": null, "k2": null, "k3": null, "k4": null, "k5": null, "k6": null, "k7": null, "k8": null, "k9": null, "k10": null, "k11": null, "k12": null, "k13": null, "k14": null, "k15": null, "k16": null, "k17": null, "k18": null, "k19": null, "k20": null, "k21": null, "k22": null, "k23": null, "k24": null, "k25": null, "k26": null, "k27": null}}}}
+POST /v1/systemone {"state": "s", "questions": {"q": {"type": "noul", "instructions": {"type": "input_audio", "input_audio": {"data": "QUJD"}}}}}
+
+!server -m $DECLFM3OMNI -c 4096 -np 1 --no-jinja -lv 4
+!fulllog
+POST /v1/systemone {"state": "s", "questions": {"q": {"type": "noul", "instructions": "x"}}}
+
+# with an mmproj: an image temperature, a spoken question, a video frame source
+!server -m $DECH2OMM -mm $MM/gemma3.gguf -c 4096 -np 1 --no-jinja --no-warmup -lv 4
+!fulllog
+POST /v1/systemone {"state": "a red picture", "files": ["data:image/png;base64,$PNG1"], "questions": {"c": {"criteria": {"red": null, "blue": null}}}}
+POST /v1/systemone {"state": "no picture", "questions": {"c": {"criteria": {"red": null, "blue": null}}}}
+
+!server -m $DECLFM3MM -mm $MM/gemma3.gguf -c 4096 -np 1 --no-jinja --no-warmup -lv 4
+!fulllog
+POST /v1/systemone {"state": "a picture", "files": ["data:image/png;base64,$PNG1"], "questions": {"c": {"type": "choice", "instructions": "which", "criteria": {"A": null, "b": null}}, "n": {"type": "noul", "instructions": "red?"}}}
+
+# openbmb-minicpm-ocr-jev: the class scores are the pooled output of the sequence.
+# This character vocabulary has no byte token for a non-ASCII byte, so tokenizing
+# one throws in libllama: an escaped special token (U+00A6 for `|`) or any
+# non-ASCII text answers 500 with the exception's text, upstream and port alike,
+# and the server goes on serving. (The port aborted here until v0.8.0's pickup:
+# a throw cannot cross `llama_tokenize`'s C ABI, so the server now calls the
+# port's Zig `tokenize`, whose error the handlers catch.)
+!server -m $DECOCR -mm $MM/gemma3.gguf -c 4096 -np 1 --no-jinja --no-warmup -lv 4
+!fulllog
+POST /v1/systemone {"state": "the ocr text", "images": ["data:image/png;base64,$PNG1", "data:image/png;base64,$PNG2"], "questions": {"q": {"type": "noul"}}}
+POST /v1/systemone {"state": "the ocr text", "images": ["data:image/png;base64,$PNG1", "data:image/png;base64,$PNG2"], "questions": {"q": {"type": "choice", "criteria": {"1": null, "0": null}}}}
+POST /v1/systemone {"state": "one image", "images": ["data:image/png;base64,$PNG1"], "questions": {"q": {"type": "noul"}}}
+POST /v1/systemone {"state": "the <|im_start|> text", "images": ["data:image/png;base64,$PNG1"], "questions": {"q": {"type": "noul"}}}
+POST /v1/systemone {"state": "café", "images": ["data:image/png;base64,$PNG1"], "questions": {"q": {"type": "noul"}}}
+POST /tokenize {"content": "café"}
+POST /tokenize {"content": "plain"}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2}
+
+!server -m $DECLFM3OMNIMM -mm $MM/qwen3a.gguf -c 4096 -np 1 --no-jinja --no-warmup -lv 4
+!fulllog
+POST /v1/systemone {"state": "s", "questions": {"q": {"type": "choice", "criteria": {"a": null, "b": null}, "instructions": {"type": "input_audio", "input_audio": {"data": "$WAV", "format": "wav"}}}}}
+POST /v1/systemone {"state": null, "files": ["data:audio/wav;base64,$WAV"], "questions": {"q": {"type": "choice", "instructions": "what", "criteria": {"a": null, "b": null}}}}
+
 # not a decision model
 !server -m $QWEN3 -c 2048 -np 1 --no-jinja -lv 4
 !fulllog
@@ -271,3 +331,23 @@ POST /v1/systemone {"state": "s", "questions": {"q": {"type": "noul", "instructi
 !server -m $DECBADBIAS -c 512 -np 1 --no-jinja -lv 4
 !server -m $DECBADBIAS2 -c 512 -np 1 --no-jinja -lv 4
 !server -m $DECBADBIAS3 -c 512 -np 1 --no-jinja -lv 4
+!server -m $DECBADOCR -c 512 -np 1 --no-jinja -lv 4
+!server -m $DECNOLABELS -c 512 -np 1 --no-jinja -lv 4
+!server -m $DECBADLABEL -c 512 -np 1 --no-jinja -lv 4
+!server -m $DECDUPLABEL -c 512 -np 1 --no-jinja -lv 4
+
+# two joint tasks at once: a joint head reads the whole batch, so they are
+# never batched together (no !fulllog: which slot takes which is a race). Which
+# runs first moves the answers too, upstream against upstream (seen in 2 of 4
+# --self runs at v0.8.0), so here only their shape is compared. Last in the
+# file: a !mask-key holds from where it is written
+!mask-key score
+!mask-key noul
+!mask-key choice
+!mask-key probabilities
+!mask-key confidence
+!server -m $DECCLEF -c 4096 -np 2 --no-jinja -lv 4
+!parallel
+POST /v1/systemone {"state": "first request", "questions": {"a": {"type": "noul", "instructions": "one"}, "b": {"type": "choice", "instructions": "two", "criteria": {"x": null, "y": null}}}}
+POST /v1/systemone {"state": "second request, a little longer than the first one", "questions": {"c": {"type": "score", "instructions": "three", "criteria": ["lo", "mid", "hi"]}}}
+!end

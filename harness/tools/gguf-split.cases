@@ -42,3 +42,10 @@ $VOCAB/ggml-vocab-llama-spm.gguf vs
 !fail --merge $FIX/qwen3-dense.gguf notsplit.gguf
 !fail --merge ld-merged.gguf again.gguf
 !fail --merge /nonexistent-00001-of-00002.gguf x.gguf
+
+# v0.8.0: a short read stops the tool, with the offset, where it used to copy
+# whatever the buffer held
+!fail --split-max-tensors 5 $DATA/trunc.gguf tr
+# --dry-run: what a failed merge leaves on disk is whatever each side's stream
+# had flushed, upstream's std::ofstream dropping its buffer at exit()
+!fail --merge --dry-run $DATA/trunc-merge-00001-of-00001.gguf tm.gguf

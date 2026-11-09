@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.7.0, `620d2225c`), lines
+//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.8.0, `8642541b2`), lines
 //! 5330-5700. Each function names the C function it replaces and the line it
 //! began at.
 //!
@@ -44,7 +44,7 @@ fn warn(comptime fmt: [*:0]const u8, args: anytype) void {
     _ = @call(.auto, fprintf, .{ cStderr(), fmt } ++ args);
 }
 
-/// Ports `validate_float` (ggml-quants.c:5302 @620d2225c).
+/// Ports `validate_float` (ggml-quants.c:5302 @8642541b2).
 fn validateFloat(f: f32, i: usize) bool {
     if (std.math.isInf(f)) {
         warn("ggml_validate_row_data: found inf value at block %zu\n", .{i});
@@ -57,8 +57,8 @@ fn validateFloat(f: f32, i: usize) bool {
     return true;
 }
 
-/// Ports `isinf_fp16` and `isnan_fp16` (ggml-quants.c:5316, 5320 @620d2225c), plus
-/// `validate_fp16` (ggml-quants.c:5324 @620d2225c).
+/// Ports `isinf_fp16` and `isnan_fp16` (ggml-quants.c:5316, 5320 @8642541b2), plus
+/// `validate_fp16` (ggml-quants.c:5324 @8642541b2).
 ///
 /// Tests the bit pattern rather than widening to f32 first: exponent all ones
 /// with a zero mantissa is infinity, with a non-zero mantissa a NaN.
@@ -75,7 +75,7 @@ fn validateFp16(f: blocks.Half, i: usize) bool {
     return true;
 }
 
-/// Ports `validate_e_e8m0` (ggml-quants.c:5338 @620d2225c).
+/// Ports `validate_e_e8m0` (ggml-quants.c:5338 @8642541b2).
 ///
 /// An E8M0 exponent has no mantissa, so 0xFF is its only invalid encoding --
 /// the equivalent of a NaN.
@@ -87,7 +87,7 @@ fn validateE8m0(e: u8, i: usize) bool {
     return true;
 }
 
-/// Ports `VALIDATE_ROW_DATA_D_F16_IMPL` (ggml-quants.c:5347 @620d2225c): one f16 scale
+/// Ports `VALIDATE_ROW_DATA_D_F16_IMPL` (ggml-quants.c:5347 @8642541b2): one f16 scale
 /// per block.
 fn checkD(comptime Block: type, data: [*]const u8, nb: usize) bool {
     const q: [*]const Block = @ptrCast(@alignCast(data));
@@ -97,7 +97,7 @@ fn checkD(comptime Block: type, data: [*]const u8, nb: usize) bool {
     return true;
 }
 
-/// Ports `VALIDATE_ROW_DATA_DM_F16_IMPL` (ggml-quants.c:5355 @620d2225c): a scale and a
+/// Ports `VALIDATE_ROW_DATA_DM_F16_IMPL` (ggml-quants.c:5355 @8642541b2): a scale and a
 /// second f16, named `m` on the legacy formats and `dmin` on the K-quants.
 fn checkDM(comptime Block: type, comptime second: []const u8, data: [*]const u8, nb: usize) bool {
     const q: [*]const Block = @ptrCast(@alignCast(data));
@@ -108,7 +108,7 @@ fn checkDM(comptime Block: type, comptime second: []const u8, data: [*]const u8,
     return true;
 }
 
-/// Ports `VALIDATE_ROW_DATA_E_E8M0_IMPL` (ggml-quants.c:5363 @620d2225c).
+/// Ports `VALIDATE_ROW_DATA_E_E8M0_IMPL` (ggml-quants.c:5363 @8642541b2).
 fn checkE(comptime Block: type, data: [*]const u8, nb: usize) bool {
     const q: [*]const Block = @ptrCast(@alignCast(data));
     for (0..nb) |i| {
@@ -117,7 +117,7 @@ fn checkE(comptime Block: type, data: [*]const u8, nb: usize) bool {
     return true;
 }
 
-/// Ports `VALIDATE_ROW_DATA_DVEC_F16_IMPL` (ggml-quants.c:5371 @620d2225c): a vector of
+/// Ports `VALIDATE_ROW_DATA_DVEC_F16_IMPL` (ggml-quants.c:5371 @8642541b2): a vector of
 /// scales per block, which only `nvfp4` has.
 fn checkDVec(comptime Block: type, comptime nr: usize, data: [*]const u8, nb: usize) bool {
     const q: [*]const Block = @ptrCast(@alignCast(data));
@@ -129,7 +129,7 @@ fn checkDVec(comptime Block: type, comptime nr: usize, data: [*]const u8, nb: us
     return true;
 }
 
-/// Ports `ggml_validate_row_data` (ggml-quants.c:5381 @620d2225c).
+/// Ports `ggml_validate_row_data` (ggml-quants.c:5381 @8642541b2).
 ///
 /// Parameters:
 /// - `t`: the format `data` is in.

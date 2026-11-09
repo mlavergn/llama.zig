@@ -6,7 +6,7 @@
 //!
 //! **Not a port.** The files it re-exports port parts of
 //! `llama.cpp/vendor/cpp-httplib/httplib.cpp` and `httplib.h` (cpp-httplib
-//! 0.61.0, vendored at v0.7.0, `620d2225c`); each names its own.
+//! 0.62.0, vendored at v0.8.0, `8642541b2`); each names its own.
 
 const std = @import("std");
 
@@ -16,6 +16,7 @@ pub const message = @import("message.zig");
 pub const thread_pool = @import("thread_pool.zig");
 pub const server = @import("server.zig");
 pub const client = @import("client.zig");
+pub const ws = @import("ws.zig");
 
 pub const Headers = detail.Headers;
 pub const Params = detail.Params;

@@ -49,6 +49,7 @@ fn showMsg(m: *const Msg) !void {
     for (m.content_parts.items) |p| {
         try str("part.type", p.type);
         try str("part.text", p.text);
+        try str("part.name", p.name);
     }
     for (m.tool_calls.items) |tc| {
         try str("tc.name", tc.name);
@@ -58,6 +59,7 @@ fn showMsg(m: *const Msg) !void {
     try str("reasoning_content", m.reasoning_content);
     try str("tool_name", m.tool_name);
     try str("tool_call_id", m.tool_call_id);
+    try str("extra_json", m.extra_json);
     try line("empty {d} media {d}", .{ @intFromBool(m.empty()), @intFromBool(m.containsMedia()) });
     try guarded(oai(m, false, "oai"));
     try guarded(oai(m, true, "oai_concat"));
@@ -119,6 +121,7 @@ fn opT(j: *Value) !void {
         try str("name", t.name);
         try str("description", t.description);
         try str("parameters", t.parameters);
+        try line("defer_loading {d}", .{@intFromBool(t.defer_loading)});
     }
     try guarded(toolsBack(tools.items));
 }

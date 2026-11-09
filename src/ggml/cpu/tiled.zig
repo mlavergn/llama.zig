@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cpu/tiled/tiled.cpp` and
-//! `llama.cpp/ggml/src/ggml-cpu/tiled/tiled.h` (v0.7.0, `620d2225c`), new at
+//! `llama.cpp/ggml/src/ggml-cpu/tiled/tiled.h` (v0.8.0, `8642541b2`), new at
 //! v0.6.0, where they replace `iqp.cpp`: the per-format unpackers, the
 //! eligibility test, the workspace sizing, the window drivers and the two
 //! entry points `ggml-cpu.c` calls. The microkernels and the tile structs are
@@ -14,7 +14,7 @@
 //! # Only live on x86
 //!
 //! `ggml_tiled_supported` has two arms. Off AVX it is a stub returning
-//! false (tiled.cpp:598 @620d2225c), which is the arm this Mac compiles: so here
+//! false (tiled.cpp:598 @8642541b2), which is the arm this Mac compiles: so here
 //! `ggml_tiled_wdata_size` is 0, `ggml_graph_plan` only pads the `mul_mat`
 //! work size to 64, and both entry points return false at once. On AVX2 and
 //! up it takes every K-quant and grid IQ type whose `src0` is not in a
@@ -99,7 +99,7 @@ fn kScaleMins(scales12: *const [12]u8) [16]u8 {
     return out;
 }
 
-/// Ports `tiled_unpack_src0` for `block_q4_K` (tiled.cpp:21 @620d2225c).
+/// Ports `tiled_unpack_src0` for `block_q4_K` (tiled.cpp:21 @8642541b2).
 fn unpackQ4K(rows: [*]const qblocks.Q4_K, row_stride: i64, n_rows: c_int, tile: *TileSrc0, num_k: c_int) void {
     const NB = 8; // 32-wide subblocks
     const u = Unpack.of(NB, n_rows, num_k);
@@ -129,7 +129,7 @@ fn unpackQ4K(rows: [*]const qblocks.Q4_K, row_stride: i64, n_rows: c_int, tile: 
     }
 }
 
-/// Ports `tiled_unpack_src0` for `block_q5_K` (tiled.cpp:66 @620d2225c): the
+/// Ports `tiled_unpack_src0` for `block_q5_K` (tiled.cpp:66 @8642541b2): the
 /// `q4_K` codes with the fifth bit ORed in from `qh`.
 fn unpackQ5K(rows: [*]const qblocks.Q5_K, row_stride: i64, n_rows: c_int, tile: *TileSrc0, num_k: c_int) void {
     const NB = 8; // 32-wide subblocks
@@ -169,7 +169,7 @@ fn unpackQ5K(rows: [*]const qblocks.Q5_K, row_stride: i64, n_rows: c_int, tile: 
     }
 }
 
-/// Ports `tiled_unpack_src0` for `block_q6_K` (tiled.cpp:121 @620d2225c).
+/// Ports `tiled_unpack_src0` for `block_q6_K` (tiled.cpp:121 @8642541b2).
 fn unpackQ6K(rows: [*]const qblocks.Q6_K, row_stride: i64, n_rows: c_int, tile: *TileSrc0, num_k: c_int) void {
     const NB = 16; // 16-wide subblocks
     const u = Unpack.of(NB, n_rows, num_k);
@@ -200,7 +200,7 @@ fn unpackQ6K(rows: [*]const qblocks.Q6_K, row_stride: i64, n_rows: c_int, tile: 
     }
 }
 
-/// Ports `tiled_unpack_src0` for `block_q3_K` (tiled.cpp:152 @620d2225c):
+/// Ports `tiled_unpack_src0` for `block_q3_K` (tiled.cpp:152 @8642541b2):
 /// 2-bit codes with the third bit from `hmask`, 6-bit scales stored as
 /// `scales - 32`.
 fn unpackQ3K(rows: [*]const qblocks.Q3_K, row_stride: i64, n_rows: c_int, tile: *TileSrc0, num_k: c_int) void {
@@ -253,7 +253,7 @@ fn unpackQ3K(rows: [*]const qblocks.Q3_K, row_stride: i64, n_rows: c_int, tile: 
     }
 }
 
-/// Ports `tiled_unpack_src0` for `block_q2_K` (tiled.cpp:199 @620d2225c).
+/// Ports `tiled_unpack_src0` for `block_q2_K` (tiled.cpp:199 @8642541b2).
 fn unpackQ2K(rows: [*]const qblocks.Q2_K, row_stride: i64, n_rows: c_int, tile: *TileSrc0, num_k: c_int) void {
     const NB = 16; // 16-wide subblocks
     const u = Unpack.of(NB, n_rows, num_k);
@@ -291,7 +291,7 @@ const iq4_lut: [16]u8 = blk: {
     break :blk t;
 };
 
-/// Ports `tiled_unpack_src0` for `block_iq4_xs` (tiled.cpp:238 @620d2225c):
+/// Ports `tiled_unpack_src0` for `block_iq4_xs` (tiled.cpp:238 @8642541b2):
 /// 4-bit codes through `kvalues_iq4nl + 128`, 6-bit scales stored as
 /// `ls - 32`.
 fn unpackIq4Xs(rows: [*]const qblocks.IQ4_XS, row_stride: i64, n_rows: c_int, tile: *TileSrc0, num_k: c_int) void {
@@ -327,7 +327,7 @@ fn unpackIq4Xs(rows: [*]const qblocks.IQ4_XS, row_stride: i64, n_rows: c_int, ti
     }
 }
 
-/// Ports `tiled_unpack_src0` for `block_iq2_xxs` (tiled.cpp:285 @620d2225c).
+/// Ports `tiled_unpack_src0` for `block_iq2_xxs` (tiled.cpp:285 @8642541b2).
 fn unpackIq2Xxs(rows: [*]const qblocks.IQ2_XXS, row_stride: i64, n_rows: c_int, tile: *TileSrc0, num_k: c_int) void {
     const NB = 8; // 32-wide subblocks
     const u = Unpack.of(NB, n_rows, num_k);
@@ -356,7 +356,7 @@ fn unpackIq2Xxs(rows: [*]const qblocks.IQ2_XXS, row_stride: i64, n_rows: c_int, 
     }
 }
 
-/// Ports `tiled_unpack_src0` for `block_iq2_xs` (tiled.cpp:318 @620d2225c).
+/// Ports `tiled_unpack_src0` for `block_iq2_xs` (tiled.cpp:318 @8642541b2).
 fn unpackIq2Xs(rows: [*]const qblocks.IQ2_XS, row_stride: i64, n_rows: c_int, tile: *TileSrc0, num_k: c_int) void {
     const NB = 16; // 16-wide subblocks
     const u = Unpack.of(NB, n_rows, num_k);
@@ -384,7 +384,7 @@ fn unpackIq2Xs(rows: [*]const qblocks.IQ2_XS, row_stride: i64, n_rows: c_int, ti
     }
 }
 
-/// Ports `tiled_unpack_src0` for `block_iq2_s` (tiled.cpp:350 @620d2225c):
+/// Ports `tiled_unpack_src0` for `block_iq2_s` (tiled.cpp:350 @8642541b2):
 /// the sign bytes share `qs`, as in the reference.
 fn unpackIq2S(rows: [*]const qblocks.IQ2_S, row_stride: i64, n_rows: c_int, tile: *TileSrc0, num_k: c_int) void {
     const NB = 16; // 16-wide subblocks
@@ -415,7 +415,7 @@ fn unpackIq2S(rows: [*]const qblocks.IQ2_S, row_stride: i64, n_rows: c_int, tile
     }
 }
 
-/// Ports `tiled_unpack_src0` for `block_iq3_xxs` (tiled.cpp:383 @620d2225c).
+/// Ports `tiled_unpack_src0` for `block_iq3_xxs` (tiled.cpp:383 @8642541b2).
 fn unpackIq3Xxs(rows: [*]const qblocks.IQ3_XXS, row_stride: i64, n_rows: c_int, tile: *TileSrc0, num_k: c_int) void {
     const NB = 8; // 32-wide subblocks
     const u = Unpack.of(NB, n_rows, num_k);
@@ -446,7 +446,7 @@ fn unpackIq3Xxs(rows: [*]const qblocks.IQ3_XXS, row_stride: i64, n_rows: c_int, 
     }
 }
 
-/// Ports `tiled_unpack_src0` for `block_iq3_s` (tiled.cpp:418 @620d2225c).
+/// Ports `tiled_unpack_src0` for `block_iq3_s` (tiled.cpp:418 @8642541b2).
 fn unpackIq3S(rows: [*]const qblocks.IQ3_S, row_stride: i64, n_rows: c_int, tile: *TileSrc0, num_k: c_int) void {
     const NB = 8; // 32-wide subblocks
     const u = Unpack.of(NB, n_rows, num_k);
@@ -483,7 +483,7 @@ fn unpackIq3S(rows: [*]const qblocks.IQ3_S, row_stride: i64, n_rows: c_int, tile
     }
 }
 
-/// Ports `tiled_unpack_src0` for `block_iq1_s` (tiled.cpp:458 @620d2225c):
+/// Ports `tiled_unpack_src0` for `block_iq1_s` (tiled.cpp:458 @8642541b2):
 /// the ternary grid times 8, offset by the delta and 128.
 fn unpackIq1S(rows: [*]const qblocks.IQ1_S, row_stride: i64, n_rows: c_int, tile: *TileSrc0, num_k: c_int) void {
     const NB = 8; // 32-wide subblocks
@@ -512,7 +512,7 @@ fn unpackIq1S(rows: [*]const qblocks.IQ1_S, row_stride: i64, n_rows: c_int, tile
     }
 }
 
-/// Ports `tiled_unpack_src0` for `block_iq1_m` (tiled.cpp:490 @620d2225c):
+/// Ports `tiled_unpack_src0` for `block_iq1_m` (tiled.cpp:490 @8642541b2):
 /// `iq1_s` with the f16 scale spread across the scale words and a delta per
 /// eight.
 fn unpackIq1M(rows: [*]const qblocks.IQ1_M, row_stride: i64, n_rows: c_int, tile: *TileSrc0, num_k: c_int) void {
@@ -559,7 +559,7 @@ fn unpackIq1M(rows: [*]const qblocks.IQ1_M, row_stride: i64, n_rows: c_int, tile
     }
 }
 
-/// Ports `tiled_unpack_src1_q8_K` (tiled.cpp:540 @620d2225c): `num_k`
+/// Ports `tiled_unpack_src1_q8_K` (tiled.cpp:540 @8642541b2): `num_k`
 /// consecutive `q8_K` blocks of each row into the tile, the ragged tail of
 /// the 16-row band zeroed. Codes stay natural; `repackSrc1` rearranges them
 /// just in time.
@@ -622,21 +622,21 @@ const EnvFlags = struct {
 
 var env_flags: EnvFlags = .{};
 
-/// Ports `ggml_tiled_matmul_enabled` (tiled.cpp:573 @620d2225c):
+/// Ports `ggml_tiled_matmul_enabled` (tiled.cpp:573 @8642541b2):
 /// `GGML_CPU_TILED_MM`, the master switch, on unless set to 0.
 fn matmulEnabled() bool {
     return env_flags.get().enabled;
 }
 
-/// Ports `ggml_tiled_matmul_forced` (tiled.cpp:584 @620d2225c):
+/// Ports `ggml_tiled_matmul_forced` (tiled.cpp:584 @8642541b2):
 /// `GGML_CPU_TILED_MM_FORCE=1` takes the tiled path even when unprofitable.
 fn matmulForced() bool {
     return env_flags.get().forced;
 }
 
-/// Ports `ggml_tiled_supported` (tiled.cpp:605 @620d2225c), the arm under
+/// Ports `ggml_tiled_supported` (tiled.cpp:605 @8642541b2), the arm under
 /// `__AVX512VNNI__ || __AVX2__ || __AVX__`, and `ggml_tiled_supported`
-/// (tiled.cpp:598 @620d2225c), the stub every other build compiles.
+/// (tiled.cpp:598 @8642541b2), the stub every other build compiles.
 fn tiledSupported(src0: *const Tensor, src1: *const Tensor) bool {
     // The C goes on to refuse a `src1` that is neither F32 nor a contiguous
     // Q8_K, after the `switch` below -- dead code there, since every arm of
@@ -671,14 +671,14 @@ fn tiledSupported(src0: *const Tensor, src1: *const Tensor) bool {
     }
 }
 
-/// Ports `ggml_tiled_ws_size` (tiled.cpp:647 @620d2225c): one thread's slot,
+/// Ports `ggml_tiled_ws_size` (tiled.cpp:647 @8642541b2): one thread's slot,
 /// 0 when disabled.
 fn wsSize() usize {
     if (!matmulEnabled()) return 0;
     return kernel.ws_slot;
 }
 
-/// Ports `ggml_tiled_wdata_size` (tiled.cpp:654 @620d2225c).
+/// Ports `ggml_tiled_wdata_size` (tiled.cpp:654 @8642541b2).
 ///
 /// Parameters:
 /// - `n_tasks`: the threads the node runs on.
@@ -693,7 +693,7 @@ pub export fn ggml_tiled_wdata_size(n_tasks: c_int, dst: *const Tensor) callconv
     return 64 + @as(usize, @intCast(n_tasks)) * wsSize();
 }
 
-/// Ports `ggml_tiled_narrow_k_extent` (tiled.cpp:664 @620d2225c): how many
+/// Ports `ggml_tiled_narrow_k_extent` (tiled.cpp:664 @8642541b2): how many
 /// K a narrow window reads contiguously, within a 31 KB L1 budget.
 fn narrowKExtent(n_rows: i64, ne00: i64) c_int {
     const l1: c_int = 31 * 1024; // fit weights in 31k to leave room for scales
@@ -710,7 +710,7 @@ fn narrowKExtent(n_rows: i64, ne00: i64) c_int {
     return if (ke < tile_k) 0 else ke;
 }
 
-/// Ports `tiled_store_window` (tiled.cpp:680 @620d2225c): the `j`-major
+/// Ports `tiled_store_window` (tiled.cpp:680 @8642541b2): the `j`-major
 /// window written back `i`-major, 16x8 blocks then the ragged tails.
 fn storeWindow(buf: [*]const f32, n_src0: c_int, n_src1: c_int, buf_stride: c_int, dst: [*]f32, dst_stride: usize) void {
     const bs: usize = @intCast(buf_stride);
@@ -735,11 +735,11 @@ fn storeWindow(buf: [*]const f32, n_src0: c_int, n_src1: c_int, buf_stride: c_in
     }
 }
 
-/// Ports `TILED_MMID_GROUP` (tiled.cpp:719 @620d2225c): `src0` rows per
+/// Ports `TILED_MMID_GROUP` (tiled.cpp:719 @8642541b2): `src0` rows per
 /// `MUL_MAT_ID` group, finer than a window so small experts still split.
 const mmid_group = 64;
 
-/// Ports `tiled_store_window_scatter` (tiled.cpp:723 @620d2225c):
+/// Ports `tiled_store_window_scatter` (tiled.cpp:723 @8642541b2):
 /// `storeWindow` into columns that are not contiguous with each other.
 fn storeWindowScatter(buf: [*]const f32, n_src0: c_int, n_src1: c_int, buf_stride: c_int, col_ptrs: [*]const [*]f32) void {
     const bs: usize = @intCast(buf_stride);
@@ -783,7 +783,7 @@ fn fmt(comptime t: c.enum_ggml_type, comptime B: type, comptime SUBBLK: usize, c
 }
 
 /// The constants of `ggml_tiled_matmul_type_dispatch` (tiled.cpp:1164
-/// @620d2225c), by `src0` type.
+/// @8642541b2), by `src0` type.
 fn formatOf(comptime t: c.enum_ggml_type) Format {
     return switch (t) {
         c.GGML_TYPE_Q6_K => fmt(t, qblocks.Q6_K, 16, false, 32, true),
@@ -834,7 +834,7 @@ inline fn unpackFn(comptime f: Format) *const fn ([*]const f.B, i64, c_int, *Til
 // -----------------------------------------------------------------------------
 // The drivers
 
-/// Ports `tiled_mmid_gemm_window` (tiled.cpp:760 @620d2225c): one `(g, k)`
+/// Ports `tiled_mmid_gemm_window` (tiled.cpp:760 @8642541b2): one `(g, k)`
 /// macrotile of `MUL_MAT_ID` -- zero the window, sweep K in 256-element
 /// slabs (or `narrowKExtent` chunks for 16 rows or fewer), scatter the rows.
 fn mmidGemmWindow(
@@ -918,7 +918,7 @@ fn mmidGemmWindow(
 }
 
 /// Ports `ggml_compute_forward_mul_mat_id_tiled_one_expert`
-/// (tiled.cpp:838 @620d2225c): one expert, its routed rows swept in
+/// (tiled.cpp:838 @8642541b2): one expert, its routed rows swept in
 /// windows of up to 256 over this thread's share of `src0`'s row groups.
 fn mulMatIdOneExpert(
     comptime a: Arm,
@@ -978,7 +978,7 @@ fn mulMatIdOneExpert(
 }
 
 /// Ports `ggml_compute_forward_mul_mat_tiled_one_chunk`
-/// (tiled.cpp:896 @620d2225c): one chunk of `MUL_MAT`, in 256x256 windows
+/// (tiled.cpp:896 @8642541b2): one chunk of `MUL_MAT`, in 256x256 windows
 /// clamped at each `src1` batch boundary.
 fn mulMatOneChunk(
     comptime a: Arm,
@@ -1108,7 +1108,7 @@ fn mulMatOneChunk(
 }
 
 /// Ports `ggml_compute_forward_mul_mat_tiled_driver` (tiled.cpp:1028
-/// @620d2225c): the whole `MUL_MAT`, entered by every thread -- `src1` to
+/// @8642541b2): the whole `MUL_MAT`, entered by every thread -- `src1` to
 /// `q8_K`, a barrier, then chunks of up to 256x256 handed out by the
 /// threadpool's counter, the chunk size halved until there are four per
 /// thread.
@@ -1217,8 +1217,8 @@ fn mulMatDriver(comptime a: Arm, comptime f: Format, params: *const ComputeParam
     }
 }
 
-/// Ports `tiled_matmul_dispatch` (tiled.cpp:1149 @620d2225c) and
-/// `ggml_tiled_matmul_type_dispatch` (tiled.cpp:1164 @620d2225c): the
+/// Ports `tiled_matmul_dispatch` (tiled.cpp:1149 @8642541b2) and
+/// `ggml_tiled_matmul_type_dispatch` (tiled.cpp:1164 @8642541b2): the
 /// `src0` type switch both ops share -- one expert of `MUL_MAT_ID` when
 /// `expert_rows` is set, the whole `MUL_MAT` otherwise.
 ///
@@ -1246,13 +1246,13 @@ fn typeDispatch(
     return false;
 }
 
-/// Ports `ggml_tiled_min_batch` (tiled.cpp:1202 @620d2225c): profitable from
+/// Ports `ggml_tiled_min_batch` (tiled.cpp:1202 @8642541b2): profitable from
 /// 8 rows, or always when forced.
 fn minBatch(rows: i64) bool {
     return rows >= 8 or matmulForced();
 }
 
-/// Ports `ggml_compute_forward_mul_mat_tiled` (tiled.cpp:1209 @620d2225c).
+/// Ports `ggml_compute_forward_mul_mat_tiled` (tiled.cpp:1209 @8642541b2).
 ///
 /// Parameters:
 /// - `params`: this thread's index, count and work buffer.
@@ -1269,7 +1269,7 @@ pub export fn ggml_compute_forward_mul_mat_tiled(params: *const ComputeParams, d
 }
 
 /// Ports `ggml_compute_forward_mul_mat_id_tiled` (tiled.cpp:1227
-/// @620d2225c): one expert of `MUL_MAT_ID`, its eligibility decided here.
+/// @8642541b2): one expert of `MUL_MAT_ID`, its eligibility decided here.
 ///
 /// Parameters:
 /// - `params`: this thread's index, count and work buffer.

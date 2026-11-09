@@ -8,7 +8,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/bert.cpp` at v0.7.0 (`620d2225c`):
+//! Ported from `llama.cpp/src/models/bert.cpp` at v0.8.0 (`8642541b2`):
 //! `llama_model_bert`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -24,7 +24,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_bert`'s `load_arch_hparams` (models/bert.cpp:3 @620d2225c).
+/// Ports `llama_model_bert`'s `load_arch_hparams` (models/bert.cpp:3 @8642541b2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_eps = (try ml.meta.getKey(f32, .attention_layernorm_eps, true, exc)).?;
@@ -42,7 +42,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_bert`'s `load_arch_tensors` (models/bert.cpp:23 @620d2225c).
+/// Ports `llama_model_bert`'s `load_arch_tensors` (models/bert.cpp:23 @8642541b2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     return loadBertTensors(self, .{ .pos_cls = true, .moe = false, .gate = false }, exc);
 }
@@ -111,13 +111,13 @@ pub fn loadBertTensors(self: *Model, comptime v: BertTensors, exc: *Exception) T
     }
 }
 
-/// Ports `llama_model_bert`'s `build_arch_graph` (models/bert.cpp:64 @620d2225c).
+/// Ports `llama_model_bert`'s `build_arch_graph` (models/bert.cpp:64 @8642541b2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_bert`'s `graph`
-/// (models/bert.cpp:68 @620d2225c), which Jina-BERT v2 and v3 and
+/// (models/bert.cpp:68 @8642541b2), which Jina-BERT v2 and v3 and
 /// Nomic-BERT build with too.
 ///
 /// Parameters:

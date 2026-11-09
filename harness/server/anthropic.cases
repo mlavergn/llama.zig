@@ -25,6 +25,13 @@ POST /v1/messages {"model": "claude", "max_tokens": 60, "tools": [{"name": "get_
 POST /v1/messages {"model": "claude", "max_tokens": 60, "tools": [{"name": "get_weather", "input_schema": {"type": "object", "properties": {"city": {"type": "string"}}}}], "messages": [{"role": "user", "content": "Weather in Rome?"}, {"role": "assistant", "content": [{"type": "text", "text": "Checking."}, {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "Rome"}}]}, {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "Cloudy"}]}], "temperature": 0, "chat_template_kwargs": {"enable_thinking": false}}
 POST /v1/messages {"model": "claude", "max_tokens": 60, "messages": [{"role": "user", "content": "Weather?"}, {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_2", "name": "get_weather", "input": {}}]}, {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_2", "content": [{"type": "text", "text": "Hot"}, {"type": "text", "text": " and dry"}]}, {"type": "text", "text": "Summarize."}]}], "temperature": 0, "chat_template_kwargs": {"enable_thinking": false}}
 
+# v0.8.0: llama.cpp parameters, a pinned slot, deferred tools and tool references
+POST /v1/messages {"model": "claude", "max_tokens": 16, "messages": [{"role": "user", "content": "Say ok."}], "extra_params": {"seed": 7, "min_p": 0.2, "temperature": 0.8}}
+POST /v1/messages {"model": "claude", "max_tokens": 8, "messages": [{"role": "user", "content": "Say ok."}], "extra_params": 5, "temperature": 0}
+POST /v1/messages {"model": "claude", "max_tokens": 8, "id_slot": 0, "messages": [{"role": "user", "content": "Say ok."}], "temperature": 0}
+POST /v1/messages {"model": "claude", "max_tokens": 16, "tools": [{"name": "search", "input_schema": {"type": "object"}}, {"name": "hidden", "defer_loading": true, "input_schema": {"type": "object"}}], "messages": [{"role": "user", "content": "Hi"}], "temperature": 0}
+POST /v1/messages {"model": "claude", "max_tokens": 16, "tools": [{"name": "search", "input_schema": {"type": "object"}}, {"name": "hidden", "defer_loading": true, "input_schema": {"type": "object"}}], "messages": [{"role": "user", "content": "Find it"}, {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "search", "input": {}}]}, {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": [{"type": "text", "text": "found"}, {"type": "tool_reference", "tool_name": "hidden"}]}]}], "temperature": 0}
+
 # refusals
 POST /v1/messages {"model": "claude"}
 POST /v1/messages {"messages": [{"role": "user", "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"}}]}]}

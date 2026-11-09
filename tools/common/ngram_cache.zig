@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/ngram-cache.h` and
-//! `llama.cpp/common/ngram-cache.cpp` at v0.7.0 (`620d2225c`). Each
+//! `llama.cpp/common/ngram-cache.cpp` at v0.8.0 (`8642541b2`). Each
 //! declaration names the C++ it replaces and the line it began at.
 //!
 //! # Iteration order
@@ -23,12 +23,12 @@ const log = @import("log.zig");
 const io = @import("io.zig");
 
 /// Ports `LLAMA_NGRAM_MIN`, `LLAMA_NGRAM_MAX`, `LLAMA_NGRAM_STATIC`
-/// (ngram-cache.h:9, 10, 11 @620d2225c).
+/// (ngram-cache.h:9, 10, 11 @8642541b2).
 pub const ngram_min = 1;
 pub const ngram_max = 4;
 pub const ngram_static = 2;
 
-/// Ports `common_ngram` (ngram-cache.h:15 @620d2225c): up to four tokens,
+/// Ports `common_ngram` (ngram-cache.h:15 @8642541b2): up to four tokens,
 /// padded with `LLAMA_TOKEN_NULL`. Saved to disk as its 16 bytes.
 pub const Ngram = extern struct {
     tokens: [ngram_max]c.llama_token,
@@ -62,13 +62,13 @@ pub const Ngram = extern struct {
     }
 };
 
-/// Ports `common_token_hash_function` (ngram-cache.h:40 @620d2225c):
+/// Ports `common_token_hash_function` (ngram-cache.h:40 @8642541b2):
 /// Fibonacci hashing, the token widened to 64 bits with its sign.
 pub fn tokenHash(token: c.llama_token) u64 {
     return @as(u64, @bitCast(@as(i64, token))) *% 11400714819323198485;
 }
 
-/// Ports `common_ngram_hash_function` (ngram-cache.h:47 @620d2225c).
+/// Ports `common_ngram_hash_function` (ngram-cache.h:47 @8642541b2).
 pub fn ngramHash(ngram: Ngram) u64 {
     var hash = tokenHash(ngram.tokens[0]);
     for (1..ngram_max) |i| {
@@ -77,11 +77,11 @@ pub fn ngramHash(ngram: Ngram) u64 {
     return hash;
 }
 
-/// Ports `common_ngram_cache_part` (ngram-cache.h:58 @620d2225c): token to
+/// Ports `common_ngram_cache_part` (ngram-cache.h:58 @8642541b2): token to
 /// the number of times it has been seen, keyed by `std::hash<int>`.
 pub const CachePart = cxx.HashMap(c.llama_token, i32, cxx.hashInt, cxx.eqlInt);
 
-/// Ports `common_ngram_cache` (ngram-cache.h:61 @620d2225c): n-gram to the
+/// Ports `common_ngram_cache` (ngram-cache.h:61 @8642541b2): n-gram to the
 /// empirical distribution of the tokens following it. Owns its parts.
 pub const Cache = cxx.HashMap(Ngram, CachePart, ngramHash, Ngram.eql);
 
@@ -97,7 +97,7 @@ pub fn cloneCache(allocator: std.mem.Allocator, cache: *const Cache) error{OutOf
     return cache.clone(allocator);
 }
 
-/// Ports `common_ngram_cache_update` (ngram-cache.cpp:12 @620d2225c): count
+/// Ports `common_ngram_cache_update` (ngram-cache.cpp:12 @8642541b2): count
 /// every n-gram ending in the last `nnew` tokens of `inp`.
 ///
 /// Parameters:
@@ -148,7 +148,7 @@ pub fn update(cache: *Cache, ngram_min_: i32, ngram_max_: i32, inp: []const c.ll
     }
 }
 
-/// Ports `get_token` (ngram-cache.cpp:55 @620d2225c): token `i` of `inp`
+/// Ports `get_token` (ngram-cache.cpp:55 @8642541b2): token `i` of `inp`
 /// followed by `draft` without its first token. An index the C++ would read
 /// out of bounds -- `i` wrapped from a negative start, when `inp` is
 /// shorter than an n-gram -- is undefined there and `LLAMA_TOKEN_NULL` here.
@@ -160,13 +160,13 @@ fn getToken(inp: []const c.llama_token, draft_: []const c.llama_token, i: u64) c
 
 /// Ports `draft_min_sample_size_lax`, `draft_min_percent_lax`,
 /// `draft_min_sample_size_strict`, `draft_min_percent_strict`
-/// (ngram-cache.cpp:60, 61, 62, 63 @620d2225c): below these the draft stops.
+/// (ngram-cache.cpp:60, 61, 62, 63 @8642541b2): below these the draft stops.
 const draft_min_sample_size_lax = [ngram_max]i32{ 2, 2, 1, 1 };
 const draft_min_percent_lax = [ngram_max]i32{ 66, 50, 50, 50 };
 const draft_min_sample_size_strict = [ngram_max]i32{ 4, 3, 2, 2 };
 const draft_min_percent_strict = [ngram_max]i32{ 75, 66, 66, 66 };
 
-/// Ports `try_draft` (ngram-cache.cpp:66 @620d2225c), the overload over the
+/// Ports `try_draft` (ngram-cache.cpp:66 @8642541b2), the overload over the
 /// static cache alone: its most frequent token, if seen often enough.
 fn tryDraftStatic(nc_static: *const Cache, ngram_static_: Ngram) c.llama_token {
     const part_static = nc_static.get(ngram_static_) orelse return c.LLAMA_TOKEN_NULL;
@@ -196,7 +196,7 @@ fn tryDraftStatic(nc_static: *const Cache, ngram_static_: Ngram) c.llama_token {
     return max_token;
 }
 
-/// Ports `try_draft` (ngram-cache.cpp:98 @620d2225c), the overload over a
+/// Ports `try_draft` (ngram-cache.cpp:98 @8642541b2), the overload over a
 /// primary cache (context or dynamic), validated against the static part:
 /// the longest n-gram first.
 fn tryDraft(nc_primary: *const Cache, ngrams_primary: []const Ngram, part_static: ?*const CachePart, min_sample_size: *const [ngram_max]i32, min_percent: *const [ngram_max]i32) c.llama_token {
@@ -242,7 +242,7 @@ fn tryDraft(nc_primary: *const Cache, ngrams_primary: []const Ngram, part_static
     return drafted_token;
 }
 
-/// Ports `common_ngram_cache_draft` (ngram-cache.cpp:146 @620d2225c): extend
+/// Ports `common_ngram_cache_draft` (ngram-cache.cpp:146 @8642541b2): extend
 /// `draft_out` one token at a time from the context cache, then the dynamic
 /// one, then the static one, until none answers or `n_draft` are drafted.
 ///
@@ -314,7 +314,7 @@ extern fn fclose(f: *FILE) c_int;
 extern fn fwrite(ptr: *const anyopaque, size: usize, n: usize, f: *FILE) usize;
 extern fn fread(ptr: *anyopaque, size: usize, n: usize, f: *FILE) usize;
 
-/// Ports `common_ngram_cache_save` (ngram-cache.cpp:200 @620d2225c): each
+/// Ports `common_ngram_cache_save` (ngram-cache.cpp:198 @8642541b2): each
 /// n-gram's 16 bytes, its token count, and its `(token, count)` pairs, in
 /// iteration order. A file that cannot be opened is written to as the
 /// C++'s failed `std::ofstream` is: not at all, silently.
@@ -329,9 +329,9 @@ pub fn save(cache: *const Cache, filename: [:0]const u8) void {
     while (it.next()) |item| {
         const ngram = item.key;
         const token_counts = item.value;
-        if (token_counts.count() == 0) _ = c.ggml_abort("ngram-cache.cpp", 205, "GGML_ASSERT(%s) failed", "!token_counts.empty()");
+        if (token_counts.count() == 0) _ = c.ggml_abort("ngram-cache.cpp", 203, "GGML_ASSERT(%s) failed", "!token_counts.empty()");
         const ntokens: i32 = @intCast(token_counts.count());
-        if (!(ntokens > 0)) _ = c.ggml_abort("ngram-cache.cpp", 207, "GGML_ASSERT(%s) failed", "ntokens > 0");
+        if (!(ntokens > 0)) _ = c.ggml_abort("ngram-cache.cpp", 205, "GGML_ASSERT(%s) failed", "ntokens > 0");
 
         _ = fwrite(&ngram, @sizeOf(Ngram), 1, f);
         _ = fwrite(&ntokens, @sizeOf(i32), 1, f);
@@ -339,7 +339,7 @@ pub fn save(cache: *const Cache, filename: [:0]const u8) void {
         while (it2.next()) |item2| {
             const token = item2.key;
             const count_ = item2.value.*;
-            if (!(count_ > 0)) _ = c.ggml_abort("ngram-cache.cpp", 214, "GGML_ASSERT(%s) failed", "count > 0");
+            if (!(count_ > 0)) _ = c.ggml_abort("ngram-cache.cpp", 212, "GGML_ASSERT(%s) failed", "count > 0");
 
             _ = fwrite(&token, @sizeOf(c.llama_token), 1, f);
             _ = fwrite(&count_, @sizeOf(i32), 1, f);
@@ -361,7 +361,7 @@ const Reader = struct {
     }
 };
 
-/// Ports `common_ngram_cache_load` (ngram-cache.cpp:222 @620d2225c). Records
+/// Ports `common_ngram_cache_load` (ngram-cache.cpp:220 @8642541b2). Records
 /// end at the first n-gram that does not read whole; a record cut short
 /// after its n-gram aborts, as the C++'s assertions do.
 ///
@@ -384,19 +384,19 @@ pub fn load(allocator: std.mem.Allocator, filename: [:0]const u8) error{ OutOfMe
     var count_: i32 = 0;
 
     while (hashmap_file.read(std.mem.asBytes(&ngram))) {
-        if (hashmap_file.eof) _ = c.ggml_abort("ngram-cache.cpp", 239, "GGML_ASSERT(%s) failed", "!hashmap_file.eof()");
-        if (!hashmap_file.read(std.mem.asBytes(&ntokens))) _ = c.ggml_abort("ngram-cache.cpp", 240, "GGML_ASSERT(%s) failed", "hashmap_file.read(ntokensc, sizeof(int32_t))");
-        if (!(ntokens > 0)) _ = c.ggml_abort("ngram-cache.cpp", 241, "GGML_ASSERT(%s) failed", "ntokens > 0");
+        if (hashmap_file.eof) _ = c.ggml_abort("ngram-cache.cpp", 237, "GGML_ASSERT(%s) failed", "!hashmap_file.eof()");
+        if (!hashmap_file.read(std.mem.asBytes(&ntokens))) _ = c.ggml_abort("ngram-cache.cpp", 238, "GGML_ASSERT(%s) failed", "hashmap_file.read(ntokensc, sizeof(int32_t))");
+        if (!(ntokens > 0)) _ = c.ggml_abort("ngram-cache.cpp", 239, "GGML_ASSERT(%s) failed", "ntokens > 0");
         var token_counts = try CachePart.init(allocator);
         errdefer token_counts.deinit();
 
         var i: i32 = 0;
         while (i < ntokens) : (i += 1) {
+            if (hashmap_file.eof) _ = c.ggml_abort("ngram-cache.cpp", 243, "GGML_ASSERT(%s) failed", "!hashmap_file.eof()");
+            if (!hashmap_file.read(std.mem.asBytes(&token))) _ = c.ggml_abort("ngram-cache.cpp", 244, "GGML_ASSERT(%s) failed", "hashmap_file.read(tokenc, sizeof(llama_token))");
             if (hashmap_file.eof) _ = c.ggml_abort("ngram-cache.cpp", 245, "GGML_ASSERT(%s) failed", "!hashmap_file.eof()");
-            if (!hashmap_file.read(std.mem.asBytes(&token))) _ = c.ggml_abort("ngram-cache.cpp", 246, "GGML_ASSERT(%s) failed", "hashmap_file.read(tokenc, sizeof(llama_token))");
-            if (hashmap_file.eof) _ = c.ggml_abort("ngram-cache.cpp", 247, "GGML_ASSERT(%s) failed", "!hashmap_file.eof()");
-            if (!hashmap_file.read(std.mem.asBytes(&count_))) _ = c.ggml_abort("ngram-cache.cpp", 248, "GGML_ASSERT(%s) failed", "hashmap_file.read(countc, sizeof(int32_t))");
-            if (!(count_ > 0)) _ = c.ggml_abort("ngram-cache.cpp", 249, "GGML_ASSERT(%s) failed", "count > 0");
+            if (!hashmap_file.read(std.mem.asBytes(&count_))) _ = c.ggml_abort("ngram-cache.cpp", 246, "GGML_ASSERT(%s) failed", "hashmap_file.read(countc, sizeof(int32_t))");
+            if (!(count_ > 0)) _ = c.ggml_abort("ngram-cache.cpp", 247, "GGML_ASSERT(%s) failed", "count > 0");
             _ = try token_counts.emplace(token, count_);
         }
 
@@ -404,12 +404,12 @@ pub fn load(allocator: std.mem.Allocator, filename: [:0]const u8) error{ OutOfMe
         const r = try ngram_cache.emplace(ngram, token_counts);
         if (!r.inserted) token_counts.deinit();
     }
-    if (!hashmap_file.eof) _ = c.ggml_abort("ngram-cache.cpp", 255, "GGML_ASSERT(%s) failed", "hashmap_file.eof()");
+    if (!hashmap_file.eof) _ = c.ggml_abort("ngram-cache.cpp", 253, "GGML_ASSERT(%s) failed", "hashmap_file.eof()");
 
     return ngram_cache;
 }
 
-/// Ports `common_ngram_cache_merge` (ngram-cache.cpp:260 @620d2225c): add
+/// Ports `common_ngram_cache_merge` (ngram-cache.cpp:258 @8642541b2): add
 /// every count in `add` to `target`.
 ///
 /// Parameters:
@@ -432,7 +432,7 @@ pub fn merge(target: *Cache, add: *const Cache) error{OutOfMemory}!void {
         while (it2.next()) |token_count| {
             const token = token_count.key;
             const count_ = token_count.value.*;
-            if (!(count_ > 0)) _ = c.ggml_abort("ngram-cache.cpp", 274, "GGML_ASSERT(%s) failed", "count > 0");
+            if (!(count_ > 0)) _ = c.ggml_abort("ngram-cache.cpp", 272, "GGML_ASSERT(%s) failed", "count > 0");
 
             const token_count_merged = part_merged.get(token) orelse {
                 _ = try part_merged.emplace(token, count_);

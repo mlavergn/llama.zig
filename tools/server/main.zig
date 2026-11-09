@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `main` (tools/server/main.cpp:3 @620d2225c) from
-//! `llama.cpp/tools/server/main.cpp` (v0.7.0, `620d2225c`).
+//! Ports `main` (tools/server/main.cpp:3 @8642541b2) from
+//! `llama.cpp/tools/server/main.cpp` (v0.8.0, `8642541b2`).
 
 const std = @import("std");
 const server = @import("server.zig");
@@ -14,7 +14,7 @@ comptime {
     _ = @import("llama");
 }
 
-/// Ports `main` (tools/server/main.cpp:3 @620d2225c).
+/// Ports `main` (tools/server/main.cpp:3 @8642541b2).
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
@@ -26,4 +26,10 @@ pub fn main(init: std.process.Init) !u8 {
 
 test {
     std.testing.refAllDecls(@This());
+    _ = @import("models.zig");
+    _ = @import("models_sched.zig");
+    _ = @import("download.zig");
+    _ = @import("hf_cache.zig");
+    _ = @import("file_lock.zig");
+    _ = @import("connect.zig");
 }

@@ -7,7 +7,7 @@
 //! `llama.cpp/tools/server/server-schema.h` (namespace `server_schema`),
 //! and `common_sampler_types_from_names` and
 //! `common_sampler_types_from_chars` from `llama.cpp/common/sampling.cpp`
-//! (llama.cpp v0.7.0, `620d2225c`). Each declaration names what it ports and
+//! (llama.cpp v0.8.0, `8642541b2`). Each declaration names what it ports and
 //! the line it began at.
 //!
 //! # The field classes
@@ -51,7 +51,7 @@ const TaskParams = task.TaskParams;
 const SamplerType = task.SamplerType;
 const GrammarTrigger = common.GrammarTrigger;
 
-/// Ports `field_eval_context` (server-schema.h:18 @620d2225c), with what the
+/// Ports `field_eval_context` (server-schema.h:18 @8642541b2), with what the
 /// handlers' lambdas capture.
 pub const EvalContext = struct {
     /// the task's arena: everything a handler sets is allocated here
@@ -62,10 +62,10 @@ pub const EvalContext = struct {
     logit_bias_eog: ?[]const c.llama_logit_bias = null,
 };
 
-/// Ports `field_handler` (server-schema.h:25 @620d2225c).
+/// Ports `field_handler` (server-schema.h:25 @8642541b2).
 pub const Handler = *const fn (ctx: *EvalContext, data: *const Value) Error!void;
 
-/// Ports `field_num` (server-schema.h:48 @620d2225c): a number, clamped to
+/// Ports `field_num` (server-schema.h:48 @8642541b2): a number, clamped to
 /// `[min, max]`, or refused outside it when the limits are hard.
 pub fn Num(comptime T: type) type {
     return struct {
@@ -88,7 +88,7 @@ pub const Kind = union(enum) {
     nested: []const Field,
 };
 
-/// Ports `field` (server-schema.h:27 @620d2225c): a request member, its
+/// Ports `field` (server-schema.h:27 @8642541b2): a request member, its
 /// aliases in the order they are tried, and how it is read.
 pub const Field = struct {
     name: []const []const u8,
@@ -115,7 +115,7 @@ extern fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
 // -----------------------------------------------------------------------------
 // eval() implementations
 
-/// Ports `handle_with_catch` (server-schema.cpp:518 @620d2225c): any
+/// Ports `handle_with_catch` (server-schema.cpp:589 @8642541b2): any
 /// exception a field throws becomes `std::invalid_argument("Field '<name>':
 /// <what>")`.
 fn handleWithCatch(name: []const u8, r: Error!void) Error!void {
@@ -132,7 +132,7 @@ fn handleWithCatch(name: []const u8, r: Error!void) Error!void {
     };
 }
 
-/// Ports `has_value` (server-schema.cpp:527 @620d2225c): a null value is
+/// Ports `has_value` (server-schema.cpp:598 @8642541b2): a null value is
 /// absent, so a client can send null for the server's default.
 fn hasValue(data: *const Value, n: []const u8) bool {
     return data.contains(n) and !(data.at(n) catch |err| switch (err) {
@@ -146,7 +146,7 @@ fn clamp(comptime T: type, min: T, max: T, v: T) T {
     return if (min < lo) lo else min;
 }
 
-/// Ports `field_num`'s `eval` (server-schema.cpp:532 @620d2225c), the template's.
+/// Ports `field_num`'s `eval` (server-schema.cpp:603 @8642541b2), the template's.
 fn evalNum(comptime T: type, f: *const Field, num: Num(T), ctx: *EvalContext, data: *const Value) Error!void {
     for (f.name) |n| {
         if (hasValue(data, n)) {
@@ -178,8 +178,8 @@ fn evalNum(comptime T: type, f: *const Field, num: Num(T), ctx: *EvalContext, da
     }
 }
 
-/// Ports `field_str`'s `eval` (server-schema.cpp:553 @620d2225c) and
-/// `field_json`'s `eval` (server-schema.cpp:580 @620d2225c), which are the same.
+/// Ports `field_str`'s `eval` (server-schema.cpp:624 @8642541b2) and
+/// `field_json`'s `eval` (server-schema.cpp:651 @8642541b2), which are the same.
 fn evalHandled(f: *const Field, ctx: *EvalContext, data: *const Value, comptime line: c_int) Error!void {
     common.ggmlAssert(f.custom_handler != null, "server-schema.cpp", line, "custom_handler");
     for (f.name) |n| {
@@ -190,7 +190,7 @@ fn evalHandled(f: *const Field, ctx: *EvalContext, data: *const Value, comptime 
     }
 }
 
-/// Ports `field_bool`'s `eval` (server-schema.cpp:565 @620d2225c).
+/// Ports `field_bool`'s `eval` (server-schema.cpp:636 @8642541b2).
 fn evalBool(f: *const Field, val: *bool, ctx: *EvalContext, data: *const Value) Error!void {
     for (f.name) |n| {
         if (hasValue(data, n)) {
@@ -209,7 +209,7 @@ fn evalBool(f: *const Field, val: *bool, ctx: *EvalContext, data: *const Value) 
     }
 }
 
-/// Ports `field_nested`'s `eval` (server-schema.cpp:592 @620d2225c): the
+/// Ports `field_nested`'s `eval` (server-schema.cpp:663 @8642541b2): the
 /// subfields, evaluated on the member's object.
 fn evalNested(f: *const Field, subfields: []const Field, ctx: *EvalContext, data: *const Value) Error!void {
     for (f.name) |n| {
@@ -234,8 +234,8 @@ pub fn eval(f: *const Field, ctx: *EvalContext, data: *const Value) Error!void {
         .num_i64 => |n| try evalNum(i64, f, n, ctx, data),
         .num_u32 => |n| try evalNum(u32, f, n, ctx, data),
         .num_f32 => |n| try evalNum(f32, f, n, ctx, data),
-        .str => try evalHandled(f, ctx, data, 554),
-        .json => try evalHandled(f, ctx, data, 581),
+        .str => try evalHandled(f, ctx, data, 625),
+        .json => try evalHandled(f, ctx, data, 652),
         .boolean => |v| try evalBool(f, v, ctx, data),
         .nested => |subs| try evalNested(f, subs, ctx, data),
     }
@@ -279,6 +279,23 @@ fn hDrySequenceBreakers(ctx: *EvalContext, data: *const Value) Error!void {
     if (ctx.params.sampling.dry_sequence_breakers.items.len == 0) {
         return throw(error.RuntimeError, "Error: dry_sequence_breakers must be a non-empty array of strings", .{});
     }
+
+    // each distinct breaker costs a full vocabulary scan at sampler init, so dedupe before counting
+    var n_unique: usize = 0;
+    for (out) |breaker| {
+        for (out[0..n_unique]) |seen| {
+            if (std.mem.eql(u8, seen, breaker)) break;
+        } else {
+            out[n_unique] = breaker;
+            n_unique += 1;
+        }
+    }
+
+    if (n_unique > c.LLAMA_DRY_MAX_SEQ_BREAKERS) {
+        return throw(error.RuntimeError, "Error: dry_sequence_breakers must contain at most {d} distinct entries", .{c.LLAMA_DRY_MAX_SEQ_BREAKERS});
+    }
+
+    ctx.params.sampling.dry_sequence_breakers.items.len = n_unique;
 }
 
 fn hJsonSchema(ctx: *EvalContext, data: *const Value) Error!void {
@@ -351,7 +368,7 @@ fn hEcho(_: *EvalContext, data: *const Value) Error!void {
 
 fn hPreservedTokens(ctx: *EvalContext, data: *const Value) Error!void {
     const tokens = try (try data.at("preserved_tokens")).getSlice(ctx.a, []const u8);
-    // `common_sampling_add_preserved_tokens` (sampling.cpp:1055 @620d2225c)
+    // `common_sampling_add_preserved_tokens` (sampling.cpp:1055 @8642541b2)
     common.ggmlAssert(ctx.vocab != null, "sampling.cpp", 1056, "vocab != nullptr");
     try chat.session.addPreservedTokens(ctx.a, &ctx.params.sampling.preserved_tokens, ctx.vocab.?, tokens);
 }
@@ -367,7 +384,7 @@ fn hGrammarTriggers(ctx: *EvalContext, data: *const Value) Error!void {
 }
 
 /// Ports `common_sampling_add_grammar_triggers` (sampling.cpp:1065
-/// @620d2225c) over `tools_common`'s sampling parameters, whose trigger
+/// @8642541b2) over `tools_common`'s sampling parameters, whose trigger
 /// type, unlike `common_chat`'s, holds any integer a request sends:
 /// `cli/common_chat/session.zig`'s `addGrammarTriggers` is the same
 /// function over that module's types.
@@ -410,12 +427,12 @@ fn triggerType(t: c_int) Error!tools.params.GrammarTriggerType {
 }
 
 fn hReasoningBudgetStartTag(ctx: *EvalContext, data: *const Value) Error!void {
-    const toks = try tokenizeIn(ctx, 342, try (try data.at("reasoning_budget_start_tag")).get([]const u8), false, true);
+    const toks = try tokenizeIn(ctx, 361, try (try data.at("reasoning_budget_start_tag")).get([]const u8), false, true);
     ctx.params.sampling.reasoning_budget_start = .fromOwnedSlice(toks);
 }
 
 fn hReasoningBudgetEndTags(ctx: *EvalContext, data: *const Value) Error!void {
-    common.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 342, "ctx.vocab != nullptr");
+    common.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 361, "ctx.vocab != nullptr");
     const s = &ctx.params.sampling;
     s.reasoning_budget_end = .empty;
     if (data.contains("reasoning_budget_end_tags")) {
@@ -423,25 +440,25 @@ fn hReasoningBudgetEndTags(ctx: *EvalContext, data: *const Value) Error!void {
         while (it.next()) |t| {
             const tag = try t.value.get([]const u8);
             if (tag.len != 0) {
-                try s.reasoning_budget_end.append(ctx.a, .fromOwnedSlice(try tokenizeIn(ctx, 350, tag, false, true)));
+                try s.reasoning_budget_end.append(ctx.a, .fromOwnedSlice(try tokenizeIn(ctx, 369, tag, false, true)));
             }
         }
     } else if (data.contains("reasoning_budget_end_tag")) {
         const tag = try (try data.at("reasoning_budget_end_tag")).get([]const u8);
         if (tag.len != 0) {
-            try s.reasoning_budget_end.append(ctx.a, .fromOwnedSlice(try tokenizeIn(ctx, 350, tag, false, true)));
+            try s.reasoning_budget_end.append(ctx.a, .fromOwnedSlice(try tokenizeIn(ctx, 369, tag, false, true)));
         }
     }
 }
 
 fn hReasoningBudgetMessage(ctx: *EvalContext, data: *const Value) Error!void {
-    common.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 370, "ctx.vocab != nullptr");
+    common.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 389, "ctx.vocab != nullptr");
     const s = &ctx.params.sampling;
     if (s.reasoning_budget_end.items.len != 0) {
         var end_tag: std.ArrayList(Token) = .fromOwnedSlice(try ctx.a.dupe(Token, s.reasoning_budget_end.items[0].items));
         const message = common.jsonValue(data, "reasoning_budget_message", []const u8, "");
         if (message.len != 0) {
-            const message_tokens = try tokenizeIn(ctx, 370, message, false, true);
+            const message_tokens = try tokenizeIn(ctx, 389, message, false, true);
             try end_tag.insertSlice(ctx.a, 0, message_tokens);
         }
         s.reasoning_budget_forced = end_tag;
@@ -464,7 +481,7 @@ fn parseBias(v: *const Value, bias: *f32) Error!bool {
 }
 
 fn hLogitBias(ctx: *EvalContext, data: *const Value) Error!void {
-    common.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 385, "ctx.vocab != nullptr");
+    common.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 404, "ctx.vocab != nullptr");
     const s = &ctx.params.sampling;
     s.logit_bias = .empty;
     const logit_bias = try data.at("logit_bias");
@@ -502,7 +519,7 @@ fn hLogitBias(ctx: *EvalContext, data: *const Value) Error!void {
 }
 
 fn hIgnoreEos(ctx: *EvalContext, data: *const Value) Error!void {
-    common.ggmlAssert(ctx.logit_bias_eog != null, "server-schema.cpp", 426, "ctx.logit_bias_eog != nullptr");
+    common.ggmlAssert(ctx.logit_bias_eog != null, "server-schema.cpp", 445, "ctx.logit_bias_eog != nullptr");
     const s = &ctx.params.sampling;
     s.ignore_eos = try (try data.at("ignore_eos")).get(bool);
     if (s.ignore_eos) {
@@ -543,7 +560,7 @@ fn dupeStrings(a: Allocator, xs: []const []const u8) Error![]const []const u8 {
     return out;
 }
 
-/// Ports `common_sampler_types_from_names` (sampling.cpp:963 @620d2225c): each
+/// Ports `common_sampler_types_from_names` (sampling.cpp:963 @8642541b2): each
 /// name, lower-cased, by its canonical spelling or an alias; an unknown
 /// one is warned about and skipped.
 pub fn samplerTypesFromNames(a: Allocator, names: []const []const u8) Error!std.ArrayList(SamplerType) {
@@ -584,7 +601,7 @@ pub fn samplerTypesFromNames(a: Allocator, names: []const []const u8) Error!std.
     return samplers;
 }
 
-/// Ports `common_sampler_types_from_chars` (sampling.cpp:1025 @620d2225c).
+/// Ports `common_sampler_types_from_chars` (sampling.cpp:1025 @8642541b2).
 pub fn samplerTypesFromChars(a: Allocator, chars: []const u8) Error!std.ArrayList(SamplerType) {
     const all = [_]SamplerType{ .dry, .top_k, .typical_p, .top_p, .top_n_sigma, .min_p, .temperature, .xtc, .infill, .penalties, .adaptive_p };
     var samplers: std.ArrayList(SamplerType) = .empty;
@@ -605,7 +622,7 @@ pub fn samplerTypesFromChars(a: Allocator, chars: []const u8) Error!std.ArrayLis
 // -----------------------------------------------------------------------------
 // the table
 
-/// Ports `make_llama_cmpl_schema` (server-schema.cpp:11 @620d2225c): the
+/// Ports `make_llama_cmpl_schema` (server-schema.cpp:13 @8642541b2): the
 /// llama.cpp-specific completion schema, every field pointing into
 /// `params`.
 ///
@@ -704,7 +721,7 @@ pub fn makeLlamaCmplSchema(a: Allocator, params_base: *const tools.params.Params
     return a.dupe(Field, &fields);
 }
 
-/// Ports `eval_llama_cmpl_schema` (server-schema.cpp:467 @620d2225c): a
+/// Ports `eval_llama_cmpl_schema` (server-schema.cpp:486 @8642541b2): a
 /// request's parameters -- the command line's defaults, every field the
 /// request carries applied over them in the table's order, then the
 /// derived ones.
@@ -763,6 +780,48 @@ pub fn evalLlamaCmplSchema(
     }
 
     return params;
+}
+
+// -----------------------------------------------------------------------------
+// TTS schema
+
+/// Ports `make_tts_schema` (server-schema.cpp:537 @8642541b2): the `/tts`
+/// request's fields, pointing into `t`.
+///
+/// Return: owned by `a`.
+pub fn makeTtsSchema(a: Allocator, t: *task.Task) Error![]const Field {
+    const i32max = std.math.maxInt(i32);
+    const fields = [_]Field{
+        .{ .name = &.{"top_k"}, .desc = "Top-k for the acoustic code predictor, 0 to use the model default", .kind = .{ .num_i32 = .{ .val = &t.tts_inp.data.top_k, .min = 0, .max = i32max } } },
+        .{ .name = &.{"top_p"}, .desc = "Top-p for the acoustic code predictor, 0.0 to use the model default", .kind = .{ .num_f32 = .{ .val = &t.tts_inp.data.top_p, .min = 0.0, .max = 1.0 } } },
+        .{ .name = &.{"seed"}, .desc = "RNG seed for the backbone sampler and the codec/vocoder (-1 = random)", .kind = .{ .num_u32 = .{ .val = &t.tts_inp.data.seed } } },
+        .{ .name = &.{ "n_predict", "max_tokens" }, .desc = "Max number of audio frames to generate", .kind = .{ .num_i32 = .{ .val = &t.params.n_predict, .min = -1, .max = i32max, .is_hard_limit = true } } },
+        .{ .name = &.{"repeat_penalty"}, .desc = "Repetition penalty applied to the backbone sampler over the whole generation", .kind = .{ .num_f32 = .{ .val = &t.params.sampling.penalty_repeat } } },
+        .{ .name = &.{"stream"}, .desc = "Stream the audio as it becomes available instead of waiting for the full generation", .kind = .{ .boolean = &t.params.stream } },
+    };
+    return a.dupe(Field, &fields);
+}
+
+/// Ports `eval_tts_schema` (server-schema.cpp:568 @8642541b2): evaluates the
+/// /tts request params into `t.params` and `t.tts_inp.data`.
+///
+/// Parameters:
+/// - `a`: the task's arena.
+pub fn evalTtsSchema(a: Allocator, params_base: *const tools.params.Params, t: *task.Task, data: *const Value) Error!void {
+    // baseline defaults, individual requests can override them
+    // TODO @ngxson : change the default values based on model
+    t.params.sampling = try task.deepClone(a, params_base.sampling);
+    t.params.sampling.penalty_repeat = 1.05;
+    t.params.n_predict = -1;
+    t.tts_inp.data.top_k = 0;
+    t.tts_inp.data.top_p = 0.0;
+    t.tts_inp.data.seed = params_base.sampling.seed;
+
+    var ctx: EvalContext = .{ .a = a, .params = &t.params, .params_base = params_base };
+
+    for (try makeTtsSchema(a, t)) |*f| {
+        try eval(f, &ctx, data);
+    }
 }
 
 // -----------------------------------------------------------------------------

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/tts/tts.cpp` at v0.7.0 (`620d2225c`). Each
+//! Ported from `llama.cpp/tools/tts/tts.cpp` at v0.8.0 (`8642541b2`). Each
 //! declaration names the C++ it replaces and the line it began at.
 //!
 //! The C++ holds the mtmd context, the speaker bitmap and the generation
@@ -12,6 +12,7 @@
 
 const std = @import("std");
 const tc = @import("tools_common");
+const chat = @import("common_chat");
 const c = tc.c;
 const log = tc.log;
 const arg = tc.arg;
@@ -26,7 +27,7 @@ extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*c.FILE;
 extern fn fwrite(p: ?*const anyopaque, size: usize, n: usize, f: ?*c.FILE) usize;
 extern fn fclose(f: ?*c.FILE) c_int;
 
-/// Ports `tts_timings` (tts.cpp:19 @620d2225c): a progress line every two
+/// Ports `tts_timings` (tts.cpp:20 @8642541b2): a progress line every two
 /// seconds.
 const Timings = struct {
     t_start_us: i64,
@@ -37,7 +38,7 @@ const Timings = struct {
         return .{ .t_start_us = t, .t_last_us = t };
     }
 
-    /// `report` (tts.cpp:23 @620d2225c), a member of `tts_timings`.
+    /// `report` (tts.cpp:24 @8642541b2), a member of `tts_timings`.
     fn report(self: *Timings, n_frames: c_int) void {
         const t_now_us = c.ggml_time_us();
         if (t_now_us - self.t_last_us < 2000000) return;
@@ -48,12 +49,12 @@ const Timings = struct {
     }
 };
 
-/// Ports `print_usage` (tts.cpp:35 @620d2225c).
+/// Ports `print_usage` (tts.cpp:36 @8642541b2).
 fn printUsage(argv: []const [:0]const u8) void {
     log.out("\nexample usage:\n", .{});
     log.out("\n    %s -m backbone.gguf -mm mmproj.gguf -p \"text to speak\" -o output.wav", .{argv[0].ptr});
     log.out("\n    %s -hf user/model -p \"text to speak\" -o output.wav\n", .{argv[0].ptr});
-    log.out("\nnote: --tts-lang and --tts-speaker-file may not be supported in all models", .{});
+    log.out("\nnote: --tts-lang, --tts-voice and --tts-speaker-file may not be supported in all models", .{});
     log.out("\n      use -n to limit the output length", .{});
     log.out("\n      see tts/README.md for per-model usage notes", .{});
     log.out("\n\n", .{});
@@ -130,20 +131,27 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
         speaker_bitmap = wrapper.bitmap;
     }
 
+    // a model with a "tts" chat template (e.g. LFM3-Audio) speaks the prompt rendered from it
+    var info = try chat.templates.modelInfo(a, @ptrCast(model.?));
+    var tmpls = try chat.templates.init(a, &info, "", "", "");
+    var prompt_str = try chat.templates.getTtsPrompt(a, &tmpls, params.prompt, params.tts_lang, params.tts_voice);
+    if (prompt_str.len == 0) prompt_str = params.prompt;
+
     const gen = c.mtmd_helper_gen_audio_init(lctx, mctx);
     defer c.mtmd_helper_gen_audio_free(gen);
-    const prompt = try a.dupeSentinel(u8, params.prompt, 0);
+    const prompt = try a.dupeSentinel(u8, prompt_str, 0);
     const lang = try a.dupeSentinel(u8, params.tts_lang, 0);
-    var inp = std.mem.zeroes(c.mtmd_helper_gen_audio_inp);
+    const voice = try a.dupeSentinel(u8, params.tts_voice, 0);
+    var inp = c.mtmd_helper_gen_audio_inp_default();
     inp.seq_id = 0;
     inp.prompt = prompt.ptr;
     inp.prompt_len = prompt.len;
     inp.speaker_ref = speaker_bitmap;
     inp.lang = lang.ptr;
+    inp.voice = voice.ptr;
     inp.top_k = params.sampling.top_k;
     inp.top_p = params.sampling.top_p;
     inp.seed = params.sampling.seed;
-    inp.out_type = c.MTMD_HELPER_GEN_AUDIO_OUTTYPE_WAV;
 
     //
     // stage 1: process prompt via backbone model, generate semantic representation
@@ -232,7 +240,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     return 0;
 }
 
-/// Ports `main` (tts.cpp:45 @620d2225c).
+/// Ports `main` (tts.cpp:46 @8642541b2).
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);

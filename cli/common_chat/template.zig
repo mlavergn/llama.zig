@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `common_chat_template` (llama.cpp v0.7.0, `620d2225c`,
+//! Ports `common_chat_template` (llama.cpp v0.8.0, `8642541b2`,
 //! `llama.cpp/common/chat.h`), the rendering half of
 //! `llama.cpp/common/chat.cpp` -- `format_time`,
 //! `common_chat_template_direct_apply_impl`,
@@ -66,7 +66,7 @@ pub const jinja_failure_prefix = "jinja: ";
 // generation_params
 
 /// Ports `autoparser`'s `generation_params` (chat-auto-parser.h:54
-/// @620d2225c): what a template is rendered with and a parser built for.
+/// @8642541b2): what a template is rendered with and a parser built for.
 /// Every JSON value and string is owned by the allocator of the call that
 /// built it, an arena.
 pub const GenerationParams = struct {
@@ -89,7 +89,7 @@ pub const GenerationParams = struct {
     add_inference: bool = false,
     mark_input: bool = true,
 
-    /// Ports `has_continuation` (chat-auto-parser.h:75 @620d2225c).
+    /// Ports `has_continuation` (chat-auto-parser.h:75 @8642541b2).
     pub fn hasContinuation(self: *const GenerationParams) bool {
         return self.continue_final_message != .none and !self.continue_msg.empty();
     }
@@ -109,8 +109,8 @@ pub const GenerationParams = struct {
 // -----------------------------------------------------------------------------
 // common_chat_template
 
-/// Ports `lexer`'s `tokenize`'s source normalisation (lexer.cpp:32
-/// @620d2225c): `\r\n` and `\r` as `\n`, then one trailing newline of the
+/// Ports `lexer`'s `tokenize`'s source normalisation (lexer.cpp:34
+/// @8642541b2): `\r\n` and `\r` as `\n`, then one trailing newline of the
 /// original dropped. This is `common_chat_template::source()`, which every
 /// template-detection `find` reads.
 ///
@@ -130,12 +130,12 @@ pub fn normalizeSource(a: Allocator, source: []const u8) Error![]u8 {
     return out.toOwnedSlice(a);
 }
 
-/// Ports `common_chat_params_init_fn` (chat.h:32 @620d2225c): builds the
+/// Ports `common_chat_params_init_fn` (chat.h:32 @8642541b2): builds the
 /// prompt and parser for a template that has a dedicated handler (see
 /// `parsers/`).
 pub const ParamsInitFn = *const fn (a: Allocator, tmpl: *const Template, inputs: *const GenerationParams) Error!params_mod.ChatParams;
 
-/// Ports `common_chat_template` (chat.h:59 @620d2225c): a template's source
+/// Ports `common_chat_template` (chat.h:60 @8642541b2): a template's source
 /// parsed, its BOS and EOS spellings, the capabilities `caps_get` reads off
 /// it, and how it is applied -- a dedicated handler, or the differential
 /// analysis run once here.
@@ -158,8 +158,8 @@ pub const Template = struct {
     analysis_error: []u8 = &.{},
     analysis_arena: ?*std.heap.ArenaAllocator = null,
 
-    /// Ports `common_chat_template`'s constructor (chat.cpp:1245
-    /// @620d2225c): parses the source, failing as upstream's lexer and
+    /// Ports `common_chat_template`'s constructor (chat.cpp:1425
+    /// @8642541b2): parses the source, failing as upstream's lexer and
     /// parser fail, runs `caps_get` over it, picks the dedicated handler,
     /// and failing that runs the analysis -- whose failure is kept for
     /// `apply` to report, so a bad template still loads.
@@ -212,6 +212,7 @@ pub const Template = struct {
             self.gpa.destroy(arena);
         }
         self.gpa.free(self.analysis_error);
+        self.gpa.free(self.caps.reasoning_effort_levels);
         self.gpa.free(self.raw);
         self.gpa.free(self.src);
         self.gpa.free(self.bos_tok);
@@ -219,22 +220,22 @@ pub const Template = struct {
         self.* = undefined;
     }
 
-    /// Ports `source` (chat.h:80 @620d2225c).
+    /// Ports `source` (chat.h:81 @8642541b2).
     pub fn source(self: *const Template) []const u8 {
         return self.src;
     }
 
-    /// Ports `bos_token` (chat.h:81 @620d2225c).
+    /// Ports `bos_token` (chat.h:82 @8642541b2).
     pub fn bosToken(self: *const Template) []const u8 {
         return self.bos_tok;
     }
 
-    /// Ports `eos_token` (chat.h:82 @620d2225c).
+    /// Ports `eos_token` (chat.h:83 @8642541b2).
     pub fn eosToken(self: *const Template) []const u8 {
         return self.eos_tok;
     }
 
-    /// Ports `original_caps` (chat.h:84 @620d2225c).
+    /// Ports `original_caps` (chat.h:85 @8642541b2).
     pub fn originalCaps(self: *const Template) Caps {
         return self.caps;
     }
@@ -292,7 +293,8 @@ const NoFree = struct {
 
 /// Upstream's rendering of a non-string `{{ }}` value; `cli/chat.zig`'s
 /// `upstreamOutput`, which `make jinja-diff` holds to
-/// `gather_string_parts_recursive` (runtime.h:713 @620d2225c).
+/// `gather_string_parts_recursive` (runtime.h:716 @8642541b2); its depth
+/// limit is zigjinja's, which fails the render where a finalizer cannot.
 fn upstreamOutput(allocator: Allocator, val: jinja.Value) jinja.Value {
     return switch (val) {
         .boolean => |b| .{ .string = if (b) "True" else "False" },
@@ -381,10 +383,18 @@ pub const Render = struct {
         return .{ .string = try self.alloc().dupe(u8, try sanitize(self.alloc(), s)) };
     }
 
-    /// Ports `from_json` (value.cpp:1424 @620d2225c): a JSON value as the
-    /// engine's, every string marked input when `mark_input`.
+    /// Ports `from_json` (value.cpp:1444 @8642541b2): a JSON value as the
+    /// engine's, every string marked input when `mark_input`. The runtime
+    /// walks values with recursion, a deeper input overflows the stack.
     pub fn fromJson(self: *Render, v: *const Value, mark_input: bool) Error!jinja.Value {
+        return self.fromJsonAt(v, mark_input, 0);
+    }
+
+    fn fromJsonAt(self: *Render, v: *const Value, mark_input: bool, depth: usize) Error!jinja.Value {
         const a = self.alloc();
+        if ((v.isArray() or v.isObject()) and depth >= jinja.llama_repr.recursive_limit) {
+            return throw(error.InvalidArgument, "JSON is nested more than 128 levels deep", .{});
+        }
         return switch (v.*) {
             .null, .discarded => .null,
             .boolean => |b| .{ .boolean = b },
@@ -398,19 +408,19 @@ pub const Render = struct {
             .array => |arr| blk: {
                 const list = try a.create(jinja.value.List);
                 list.* = jinja.value.List.init(a);
-                for (arr.items) |*item| try list.append(try self.fromJson(item, mark_input));
+                for (arr.items) |*item| try list.append(try self.fromJsonAt(item, mark_input, depth + 1));
                 break :blk .{ .list = list };
             },
             .object => |m| blk: {
                 const dict = try a.create(jinja.value.Dict);
                 dict.* = jinja.value.Dict.init(a);
-                for (m.members.items) |*member| try dict.set(member.key, try self.fromJson(&member.value, mark_input));
+                for (m.members.items) |*member| try dict.set(member.key, try self.fromJsonAt(&member.value, mark_input, depth + 1));
                 break :blk .{ .dict = dict };
             },
         };
     }
 
-    /// Ports `global_from_json` (value.cpp:1521 @620d2225c): each member of
+    /// Ports `global_from_json` (value.cpp:1543 @8642541b2): each member of
     /// the object bound in order, a later one replacing an earlier binding.
     pub fn bindJson(self: *Render, obj: *const Value, mark_input: bool) Error!void {
         if (!obj.isObject()) return throw(error.RuntimeError, "global_from_json: input JSON value must be an object", .{});
@@ -426,7 +436,7 @@ pub const Render = struct {
     }
 
     /// Runs `tmpl` over the bound variables, as `run`, keeping the runs:
-    /// `gather_string_parts` (runtime.h:750 @620d2225c), its consecutive
+    /// `gather_string_parts` (runtime.h:755 @8642541b2), its consecutive
     /// parts of one kind joined.
     ///
     /// Return: the prompt, its list and texts owned by `out`.
@@ -506,7 +516,7 @@ fn sanitize(a: Allocator, text: []const u8) Error![]const u8 {
     return out.items;
 }
 
-/// Ports `caps_apply_preserve_reasoning` (caps.cpp:22 @620d2225c).
+/// Ports `caps_apply_preserve_reasoning` (caps.cpp:24 @8642541b2).
 pub fn capsApplyPreserveReasoning(r: *Render, enabled: bool) Error!void {
     try r.set("preserve_thinking", .{ .boolean = enabled });
     try r.set("clear_thinking", .{ .boolean = !enabled });
@@ -514,7 +524,7 @@ pub fn capsApplyPreserveReasoning(r: *Render, enabled: bool) Error!void {
     try r.set("drop_thinking", .{ .boolean = !enabled });
 }
 
-/// Ports `caps_apply_reasoning_effort` (caps.cpp:29 @620d2225c): one value
+/// Ports `caps_apply_reasoning_effort` (caps.cpp:31 @8642541b2): one value
 /// under both names, so a use of either counts against it.
 ///
 /// Return: the value bound.
@@ -539,7 +549,7 @@ pub fn now() i64 {
 
 const month_abbrev = [_][]const u8{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 
-/// Ports `format_time` (chat.cpp:37 @620d2225c) for the two formats it is
+/// Ports `format_time` (chat.cpp:37 @8642541b2) for the two formats it is
 /// given, `%b %d %Y` and `%d %b %Y`, in the C locale and local time.
 ///
 /// Return: owned by `a`.
@@ -556,7 +566,7 @@ pub fn formatTime(a: Allocator, t: i64, comptime day_first: bool) Error![]u8 {
         std.fmt.allocPrint(a, "{s} {d:0>2} {d}", .{ month, day, year_day.year });
 }
 
-/// Ports `common_chat_extra_context` (chat.cpp:1065 @620d2225c):
+/// Ports `common_chat_extra_context` (chat.cpp:1230 @8642541b2):
 /// `datetime` and `date_string`, today's date two ways.
 ///
 /// Return: an object owned by `a`.
@@ -568,8 +578,8 @@ pub fn extraContext(a: Allocator) Error!Value {
     return ctx;
 }
 
-/// Ports `common_chat_template_direct_apply_impl` (chat.cpp:877
-/// @620d2225c): `inputs` rendered through `tmpl`, each override replacing
+/// Ports `common_chat_template_direct_apply_impl` (chat.cpp:1042
+/// @8642541b2): `inputs` rendered through `tmpl`, each override replacing
 /// what `inputs` would have bound, `bos_token` and `eos_token` bound last as
 /// template text -- they come from the model, not from the user -- and a
 /// BOS or EOS the vocabulary adds itself cut from a template part at
@@ -648,13 +658,13 @@ pub fn directApplyImpl(
     return result;
 }
 
-/// Ports `common_chat_template_direct_apply` (chat.cpp:953 @620d2225c).
+/// Ports `common_chat_template_direct_apply` (chat.cpp:1118 @8642541b2).
 pub fn directApply(a: Allocator, tmpl: *const Template, inputs: *const GenerationParams) Error!Prompt {
     return directApplyImpl(a, tmpl, inputs, null, null, null);
 }
 
-/// Ports `common_chat_template_generation_prompt_impl` (chat.cpp:959
-/// @620d2225c): what `add_generation_prompt` appends, as the difference
+/// Ports `common_chat_template_generation_prompt_impl` (chat.cpp:1124
+/// @8642541b2): what `add_generation_prompt` appends, as the difference
 /// between a render without it and one with.
 ///
 /// Return: owned by `a`.
@@ -678,7 +688,7 @@ pub fn generationPromptImpl(
     return gen_prompt[prefix_len..];
 }
 
-/// Ports `common_chat_template_generation_prompt` (chat.cpp:981 @620d2225c).
+/// Ports `common_chat_template_generation_prompt` (chat.cpp:1146 @8642541b2).
 pub fn generationPrompt(a: Allocator, tmpl: *const Template, inputs: *const GenerationParams) Error![]const u8 {
     return generationPromptImpl(a, tmpl, inputs, null, null, null);
 }

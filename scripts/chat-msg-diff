@@ -68,8 +68,16 @@ def part(p):
     kind = rng.random()
     if kind < 0.6:
         d = {"type": "text", "text": word()}
-    elif kind < 0.8:
+    elif kind < 0.7:
         d = {"type": "media_marker", "text": "<__media__>"}
+    elif kind < 0.8:
+        # a request's deferred tool, named; `text` beside it is ignored
+        d = {"type": "tool_reference", "name": rng.choice(["get_weather", "", "日本"])}
+        if rng.random() < 0.2:
+            d["text"] = word()
+        if rng.random() < p:
+            rng.choice([lambda: d.pop("name"), lambda: d.__setitem__("name", junk())])()
+        return d
     else:
         d = {"type": rng.choice(["image_url", "input_audio", 7, None]), "text": word()}
     if rng.random() < p:
@@ -86,6 +94,11 @@ def tool_call(p):
     tc = {"type": "function", "function": {"name": rng.choice(["get_weather", "f", "", "日本"]), "arguments": args}}
     if rng.random() < 0.6:
         tc["id"] = rng.choice(["call_1", "abc", ""])
+    # keys beyond OpenAI's, which a template such as DeepSeek V4.1 reads back
+    if rng.random() < 0.2:
+        tc[rng.choice(["index", "extra", "function_extra"])] = junk()
+    if rng.random() < 0.2:
+        tc["function"][rng.choice(["strict", "thought", "a"])] = junk()
     if rng.random() < p:
         rng.choice([
             lambda: tc.pop("type"), lambda: tc.__setitem__("type", rng.choice(["fn", 3, None])),
@@ -111,6 +124,9 @@ def message(p):
     for k in ("reasoning_content", "name", "tool_call_id"):
         if rng.random() < 0.2:
             m[k] = word()
+    # keys beyond OpenAI's, kept whole in `extra_json`
+    if rng.random() < 0.25:
+        m[rng.choice(["timestamp", "tools", "z", "__tool_call_extras", "prefix"])] = junk()
     if rng.random() < p:
         rng.choice([
             lambda: m.pop("role"), lambda: m.__setitem__("role", junk()),
@@ -132,6 +148,14 @@ def tool(p):
         t["function"]["parameters"] = rng.choice([
             {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]},
             {}, None, {"type": "object"}, [1, 2], "str"])
+    # on the function, on the tool next to "type", or both: the function wins
+    if rng.random() < 0.3:
+        t["function"]["defer_loading"] = rng.choice([True, False])
+    if rng.random() < 0.3:
+        t["defer_loading"] = rng.choice([True, False])
+    if rng.random() < p:
+        rng.choice([lambda: t.__setitem__("defer_loading", junk()),
+                    lambda: t["function"].__setitem__("defer_loading", junk())])()
     if rng.random() < p:
         rng.choice([
             lambda: t.pop("type"), lambda: t.__setitem__("type", rng.choice(["fn", 1, None])),

@@ -9,6 +9,13 @@
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
-zig build mtmd-audio-diff --release="${MTMD_AUDIO_O:-fast}" >/dev/null 2>&1 \
+# -Dcuda=false: these preprocessors run on the CPU alone, and a CUDA build
+# imports the port's `llama` module, whose CUDA link carries `libstdc++.so`
+# (llama-cli needs it for cuBLAS and the CUB shim). libstdc++'s
+# `__gxx_personality_v0` then wins over Zig's libc++abi and aborts on every
+# exception the reference throws, which the harness means to catch: on the
+# GB10, v0.8.0's torch-resize cases ended in `terminate` (NOTES.md, "Upstream
+# sync v0.7.0 → v0.8.0"). A no-op on macOS, where CUDA is off anyway.
+zig build mtmd-audio-diff --release="${MTMD_AUDIO_O:-fast}" -Dcuda=false >/dev/null 2>&1 \
     || { echo "FAIL: could not build mtmd-audio-diff (zig build mtmd-audio-diff)" >&2; exit 2; }
 exec zig-out/bin/mtmd-audio-diff "$@"

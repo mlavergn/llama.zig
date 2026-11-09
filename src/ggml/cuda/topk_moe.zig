@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/topk-moe.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/topk-moe.cuh` at v0.7.0 (`620d2225c`), the
+//! `llama.cpp/ggml/src/ggml-cuda/topk-moe.cuh` at v0.8.0 (`8642541b2`), the
 //! host half. The kernel, `topk_moe_cuda`, stays CUDA.
 
 const std = @import("std");
@@ -16,13 +16,13 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `TOPK_MOE_ROWS_PER_BLOCK` (topk-moe.cuh:7 @620d2225c): rows that one
+/// Ports `TOPK_MOE_ROWS_PER_BLOCK` (topk-moe.cuh:7 @8642541b2): rows that one
 /// CUDA block handles. `fusion.zig`'s memory-range check reads it too: one
 /// block reads all its logits before it writes, so up to this many rows the
 /// logits may alias the outputs.
 pub const rows_per_block = 8;
 
-/// Ports `ggml_cuda_topk_moe_args` (topk-moe.cuh:9 @620d2225c).
+/// Ports `ggml_cuda_topk_moe_args` (topk-moe.cuh:9 @8642541b2).
 pub const Args = struct {
     sigmoid: bool = false,
     sqrt_softplus: bool = false,
@@ -31,18 +31,23 @@ pub const Args = struct {
     prob_bias: bool = false,
     norm: bool = false,
     scale: bool = false,
+    /// > 0: pick experts only from the top `n_group_used` expert groups.
+    n_groups: c_int = 0,
+    n_group_used: c_int = 0,
 };
 
-/// Ports `topk_moe_config` (topk-moe.cu:9 @620d2225c); passed to the kernel
-/// by value, four `bool`s.
+/// Ports `topk_moe_config` (topk-moe.cu:9 @8642541b2); passed to the kernel
+/// by value: four `bool`s and, since v0.8.0, two `int`s, 12 bytes in all.
 const Config = extern struct {
     use_sigmoid: bool,
     use_sqrt_softplus: bool,
     with_norm: bool,
     delayed_softmax: bool,
+    n_groups: c_int,
+    n_group_used: c_int,
 };
 
-/// Ports `launch_topk_moe_cuda` (topk-moe.cu:281 @620d2225c).
+/// Ports `launch_topk_moe_cuda` (topk-moe.cu:341 @8642541b2).
 fn launchTopkMoe(comptime has_bias: bool, ctx: *common.Context, logits: ?*const f32, weights: ?*f32, ids: ?*i32, bias: ?*f32, n_rows: c_int, n_expert: c_int, n_expert_used: c_int, clamp_val: f32, scale_val: f32, config: Config) void {
     impl.assert(!(config.with_norm and config.delayed_softmax), "!(config.with_norm && config.delayed_softmax) && \"delayed softmax is not supported with weight normalization\"");
     const p: kernels.LaunchParams = .{
@@ -52,7 +57,7 @@ fn launchTopkMoe(comptime has_bias: bool, ctx: *common.Context, logits: ?*const 
     };
     const args = .{ logits, weights, ids, bias, n_rows, n_expert_used, clamp_val, scale_val, config };
     switch (n_expert) {
-        inline 1, 2, 4, 8, 16, 32, 64, 128, 256, 288, 512, 576 => |n| kernels.launchPdl(
+        inline 1, 2, 4, 8, 16, 32, 64, 128, 256, 288, 384, 512, 576 => |n| kernels.launchPdl(
             kernels.get("topk-moe", kernels.tmpl("topk_moe_cuda", &.{ kernels.int(n), kernels.boolean(has_bias) })),
             p,
             args,
@@ -61,7 +66,7 @@ fn launchTopkMoe(comptime has_bias: bool, ctx: *common.Context, logits: ?*const 
     }
 }
 
-/// Ports `ggml_cuda_op_topk_moe` (topk-moe.cu:354 @620d2225c).
+/// Ports `ggml_cuda_op_topk_moe` (topk-moe.cu:422 @8642541b2).
 pub fn opTopkMoe(ctx: *common.Context, logits: *const Tensor, weights: *Tensor, ids: *Tensor, clamp: ?*const Tensor, scale: ?*const Tensor, bias: ?*const Tensor, args: *const Args) void {
     impl.assert(logits.type == c.GGML_TYPE_F32, "logits->type == GGML_TYPE_F32");
     impl.assert(weights.type == c.GGML_TYPE_F32, "weights->type == GGML_TYPE_F32");
@@ -91,6 +96,8 @@ pub fn opTopkMoe(ctx: *common.Context, logits: *const Tensor, weights: *Tensor, 
         .use_sqrt_softplus = args.sqrt_softplus,
         .with_norm = with_norm,
         .delayed_softmax = args.delayed_softmax,
+        .n_groups = args.n_groups,
+        .n_group_used = args.n_group_used,
     };
 
     if (bias != null) {
@@ -100,12 +107,12 @@ pub fn opTopkMoe(ctx: *common.Context, logits: *const Tensor, weights: *Tensor, 
     }
 }
 
-/// Ports `ggml_cuda_should_use_topk_moe` (topk-moe.cu:402 @620d2225c).
+/// Ports `ggml_cuda_should_use_topk_moe` (topk-moe.cu:472 @8642541b2).
 pub fn shouldUseTopkMoe(gating_op: *const Tensor, weights: *const Tensor, logits: *const Tensor, ids: *const Tensor) bool {
     // must match an instantiation of launch_topk_moe_cuda: a power of 2 up
     // to 512, or one of the non-power-of-2 expert counts of supported models
     const n_expert: c_int = @intCast(ids.nb[1] / ids.nb[0]);
-    if (((n_expert & (n_expert - 1)) != 0 or n_expert > 512) and n_expert != 288 and n_expert != 576) return false;
+    if (((n_expert & (n_expert - 1)) != 0 or n_expert > 512) and n_expert != 288 and n_expert != 384 and n_expert != 576) return false;
 
     if (!c.ggml_is_contiguous(weights) or !c.ggml_is_contiguous(logits)) return false;
 

@@ -5,7 +5,7 @@
 //!
 //! Ports `ThreadPool` from `llama.cpp/vendor/cpp-httplib/httplib.cpp` and
 //! its declaration in `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib
-//! 0.61.0, vendored at v0.7.0, `620d2225c`). Each declaration names what it
+//! 0.62.0, vendored at v0.8.0, `8642541b2`). Each declaration names what it
 //! ports and the line it began at.
 //!
 //! # pthreads, as the C's are
@@ -29,7 +29,7 @@ pub const Task = struct {
     run: *const fn (ctx: *anyopaque, arg: usize) void,
 };
 
-/// Ports `TaskQueue` (httplib.h:1996 @620d2225c): what a server hands each
+/// Ports `TaskQueue` (httplib.h:2050 @8642541b2): what a server hands each
 /// accepted connection to -- `ThreadPool`, or a queue of the caller's own
 /// (`Server.new_task_queue`). `destroy` is the `std::unique_ptr`'s delete,
 /// which a queue over a pool it does not own makes a no-op.
@@ -63,7 +63,7 @@ const Worker = struct {
     id: std.c.pthread_t,
 };
 
-/// Ports `ThreadPool` (httplib.h:2007 @620d2225c): `base` threads always
+/// Ports `ThreadPool` (httplib.h:2061 @8642541b2): `base` threads always
 /// alive, and up to `max - base` more spawned when a job arrives with none
 /// idle, each exiting after `CPPHTTPLIB_THREAD_POOL_IDLE_TIMEOUT` seconds
 /// without work.
@@ -86,7 +86,7 @@ pub const ThreadPool = struct {
     /// recorded its own handle, so `move_to_finished` always finds it.
     started: std.c.pthread_mutex_t = .{},
 
-    /// Ports `ThreadPool` (httplib.cpp:7321 @620d2225c), the constructor:
+    /// Ports `ThreadPool` (httplib.cpp:7620 @8642541b2), the constructor:
     /// starts the `n` base threads. The C throws when `max_n` is below `n`;
     /// this returns `error.InvalidArgument`.
     ///
@@ -152,9 +152,9 @@ pub const ThreadPool = struct {
         a.destroy(self);
     }
 
-    /// Ports `enqueue` (httplib.cpp:7359 @620d2225c), a member of
-    /// `ThreadPool`: queues `fn_`, spawning a dynamic thread when none is
-    /// idle and the pool is under its maximum.
+    /// Ports `enqueue` (httplib.cpp:7658 @8642541b2), a member of
+    /// `ThreadPool`: queues `fn_`, spawning a dynamic thread when jobs
+    /// outnumber idle threads and the pool is under its maximum.
     ///
     /// Return: false once shut down.
     pub fn enqueue(self: *ThreadPool, fn_: Task) bool {
@@ -164,7 +164,7 @@ pub const ThreadPool = struct {
             if (self.shutdown_) return false;
             if (self.max_queued_requests > 0 and self.jobs.items.len - self.jobs_head >= self.max_queued_requests) return false;
             self.jobs.append(self.allocator, fn_) catch return false;
-            if (self.idle_thread_count == 0 and self.threads.items.len + self.dynamic_threads.items.len < self.max_thread_count) {
+            if (self.jobs.items.len - self.jobs_head > self.idle_thread_count and self.threads.items.len + self.dynamic_threads.items.len < self.max_thread_count) {
                 self.cleanupFinishedThreads();
                 self.dynamic_threads.ensureUnusedCapacity(self.allocator, 1) catch return true;
                 _ = std.c.pthread_mutex_lock(&self.started);
@@ -178,7 +178,7 @@ pub const ThreadPool = struct {
         return true;
     }
 
-    /// Ports `shutdown` (httplib.cpp:7380 @620d2225c), a member of
+    /// Ports `shutdown` (httplib.cpp:7679 @8642541b2), a member of
     /// `ThreadPool`: lets the queue drain, then joins every thread.
     pub fn shutdown(self: *ThreadPool) void {
         _ = std.c.pthread_mutex_lock(&self.mutex);
@@ -200,7 +200,7 @@ pub const ThreadPool = struct {
         _ = std.c.pthread_mutex_unlock(&self.mutex);
     }
 
-    /// Ports `move_to_finished` (httplib.cpp:7407 @620d2225c), a member of
+    /// Ports `move_to_finished` (httplib.cpp:7706 @8642541b2), a member of
     /// `ThreadPool`; `mutex` is held.
     fn moveToFinished(self: *ThreadPool, id: std.c.pthread_t) void {
         for (self.dynamic_threads.items, 0..) |w, i| {
@@ -217,7 +217,7 @@ pub const ThreadPool = struct {
         }
     }
 
-    /// Ports `cleanup_finished_threads` (httplib.cpp:7418 @620d2225c), a
+    /// Ports `cleanup_finished_threads` (httplib.cpp:7717 @8642541b2), a
     /// member of `ThreadPool`; `mutex` is held.
     fn cleanupFinishedThreads(self: *ThreadPool) void {
         for (self.finished_threads.items) |w| w.thread.join();
@@ -239,7 +239,7 @@ pub const ThreadPool = struct {
         return self.jobs_head < self.jobs.items.len;
     }
 
-    /// Ports `worker` (httplib.cpp:7426 @620d2225c), a member of
+    /// Ports `worker` (httplib.cpp:7725 @8642541b2), a member of
     /// `ThreadPool`: runs jobs until shut down with none left; a dynamic
     /// worker also leaves after its idle timeout.
     fn worker(self: *ThreadPool, is_dynamic: bool) void {

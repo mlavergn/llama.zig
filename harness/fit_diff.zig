@@ -70,6 +70,7 @@ extern fn fit_ref_device_memory(
     hp: *[3]u32,
     log_level: c_int,
 ) c_int;
+extern fn fit_ref_measure(path_model: [*:0]const u8, mparams: *const c.llama_model_params, cparams: *const c.llama_context_params, out: [*]u8, cap: usize, log_level: c_int) c_int;
 extern fn fit_ref_print(path_model: [*:0]const u8, mparams: *c.llama_model_params, cparams: *c.llama_context_params, path: [*:0]const u8) c_int;
 extern fn fit_dev_set(i: c_int, free: usize, total: usize, typ: c_int) c.ggml_backend_dev_t;
 
@@ -563,6 +564,16 @@ fn memoryData(w: *std.Io.Writer, cs: Case, in: *Inputs, ref: bool, fit_log: *std
         const text2 = try refLogSince();
         defer gpa.free(text2);
         try fit_log.writeAll(text2);
+
+        var rows: [4096]u8 = undefined;
+        // a context of its own, so what it reports back is not the trained one
+        var cp = in.cp;
+        cp.n_ctx = 512;
+        _ = fit_ref_measure(pathOf(cs.model).ptr, &in.mp, &cp, &rows, rows.len, cs.log_level);
+        try w.writeAll(std.mem.sliceTo(&rows, 0));
+        const text3 = try refLogSince();
+        defer gpa.free(text3);
+        try fit_log.writeAll(text3);
     } else {
         const log: fit.Log = .{ .verbosity = fit.Log.level_trace, .out = fit_log, .prefix = true };
         var devs: std.ArrayList(c.ggml_backend_dev_t) = .empty;
@@ -585,6 +596,21 @@ fn memoryData(w: *std.Io.Writer, cs: Case, in: *Inputs, ref: bool, fit_log: *std
             try w.writeAll(pw.written());
         } else |e| switch (e) {
             error.Runtime => try w.print("fit_print -1\n", .{}),
+            else => return e,
+        }
+
+        var arena_state = std.heap.ArenaAllocator.init(gpa);
+        defer arena_state.deinit();
+        var n_ctx_train: u32 = 0;
+        var n_ctx: u32 = 0;
+        var what: []const u8 = "";
+        var cp = in.cp;
+        cp.n_ctx = 512;
+        if (fit.fitMeasure(arena_state.allocator(), pathOf(cs.model).ptr, &in.mp, &cp, &n_ctx_train, &n_ctx, @intCast(cs.log_level), &what)) |rows| {
+            try w.print("measure {d} {d}\n", .{ n_ctx_train, n_ctx });
+            for (rows) |r| try w.print("  row {d} {s}|{s} {d} {d} {d} {d} {d}\n", .{ @as(u8, @intCast(@backingInt(r.kind))), r.name, r.description, r.total, r.free, r.model, r.context, r.compute });
+        } else |e| switch (e) {
+            error.Runtime => try w.print("measure failed: {s}\n", .{what}),
             else => return e,
         }
     }

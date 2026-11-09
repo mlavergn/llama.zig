@@ -32,6 +32,11 @@ serves, from <root>:
     /headonly/<name>      HEAD answers, GET is 404
     /status/<code>        that status, a small JSON body
     /slow/<name>          like /files, the body dribbled over ~15 s
+    /r416/<name>          a GET with a Range is 416, without one whole
+    /norange200/<name>    says it takes ranges, answers a Range with 200
+
+A request in absolute-form (`GET http://host/path`) is what a client sends
+to a proxy: it is logged as it came and served as its path.
 
 Every request is logged to <logfile>, one line each: the method, the path,
 and the headers the downloader sets (Range, Authorization, User-Agent,
@@ -74,7 +79,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
     def record(self):
-        hs = [f"{k}={self.headers.get(k)}" for k in ("Range", "Authorization", "User-Agent", "Accept") if self.headers.get(k) is not None]
+        hs = [f"{k}={self.headers.get(k)}" for k in ("Range", "Authorization", "Proxy-Authorization", "User-Agent", "Accept") if self.headers.get(k) is not None]
         log(f"{self.command} {self.path} {' '.join(hs)}".rstrip())
 
     def send_json(self, code, obj):
@@ -132,7 +137,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def handle_any(self):
         self.record()
-        path, _, query = self.path.partition("?")
+        target = self.path
+        if target.startswith("http://"):
+            target = "/" + target[len("http://"):].partition("/")[2]
+        path, _, query = target.partition("?")
         parts = path.split("/")
         # hub API
         if path.startswith("/api/models/"):
@@ -213,6 +221,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send_json(404, {"error": "gone"})
         if kind == "slow":
             return self.send_file(data, etag=etag, mode="slow")
+        if kind == "r416":
+            if self.command == "GET" and self.headers.get("Range"):
+                return self.send_json(416, {"error": "range"})
+            return self.send_file(data, etag=etag)
+        if kind == "norange200":
+            if self.command == "GET" and self.headers.get("Range"):
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            return self.send_file(data, etag=etag)
         return self.send_json(404, {"error": "no such route"})
 
     def do_GET(self):

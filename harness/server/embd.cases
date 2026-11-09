@@ -1,5 +1,8 @@
 # Embeddings and reranking (Stage 10 step 3c): scripts/server-diff embd.
 # Qwen3-0.6B under each pooling, then as a reranker.
+# how often the idle loop logs is the scheduler's: on the GB10 an extra idle
+# pass after the refused cls request differs upstream against upstream
+!droplog update_slots: all slots are idle
 !server -m $QWEN3 -c 2048 -np 2 --no-jinja --embedding --pooling mean -lv 4
 !fulllog
 
@@ -74,6 +77,23 @@ POST /v1/reranking {"query": 3, "documents": ["a"]}
 POST /rerank {"documents": ["a"]}
 POST /rerank {"query": "q", "documents": "a"}
 POST /rerank {"query": "q", "documents": [1, 2]}
+# v0.8.0: typed input: {"text": ..., "image": ...} on the query and the documents
+POST /rerank {"query": {"text": "What is "}, "documents": [{"text": ["a ", "panda"]}, "plain"], "top_n": 0}
+POST /rerank {"query": {"text": ["What ", "is"]}, "documents": ["x"]}
+POST /rerank {"query": {"text": 3}, "documents": ["x"]}
+POST /rerank {"query": {"text": [3]}, "documents": ["x"]}
+POST /rerank {"query": {"image": 3}, "documents": ["x"]}
+POST /rerank {"query": {"image": [3]}, "documents": ["x"]}
+POST /rerank {"query": {"image": "AAAA"}, "documents": ["x"]}
+POST /rerank {"query": "q", "documents": [{"image": ["AAAA"]}]}
+POST /rerank {"query": "q", "documents": [{"video": "x"}]}
+POST /rerank {"query": "q", "documents": [{"fps": 1}]}
+POST /rerank {"query": "q", "documents": [{"max_frames": 1}]}
+POST /rerank {"query": "q", "documents": [true]}
+POST /rerank {"query": ["q"], "documents": ["a"]}
+POST /rerank {"query": "q", "documents": ["a"], "top_n": -1}
+POST /rerank {"query": "q", "documents": {"a": 1}}
+POST /rerank {"query": "q", "texts": [{"text": "a"}]}
 # (an embedding from the rank head is the reference's own run-to-run noise)
 
 # v0.6.0: a causal reranker (Qwen3's RANK pooling over a KV cache) splits its

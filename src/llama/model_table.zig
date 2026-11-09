@@ -8,13 +8,13 @@
 //! - `llama.cpp/src/llama-model.cpp` -- the switches of `llm_type_name`
 //!   and `llama_model_rope_type`
 //!
-//! Both at v0.7.0 (`620d2225c`). **Do not edit**: regenerate after moving the
+//! Both at v0.8.0 (`8642541b2`). **Do not edit**: regenerate after moving the
 //! pin. The rope rules marked `.conditional` read the hyperparameters and are
 //! ported by hand in `model.zig`.
 
 const c = @import("impl.zig").c;
 
-/// Mirrors `llm_type` (llama-model.h:23 @620d2225c).
+/// Mirrors `llm_type` (llama-model.h:23 @8642541b2).
 pub const Type = enum(c_int) {
     unknown,
     @"14m",
@@ -109,6 +109,8 @@ pub const Type = enum(c_int) {
     @"16x3_8b",
     @"10b_128x3_66b",
     @"57b_a14b",
+    @"816b_a42b",
+    @"78b_a3_5b",
     @"17b_16e",
     @"17b_128e",
     a13b,
@@ -154,7 +156,7 @@ pub const Type = enum(c_int) {
     e4b,
 };
 
-/// Ports `llm_type_name` (llama-model.cpp:900 @620d2225c), by `Type` ordinal; the
+/// Ports `llm_type_name` (llama-model.cpp:927 @8642541b2), by `Type` ordinal; the
 /// switch's default where it names none.
 pub const type_names = [_][:0]const u8{
     "?B",
@@ -250,6 +252,8 @@ pub const type_names = [_][:0]const u8{
     "16x3.8B",
     "10B+128x3.66B",
     "57B.A14B",
+    "816B.A42B",
+    "78B.A3.5B",
     "17Bx16E (Scout)",
     "17Bx128E (Maverick)",
     "A13B",
@@ -304,7 +308,7 @@ pub const RopeRule = union(enum) {
     abort,
 };
 
-/// Ports the switch of `llama_model_rope_type` (llama-model.cpp:3446 @620d2225c), by
+/// Ports the switch of `llama_model_rope_type` (llama-model.cpp:3504 @8642541b2), by
 /// `arch.Arch` ordinal. An architecture the switch does not name falls out of
 /// it to `LLAMA_ROPE_TYPE_NONE`.
 pub const rope_rules = [_]RopeRule{
@@ -335,8 +339,10 @@ pub const rope_rules = [_]RopeRule{
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_QWEN2
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_QWEN2MOE
     .{ .fixed = c.LLAMA_ROPE_TYPE_MROPE }, // LLM_ARCH_QWEN2VL
+    .{ .fixed = c.LLAMA_ROPE_TYPE_MROPE }, // LLM_ARCH_SENSENOVA_U1
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_QWEN3
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_QWEN3MOE
+    .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_FLINT
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_QWEN3NEXT
     .{ .fixed = c.LLAMA_ROPE_TYPE_IMROPE }, // LLM_ARCH_QWEN3VL
     .{ .fixed = c.LLAMA_ROPE_TYPE_IMROPE }, // LLM_ARCH_QWEN3VLMOE
@@ -379,6 +385,7 @@ pub const rope_rules = [_]RopeRule{
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_OLMO2
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_OLMOE
     .{ .fixed = c.LLAMA_ROPE_TYPE_NORM }, // LLM_ARCH_MUSE_GLIMMER
+    .{ .fixed = c.LLAMA_ROPE_TYPE_NORM }, // LLM_ARCH_MUSE_SPARK
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_OPENELM
     .{ .fixed = c.LLAMA_ROPE_TYPE_NORM }, // LLM_ARCH_ARCTIC
     .{ .fixed = c.LLAMA_ROPE_TYPE_NORM }, // LLM_ARCH_DEEPSEEK
@@ -386,6 +393,7 @@ pub const rope_rules = [_]RopeRule{
     .{ .fixed = c.LLAMA_ROPE_TYPE_NORM }, // LLM_ARCH_DEEPSEEK2OCR
     .{ .fixed = c.LLAMA_ROPE_TYPE_NORM }, // LLM_ARCH_DEEPSEEK32
     .{ .fixed = c.LLAMA_ROPE_TYPE_NORM }, // LLM_ARCH_DEEPSEEK4
+    .{ .fixed = c.LLAMA_ROPE_TYPE_NORM }, // LLM_ARCH_DEEPSEEK41
     .{ .fixed = c.LLAMA_ROPE_TYPE_NORM }, // LLM_ARCH_CHATGLM
     .conditional, // LLM_ARCH_GLM4
     .conditional, // LLM_ARCH_GLM4_MOE
@@ -432,6 +440,7 @@ pub const rope_rules = [_]RopeRule{
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_OPENAI_MOE
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_LFM2
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_LFM2MOE
+    .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_LFM3
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_DREAM
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_SMALLTHINKER
     .{ .fixed = c.LLAMA_ROPE_TYPE_NORM }, // LLM_ARCH_LLADA
@@ -466,10 +475,12 @@ pub const rope_rules = [_]RopeRule{
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_MINIMAX_01
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_HRM_TEXT
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_K2_HORIZON
+    .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_BEAM
+    .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_KOLIBRI1
     .abort, // LLM_ARCH_UNKNOWN
 };
 
-/// Ports the cases of `llama_model_mapping` (llama-model.cpp:43 @620d2225c), by
+/// Ports the cases of `llama_model_mapping` (llama-model.cpp:43 @8642541b2), by
 /// `arch.Arch` ordinal: whether the architecture has a model class. One that
 /// does not is `unsupported model architecture`.
 pub const mapped = [_]bool{
@@ -500,8 +511,10 @@ pub const mapped = [_]bool{
     true, // LLM_ARCH_QWEN2
     true, // LLM_ARCH_QWEN2MOE
     true, // LLM_ARCH_QWEN2VL
+    true, // LLM_ARCH_SENSENOVA_U1
     true, // LLM_ARCH_QWEN3
     true, // LLM_ARCH_QWEN3MOE
+    true, // LLM_ARCH_FLINT
     true, // LLM_ARCH_QWEN3NEXT
     true, // LLM_ARCH_QWEN3VL
     true, // LLM_ARCH_QWEN3VLMOE
@@ -544,6 +557,7 @@ pub const mapped = [_]bool{
     true, // LLM_ARCH_OLMO2
     true, // LLM_ARCH_OLMOE
     true, // LLM_ARCH_MUSE_GLIMMER
+    true, // LLM_ARCH_MUSE_SPARK
     true, // LLM_ARCH_OPENELM
     true, // LLM_ARCH_ARCTIC
     true, // LLM_ARCH_DEEPSEEK
@@ -551,6 +565,7 @@ pub const mapped = [_]bool{
     true, // LLM_ARCH_DEEPSEEK2OCR
     true, // LLM_ARCH_DEEPSEEK32
     true, // LLM_ARCH_DEEPSEEK4
+    true, // LLM_ARCH_DEEPSEEK41
     true, // LLM_ARCH_CHATGLM
     true, // LLM_ARCH_GLM4
     true, // LLM_ARCH_GLM4_MOE
@@ -597,6 +612,7 @@ pub const mapped = [_]bool{
     true, // LLM_ARCH_OPENAI_MOE
     true, // LLM_ARCH_LFM2
     true, // LLM_ARCH_LFM2MOE
+    true, // LLM_ARCH_LFM3
     true, // LLM_ARCH_DREAM
     true, // LLM_ARCH_SMALLTHINKER
     true, // LLM_ARCH_LLADA
@@ -631,5 +647,7 @@ pub const mapped = [_]bool{
     true, // LLM_ARCH_MINIMAX_01
     true, // LLM_ARCH_HRM_TEXT
     true, // LLM_ARCH_K2_HORIZON
+    true, // LLM_ARCH_BEAM
+    true, // LLM_ARCH_KOLIBRI1
     false, // LLM_ARCH_UNKNOWN
 };

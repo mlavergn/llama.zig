@@ -17,6 +17,8 @@
 !mask s/^[A-Za-z0-9_.\/-]+:[0-9]+: terminating due to uncaught/libc++abi: terminating due to uncaught/
 !mask /^[0-9]+ +[A-Za-z_.-]+ +0x[0-9a-f]+ /d
 !mask s/^llama\.cpp\/([a-z-]+\/)*//
+!mask s/run_audio_stream: ([0-9]+) tokens, ([0-9.]+) s audio in [0-9.]+ s \([0-9.]+x realtime\)/run_audio_stream: \1 tokens, \2 s audio/
+!mask s/run_audio_stream: encoder [0-9.]+ s, decoder [0-9.]+ s, [0-9.]+ ms per 80 ms step/run_audio_stream: X/
 
 --help
 --version
@@ -136,3 +138,19 @@
 -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf --chat-template chatml -n 6 --temp 0
 !stdin
 !tty off
+
+# v0.8.0: the new vision and audio towers in a turn; a realtime model
+# streams its one audio file through mtmd_audio_stream instead, and its
+# transcript follows the audio by the text model's token delay
+-m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3vl.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg -n 12 --temp 0
+-m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a.gguf -p "transcribe" --audio $DATA/tone16k.wav -n 12 --temp 0
+-m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3-omni.gguf -p "<__media__> and <__media__>" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --audio $DATA/tone16k.wav -n 12 --temp 0
+-m $MM/text-qwen3.gguf -mm $MM/muse-spark-audio.gguf -p "transcribe" --audio $DATA/tone44k.wav --chat-template chatml -n 12 --temp 0 -c 8192
+-m $MM/text-qwen3vl.gguf -mm $MM/sensenova_u1.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 12 --temp 0 -c 8192
+-m $MM/text-qwen3.gguf -mm $MM/deepseek41v.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 12 --temp 0 -c 8192
+-m $MM/text-qwen3.gguf -mm $MM/minicpm_ocr_1_0.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 12 --temp 0
+-m $MM/text-mistral3-rt.gguf -mm $MM/voxtral_rt.gguf --audio $DATA/tone16k.wav --chat-template chatml -n 40 --temp 0
+-m $MM/text-mistral3-rt.gguf -mm $MM/voxtral_rt.gguf --audio $DATA/tone44k.wav --chat-template chatml -n 4 --temp 0
+!fail -m $MM/text-mistral3-rt.gguf -mm $MM/voxtral_rt.gguf --chat-template chatml -n 4 --temp 0
+!fail -m $MM/text-mistral3-rt.gguf -mm $MM/voxtral_rt.gguf --audio $DATA/tone16k.wav --audio $DATA/tone44k.wav --chat-template chatml -n 4 --temp 0
+!fail -m $MM/text-mistral3-rt.gguf -mm $MM/voxtral_rt.gguf --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 4 --temp 0

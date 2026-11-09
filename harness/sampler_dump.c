@@ -552,11 +552,23 @@ static const struct grammar_case grammars[] = {
     // sequence.
     { "partial3", "root ::= [\\u0800-\\u0840]+ \"!\"", "root" },
     { "partial4", "root ::= [\\U00010000-\\U00010040]+ \"!\"", "root" },
+    // v0.8.0 walks a candidate's code points in a loop, one level each:
+    // several stacks at a level, each narrowing the last's rejects, and whole
+    // runs a long token spends in one rule.
+    { "stacks",  "root ::= \"a\" (\"bc\" | \"bd\" | \"b\" [e-z]) [a-z]* | \"abd\" \"x\" | [a-z]+ \" \" [a-z]+ | [a-c]{2,3} \"!\"", "root" },
+    { "spaces",  "root ::= [ \\t\\n]* \"x\" | [ ]+ \"y\" [ ]*", "root" },
+    { "words",   "root ::= ([a-zA-Z]+ [ ,.])* [a-z]* | [ ]* [A-Z] [a-z]{3,20}", "root" },
+    { "chartok", "root ::= \"ab\" <[1]> \"cd\" | [a-z] <[3]> | \"a\" [\\u0800-\\u0840]", "root" },
 };
 #define N_GRAMMARS (sizeof(grammars) / sizeof(grammars[0]))
 
 static llama_token * vocab_ids;
 static int32_t n_vocab;
+
+/* While set, what libllama logs is part of the listing, under this prefix:
+ * the grammar's and DRY's refusals and warnings are the only sign of which
+ * arm ran. */
+static const char * log_echo;
 
 /* Candidates for a vocab-section step: every token, with logits from the
  * synthetic generator. */
@@ -624,6 +636,181 @@ static void feed_lazy(const char * name, struct llama_sampler * s, const struct 
     }
 }
 
+static void run_grammar(const struct llama_vocab * vocab, const char * name, const char * text, const char * root) {
+    log_echo = "grammar";
+    struct llama_sampler * s = llama_sampler_init_grammar(vocab, text, root);
+    log_echo = NULL;
+    printf("grammar %s init=%s\n", name, s ? llama_sampler_name(s) : "(null)");
+    if (!s) return;
+    walk_grammar(name, s, vocab, 8);
+    llama_sampler_free(s);
+}
+
+static void run_grammar_built(const struct llama_vocab * vocab, const char * name, char * text) {
+    run_grammar(vocab, name, text, "root");
+    free(text);
+}
+
+/* `root ::= (((...."x"....)))`, `n` groups deep. */
+static char * build_groups(int n) {
+    char * s = malloc(2 * (size_t) n + 32);
+    char * p = s + sprintf(s, "root ::= ");
+    for (int i = 0; i < n; i++) *p++ = '(';
+    p += sprintf(p, "\"x\"");
+    for (int i = 0; i < n; i++) *p++ = ')';
+    *p = 0;
+    return s;
+}
+
+/* `root ::= r0`, `r0 ::= r1`, ... ending in `"a"`, each reference after
+ * `lead`. */
+static char * build_chain(int n, const char * lead) {
+    char * s = malloc(((size_t) n + 2) * (32 + strlen(lead)));
+    char * p = s + sprintf(s, "root ::= r0\n");
+    for (int i = 0; i < n; i++) p += sprintf(p, "r%d ::= %sr%d\n", i, lead, i + 1);
+    sprintf(p, "r%d ::= \"a\"\n", n);
+    return s;
+}
+
+/* One DRY sampler through the history: every record the case makes. */
+static void run_dry(const struct llama_vocab * vocab, const char * name, float mult, float base, int allowed, int last_n,
+                    const char ** breakers, size_t n_breakers, const llama_token * hist, int nh) {
+    log_echo = "dry";
+    struct llama_sampler * s = llama_sampler_init_dry(vocab, mult, base, allowed, last_n, breakers, n_breakers);
+    log_echo = NULL;
+    printf("dry %s name=%s\n", name, llama_sampler_name(s));
+    char label[128];
+    llama_token_data_array a;
+    for (int i = 0; i < nh; i++) {
+        llama_sampler_accept(s, hist[i]);
+        if (i % 4 == 3 || i == nh - 1) {
+            fill_vocab(&a, (uint64_t) (500 + i));
+            llama_sampler_apply(s, &a);
+            snprintf(label, sizeof label, "dry %s after%d", name, i);
+            rec(label, &a);
+
+            // All-zero logits: `0 - penalty` keeps every bit of the
+            // penalty, where subtracting it from a logit near 1
+            // rounds most last-bit differences away.
+            fill_vocab(&a, (uint64_t) (500 + i));
+            for (size_t t = 0; t < a.size; t++) a.data[t].logit = 0.0f;
+            llama_sampler_apply(s, &a);
+            snprintf(label, sizeof label, "dry %s zeros%d", name, i);
+            rec(label, &a);
+        }
+    }
+    struct llama_sampler * c = llama_sampler_clone(s);
+    fill_vocab(&a, 600);
+    llama_sampler_apply(c, &a);
+    snprintf(label, sizeof label, "dry %s clone", name);
+    rec(label, &a);
+    llama_sampler_reset(s);
+    fill_vocab(&a, 600);
+    llama_sampler_apply(s, &a);
+    snprintf(label, sizeof label, "dry %s reset", name);
+    rec(label, &a);
+    llama_sampler_free(c);
+    llama_sampler_free(s);
+}
+
+/* Distinct breakers no token holds, so they take a place under the cap and
+ * change nothing else. */
+static const char * dry_filler(int i) {
+    static char pool[LLAMA_DRY_MAX_SEQ_BREAKERS + 8][16];
+    snprintf(pool[i], sizeof pool[i], "\x01zq%d", i);
+    return pool[i];
+}
+
+/* v0.8.0's cap on distinct breakers, and the dedup under it. A breaker that
+ * matters -- ":" stops a repeat at every ":" of the history -- sits on either
+ * side of the cap. */
+static void run_dry_breakers(const struct llama_vocab * vocab) {
+    enum { CAP = LLAMA_DRY_MAX_SEQ_BREAKERS };
+    static const char * b[512];
+    char label[64];
+    size_t n;
+
+    // The repeat runs through every ":" and every "!", so a breaker there
+    // shortens it.
+    static const char * history = "one two: three four! one two: three four! one two: three four! one two: three four! one two";
+    llama_token hist[256];
+    int nh = llama_tokenize(vocab, history, (int32_t) strlen(history), hist, 256, false, false);
+
+    // Without it the cases below would prove nothing: ":" must change the
+    // records. scripts/sampler-diff fails if "dry-none" and "dry-colon" agree.
+    run_dry(vocab, "dry-none", 0.8f, 1.75f, 2, 64, b, 0, hist, nh);
+    b[0] = ":";
+    run_dry(vocab, "dry-colon", 0.8f, 1.75f, 2, 64, b, 1, hist, nh);
+
+    // The cap: ":" as the last kept, then the first dropped.
+    for (int fillers = CAP - 2; fillers <= CAP; fillers++) {
+        n = 0;
+        for (int i = 0; i < fillers; i++) b[n++] = dry_filler(i);
+        b[n++] = ":";
+        b[n++] = "!";
+        snprintf(label, sizeof label, "dry-cap%d", fillers);
+        run_dry(vocab, label, 0.8f, 1.75f, 2, 64, b, n, hist, nh);
+    }
+
+    // Duplicates are not counted: a hundred ":" leave room for the last.
+    n = 0;
+    for (int i = 0; i < 100; i++) b[n++] = "\"";
+    for (int i = 0; i < CAP - 2; i++) b[n++] = dry_filler(i);
+    b[n++] = ":";
+    b[n++] = "!";
+    run_dry(vocab, "dry-dup", 0.8f, 1.75f, 2, 64, b, n, hist, nh);
+
+    // Truncation comes first: two breakers that differ past byte 40 are one.
+    static const char long_a[] = "0123456789012345678901234567890123456789AAAAAAAAAA";
+    static const char long_b[] = "0123456789012345678901234567890123456789BBBBBBBBBB";
+    n = 0;
+    for (int i = 0; i < CAP - 2; i++) b[n++] = dry_filler(i);
+    b[n++] = long_a;
+    b[n++] = long_b;
+    b[n++] = ":";
+    b[n++] = "!";
+    run_dry(vocab, "dry-trunc", 0.8f, 1.75f, 2, 64, b, n, hist, nh);
+
+    // Null and empty entries take no place, and the index in the warning is
+    // the entry's.
+    n = 0;
+    b[n++] = NULL;
+    b[n++] = "";
+    for (int i = 0; i < CAP; i++) {
+        b[n++] = dry_filler(i);
+        if (i % 16 == 0) b[n++] = "";
+    }
+    b[n++] = NULL;
+    b[n++] = ":";
+    b[n++] = "!";
+    run_dry(vocab, "dry-holes", 0.8f, 1.75f, 2, 64, b, n, hist, nh);
+    b[0] = NULL;
+    b[1] = "";
+    run_dry(vocab, "dry-nothing", 0.8f, 1.75f, 2, 64, b, 2, hist, nh);
+
+    // Breakers of several tokens: each prefix a token ends with has a tail,
+    // the same one for every token sharing that prefix, and past 20 tokens
+    // it is cut.
+    b[0] = "two: three";
+    run_dry(vocab, "dry-tail", 0.8f, 1.75f, 2, 64, b, 1, hist, nh);
+    b[0] = "two: three";
+    b[1] = "four! one";
+    b[2] = " three four";
+    b[3] = "q w e r t y u i o p a s d f g h j k l z";
+    b[4] = "1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4";
+    run_dry(vocab, "dry-tails", 0.8f, 1.75f, 2, 64, b, 5, hist, nh);
+    // A tail longer than the 20 tokens kept: this history holds the first
+    // 20 of them and then leaves the breaker, so only the cut tail matches.
+    static const char * long_history =
+        "a b 1 2 3 4 5 6 7 8 9 0 1 2 3 x a b 1 2 3 4 5 6 7 8 9 0 1 2 3 x "
+        "a b 1 2 3 4 5 6 7 8 9 0 1 2 3 x a b 1 2 3 4 5 6 7 8 9 0 1 2 3 x a b 1 2 3";
+    llama_token long_hist[256];
+    int n_long = llama_tokenize(vocab, long_history, (int32_t) strlen(long_history), long_hist, 256, false, false);
+    run_dry(vocab, "dry-nolongtail", 0.8f, 1.75f, 2, 128, b, 0, long_hist, n_long);
+    b[0] = "1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0";
+    run_dry(vocab, "dry-longtail", 0.8f, 1.75f, 2, 128, b, 1, long_hist, n_long);
+}
+
 static void run_vocab(const struct llama_vocab * vocab) {
     n_vocab = llama_vocab_n_tokens(vocab);
     printf("vocab n=%d eos=%d eot=%d\n", n_vocab, llama_vocab_eos(vocab), llama_vocab_eot(vocab));
@@ -631,12 +818,24 @@ static void run_vocab(const struct llama_vocab * vocab) {
 
     for (size_t g = 0; g < N_GRAMMARS; g++) {
         const char * text = grammars[g].text ? grammars[g].text : json_gbnf;
-        struct llama_sampler * s = llama_sampler_init_grammar(vocab, text, grammars[g].root);
-        printf("grammar %s init=%s\n", grammars[g].name, s ? llama_sampler_name(s) : "(null)");
-        if (!s) continue;
-        walk_grammar(grammars[g].name, s, vocab, 8);
-        llama_sampler_free(s);
+        run_grammar(vocab, grammars[g].name, text, grammars[g].root);
     }
+
+    // v0.8.0's depth limits, on both sides of each. A group nests up to
+    // GRAMMAR_RECURSIVE_LIMIT deep; rules chain, leftmost, one further, since
+    // the check there is `>` and the root is depth 0. A chain whose references
+    // are not leftmost is never walked and has no limit.
+    for (int n = 254; n <= 258; n++) {
+        char name[32];
+        snprintf(name, sizeof name, "deep-group%d", n);
+        run_grammar_built(vocab, name, build_groups(n));
+        snprintf(name, sizeof name, "deep-chain%d", n);
+        run_grammar_built(vocab, name, build_chain(n, ""));
+    }
+    run_grammar_built(vocab, "deep-group300", build_groups(300));
+    run_grammar_built(vocab, "deep-chain100", build_chain(100, ""));
+    run_grammar_built(vocab, "deep-chain1000", build_chain(1000, ""));
+    run_grammar_built(vocab, "deep-right1000", build_chain(1000, "\"x\" "));
 
     // Lazy grammars. The trigger patterns run through std::regex upstream.
     // Ends where the JSON does: a lazy grammar that has triggered rejects
@@ -709,42 +908,9 @@ static void run_vocab(const struct llama_vocab * vocab) {
         llama_token hist[256];
         int nh = llama_tokenize(vocab, history, (int32_t) strlen(history), hist, 256, false, false);
         for (size_t k = 0; k < sizeof(cases) / sizeof(cases[0]); k++) {
-            struct llama_sampler * s = llama_sampler_init_dry(vocab, cases[k].mult, cases[k].base,
-                cases[k].allowed, cases[k].last_n, breakers, 5);
-            printf("dry %s name=%s\n", cases[k].name, llama_sampler_name(s));
-            char label[128];
-            llama_token_data_array a;
-            for (int i = 0; i < nh; i++) {
-                llama_sampler_accept(s, hist[i]);
-                if (i % 4 == 3 || i == nh - 1) {
-                    fill_vocab(&a, (uint64_t) (500 + i));
-                    llama_sampler_apply(s, &a);
-                    snprintf(label, sizeof label, "dry %s after%d", cases[k].name, i);
-                    rec(label, &a);
-
-                    // All-zero logits: `0 - penalty` keeps every bit of the
-                    // penalty, where subtracting it from a logit near 1
-                    // rounds most last-bit differences away.
-                    fill_vocab(&a, (uint64_t) (500 + i));
-                    for (size_t t = 0; t < a.size; t++) a.data[t].logit = 0.0f;
-                    llama_sampler_apply(s, &a);
-                    snprintf(label, sizeof label, "dry %s zeros%d", cases[k].name, i);
-                    rec(label, &a);
-                }
-            }
-            struct llama_sampler * c = llama_sampler_clone(s);
-            fill_vocab(&a, 600);
-            llama_sampler_apply(c, &a);
-            snprintf(label, sizeof label, "dry %s clone", cases[k].name);
-            rec(label, &a);
-            llama_sampler_reset(s);
-            fill_vocab(&a, 600);
-            llama_sampler_apply(s, &a);
-            snprintf(label, sizeof label, "dry %s reset", cases[k].name);
-            rec(label, &a);
-            llama_sampler_free(c);
-            llama_sampler_free(s);
+            run_dry(vocab, cases[k].name, cases[k].mult, cases[k].base, cases[k].allowed, cases[k].last_n, breakers, 5, hist, nh);
         }
+        run_dry_breakers(vocab);
     }
 
     // Infill: candidates sharing prefixes, plus EOG tokens.
@@ -1035,9 +1201,11 @@ static void run_generate(struct llama_model * model) {
 // ---------------------------------------------------------------------------
 
 static void quiet(enum ggml_log_level level, const char * text, void * user_data) {
-    (void) level;
-    (void) text;
     (void) user_data;
+    if (log_echo) {
+        size_t n = strlen(text);
+        printf("%s log %d %s%s", log_echo, (int) level, text, n && text[n - 1] == '\n' ? "" : "\n");
+    }
 }
 
 int main(int argc, char ** argv) {

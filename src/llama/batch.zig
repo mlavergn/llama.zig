@@ -12,7 +12,7 @@
 //!   C API's bodies
 //! - `llama.cpp/src/llama-cparams.h` -- `LLAMA_MAX_SEQ`
 //!
-//! All at v0.7.0 (`620d2225c`). Each declaration below names the source file
+//! All at v0.8.0 (`8642541b2`). Each declaration below names the source file
 //! and line it came from. The C entry points are `api/batch.zig`'s.
 //!
 //! # The extended batch's sequence sets
@@ -71,7 +71,7 @@ fn oom() noreturn {
     impl.abort("llama-batch.cpp", 0, "out of memory");
 }
 
-/// Ports `LLAMA_MAX_SEQ` (llama-cparams.h:8 @620d2225c).
+/// Ports `LLAMA_MAX_SEQ` (llama-cparams.h:8 @8642541b2).
 pub const max_seq: u32 = 256;
 
 /// Ports `llama_batch_allocr`'s `seq_set_t`, `std::bitset<LLAMA_MAX_SEQ>`:
@@ -96,7 +96,7 @@ fn cInt(v: u32) c_int {
 // -----------------------------------------------------------------------------
 // llama_ubatch
 
-/// Ports `llama_ubatch`'s `data_t` (llama-batch.h:64 @620d2225c): the arrays a
+/// Ports `llama_ubatch`'s `data_t` (llama-batch.h:64 @8642541b2): the arrays a
 /// `Ubatch` built by the allocator points into, with the reference count
 /// `std`'s `shared_ptr` keeps beside them.
 pub const UbatchData = struct {
@@ -148,7 +148,7 @@ pub const UbatchData = struct {
     }
 };
 
-/// Ports `llama_ubatch` (llama-batch.h:17 @620d2225c).
+/// Ports `llama_ubatch` (llama-batch.h:17 @8642541b2).
 ///
 /// A value type, as in the C++, and default-initializable to the empty
 /// ubatch the splitters return when the batch is consumed. Its pointers
@@ -202,21 +202,21 @@ pub const Ubatch = struct {
     /// The arrays above, when this ubatch owns them.
     data: ?*UbatchData = null,
 
-    /// Ports `llama_ubatch`'s `equal_seqs` (llama-batch.h:18 @620d2225c).
+    /// Ports `llama_ubatch`'s `equal_seqs` (llama-batch.h:18 @8642541b2).
     ///
     /// Return: whether every sequence set has `n_seq_tokens` tokens.
     pub fn equalSeqs(self: *const Ubatch) bool {
         return self.b_equal_seqs != 0;
     }
 
-    /// Ports `llama_ubatch`'s `is_pos_2d` (llama-batch.h:27 @620d2225c).
+    /// Ports `llama_ubatch`'s `is_pos_2d` (llama-batch.h:27 @8642541b2).
     ///
     /// Return: whether positions are M-RoPE's, three or more per token.
     pub fn isPos2d(self: *const Ubatch) bool {
         return self.n_pos >= 3;
     }
 
-    /// Ports `llama_ubatch`'s `is_mixed` (llama-batch.h:33 @620d2225c).
+    /// Ports `llama_ubatch`'s `is_mixed` (llama-batch.h:33 @8642541b2).
     ///
     /// Return: whether `type` picks a token or an embedding per row, with
     /// `n_pos` position sections for every row.
@@ -224,7 +224,7 @@ pub const Ubatch = struct {
         return self.type != null;
     }
 
-    /// Ports `ASSERT_EMBD_OR_TOKEN` (llama-batch.h:86 @620d2225c): aborts
+    /// Ports `ASSERT_EMBD_OR_TOKEN` (llama-batch.h:86 @8642541b2): aborts
     /// when a mixed ubatch reaches code that takes only tokens or only
     /// embeddings.
     ///
@@ -299,7 +299,7 @@ const PosSet = struct {
 // -----------------------------------------------------------------------------
 // llama_batch_allocr
 
-/// Ports `llama_batch_allocr` (llama-batch.h:154 @620d2225c): converts a
+/// Ports `llama_batch_allocr` (llama-batch.h:154 @8642541b2): converts a
 /// `llama_batch_ext` into the flat `llama_batch` it keeps, sanitizes it,
 /// and splits it into ubatches.
 pub const BatchAllocr = struct {
@@ -363,7 +363,7 @@ pub const BatchAllocr = struct {
     debug: c_int = 0,
 
     /// Ports the constructor of `llama_batch_allocr` (llama-batch.cpp:15
-    /// @620d2225c), which reads `LLAMA_BATCH_DEBUG` once, here.
+    /// @8642541b2), which reads `LLAMA_BATCH_DEBUG` once, here.
     ///
     /// Parameters:
     /// - `n_pos_per_embd`: positions per token, 4 for M-RoPE.
@@ -405,7 +405,7 @@ pub const BatchAllocr = struct {
         self.seq_set_map.clearRetainingCapacity();
     }
 
-    /// Ports `llama_batch_allocr`'s `init` (llama-batch.cpp:28 @620d2225c):
+    /// Ports `llama_batch_allocr`'s `init` (llama-batch.cpp:28 @8642541b2):
     /// converts the extended batch into the flat batch this allocator keeps,
     /// validates it, and checks it against the memory the extended batch
     /// names.
@@ -866,7 +866,7 @@ pub const BatchAllocr = struct {
     }
 
     /// Ports `llama_batch_allocr`'s `ubatch_reserve` (llama-batch.cpp:498
-    /// @620d2225c): a well-defined ubatch of `n_seqs` sequences of
+    /// @8642541b2): a well-defined ubatch of `n_seqs` sequences of
     /// `n_seq_tokens` tokens, all zero, for sizing compute buffers. It clears
     /// the allocator's batch.
     ///
@@ -918,35 +918,35 @@ pub const BatchAllocr = struct {
         };
     }
 
-    /// Ports `llama_batch_allocr`'s `get_batch` (llama-batch.cpp:548 @620d2225c).
+    /// Ports `llama_batch_allocr`'s `get_batch` (llama-batch.cpp:548 @8642541b2).
     ///
     /// Return: the sanitized batch, borrowed from the allocator.
     pub fn getBatch(self: *const BatchAllocr) *const c.llama_batch {
         return &self.batch;
     }
 
-    /// Ports `llama_batch_allocr`'s `get_n_tokens` (llama-batch.cpp:552 @620d2225c).
+    /// Ports `llama_batch_allocr`'s `get_n_tokens` (llama-batch.cpp:552 @8642541b2).
     ///
     /// Return: the batch's token count.
     pub fn getNTokens(self: *const BatchAllocr) u32 {
         return @bitCast(self.batch.n_tokens);
     }
 
-    /// Ports `llama_batch_allocr`'s `get_n_outputs` (llama-batch.cpp:556 @620d2225c).
+    /// Ports `llama_batch_allocr`'s `get_n_outputs` (llama-batch.cpp:556 @8642541b2).
     ///
     /// Return: how many tokens are outputs.
     pub fn getNOutputs(self: *const BatchAllocr) u32 {
         return self.n_outputs;
     }
 
-    /// Ports `llama_batch_allocr`'s `get_n_used` (llama-batch.cpp:560 @620d2225c).
+    /// Ports `llama_batch_allocr`'s `get_n_used` (llama-batch.cpp:560 @8642541b2).
     ///
     /// Return: how many tokens the splits since `splitReset` took.
     pub fn getNUsed(self: *const BatchAllocr) u32 {
         return self.n_used;
     }
 
-    /// Ports `llama_batch_allocr`'s `get_out_ids` (llama-batch.cpp:564 @620d2225c).
+    /// Ports `llama_batch_allocr`'s `get_out_ids` (llama-batch.cpp:564 @8642541b2).
     ///
     /// Return: the output indices in the order the splits met them; the
     /// list is the allocator's, and the caller may change it, as the C++'s
@@ -955,7 +955,7 @@ pub const BatchAllocr = struct {
         return &self.out_ids;
     }
 
-    /// Ports `llama_batch_allocr`'s `seq_pos_min` (llama-batch.cpp:568 @620d2225c).
+    /// Ports `llama_batch_allocr`'s `seq_pos_min` (llama-batch.cpp:568 @8642541b2).
     ///
     /// Parameters:
     /// - `seq_id`: the sequence, in `[0, LLAMA_MAX_SEQ)`.
@@ -966,7 +966,7 @@ pub const BatchAllocr = struct {
         return if (p.len == 0) -1 else p[0];
     }
 
-    /// Ports `llama_batch_allocr`'s `seq_pos_max` (llama-batch.cpp:572 @620d2225c).
+    /// Ports `llama_batch_allocr`'s `seq_pos_max` (llama-batch.cpp:572 @8642541b2).
     ///
     /// Parameters:
     /// - `seq_id`: the sequence, in `[0, LLAMA_MAX_SEQ)`.
@@ -978,7 +978,7 @@ pub const BatchAllocr = struct {
     }
 
     /// Ports `llama_batch_allocr`'s `split_reset` (llama-batch.cpp:576
-    /// @620d2225c): call once before splitting.
+    /// @8642541b2): call once before splitting.
     ///
     /// Return: nothing.
     pub fn splitReset(self: *BatchAllocr) void {
@@ -991,7 +991,7 @@ pub const BatchAllocr = struct {
     }
 
     /// Ports `llama_batch_allocr`'s `split_simple` (llama-batch.cpp:585
-    /// @620d2225c): the next `n_ubatch` unused tokens, in batch order, as
+    /// @8642541b2): the next `n_ubatch` unused tokens, in batch order, as
     /// sequence sets of one token each.
     ///
     /// Parameters:
@@ -1032,7 +1032,7 @@ pub const BatchAllocr = struct {
     }
 
     /// Ports `llama_batch_allocr`'s `split_equal` (llama-batch.cpp:619
-    /// @620d2225c): ubatches of non-overlapping sequence sets with the same
+    /// @8642541b2): ubatches of non-overlapping sequence sets with the same
     /// number of tokens each.
     ///
     /// Parameters:
@@ -1214,7 +1214,7 @@ pub const BatchAllocr = struct {
     }
 
     /// Ports `llama_batch_allocr`'s `split_seq` (llama-batch.cpp:790
-    /// @620d2225c): one sequence set per ubatch, taking later tokens whose
+    /// @8642541b2): one sequence set per ubatch, taking later tokens whose
     /// set is a subset of the current one.
     ///
     /// Parameters:
@@ -1259,7 +1259,7 @@ pub const BatchAllocr = struct {
         return self.ubatchAdd(idxs.items, 1, true);
     }
 
-    /// Ports `llama_batch_allocr`'s `clear` (llama-batch.cpp:832 @620d2225c).
+    /// Ports `llama_batch_allocr`'s `clear` (llama-batch.cpp:832 @8642541b2).
     /// `has_cpl`, `used`, `out_ids` and `n_used` survive it, as in the C++.
     fn clear(self: *BatchAllocr) void {
         self.n_outputs = 0;
@@ -1290,7 +1290,7 @@ pub const BatchAllocr = struct {
     }
 
     /// Ports `llama_batch_allocr`'s `ubatch_add` (llama-batch.cpp:864
-    /// @620d2225c): copies the tokens at `idxs` into a new ubatch and
+    /// @8642541b2): copies the tokens at `idxs` into a new ubatch and
     /// records its outputs in `out_ids`. From a mixed batch, a ubatch whose
     /// rows are all of one kind is a plain token or embedding ubatch.
     fn ubatchAdd(self: *BatchAllocr, idxs: []const i32, n_seqs: u32, equal_seqs: bool) Ubatch {
@@ -1420,7 +1420,7 @@ pub const BatchAllocr = struct {
     }
 
     /// Ports `llama_batch_allocr`'s `ubatch_print` (llama-batch.cpp:990
-    /// @620d2225c), for `LLAMA_BATCH_DEBUG`.
+    /// @8642541b2), for `LLAMA_BATCH_DEBUG`.
     fn ubatchPrint(self: *const BatchAllocr, ubatch: *const Ubatch, debug: c_int) void {
         if (debug <= 0) return;
         const f = "ubatch_print";
@@ -1578,7 +1578,7 @@ pub const SeqIdSet = struct {
 };
 
 /// Ports `llama_batch_ext_select_n_embd_inp` (llama-batch.cpp:1138
-/// @620d2225c): the width of a batch's embedding rows. DFlash batches carry
+/// @8642541b2): the width of a batch's embedding rows. DFlash batches carry
 /// the fused target features at the encoder's input width, the rest token
 /// embeddings; the context type no longer matters.
 ///
@@ -1597,7 +1597,7 @@ pub fn selectNEmbdInp(ctx_type: c.enum_llama_context_type, arch: arch_mod.Arch, 
 }
 
 /// Ports `llama_batch_ext_select_n_embd_state` (llama-batch.cpp:1146
-/// @620d2225c): the width of a batch's state embedding rows. An MTP context
+/// @8642541b2): the width of a batch's state embedding rows. An MTP context
 /// takes the target model's hidden state, a LiliCorr model its token
 /// embeddings; 0 takes none.
 ///
@@ -1617,7 +1617,7 @@ pub fn selectNEmbdState(ctx_type: c.enum_llama_context_type, hparams: *const hpa
     return 0;
 }
 
-/// Ports `llama_batch_ext` (llama-batch.h:97 @620d2225c): the extended
+/// Ports `llama_batch_ext` (llama-batch.h:97 @8642541b2): the extended
 /// batch, a list of entries each carrying a token id, an embedding or both,
 /// its sequences, positions and output flag. The handle behind
 /// `struct llama_batch_ext *`.
@@ -1647,7 +1647,7 @@ pub const BatchExt = struct {
     embd: std.ArrayList(f32) = .empty,
     state: std.ArrayList(f32) = .empty,
 
-    /// Ports `llama_batch_ext`'s `token` (llama-batch.h:111 @620d2225c).
+    /// Ports `llama_batch_ext`'s `token` (llama-batch.h:111 @8642541b2).
     pub const Entry = struct {
         id: Token = null_token,
         /// Whether `embd_off` is set.
@@ -1665,8 +1665,8 @@ pub const BatchExt = struct {
     };
 
     /// Ports the test constructor of `llama_batch_ext` (llama-batch.cpp:1169
-    /// @620d2225c), which takes no state embedding; `Context.batchExtCreate`
-    /// ports the context constructor (llama-batch.cpp:1157 @620d2225c) and
+    /// @8642541b2), which takes no state embedding; `Context.batchExtCreate`
+    /// ports the context constructor (llama-batch.cpp:1157 @8642541b2) and
     /// sets `n_embd_state` after this.
     ///
     /// Return: an empty batch on the heap; free it with `destroy`.
@@ -1703,7 +1703,7 @@ pub const BatchExt = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `llama_batch_ext`'s `clear` (llama-batch.cpp:1188 @620d2225c).
+    /// Ports `llama_batch_ext`'s `clear` (llama-batch.cpp:1188 @8642541b2).
     ///
     /// Return: nothing.
     pub fn clear(self: *BatchExt) void {
@@ -1719,7 +1719,7 @@ pub const BatchExt = struct {
     }
 
     /// Ports `llama_batch_ext`'s `add_token` (llama-batch.cpp:1195
-    /// @620d2225c): an entry in one sequence, with no position yet.
+    /// @8642541b2): an entry in one sequence, with no position yet.
     ///
     /// Return: its index, -1 when the batch is full, -3 for an invalid
     /// sequence id.
@@ -1739,7 +1739,7 @@ pub const BatchExt = struct {
         return @truncate(@as(isize, @bitCast(self.tokens.items.len - 1)));
     }
 
-    /// Ports `llama_batch_ext`'s `add_seq` (llama-batch.cpp:1212 @620d2225c).
+    /// Ports `llama_batch_ext`'s `add_seq` (llama-batch.cpp:1212 @8642541b2).
     ///
     /// Return: false for an invalid index or sequence id.
     pub fn addSeq(self: *BatchExt, idx: i32, seq_id: SeqId) bool {
@@ -1756,7 +1756,7 @@ pub const BatchExt = struct {
     }
 
     /// Ports `llama_batch_ext`'s `set_token_id` (llama-batch.cpp:1227
-    /// @620d2225c).
+    /// @8642541b2).
     ///
     /// Return: false for an invalid index or token id.
     pub fn setTokenId(self: *BatchExt, idx: i32, id: Token) bool {
@@ -1771,7 +1771,7 @@ pub const BatchExt = struct {
     }
 
     /// Ports `llama_batch_ext`'s `set_token_embd` (llama-batch.cpp:1238
-    /// @620d2225c): the entry's embedding, `n_rows * n_embd` floats, which
+    /// @8642541b2): the entry's embedding, `n_rows * n_embd` floats, which
     /// must be the batch's row width -- the first one sets it.
     ///
     /// Return: false for an invalid index, a null or mis-sized embedding, or
@@ -1812,7 +1812,7 @@ pub const BatchExt = struct {
     }
 
     /// Ports `llama_batch_ext`'s `set_token_state` (llama-batch.cpp:1274
-    /// @620d2225c): the entry's state embedding, `n_embd_state` floats.
+    /// @8642541b2): the entry's state embedding, `n_embd_state` floats.
     ///
     /// Return: false for an invalid index, a null or mis-sized state, a
     /// context that takes none, or an entry that has one already.
@@ -1849,7 +1849,7 @@ pub const BatchExt = struct {
     }
 
     /// Ports `llama_batch_ext`'s `set_token_pos` (llama-batch.cpp:1306
-    /// @620d2225c): one position for an entry with a token id, and
+    /// @8642541b2): one position for an entry with a token id, and
     /// `n_pos_per_embd` for an embedding.
     ///
     /// Return: false for an invalid index or a null `pos_in`.
@@ -1872,7 +1872,7 @@ pub const BatchExt = struct {
     }
 
     /// Ports `llama_batch_ext`'s `set_output` (llama-batch.cpp:1324
-    /// @620d2225c).
+    /// @8642541b2).
     ///
     /// Return: false for an invalid index.
     pub fn setOutput(self: *BatchExt, idx: i32, output_last: bool) bool {
@@ -1884,7 +1884,7 @@ pub const BatchExt = struct {
     }
 
     /// Ports `llama_batch_ext`'s `set_decision_order` (llama-batch.cpp:1332
-    /// @620d2225c).
+    /// @8642541b2).
     ///
     /// Return: false for an invalid index.
     pub fn setDecisionOrder(self: *BatchExt, idx: i32, order: i32) bool {
@@ -1896,7 +1896,7 @@ pub const BatchExt = struct {
     }
 };
 
-/// Ports `llama_batch_compat`'s `init` (llama-batch.cpp:1410 @620d2225c):
+/// Ports `llama_batch_compat`'s `init` (llama-batch.cpp:1410 @8642541b2):
 /// fills an extended batch from a `llama_batch`, generating what the old API
 /// leaves out -- one sequence 0, positions continuing from the memory along
 /// each entry's first sequence, and the last entry as the only output.
@@ -1986,7 +1986,7 @@ pub fn compatInit(dst: *BatchExt, batch_inp: c.llama_batch, n_embd_row_in: usize
 // -----------------------------------------------------------------------------
 // The C interface
 
-/// Ports `llama_batch_get_one` (llama-batch.cpp:1077 @620d2225c): a batch of
+/// Ports `llama_batch_get_one` (llama-batch.cpp:1077 @8642541b2): a batch of
 /// one sequence over `tokens`, everything else left for `initBatch` to fill.
 ///
 /// Parameters:
@@ -2014,7 +2014,7 @@ fn cMalloc(comptime T: type, n: usize) [*c]T {
     return @ptrCast(@alignCast(std.c.malloc(n)));
 }
 
-/// Ports `llama_batch_init` (llama-batch.cpp:1091 @620d2225c): a batch whose
+/// Ports `llama_batch_init` (llama-batch.cpp:1091 @8642541b2): a batch whose
 /// arrays are `malloc`ed for `n_tokens_alloc` tokens, with `n_tokens` 0.
 ///
 /// Parameters:
@@ -2049,7 +2049,7 @@ pub fn batchInit(n_tokens_alloc: i32, embd: i32, n_seq_max: i32) c.llama_batch {
     return batch;
 }
 
-/// Ports `llama_batch_free` (llama-batch.cpp:1121 @620d2225c).
+/// Ports `llama_batch_free` (llama-batch.cpp:1121 @8642541b2).
 ///
 /// Parameters:
 /// - `batch`: a batch from `batchInit`, or the C's `llama_batch_init`.

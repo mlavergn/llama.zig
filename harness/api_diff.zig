@@ -528,8 +528,46 @@ fn portDefaultLog(_: usize) void {
 // -----------------------------------------------------------------------------
 // Models
 
+extern fn _Z24llama_model_get_tok_embdPK11llama_modelPf(model: ?*const c.struct_llama_model, out: ?[*]f32) u32;
+extern fn _Z29llama_model_get_tok_embd_rowsPK11llama_modelPKijPf(model: ?*const c.struct_llama_model, tokens: ?[*]const c.llama_token, n_tokens: u32, out: ?[*]f32) u32;
+extern fn _Z26llama_model_n_tokens_delayPK11llama_model(model: ?*const c.struct_llama_model) u32;
+
+/// `llama-ext.h`'s token-embedding reads and `llama_model_n_tokens_delay`,
+/// which have C++ linkage in the reference.
+fn extScript(comptime s: Side, out: *std.ArrayList(u8), mc: ?*const c.struct_llama_model) void {
+    const tok_embd = if (s == .ref) _Z24llama_model_get_tok_embdPK11llama_modelPf else api.model.llama_model_get_tok_embd;
+    const rows = if (s == .ref) _Z29llama_model_get_tok_embd_rowsPK11llama_modelPKijPf else api.model.llama_model_get_tok_embd_rows;
+    const delay = if (s == .ref) _Z26llama_model_n_tokens_delayPK11llama_model else api.model.llama_model_n_tokens_delay;
+
+    w(out, "n_tokens_delay {d}", .{delay(mc)});
+
+    const n_all = tok_embd(mc, null);
+    w(out, "tok_embd elements {d}", .{n_all});
+
+    const n_vocab = F(s, "llama_vocab_n_tokens")(F(s, "llama_model_get_vocab")(mc));
+    const n_embd: usize = @intCast(@max(F(s, "llama_model_n_embd")(mc), 1));
+    var dst: [8 * 8192]f32 = undefined;
+    const lists = [_][]const c.llama_token{
+        &.{0},
+        &.{ 1, 0, 1 },
+        &.{ n_vocab - 1, 3 },
+        &.{n_vocab},
+        &.{ 0, -1 },
+        &.{},
+    };
+    for (lists) |l| {
+        if (n_embd * @max(l.len, 1) > dst.len) break;
+        @memset(&dst, 0);
+        const r = rows(mc, l.ptr, @intCast(l.len), &dst);
+        w(out, "tok_embd_rows {d} tokens -> {d} {x}", .{ l.len, r, std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(dst[0 .. n_embd * l.len])) });
+    }
+    w(out, "tok_embd_rows null tokens {d}", .{rows(mc, null, 1, &dst)});
+    w(out, "tok_embd_rows null out {d}", .{rows(mc, lists[0].ptr, 1, null)});
+}
+
 fn modelScript(comptime s: Side, out: *std.ArrayList(u8), m: ?*c.struct_llama_model) void {
     const mc: ?*const c.struct_llama_model = m;
+    extScript(s, out, mc);
     w(out, "vocab non-null {}", .{F(s, "llama_model_get_vocab")(mc) != null});
     {
         const n_layer = F(s, "llama_model_n_layer")(mc);

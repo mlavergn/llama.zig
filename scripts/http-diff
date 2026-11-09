@@ -7,7 +7,7 @@
 # server-common.cpp and httplib.cpp compiled unmodified, with
 # llama.cpp.zmake's httplib_defines and ui-stub); harness/http_diff.zig runs
 # the port's with the same routes. harness/http_driver.py starts each under
-# fifteen configurations -- API keys, a path prefix, CORS settings, thread
+# sixteen configurations -- API keys, a path prefix, CORS settings, thread
 # counts, not ready, the Vertex AI routes, a Unix socket, several listeners,
 # and five that fail to start -- sends both the same raw bytes, and requires every response's
 # bytes, how each connection ended, every log line and the exit code to be

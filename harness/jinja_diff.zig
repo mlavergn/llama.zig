@@ -55,7 +55,7 @@ const inputs = @import("inputs");
 
 extern fn jinja_ref_render(tmpl: [*]const u8, tmpl_len: usize, vars: [*]const u8, vars_len: usize, out: *?[*]u8, out_len: *usize, input: *?[*]u8, parts: *?[*]u8) c_int;
 extern fn jinja_ref_free(p: ?*anyopaque) void;
-extern fn jinja_ref_caps(tmpl: [*]const u8, tmpl_len: usize, out: *[9]u8) c_int;
+extern fn jinja_ref_caps(tmpl: [*]const u8, tmpl_len: usize, out: *[9]u8, levels: [*]u8, levels_cap: usize) c_int;
 
 const gpa = std.heap.c_allocator;
 
@@ -194,6 +194,8 @@ fn diagnose(source: []const u8, conv: Conversation) []const u8 {
     defer env.deinit();
     env.trim_blocks = true;
     env.lstrip_blocks = true;
+    // as `chat.zig` sets it: without it a macro that recurses for ever overflows the stack here
+    env.llama_cpp_semantics = true;
     const template = env.fromString(source, "chat") catch |e| return std.fmt.allocPrint(gpa, "parse: {s} near line {d}", .{ @errorName(e), env.last_syntax_error_line }) catch "parse";
     var list = std.json.Array.init(arena);
     for (conv.messages) |m| {
@@ -301,7 +303,8 @@ const probes = [_]Probe{
     // probes above never reach: no parameters (`{}`), so no `properties`.
     .{ .name = "no-params-tool", .tools = "[{\"type\":\"function\",\"function\":{\"name\":\"ping\",\"description\":\"No arguments\",\"parameters\":{}}}]", .messages = "[" ++ USER ++ "," ++ calls(call("ping", "{}", "call00001")) ++ "]" },
     .{ .name = "caps-string", .messages = "[{\"role\":\"user\",\"content\":\"STRING_MARKER\"}]", .tools = "[]" },
-    .{ .name = "caps-typed", .messages = "[{\"role\":\"user\",\"content\":[]}]", .tools = "[]" },
+    .{ .name = "caps-typed", .messages = "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"STRING_MARKER\"}]}]", .tools = "[]" },
+    .{ .name = "caps-typed-empty", .messages = "[{\"role\":\"user\",\"content\":[]}]", .tools = "[]" },
     .{ .name = "caps-typed-text", .messages = "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Hello\"},{\"type\":\"text\",\"text\":\"again\"}]}]" },
     .{ .name = "caps-system", .messages = "[{\"role\":\"system\",\"content\":\"System message\"},{\"role\":\"user\",\"content\":\"User message\"}]", .tools = "[]" },
     .{ .name = "caps-object-args", .messages = capsCalls("{\"arg\":\"value\"}", false), .tools = caps_tools },
@@ -370,7 +373,8 @@ fn runProbes(filter: []const u8) !struct { renders: usize, differ: usize, caps_d
     for (inputs.templates) |tmpl| {
         if (std.mem.indexOf(u8, tmpl.name, filter) == null) continue;
         var ref_caps: [9]u8 = undefined;
-        const ref_rc = jinja_ref_caps(tmpl.source.ptr, tmpl.source.len, &ref_caps);
+        var ref_levels: [128]u8 = undefined;
+        const ref_rc = jinja_ref_caps(tmpl.source.ptr, tmpl.source.len, &ref_caps, &ref_levels, ref_levels.len);
         var port = common_chat.template.Template.init(gpa, tmpl.source, bos, eos) catch |e| {
             if (ref_rc != 0) continue;
             std.debug.print("  {s}: ours fails to load: {s}\n", .{ tmpl.name, @errorName(e) });
@@ -390,6 +394,13 @@ fn runProbes(filter: []const u8) !struct { renders: usize, differ: usize, caps_d
                 caps_differ += 1;
                 std.debug.print("  {s}: caps {s}: upstream {d}, ours {}\n", .{ tmpl.name, e.name, ref_caps[i], e.value });
             }
+        }
+        const port_levels = try std.mem.join(gpa, ",", port.caps.reasoning_effort_levels);
+        defer gpa.free(port_levels);
+        const ref_levels_s = std.mem.sliceTo(&ref_levels, 0);
+        if (!std.mem.eql(u8, port_levels, ref_levels_s)) {
+            caps_differ += 1;
+            std.debug.print("  {s}: reasoning_effort_levels: upstream [{s}], ours [{s}]\n", .{ tmpl.name, ref_levels_s, port_levels });
         }
         var line: [probes.len * 4]u8 = undefined;
         for (probes, 0..) |p, k| {

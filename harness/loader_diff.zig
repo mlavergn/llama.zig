@@ -48,6 +48,8 @@ extern fn ref_n_bytes(model: *const c.llama_model) usize;
 extern fn ref_ftype(model: *const c.llama_model) c_int;
 extern fn ref_n_labels(model: *const c.llama_model) usize;
 extern fn ref_label(model: *const c.llama_model, i: usize) [*:0]const u8;
+extern fn ref_decision_label(model: *const c.llama_model, i: u32) ?[*:0]const u8;
+extern fn ref_n_decision_labels(model: *const c.llama_model) usize;
 extern fn ref_n_kv(model: *const c.llama_model) usize;
 extern fn ref_kv(model: *const c.llama_model, i: usize, key: *[*:0]const u8, value: *[*:0]const u8) c_int;
 extern fn ref_hparams_sizeof() usize;
@@ -259,6 +261,16 @@ fn runCase(cs: Case) void {
             expectInt("classifier labels", ref_n_labels(rm), m.classifier_labels.items.len);
             for (m.classifier_labels.items, 0..) |l, i| {
                 if (i < ref_n_labels(rm)) expectStr("classifier label", std.mem.span(ref_label(rm, i)), l);
+            }
+            // `llama_model_decision_label`, past the last one too.
+            expectInt("decision labels", ref_n_decision_labels(rm), m.decision_labels.items.len);
+            for (0..m.decision_labels.items.len + 2) |li| {
+                const rl = ref_decision_label(rm, @intCast(li));
+                const pl: ?[*:0]const u8 = @ptrCast(harness_root.api.model.llama_model_decision_label(@ptrCast(m), @intCast(li)));
+                checks += 1;
+                if ((rl == null) != (pl == null)) {
+                    fail("{s}: decision label {d}: null C++ {} port {}", .{ cs.name, li, rl == null, pl == null });
+                } else if (rl) |r| expectStr("decision label", std.mem.span(r), std.mem.span(pl.?));
             }
             expectInt("gguf_kv size", ref_n_kv(rm), m.gguf_kv.len);
             var it = m.gguf_kv.iterator();
@@ -947,6 +959,32 @@ const Qwen = struct {
         setStrs(ctx, "qwen35.classifier.output_labels", &.{ "negative", "neutral", "positive \"quoted\"" });
     }
 
+    /// v0.8.0's `<arch>.decision.labels`.
+    fn decisionLabels(ctx: *c.gguf_context) void {
+        setStrs(ctx, "qwen35.decision.labels", &.{ "yes", "no", "maybe \"so\"" });
+    }
+
+    /// v0.8.0: `gguf_kv_to_str` stops rendering an array once the text is
+    /// past 40 bytes, so the dump must show the same around that edge: one
+    /// short of it, at it, one past it, a last element that crosses it, and
+    /// an element that ends in an escape exactly there.
+    fn arrayEdges(ctx: *c.gguf_context) void {
+        const fits = "12345678901234567890123456789012345";
+        setStrs(ctx, "general.arr_38", &.{fits});
+        setStrs(ctx, "general.arr_39", &.{fits ++ "6"});
+        setStrs(ctx, "general.arr_40", &.{fits ++ "67"});
+        setStrs(ctx, "general.arr_41", &.{fits ++ "678"});
+        setStrs(ctx, "general.arr_two", &.{ fits ++ "6789", "more" });
+        setStrs(ctx, "general.arr_cross", &.{ "short", fits, "tail" });
+        setStrs(ctx, "general.arr_esc", &.{ "1234567890123456789012345678901234\\\"", "more" });
+        setStrs(ctx, "general.arr_bs", &.{ "a\\b", "c\"d" });
+        setStrs(ctx, "general.arr_empty", &.{});
+        const ints = [_]u32{ 100000, 200000, 300000, 400000, 500000, 600000, 700000, 800000 };
+        c.gguf_set_arr_data(ctx, "general.ints_8", c.GGUF_TYPE_UINT32, &ints, ints.len);
+        c.gguf_set_arr_data(ctx, "general.ints_5", c.GGUF_TYPE_UINT32, &ints, 5);
+        c.gguf_set_arr_data(ctx, "general.ints_4", c.GGUF_TYPE_UINT32, &ints, 4);
+    }
+
     fn headSizes(ctx: *c.gguf_context) void {
         c.gguf_set_val_u32(ctx, "qwen35.attention.key_length", 96);
         c.gguf_set_val_u32(ctx, "qwen35.attention.value_length", 80);
@@ -1254,6 +1292,8 @@ pub fn main(init: std.process.Init) !void {
             .{ "no file_type", Qwen.noFileType },
             .{ "no name", Qwen.noName },
             .{ "classifier labels", Qwen.labels },
+            .{ "decision labels", Qwen.decisionLabels },
+            .{ "array edges", Qwen.arrayEdges },
             .{ "head sizes", Qwen.headSizes },
             .{ "no heads", Qwen.noHeads },
             .{ "pooling", Qwen.pooling },

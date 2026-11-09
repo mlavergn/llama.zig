@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/nemotron.cpp` at v0.7.0 (`620d2225c`):
+//! Ported from `llama.cpp/src/models/nemotron.cpp` at v0.8.0 (`8642541b2`):
 //! `llama_model_nemotron`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -19,7 +19,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_nemotron`'s `load_arch_hparams` (models/nemotron.cpp:3 @620d2225c).
+/// Ports `llama_model_nemotron`'s `load_arch_hparams` (models/nemotron.cpp:3 @8642541b2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_eps = (try ml.meta.getKey(f32, .attention_layernorm_eps, true, exc)).?;
@@ -30,7 +30,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_nemotron`'s `load_arch_tensors` (models/nemotron.cpp:12 @620d2225c).
+/// Ports `llama_model_nemotron`'s `load_arch_tensors` (models/nemotron.cpp:12 @8642541b2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -49,8 +49,11 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
         layer.attn_norm = try self.createTensor(.{ .tensor = .attn_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, 0, exc);
         layer.attn_norm_b = try self.createTensor(.{ .tensor = .attn_norm, .suffix = "bias", .bid = i }, &.{l.n_embd}, 0, exc);
 
-        try self.createTensorQkv(layer, i, l.n_embd, l.n_embd, l.n_embd_gqa, l.n_embd_gqa, 0, exc);
-        layer.wo = try self.createTensor(.{ .tensor = .attn_out, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_embd }, 0, exc);
+        // `n_embd_head_k * n_head` equals `n_embd` for standard Nemotron (32
+        // heads), and differs for non-standard GQA (48 Q heads, head_dim 128).
+        const n_embd_q = l.n_embd_head_k * l.n_head;
+        try self.createTensorQkv(layer, i, l.n_embd, n_embd_q, l.n_embd_gqa, l.n_embd_gqa, 0, exc);
+        layer.wo = try self.createTensor(.{ .tensor = .attn_out, .suffix = "weight", .bid = i }, &.{ n_embd_q, l.n_embd }, 0, exc);
 
         // Optional bias tensors.
         layer.wo_b = try self.createTensor(.{ .tensor = .attn_out, .suffix = "bias", .bid = i }, &.{l.n_embd}, nr, exc);
@@ -67,14 +70,14 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_nemotron`'s `build_arch_graph` (models/nemotron.cpp:46 @620d2225c)
-/// and the constructor of its `graph` (models/nemotron.cpp:50 @620d2225c).
+/// Ports `llama_model_nemotron`'s `build_arch_graph` (models/nemotron.cpp:49 @8642541b2)
+/// and the constructor of its `graph` (models/nemotron.cpp:53 @8642541b2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/nemotron.cpp", 53, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/nemotron.cpp", 56, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 

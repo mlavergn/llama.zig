@@ -9,7 +9,7 @@
 //!   `llama_prefetch_rows` and `llama_clear_tensor_data`
 //! - `llama.cpp/ggml/include/ggml.h` — `GGML_ASSERT` and `GGML_ABORT`
 //!
-//! All at v0.7.0 (`620d2225c`). Each declaration below names the source file
+//! All at v0.8.0 (`8642541b2`). Each declaration below names the source file
 //! and line it came from.
 //!
 //! # The C ABI import
@@ -127,7 +127,7 @@ pub fn writeStderr(parts: []const []const u8) void {
 
 const log = @import("log.zig");
 
-/// Ports `llama_prefetch_rows` (llama-impl.cpp:23 @620d2225c): prefetch the
+/// Ports `llama_prefetch_rows` (llama-impl.cpp:22 @8642541b2): prefetch the
 /// host pages a gather of these rows of `tensor` will read. A no-op for a
 /// tensor that is not in host memory, or for no rows.
 ///
@@ -143,23 +143,23 @@ pub fn prefetchRows(tensor: ?*const c.ggml_tensor, rows: [*c]const i32, n_rows: 
         return;
     }
 
-    assert(c.ggml_is_matrix(t), "llama-impl.cpp", 28, "ggml_is_matrix(tensor)");
+    assert(c.ggml_is_matrix(t), "llama-impl.cpp", 27, "ggml_is_matrix(tensor)");
 
     const row_bytes = c.ggml_row_size(t.type, t.ne[0]);
     const base: [*]const u8 = @ptrCast(t.data.?);
 
     const mmap = @import("mmap.zig");
-    const mr = allocator.alloc(mmap.MemoryRange, n_rows) catch abort("llama-impl.cpp", 33, "out of memory");
+    const mr = allocator.alloc(mmap.MemoryRange, n_rows) catch abort("llama-impl.cpp", 32, "out of memory");
     defer allocator.free(mr);
     for (0..n_rows) |i| {
-        assert(rows[i] >= 0 and rows[i] < t.ne[1], "llama-impl.cpp", 36, "rows[i] >= 0 && rows[i] < tensor->ne[1]");
+        assert(rows[i] >= 0 and rows[i] < t.ne[1], "llama-impl.cpp", 35, "rows[i] >= 0 && rows[i] < tensor->ne[1]");
         mr[i] = .{ .addr = base + @as(usize, @intCast(rows[i])) * t.nb[1], .size = row_bytes };
     }
 
     mmap.prefetchRanges(mr);
 }
 
-/// Ports `llama_clear_tensor_data` (llama-impl.cpp:92 @620d2225c): zero
+/// Ports `llama_clear_tensor_data` (llama-impl.cpp:91 @8642541b2): zero
 /// `size` bytes of `t` from `offset` by writing zeros, 1 MiB at a time,
 /// since not every backend buffer implements `ggml_backend_tensor_memset`.
 ///
@@ -174,7 +174,7 @@ pub fn clearTensorData(t: *c.ggml_tensor, offset: usize, size: usize) void {
     }
 }
 
-/// Ports `LLAMA_LOG_WARN` (llama-impl.h:29 @620d2225c).
+/// Ports `LLAMA_LOG_WARN` (llama-impl.h:29 @8642541b2).
 ///
 /// Parameters:
 /// - `format`: a printf format string.
@@ -185,7 +185,7 @@ pub fn logWarn(comptime format: [:0]const u8, args: anytype) void {
     log.logInternal(c.GGML_LOG_LEVEL_WARN, format, args);
 }
 
-/// Ports `LLAMA_LOG_ERROR` (llama-impl.h:30 @620d2225c).
+/// Ports `LLAMA_LOG_ERROR` (llama-impl.h:30 @8642541b2).
 ///
 /// Parameters:
 /// - `format`: a printf format string.
@@ -196,7 +196,7 @@ pub fn logError(comptime format: [:0]const u8, args: anytype) void {
     log.logInternal(c.GGML_LOG_LEVEL_ERROR, format, args);
 }
 
-/// Ports `LLAMA_LOG_INFO` (llama-impl.h:28 @620d2225c).
+/// Ports `LLAMA_LOG_INFO` (llama-impl.h:28 @8642541b2).
 ///
 /// Parameters:
 /// - `format`: a printf format string.
@@ -207,7 +207,7 @@ pub fn logInfo(comptime format: [:0]const u8, args: anytype) void {
     log.logInternal(c.GGML_LOG_LEVEL_INFO, format, args);
 }
 
-/// Ports `LLAMA_LOG_DEBUG` (llama-impl.h:31 @620d2225c).
+/// Ports `LLAMA_LOG_DEBUG` (llama-impl.h:31 @8642541b2).
 ///
 /// Parameters:
 /// - `format`: a printf format string.
@@ -218,7 +218,7 @@ pub fn logDebug(comptime format: [:0]const u8, args: anytype) void {
     log.logInternal(c.GGML_LOG_LEVEL_DEBUG, format, args);
 }
 
-/// Ports `LLAMA_LOG_CONT` (llama-impl.h:32 @620d2225c): continues the
+/// Ports `LLAMA_LOG_CONT` (llama-impl.h:32 @8642541b2): continues the
 /// previous line.
 ///
 /// Parameters:
@@ -233,7 +233,7 @@ pub fn logCont(comptime format: [:0]const u8, args: anytype) void {
 // -----------------------------------------------------------------------------
 // Assertions
 
-/// Mirrors `GGML_ABORT` (ggml.h:287 @620d2225c), through ggml's own
+/// Mirrors `GGML_ABORT` (ggml.h:287 @8642541b2), through ggml's own
 /// `ggml_abort`, so the message and backtrace are the C++'s.
 ///
 /// Parameters:
@@ -246,7 +246,7 @@ pub fn abort(comptime file: [:0]const u8, comptime line: c_int, comptime msg: [:
     c.ggml_abort(file.ptr, line, "%s", msg.ptr);
 }
 
-/// Mirrors `GGML_ASSERT` (ggml.h:288 @620d2225c).
+/// Mirrors `GGML_ASSERT` (ggml.h:288 @8642541b2).
 ///
 /// Parameters:
 /// - `ok`: the condition.
@@ -361,7 +361,7 @@ pub const Exception = struct {
 // -----------------------------------------------------------------------------
 // Timing
 
-/// Ports `time_meas` (llama-impl.h:80 @620d2225c).
+/// Ports `time_meas` (llama-impl.h:80 @8642541b2).
 ///
 /// The C++ adds the elapsed time to its accumulator in the destructor; here
 /// `deinit` does, called through `defer`.
@@ -369,7 +369,7 @@ pub const TimeMeas = struct {
     t_start_us: i64,
     t_acc: *i64,
 
-    /// Ports the constructor of `time_meas` (llama-impl.cpp:43 @620d2225c).
+    /// Ports the constructor of `time_meas` (llama-impl.cpp:42 @8642541b2).
     ///
     /// Parameters:
     /// - `t_acc`: the accumulator; borrowed until `deinit`.
@@ -380,7 +380,7 @@ pub const TimeMeas = struct {
         return .{ .t_start_us = if (disable) -1 else c.ggml_time_us(), .t_acc = t_acc };
     }
 
-    /// Ports the destructor of `time_meas` (llama-impl.cpp:45 @620d2225c).
+    /// Ports the destructor of `time_meas` (llama-impl.cpp:44 @8642541b2).
     ///
     /// Return: nothing.
     pub fn deinit(self: TimeMeas) void {

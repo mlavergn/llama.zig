@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.7.0, `620d2225c`), roughly
+//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.8.0, `8642541b2`), roughly
 //! lines 631-1605. Each function names the C function it replaces and the line
 //! it began at.
 //!
@@ -23,73 +23,73 @@ const impl = @import("impl.zig");
 const c = impl.c;
 
 const op_name = [_][*:0]const u8{
-    "NONE",               "DUP",                     "ADD",             "ADD_ID",
-    "ADD1",               "ACC",                     "SUB",             "MUL",
-    "DIV",                "SQR",                     "SQRT",            "LOG",
-    "SIN",                "COS",                     "SUM",             "SUM_ROWS",
-    "CUMSUM",             "MEAN",                    "ARGMAX",          "COUNT_EQUAL",
-    "REPEAT",             "REPEAT_BACK",             "CONCAT",          "SILU_BACK",
-    "NORM",               "RMS_NORM",                "RMS_NORM_BACK",   "GROUP_NORM",
-    "L2_NORM",            "MUL_MAT",                 "MUL_MAT_ID",      "OUT_PROD",
-    "SCALE",              "SET",                     "CPY",             "CONT",
-    "RESHAPE",            "VIEW",                    "PERMUTE",         "TRANSPOSE",
-    "GET_ROWS",           "GET_ROWS_BACK",           "SET_ROWS",        "DIAG",
-    "DIAG_MASK_INF",      "DIAG_MASK_ZERO",          "SOFT_MAX",        "SOFT_MAX_BACK",
-    "ROPE",               "ROPE_BACK",               "CLAMP",           "CONV_TRANSPOSE_1D",
-    "IM2COL",             "IM2COL_BACK",             "IM2COL_3D",       "COL2IM_1D",
-    "CONV_2D",            "CONV_3D",                 "CONV_2D_DW",      "CONV_TRANSPOSE_2D",
-    "POOL_1D",            "POOL_2D",                 "POOL_2D_BACK",    "UPSCALE",
-    "PAD",                "PAD_REFLECT_1D",          "ROLL",            "ARANGE",
-    "TIMESTEP_EMBEDDING", "ARGSORT",                 "TOP_K",           "LEAKY_RELU",
-    "TRI",                "FILL",                    "FLASH_ATTN_EXT",  "FLASH_ATTN_BACK",
-    "SSM_CONV",           "SSM_SCAN",                "WIN_PART",        "WIN_UNPART",
-    "GET_REL_POS",        "ADD_REL_POS",             "RWKV_WKV6",       "GATED_LINEAR_ATTN",
-    "RWKV_WKV7",          "SOLVE_TRI",               "GATED_DELTA_NET", "LIGHTNING_INDEXER",
-    "DSV4_HC_COMB",       "DSV4_HC_PRE",             "DSV4_HC_POST",    "UNARY",
-    "MAP_CUSTOM1",        "MAP_CUSTOM2",             "MAP_CUSTOM3",     "CUSTOM",
-    "CROSS_ENTROPY_LOSS", "CROSS_ENTROPY_LOSS_BACK", "OPT_STEP_ADAMW",  "OPT_STEP_SGD",
-    "GLU",
+    "NONE",               "DUP",                "ADD",                     "ADD_ID",
+    "ADD1",               "ACC",                "SUB",                     "MUL",
+    "DIV",                "SQR",                "SQRT",                    "LOG",
+    "SIN",                "COS",                "SUM",                     "SUM_ROWS",
+    "CUMSUM",             "MEAN",               "ARGMAX",                  "COUNT_EQUAL",
+    "REPEAT",             "REPEAT_BACK",        "CONCAT",                  "SILU_BACK",
+    "NORM",               "RMS_NORM",           "RMS_NORM_BACK",           "GROUP_NORM",
+    "L2_NORM",            "MUL_MAT",            "MUL_MAT_ID",              "OUT_PROD",
+    "SCALE",              "SET",                "CPY",                     "CONT",
+    "RESHAPE",            "VIEW",               "PERMUTE",                 "TRANSPOSE",
+    "GET_ROWS",           "GET_ROWS_BACK",      "SET_ROWS",                "DIAG",
+    "DIAG_MASK_INF",      "DIAG_MASK_ZERO",     "SOFT_MAX",                "SOFT_MAX_BACK",
+    "ROPE",               "ROPE_BACK",          "CLAMP",                   "CONV_TRANSPOSE_1D",
+    "IM2COL",             "IM2COL_BACK",        "IM2COL_3D",               "COL2IM_1D",
+    "CONV_2D",            "CONV_3D",            "CONV_2D_DW",              "CONV_TRANSPOSE_2D",
+    "POOL_1D",            "POOL_2D",            "POOL_2D_BACK",            "UPSCALE",
+    "PAD",                "PAD_REFLECT_1D",     "ROLL",                    "ARANGE",
+    "TIMESTEP_EMBEDDING", "ARGSORT",            "TOP_K",                   "LEAKY_RELU",
+    "TRI",                "FILL",               "FLASH_ATTN_EXT",          "FLASH_ATTN_BACK",
+    "SSM_CONV",           "SSM_SCAN",           "WIN_PART",                "WIN_UNPART",
+    "GET_REL_POS",        "ADD_REL_POS",        "RWKV_WKV6",               "GATED_LINEAR_ATTN",
+    "RWKV_WKV7",          "SOLVE_TRI",          "GATED_DELTA_NET",         "LIGHTNING_INDEXER",
+    "DSV4_HC_COMB",       "DSV4_HC_PRE",        "DSV4_HC_POST",            "TOP_K_MASK",
+    "UNARY",              "MAP_CUSTOM1",        "MAP_CUSTOM2",             "MAP_CUSTOM3",
+    "CUSTOM",             "CROSS_ENTROPY_LOSS", "CROSS_ENTROPY_LOSS_BACK", "OPT_STEP_ADAMW",
+    "OPT_STEP_SGD",       "GLU",
 };
 
 const op_symbol = [_][*:0]const u8{
-    "none",                                   "x",                                "x+y",
-    "x[i]+y",                                 "x+y",                              "view(x,nb,offset)+=y->x",
-    "x-y",                                    "x*y",                              "x/y",
+    "none",                                   "x",                                             "x+y",
+    "x[i]+y",                                 "x+y",                                           "view(x,nb,offset)+=y->x",
+    "x-y",                                    "x*y",                                           "x/y",
     "x^2",
     "√x",
-    "log(x)",                                 "sin(x)",                           "cos(x)",
+    "log(x)",                                 "sin(x)",                                        "cos(x)",
     "Σx",
     "Σx_k",
     "cumsum(x)",
     "Σx/n",
-    "argmax(x)",                              "count_equal(x)",                   "repeat(x)",
-    "repeat_back(x)",                         "concat(x, y)",                     "silu_back(x)",
-    "norm(x)",                                "rms_norm(x)",                      "rms_norm_back(x)",
-    "group_norm(x)",                          "l2_norm(x)",                       "X*Y",
-    "X[i]*Y",                                 "X*Y",                              "x*v",
-    "y-\\>view(x)",                           "x-\\>y",                           "cont(x)",
-    "reshape(x)",                             "view(x)",                          "permute(x)",
-    "transpose(x)",                           "get_rows(x)",                      "get_rows_back(x)",
-    "set_rows(x)",                            "diag(x)",                          "diag_mask_inf(x)",
-    "diag_mask_zero(x)",                      "soft_max(x)",                      "soft_max_back(x)",
-    "rope(x)",                                "rope_back(x)",                     "clamp(x)",
-    "conv_transpose_1d(x)",                   "im2col(x)",                        "im2col_back(x)",
-    "im2col_3d(x)",                           "col2im_1d(x)",                     "conv_2d(x)",
-    "conv_3d(x)",                             "conv_2d_dw(x)",                    "conv_transpose_2d(x)",
-    "pool_1d(x)",                             "pool_2d(x)",                       "pool_2d_back(x)",
-    "upscale(x)",                             "pad(x)",                           "pad_reflect_1d(x)",
-    "roll(x)",                                "arange(start, stop, step)",        "timestep_embedding(timesteps, dim, max_period)",
-    "argsort(x)",                             "top_k(x)",                         "leaky_relu(x)",
-    "tri(x)",                                 "fill(x, c)",                       "flash_attn_ext(x)",
-    "flash_attn_back(x)",                     "ssm_conv(x)",                      "ssm_scan(x)",
-    "win_part(x)",                            "win_unpart(x)",                    "get_rel_pos(x)",
-    "add_rel_pos(x)",                         "rwkv_wkv6(k, v, r, tf, td, s)",    "gated_linear_attn(k, v, q, gate, s)",
-    "rwkv_wkv7(r, w, k, v, a, b, s)",         "A X = B, A triangular, solve X",   "gated_delta_net(q, k, v, g, beta, s)",
-    "lightning_indexer(q, k, weights, mask)", "dsv4_hc_comb(mixes, scale, base)", "dsv4_hc_pre(x, weights)",
-    "dsv4_hc_post(x, residual, post, comb)",  "unary(x)",                         "map_custom(x)",
-    "map_custom(x,y)",                        "map_custom(x,y,z)",                "custom(x)",
-    "cross_entropy_loss(x,y)",                "cross_entropy_loss_back(x,y)",     "adamw(x)",
-    "sgd(x)",                                 "glu(x)",
+    "argmax(x)",                              "count_equal(x)",                                "repeat(x)",
+    "repeat_back(x)",                         "concat(x, y)",                                  "silu_back(x)",
+    "norm(x)",                                "rms_norm(x)",                                   "rms_norm_back(x)",
+    "group_norm(x)",                          "l2_norm(x)",                                    "X*Y",
+    "X[i]*Y",                                 "X*Y",                                           "x*v",
+    "y-\\>view(x)",                           "x-\\>y",                                        "cont(x)",
+    "reshape(x)",                             "view(x)",                                       "permute(x)",
+    "transpose(x)",                           "get_rows(x)",                                   "get_rows_back(x)",
+    "set_rows(x)",                            "diag(x)",                                       "diag_mask_inf(x)",
+    "diag_mask_zero(x)",                      "soft_max(x)",                                   "soft_max_back(x)",
+    "rope(x)",                                "rope_back(x)",                                  "clamp(x)",
+    "conv_transpose_1d(x)",                   "im2col(x)",                                     "im2col_back(x)",
+    "im2col_3d(x)",                           "col2im_1d(x)",                                  "conv_2d(x)",
+    "conv_3d(x)",                             "conv_2d_dw(x)",                                 "conv_transpose_2d(x)",
+    "pool_1d(x)",                             "pool_2d(x)",                                    "pool_2d_back(x)",
+    "upscale(x)",                             "pad(x)",                                        "pad_reflect_1d(x)",
+    "roll(x)",                                "arange(start, stop, step)",                     "timestep_embedding(timesteps, dim, max_period)",
+    "argsort(x)",                             "top_k(x)",                                      "leaky_relu(x)",
+    "tri(x)",                                 "fill(x, c)",                                    "flash_attn_ext(x)",
+    "flash_attn_back(x)",                     "ssm_conv(x)",                                   "ssm_scan(x)",
+    "win_part(x)",                            "win_unpart(x)",                                 "get_rel_pos(x)",
+    "add_rel_pos(x)",                         "rwkv_wkv6(k, v, r, tf, td, s)",                 "gated_linear_attn(k, v, q, gate, s)",
+    "rwkv_wkv7(r, w, k, v, a, b, s)",         "A X = B, A triangular, solve X",                "gated_delta_net(q, k, v, g, beta, s)",
+    "lightning_indexer(q, k, weights, mask)", "dsv4_hc_comb(mixes, scale, base)",              "dsv4_hc_pre(x, weights)",
+    "dsv4_hc_post(x, residual, post, comb)",  "top_k_mask(mask, top_k, score, blocks, extra)", "unary(x)",
+    "map_custom(x)",                          "map_custom(x,y)",                               "map_custom(x,y,z)",
+    "custom(x)",                              "cross_entropy_loss(x,y)",                       "cross_entropy_loss_back(x,y)",
+    "adamw(x)",                               "sgd(x)",                                        "glu(x)",
 };
 
 const unary_op_name = [_][*:0]const u8{
@@ -101,7 +101,7 @@ const unary_op_name = [_][*:0]const u8{
     "ROUND",       "TRUNC",
 };
 
-/// Ports `GGML_GLU_OP_NAME` (ggml.c:1261 @620d2225c).
+/// Ports `GGML_GLU_OP_NAME` (ggml.c:1260 @8642541b2).
 const glu_op_name = [_][*:0]const u8{
     "REGLU",     "GEGLU",       "SWIGLU",       "SWIGLU_OAI",
     "GEGLU_ERF", "GEGLU_QUICK", "SWIGLU_CLAMP",
@@ -424,25 +424,25 @@ const type_traits = blk: {
 // -----------------------------------------------------------------------------
 // Table accessors
 
-/// Ports `ggml_get_type_traits` (ggml.c:959 @620d2225c).
+/// Ports `ggml_get_type_traits` (ggml.c:956 @8642541b2).
 pub export fn ggml_get_type_traits(t: c.enum_ggml_type) *const c.ggml_type_traits {
     std.debug.assert(t >= 0 and t < c.GGML_TYPE_COUNT);
     return &type_traits[@intCast(t)];
 }
 
-/// Ports `ggml_blck_size` (ggml.c:1338 @620d2225c).
+/// Ports `ggml_blck_size` (ggml.c:1337 @8642541b2).
 pub export fn ggml_blck_size(t: c.enum_ggml_type) i64 {
     std.debug.assert(t >= 0 and t < c.GGML_TYPE_COUNT);
     return type_traits[@intCast(t)].blck_size;
 }
 
-/// Ports `ggml_type_size` (ggml.c:1344 @620d2225c).
+/// Ports `ggml_type_size` (ggml.c:1343 @8642541b2).
 pub export fn ggml_type_size(t: c.enum_ggml_type) usize {
     std.debug.assert(t >= 0 and t < c.GGML_TYPE_COUNT);
     return type_traits[@intCast(t)].type_size;
 }
 
-/// Ports `ggml_row_size` (ggml.c:1350 @620d2225c).
+/// Ports `ggml_row_size` (ggml.c:1349 @8642541b2).
 ///
 /// A row's size is not `ne * type_size`: for a quantized type, `type_size` is
 /// the size of a whole block, so the element count divides by the block size.
@@ -452,7 +452,7 @@ pub export fn ggml_row_size(t: c.enum_ggml_type, ne: i64) usize {
     return ggml_type_size(t) * @as(usize, @intCast(ne)) / @as(usize, @intCast(ggml_blck_size(t)));
 }
 
-/// Ports `ggml_type_sizef` (ggml.c:1357 @620d2225c).
+/// Ports `ggml_type_sizef` (ggml.c:1356 @8642541b2).
 ///
 /// Bytes per element as a fraction, which is how quantized formats are usually
 /// quoted (a 4-bit type reports 0.5 and change).
@@ -462,39 +462,39 @@ export fn ggml_type_sizef(t: c.enum_ggml_type) f64 {
     return @as(f64, @floatFromInt(traits.type_size)) / @as(f64, @floatFromInt(traits.blck_size));
 }
 
-/// Ports `ggml_type_name` (ggml.c:1363 @620d2225c).
+/// Ports `ggml_type_name` (ggml.c:1362 @8642541b2).
 pub export fn ggml_type_name(t: c.enum_ggml_type) [*:0]const u8 {
     std.debug.assert(t >= 0 and t < c.GGML_TYPE_COUNT);
     return @ptrCast(type_traits[@intCast(t)].type_name);
 }
 
-/// Ports `ggml_is_quantized` (ggml.c:1369 @620d2225c).
+/// Ports `ggml_is_quantized` (ggml.c:1368 @8642541b2).
 pub export fn ggml_is_quantized(t: c.enum_ggml_type) bool {
     std.debug.assert(t >= 0 and t < c.GGML_TYPE_COUNT);
     return type_traits[@intCast(t)].is_quantized;
 }
 
-/// Ports `ggml_op_name` (ggml.c:1375 @620d2225c).
+/// Ports `ggml_op_name` (ggml.c:1374 @8642541b2).
 pub export fn ggml_op_name(op: c.enum_ggml_op) [*:0]const u8 {
     return op_name[@intCast(op)];
 }
 
-/// Ports `ggml_op_symbol` (ggml.c:1379 @620d2225c).
+/// Ports `ggml_op_symbol` (ggml.c:1378 @8642541b2).
 pub export fn ggml_op_symbol(op: c.enum_ggml_op) [*:0]const u8 {
     return op_symbol[@intCast(op)];
 }
 
-/// Ports `ggml_unary_op_name` (ggml.c:1383 @620d2225c).
+/// Ports `ggml_unary_op_name` (ggml.c:1382 @8642541b2).
 pub export fn ggml_unary_op_name(op: c.enum_ggml_unary_op) [*:0]const u8 {
     return unary_op_name[@intCast(op)];
 }
 
-/// Ports `ggml_glu_op_name` (ggml.c:1387 @620d2225c).
+/// Ports `ggml_glu_op_name` (ggml.c:1386 @8642541b2).
 pub export fn ggml_glu_op_name(op: c.enum_ggml_glu_op) [*:0]const u8 {
     return glu_op_name[@intCast(op)];
 }
 
-/// Ports `ggml_op_desc` (ggml.c:1391 @620d2225c).
+/// Ports `ggml_op_desc` (ggml.c:1390 @8642541b2).
 ///
 /// Unary and GLU ops all share one `ggml_op`, so a useful description has to
 /// reach into `op_params` for the real operation.
@@ -504,19 +504,19 @@ pub export fn ggml_op_desc(t: *const c.ggml_tensor) [*:0]const u8 {
     return ggml_op_name(t.op);
 }
 
-/// Ports `ggml_get_unary_op` (ggml.c:1952 @620d2225c).
+/// Ports `ggml_get_unary_op` (ggml.c:1951 @8642541b2).
 pub export fn ggml_get_unary_op(t: *const c.ggml_tensor) c.enum_ggml_unary_op {
     impl.assert(t.op == c.GGML_OP_UNARY, "tensor->op == GGML_OP_UNARY");
     return @intCast(t.op_params[0]);
 }
 
-/// Ports `ggml_get_glu_op` (ggml.c:1957 @620d2225c).
+/// Ports `ggml_get_glu_op` (ggml.c:1956 @8642541b2).
 pub export fn ggml_get_glu_op(t: *const c.ggml_tensor) c.enum_ggml_glu_op {
     impl.assert(t.op == c.GGML_OP_GLU, "tensor->op == GGML_OP_GLU");
     return @intCast(t.op_params[0]);
 }
 
-/// Ports `ggml_ftype_to_ggml_type` (ggml.c:1438 @620d2225c).
+/// Ports `ggml_ftype_to_ggml_type` (ggml.c:1437 @8642541b2).
 ///
 /// A file type names the format most tensors in a model use; this maps it to
 /// the tensor type that implies. Aborts on an unknown or mixed file type,
@@ -560,19 +560,19 @@ export fn ggml_ftype_to_ggml_type(ftype: c.enum_ggml_ftype) c.enum_ggml_type {
 // -----------------------------------------------------------------------------
 // Element counts and sizes
 
-/// Ports `ggml_nelements` (ggml.c:1297 @620d2225c).
+/// Ports `ggml_nelements` (ggml.c:1296 @8642541b2).
 pub export fn ggml_nelements(tensor: *const c.ggml_tensor) i64 {
     comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
     return tensor.ne[0] * tensor.ne[1] * tensor.ne[2] * tensor.ne[3];
 }
 
-/// Ports `ggml_nrows` (ggml.c:1303 @620d2225c).
+/// Ports `ggml_nrows` (ggml.c:1302 @8642541b2).
 pub export fn ggml_nrows(tensor: *const c.ggml_tensor) i64 {
     comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
     return tensor.ne[1] * tensor.ne[2] * tensor.ne[3];
 }
 
-/// Ports `ggml_nbytes` (ggml.c:1309 @620d2225c).
+/// Ports `ggml_nbytes` (ggml.c:1308 @8642541b2).
 ///
 /// Computed from strides rather than from the element count, so a view of a
 /// larger tensor reports the span it actually occupies.
@@ -597,17 +597,17 @@ pub export fn ggml_nbytes(tensor: *const c.ggml_tensor) usize {
     return nbytes;
 }
 
-/// Ports `ggml_nbytes_pad` (ggml.c:1334 @620d2225c).
+/// Ports `ggml_nbytes_pad` (ggml.c:1333 @8642541b2).
 pub export fn ggml_nbytes_pad(tensor: *const c.ggml_tensor) usize {
     return impl.pad(ggml_nbytes(tensor), c.GGML_MEM_ALIGN);
 }
 
-/// Ports `ggml_element_size` (ggml.c:1403 @620d2225c).
+/// Ports `ggml_element_size` (ggml.c:1402 @8642541b2).
 pub export fn ggml_element_size(tensor: *const c.ggml_tensor) usize {
     return ggml_type_size(tensor.type);
 }
 
-/// Ports `ggml_tensor_overhead` (ggml.c:1477 @620d2225c).
+/// Ports `ggml_tensor_overhead` (ggml.c:1476 @8642541b2).
 ///
 /// What a tensor costs a context beyond its data: the object header plus the
 /// tensor struct.
@@ -615,34 +615,34 @@ pub export fn ggml_tensor_overhead() usize {
     return object_size + c.GGML_TENSOR_SIZE;
 }
 
-/// Ports `GGML_OBJECT_SIZE` (ggml.c:980 @620d2225c).
+/// Ports `GGML_OBJECT_SIZE` (ggml.c:977 @8642541b2).
 pub const object_size: usize = @sizeOf(impl.Object);
 
 // -----------------------------------------------------------------------------
 // Shape predicates
 
-/// Ports `ggml_is_scalar` (ggml.c:1407 @620d2225c).
+/// Ports `ggml_is_scalar` (ggml.c:1406 @8642541b2).
 pub export fn ggml_is_scalar(tensor: *const c.ggml_tensor) bool {
     comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
     return tensor.ne[0] == 1 and tensor.ne[1] == 1 and tensor.ne[2] == 1 and tensor.ne[3] == 1;
 }
 
-/// Ports `ggml_is_vector` (ggml.c:1413 @620d2225c).
+/// Ports `ggml_is_vector` (ggml.c:1412 @8642541b2).
 pub export fn ggml_is_vector(tensor: *const c.ggml_tensor) bool {
     return tensor.ne[1] == 1 and tensor.ne[2] == 1 and tensor.ne[3] == 1;
 }
 
-/// Ports `ggml_is_matrix` (ggml.c:1419 @620d2225c).
+/// Ports `ggml_is_matrix` (ggml.c:1418 @8642541b2).
 pub export fn ggml_is_matrix(tensor: *const c.ggml_tensor) bool {
     return tensor.ne[2] == 1 and tensor.ne[3] == 1;
 }
 
-/// Ports `ggml_is_3d` (ggml.c:1425 @620d2225c).
+/// Ports `ggml_is_3d` (ggml.c:1424 @8642541b2).
 pub export fn ggml_is_3d(tensor: *const c.ggml_tensor) bool {
     return tensor.ne[3] == 1;
 }
 
-/// Ports `ggml_n_dims` (ggml.c:1429 @620d2225c).
+/// Ports `ggml_n_dims` (ggml.c:1428 @8642541b2).
 ///
 /// Return: the index of the highest non-unit dimension, plus one. Always at
 /// least 1, so a scalar reports one dimension rather than none.
@@ -654,7 +654,7 @@ pub export fn ggml_n_dims(tensor: *const c.ggml_tensor) c_int {
     return 1;
 }
 
-/// Ports `ggml_is_empty` (ggml.c:1565 @620d2225c).
+/// Ports `ggml_is_empty` (ggml.c:1564 @8642541b2).
 pub export fn ggml_is_empty(tensor: *const c.ggml_tensor) bool {
     for (0..c.GGML_MAX_DIMS) |i| {
         if (tensor.ne[i] == 0) return true;
@@ -662,26 +662,26 @@ pub export fn ggml_is_empty(tensor: *const c.ggml_tensor) bool {
     return false;
 }
 
-/// Ports `ggml_are_same_shape` (ggml.c:1575 @620d2225c).
+/// Ports `ggml_are_same_shape` (ggml.c:1574 @8642541b2).
 pub export fn ggml_are_same_shape(t0: *const c.ggml_tensor, t1: *const c.ggml_tensor) bool {
     comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
     return t0.ne[0] == t1.ne[0] and t0.ne[1] == t1.ne[1] and
         t0.ne[2] == t1.ne[2] and t0.ne[3] == t1.ne[3];
 }
 
-/// Ports `ggml_are_same_stride` (ggml.c:1585 @620d2225c).
+/// Ports `ggml_are_same_stride` (ggml.c:1584 @8642541b2).
 pub export fn ggml_are_same_stride(t0: *const c.ggml_tensor, t1: *const c.ggml_tensor) bool {
     comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
     return t0.nb[0] == t1.nb[0] and t0.nb[1] == t1.nb[1] and
         t0.nb[2] == t1.nb[2] and t0.nb[3] == t1.nb[3];
 }
 
-/// Ports `ggml_is_view` (ggml.c:1595 @620d2225c).
+/// Ports `ggml_is_view` (ggml.c:1594 @8642541b2).
 pub export fn ggml_is_view(t: *const c.ggml_tensor) bool {
     return impl.isView(t);
 }
 
-/// Ports `ggml_can_repeat` (ggml.c:1600 @620d2225c).
+/// Ports `ggml_can_repeat` (ggml.c:1599 @8642541b2).
 ///
 /// Return: whether `t1`'s shape is a whole-number tiling of `t0`'s, which is
 /// what broadcasting requires. Two empty tensors count as compatible.
@@ -694,7 +694,7 @@ pub export fn ggml_can_repeat(t0: *const c.ggml_tensor, t1: *const c.ggml_tensor
         @rem(t1.ne[3], t0.ne[3]) == 0;
 }
 
-/// Ports `ggml_can_repeat_rows` (ggml.c:1610 @620d2225c).
+/// Ports `ggml_can_repeat_rows` (ggml.c:1609 @8642541b2).
 pub fn canRepeatRows(t0: *const c.ggml_tensor, t1: *const c.ggml_tensor) bool {
     return t0.ne[0] == t1.ne[0] and ggml_can_repeat(t0, t1);
 }
@@ -702,12 +702,12 @@ pub fn canRepeatRows(t0: *const c.ggml_tensor, t1: *const c.ggml_tensor) bool {
 // -----------------------------------------------------------------------------
 // Layout predicates
 
-/// Ports `ggml_is_transposed` (ggml.c:1481 @620d2225c).
+/// Ports `ggml_is_transposed` (ggml.c:1480 @8642541b2).
 pub export fn ggml_is_transposed(tensor: *const c.ggml_tensor) bool {
     return tensor.nb[0] > tensor.nb[1];
 }
 
-/// Ports `ggml_is_contiguous_m_n` (ggml.c:1485 @620d2225c).
+/// Ports `ggml_is_contiguous_m_n` (ggml.c:1484 @8642541b2).
 ///
 /// Walks the strides checking each equals the running product of the lower
 /// dimensions. Dimensions at or below `m` are exempt, which is how the
@@ -739,42 +739,42 @@ fn isContiguousMN(tensor: *const c.ggml_tensor, m: usize, n: usize) bool {
     return true;
 }
 
-/// Ports `ggml_is_contiguous` (ggml.c:1505 @620d2225c).
+/// Ports `ggml_is_contiguous` (ggml.c:1504 @8642541b2).
 pub export fn ggml_is_contiguous(tensor: *const c.ggml_tensor) bool {
     return ggml_is_contiguous_0(tensor);
 }
 
-/// Ports `ggml_is_contiguous_0` (ggml.c:1509 @620d2225c).
+/// Ports `ggml_is_contiguous_0` (ggml.c:1508 @8642541b2).
 export fn ggml_is_contiguous_0(tensor: *const c.ggml_tensor) bool {
     return isContiguousMN(tensor, 0, c.GGML_MAX_DIMS);
 }
 
-/// Ports `ggml_is_contiguous_1` (ggml.c:1513 @620d2225c).
+/// Ports `ggml_is_contiguous_1` (ggml.c:1512 @8642541b2).
 pub export fn ggml_is_contiguous_1(tensor: *const c.ggml_tensor) bool {
     return isContiguousMN(tensor, 1, c.GGML_MAX_DIMS);
 }
 
-/// Ports `ggml_is_contiguous_2` (ggml.c:1517 @620d2225c).
+/// Ports `ggml_is_contiguous_2` (ggml.c:1516 @8642541b2).
 pub export fn ggml_is_contiguous_2(tensor: *const c.ggml_tensor) bool {
     return isContiguousMN(tensor, 2, c.GGML_MAX_DIMS);
 }
 
-/// Ports `ggml_is_contiguous_to_1` (ggml.c:1521 @620d2225c).
+/// Ports `ggml_is_contiguous_to_1` (ggml.c:1520 @8642541b2).
 export fn ggml_is_contiguous_to_1(tensor: *const c.ggml_tensor) bool {
     return isContiguousMN(tensor, 0, 1);
 }
 
-/// Ports `ggml_is_contiguous_to_2` (ggml.c:1525 @620d2225c).
+/// Ports `ggml_is_contiguous_to_2` (ggml.c:1524 @8642541b2).
 export fn ggml_is_contiguous_to_2(tensor: *const c.ggml_tensor) bool {
     return isContiguousMN(tensor, 0, 2);
 }
 
-/// Ports `ggml_is_contiguous_to_3` (ggml.c:1529 @620d2225c).
+/// Ports `ggml_is_contiguous_to_3` (ggml.c:1528 @8642541b2).
 export fn ggml_is_contiguous_to_3(tensor: *const c.ggml_tensor) bool {
     return isContiguousMN(tensor, 0, 3);
 }
 
-/// Ports `ggml_is_contiguously_allocated` (ggml.c:1533 @620d2225c).
+/// Ports `ggml_is_contiguously_allocated` (ggml.c:1532 @8642541b2).
 ///
 /// Stronger than `ggml_is_contiguous`: the span the tensor occupies must equal
 /// what its elements need, so there is no trailing slack either.
@@ -783,26 +783,26 @@ pub export fn ggml_is_contiguously_allocated(tensor: *const c.ggml_tensor) bool 
         ggml_type_size(tensor.type) / @as(usize, @intCast(ggml_blck_size(tensor.type)));
 }
 
-/// Ports `ggml_is_permuted` (ggml.c:1537 @620d2225c).
+/// Ports `ggml_is_permuted` (ggml.c:1536 @8642541b2).
 pub export fn ggml_is_permuted(tensor: *const c.ggml_tensor) bool {
     comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
     return tensor.nb[0] > tensor.nb[1] or tensor.nb[1] > tensor.nb[2] or tensor.nb[2] > tensor.nb[3];
 }
 
-/// Ports `ggml_is_contiguous_channels` (ggml.c:1543 @620d2225c).
+/// Ports `ggml_is_contiguous_channels` (ggml.c:1542 @8642541b2).
 pub export fn ggml_is_contiguous_channels(tensor: *const c.ggml_tensor) bool {
     return tensor.nb[0] > tensor.nb[2] and
         tensor.nb[1] > tensor.nb[0] and
         tensor.nb[2] == ggml_type_size(tensor.type);
 }
 
-/// Ports `ggml_is_contiguous_rows` (ggml.c:1550 @620d2225c).
+/// Ports `ggml_is_contiguous_rows` (ggml.c:1549 @8642541b2).
 pub export fn ggml_is_contiguous_rows(tensor: *const c.ggml_tensor) bool {
     return tensor.ne[0] == ggml_blck_size(tensor.type) or
         tensor.nb[0] == ggml_type_size(tensor.type);
 }
 
-/// Ports `ggml_is_padded_1d` (ggml.c:1556 @620d2225c).
+/// Ports `ggml_is_padded_1d` (ggml.c:1555 @8642541b2).
 pub fn isPadded1d(tensor: *const c.ggml_tensor) bool {
     comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
     return tensor.nb[0] == ggml_type_size(tensor.type) and
@@ -826,8 +826,8 @@ pub fn isPadded1d(tensor: *const c.ggml_tensor) bool {
 // checksums from the stock ggml `llama.cpp.zmake` builds (v0.4.0 added
 // SWIGLU_CLAMP, which moved `golden_glu_name` alone).
 const golden_traits: u64 = 0x2e2b1f729ea5e5af;
-const golden_op_name: u64 = 0xa418b62a7aae6cae;
-const golden_op_symbol: u64 = 0xce807e1fc06f73a5;
+const golden_op_name: u64 = 0x7849ce3c514237af;
+const golden_op_symbol: u64 = 0xbf7bcbc1d68353c3;
 const golden_unary_name: u64 = 0x78d971e2f43bd703;
 const golden_glu_name: u64 = 0xbcc1426328c349eb;
 

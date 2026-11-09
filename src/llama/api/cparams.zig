@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-cparams.cpp` (v0.7.0, `620d2225c`):
+//! Ported from `llama.cpp/src/llama-cparams.cpp` (v0.8.0, `8642541b2`):
 //! `llama_max_parallel_sequences`, its one unmangled export.
 //!
 //! The function has the C signature and is `pub`, not `export`: the
@@ -12,7 +12,7 @@
 const std = @import("std");
 const cparams = @import("../cparams.zig");
 
-/// Ports `llama_max_parallel_sequences` (llama-cparams.cpp:3 @620d2225c).
+/// Ports `llama_max_parallel_sequences` (llama-cparams.cpp:3 @8642541b2).
 pub fn llama_max_parallel_sequences() callconv(.c) usize {
     return cparams.maxParallelSequences();
 }

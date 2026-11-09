@@ -200,6 +200,12 @@ fn buildList(v: Variant, n_layer: u32, n_expert: u32) TensorList {
                         "attn_k_b",                "attn_v_b",               "attn_q_a",       "attn_q_b",
                         "nextn.eh_proj",
                     }) |nm| l.addf("blk.{d}." ++ nm ++ ".weight", .{i}, .{ 512, 512, 1, 1 }, h16);
+                    // v0.8.0: the fused QKV-and-gate and the two categories
+                    // Muse Spark bumps to Q8_0, and what is never quantized
+                    inline for (.{
+                        "attn_qkv_gate", "attn_gate",      "ffn_latent_down", "ffn_latent_up",
+                        "engram_gate",   "conv2d_spatial", "conv_dw",
+                    }) |nm| l.addf("blk.{d}." ++ nm ++ ".weight", .{i}, .{ 512, 512, 1, 1 }, h16);
                 }
                 l.addf("blk.{d}.attn_output.weight", .{i}, .{ if (i % 3 == 1) 40 else n_embd, n_embd, 1, 1 }, h16);
                 l.addf("blk.{d}.ffn_gate.weight", .{i}, .{ n_embd, 13824, 1, 1 }, h16);
@@ -219,8 +225,21 @@ fn buildList(v: Variant, n_layer: u32, n_expert: u32) TensorList {
                 l.addf("blk.{d}.ffn_down_shexp.weight", .{i}, .{ 1536, n_embd, 1, 1 }, h16);
                 l.addf("blk.{d}.attn_kv_b.weight", .{i}, .{ 512, 4096, 1, 1 }, h16);
                 l.addf("blk.{d}.attn_q_b.weight", .{i}, .{ 1536, 4096, 2, 1 }, h16);
+                // the chunked experts tensor_is_expert also names
+                l.addf("blk.{d}.ffn_gate_chexps.weight", .{i}, .{ n_embd, 1536, e, 1 }, h16);
+                l.addf("blk.{d}.ffn_down_chexps.weight", .{i}, .{ 1536, n_embd, e, 1 }, h16);
             },
         }
+    }
+    switch (v) {
+        .untied_odd => {
+            // LFM3-Audio's encoder convs and codec, by prefix alone
+            l.add("a.conv1d.0.weight", .{ 512, 512, 1, 1 }, h16);
+            l.add("a.gen.wav.0.weight", .{ 512, 512, 1, 1 }, h16);
+            l.add("xa.conv1d.0.weight", .{ 512, 512, 1, 1 }, h16);
+            l.add("xa.gen.wav.0.weight", .{ 512, 512, 1, 1 }, h16);
+        },
+        else => {},
     }
     switch (v) {
         .no_layer => l.add("ffn_down_extra.weight", .{ 11008, n_embd, 1, 1 }, h16),
@@ -445,7 +464,7 @@ fn typeRules(quick: bool) void {
 
     // The architectures the rules name, under every descriptor, parameter
     // set and list.
-    const archs = [_][:0]const u8{ "llama", "falcon", "bailingmoe3", "qwen35", "qwen2", "deepseek2", "glm5-next" };
+    const archs = [_][:0]const u8{ "llama", "falcon", "bailingmoe3", "qwen35", "qwen2", "deepseek2", "glm5-next", "muse-spark" };
     const layer_counts = [_]u32{ 1, 8, 32, 80 };
     const heads = [_][2]u32{ .{ 32, 32 }, .{ 32, 8 }, .{ 32, 4 }, .{ 32, 0 } };
     const experts = [_]u32{ 0, 4, 8, 16 };
@@ -518,6 +537,8 @@ const FileSpec = struct {
     /// Extra tensors for error paths.
     huge_blk: bool = false,
     odd_shape: bool = false,
+    /// A 4-dimensional weight: its importance data and rows span `ne[3]`.
+    four_d: bool = false,
     arch: [:0]const u8 = "qwen35",
 };
 
@@ -607,6 +628,7 @@ fn specTensors(s: FileSpec, out: *std.ArrayList(SynthTensor)) void {
         }
     }
     if (s.huge_blk) add(out, "blk.99999999999.ffn_up.weight", .{ n_embd_f, 8, 1, 1 }, w);
+    if (s.four_d) add(out, "blk.1.ffn_up_4d.weight", .{ n_embd_f, 4, 2, 3 }, w);
 }
 
 fn writeTensorData(t: *c.ggml_tensor, rng: *Rng) void {
@@ -693,7 +715,7 @@ const Imatrix = struct {
         var rng: Rng = .{ .s = 7 };
         var t: ?*c.ggml_tensor = c.ggml_get_first_tensor(ctx);
         while (t) |tt| : (t = c.ggml_get_next_tensor(ctx, tt)) {
-            const n: usize = @intCast(tt.ne[0] * tt.ne[2]);
+            const n: usize = @intCast(tt.ne[0] * tt.ne[2] * tt.ne[3]);
             const d = gpa.alloc(f32, n) catch unreachable;
             for (d) |*x| x.* = @abs(rng.float()) + 0.01;
             self.names.append(gpa, gpa.dupeSentinel(u8, std.mem.sliceTo(&tt.name, 0), 0) catch unreachable) catch unreachable;
@@ -907,6 +929,7 @@ fn fileRuns(dir: []const u8, quick: bool) void {
         .{ .name = "f16-gqa1-untied-moe8", .wtype = c.GGML_TYPE_F16, .n_head_kv = 4, .n_expert = 8, .tied = false },
         .{ .name = "bf16-gqa4-untied", .wtype = c.GGML_TYPE_BF16, .tied = false },
         .{ .name = "mixed-gqa1", .wtype = c.GGML_TYPE_F32, .mixed = true, .n_head_kv = 4, .tied = false },
+        .{ .name = "f32-four-d", .wtype = c.GGML_TYPE_F32, .four_d = true },
     };
     var paths: [specs.len][:0]const u8 = undefined;
     for (specs, 0..) |s, i| paths[i] = writeSpec(dir, s, 1);

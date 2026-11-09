@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/wkv.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/wkv.cuh` at v0.7.0 (`620d2225c`). The
+//! `llama.cpp/ggml/src/ggml-cuda/wkv.cuh` at v0.8.0 (`8642541b2`). The
 //! kernels -- `rwkv_wkv_f32`, `rwkv_wkv7_f32` and
 //! `rwkv_wkv7_f32_t1_warp_row` -- stay CUDA. Every launch is `<<<>>>`.
 
@@ -16,7 +16,7 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_WKV_BLOCK_SIZE` (wkv.cuh:3 @620d2225c).
+/// Ports `CUDA_WKV_BLOCK_SIZE` (wkv.cuh:3 @8642541b2).
 const block_size = 64;
 
 /// An `int64_t` into a `dim3` member, which is `unsigned int`.
@@ -33,7 +33,7 @@ fn srcData(dst: *const Tensor, i: usize) ?*const anyopaque {
     return impl.one(Tensor, dst.src[i]).data;
 }
 
-/// Ports `ggml_cuda_op_rwkv_wkv6` (wkv.cu:193 @620d2225c).
+/// Ports `ggml_cuda_op_rwkv_wkv6` (wkv.cu:193 @8642541b2).
 pub fn opRwkvWkv6(ctx: *common.Context, dst: *Tensor) void {
     const k_d = srcData(dst, 0);
     const v_d = srcData(dst, 1);
@@ -64,7 +64,7 @@ pub fn opRwkvWkv6(ctx: *common.Context, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_cuda_op_rwkv_wkv7` (wkv.cu:221 @620d2225c).
+/// Ports `ggml_cuda_op_rwkv_wkv7` (wkv.cu:221 @8642541b2).
 pub fn opRwkvWkv7(ctx: *common.Context, dst: *Tensor) void {
     const r_d = srcData(dst, 0);
     const w_d = srcData(dst, 1);

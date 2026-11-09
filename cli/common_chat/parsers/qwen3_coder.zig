@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/qwen3-coder.cpp` (llama.cpp v0.7.0,
-//! `620d2225c`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/qwen3-coder.cpp` (llama.cpp v0.8.0,
+//! `8642541b2`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -55,8 +55,9 @@ const Build = struct {
         var reasoning = try b.eps();
         if (self.supports_reasoning and self.extract_reasoning) {
             var r = try b.litPlus("<think>", try b.space());
-            r = try b.plus(r, try p.reasoning(try b.untilOneOf(&.{ "</think>", "<tool_call>" })));
-            r = try b.plus(r, try b.orr(try b.literal("</think>"), try b.peek(try b.literal("<tool_call>"))));
+            // The template strips the newline before </think>, so leave it out of the reasoning
+            r = try b.plus(r, try p.reasoning(try b.untilOneOf(&.{ "\n</think>", "</think>", "<tool_call>" })));
+            r = try b.plus(r, try b.orr(try b.orr(try b.literal("\n</think>"), try b.literal("</think>")), try b.peek(try b.literal("<tool_call>"))));
             reasoning = try b.optional(r);
         }
 
@@ -88,7 +89,16 @@ const Build = struct {
             const calls = if (self.inputs.parallel_tool_calls) try b.plus(tool_call_first, try b.zeroOrMore(tool_call)) else tool_call_first;
             const tool_calls = try b.triggerRule("tool-call-root", try b.repeat(calls, min_calls, 1));
 
-            const content = try p.content(try b.untilOneOf(self.tool_call_starts));
+            // The templates separate content from the tool calls with one or two newlines,
+            // stop the content before them
+            var content_ends: std.ArrayList([]const u8) = .empty;
+            for (self.tool_call_starts) |start| {
+                try content_ends.append(self.a, try std.mem.concat(self.a, u8, &.{ "\n\n", start }));
+                try content_ends.append(self.a, try std.mem.concat(self.a, u8, &.{ "\n", start }));
+                try content_ends.append(self.a, start);
+            }
+
+            const content = try p.content(try b.untilOneOf(content_ends.items));
             return b.plus(generation_prompt, try b.shl(try b.shl(reasoning, content), tool_calls));
         }
 
@@ -138,7 +148,7 @@ const Build = struct {
 
         const arg_open = try p.toolArgOpen(try b.plusLit(try b.litPlus("<parameter=", try p.toolArgName(try b.literal(prm.name))), ">\n"));
 
-        const types = prm.schema.valueTypes();
+        const types = prm.schema.valueTypes() catch |e| return peg.errors.fromSchema(e);
 
         var arg_value = try b.eps();
         if (!types.has(.string)) {
@@ -173,7 +183,7 @@ const Starts = struct {
     }
 };
 
-/// Ports `common_chat_params_init_qwen3_coder` (qwen3-coder.cpp:3 @620d2225c).
+/// Ports `common_chat_params_init_qwen3_coder` (qwen3-coder.cpp:3 @8642541b2).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

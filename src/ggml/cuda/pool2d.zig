@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/pool2d.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/pool2d.cuh` at v0.7.0 (`620d2225c`). The
+//! `llama.cpp/ggml/src/ggml-cuda/pool2d.cuh` at v0.8.0 (`8642541b2`). The
 //! kernels, `pool2d_nchw_kernel` and (since v0.7.0) the warp-per-output
 //! `pool2d_nchw_kernel_warp`, stay CUDA.
 
@@ -16,9 +16,9 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_POOL2D_BLOCK_SIZE` (pool2d.cuh:3 @620d2225c).
+/// Ports `CUDA_POOL2D_BLOCK_SIZE` (pool2d.cuh:3 @8642541b2).
 const block_size = 256;
-/// Ports `CUDA_POOL2D_WARP_KERNEL_MIN_WINDOW` (pool2d.cuh:4 @620d2225c).
+/// Ports `CUDA_POOL2D_WARP_KERNEL_MIN_WINDOW` (pool2d.cuh:4 @8642541b2).
 const warp_kernel_min_window = 32;
 
 /// An `int64_t` into an `int` parameter.
@@ -26,7 +26,7 @@ fn int(x: i64) c_int {
     return @truncate(x);
 }
 
-/// Ports `pool2d_nchw_kernel_f32_f32_cuda` (pool2d.cu:112 @620d2225c).
+/// Ports `pool2d_nchw_kernel_f32_f32_cuda` (pool2d.cu:112 @8642541b2).
 /// Since v0.7.0 a window of 32 or more elements takes one warp per output.
 fn pool2dNchwKernelF32F32Cuda(ih: c_int, iw: c_int, oh: c_int, ow: c_int, kh: c_int, kw: c_int, sh: c_int, sw: c_int, ph: c_int, pw: c_int, parallel_elements: c_int, src: ?*const anyopaque, dst: ?*anyopaque, op: c.enum_ggml_op_pool, stream: cu.cudaStream_t) void {
     if (kh *% kw >= warp_kernel_min_window) {
@@ -50,7 +50,7 @@ fn pool2dNchwKernelF32F32Cuda(ih: c_int, iw: c_int, oh: c_int, ow: c_int, kh: c_
     }, .{ ih, iw, oh, ow, kh, kw, sh, sw, ph, pw, parallel_elements, src, dst, op });
 }
 
-/// Ports `ggml_cuda_op_pool2d` (pool2d.cu:131 @620d2225c).
+/// Ports `ggml_cuda_op_pool2d` (pool2d.cu:131 @8642541b2).
 pub fn opPool2d(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;

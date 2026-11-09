@@ -7,7 +7,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/k2-horizon.cpp` at v0.7.0 (`620d2225c`):
+//! Ported from `llama.cpp/src/models/k2-horizon.cpp` at v0.8.0 (`8642541b2`):
 //! `llama_model_k2_horizon`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `graph` and `graph::build_routed_value`, and the
 //! file's `k2_horizon_group_rms_norm`. The class is declared in
@@ -27,9 +27,9 @@ const Model = model_mod.Model;
 const Layer = model_mod.Layer;
 const Tensor = c.ggml_tensor;
 
-// Mirrors the declaration of `llama_model_k2_horizon` (src/models/models.h:2931 @620d2225c).
+// Mirrors the declaration of `llama_model_k2_horizon` (src/models/models.h:3136 @8642541b2).
 
-/// Ports `llama_model_k2_horizon`'s `load_arch_hparams` (models/k2-horizon.cpp:3 @620d2225c).
+/// Ports `llama_model_k2_horizon`'s `load_arch_hparams` (models/k2-horizon.cpp:3 @8642541b2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -80,7 +80,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_k2_horizon`'s `load_arch_tensors` (models/k2-horizon.cpp:51 @620d2225c).
+/// Ports `llama_model_k2_horizon`'s `load_arch_tensors` (models/k2-horizon.cpp:51 @8642541b2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -154,12 +154,12 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_k2_horizon`'s `build_arch_graph` (models/k2-horizon.cpp:119 @620d2225c).
+/// Ports `llama_model_k2_horizon`'s `build_arch_graph` (models/k2-horizon.cpp:119 @8642541b2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
-/// Ports `k2_horizon_group_rms_norm` (models/k2-horizon.cpp:124 @620d2225c): an RMS
+/// Ports `k2_horizon_group_rms_norm` (models/k2-horizon.cpp:124 @8642541b2): an RMS
 /// norm over `n_groups` equal slices of `ne[0]`, then one full-width weight.
 fn groupRmsNorm(ctx: *c.ggml_context, cur_: *Tensor, weight: ?*Tensor, n_groups: i64, eps: f32) *Tensor {
     impl.assert(n_groups > 0 and @rem(cur_.ne[0], n_groups) == 0, "models/k2-horizon.cpp", 125, "n_groups > 0 && cur->ne[0] % n_groups == 0");
@@ -175,7 +175,7 @@ fn groupRmsNorm(ctx: *c.ggml_context, cur_: *Tensor, weight: ?*Tensor, n_groups:
 }
 
 /// Ports `llama_model_k2_horizon::graph`'s `build_routed_value`
-/// (models/k2-horizon.cpp:138 @620d2225c): MoVA, which routes each token to
+/// (models/k2-horizon.cpp:138 @8642541b2): MoVA, which routes each token to
 /// `n_value_expert_used` value experts, V = sum_k w_k * silu(W_k x).
 fn buildRoutedValue(b: *const graph.Builder, layer: *const Layer, cur: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -260,7 +260,7 @@ fn buildRoutedValue(b: *const graph.Builder, layer: *const Layer, cur: *Tensor, 
 }
 
 /// Ports the constructor of `llama_model_k2_horizon`'s `graph`
-/// (models/k2-horizon.cpp:213 @620d2225c).
+/// (models/k2-horizon.cpp:213 @8642541b2).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

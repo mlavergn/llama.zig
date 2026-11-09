@@ -17,7 +17,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/qwen4exp.cpp` at v0.7.0 (`620d2225c`),
+//! Ported from `llama.cpp/src/models/qwen4exp.cpp` at v0.8.0 (`8642541b2`),
 //! with its declaration in `llama.cpp/src/models/models.h`:
 //! `qwen4exp_require_nonzero`, `qwen4exp_require_arr_len`,
 //! `llama_model_qwen4exp`'s `load_arch_hparams`, `load_arch_tensors` and
@@ -60,15 +60,15 @@ fn oom() noreturn {
     impl.abort(src, 0, "out of memory");
 }
 
-/// `LLAMA_MAX_PLE_NGRAM` (llama-hparams.h:13 @620d2225c).
+/// `LLAMA_MAX_PLE_NGRAM` (llama-hparams.h:13 @8642541b2).
 const max_ple_ngram: u32 = 8;
-/// `LLAMA_MAX_PLE_HEADS` (llama-hparams.h:14 @620d2225c).
+/// `LLAMA_MAX_PLE_HEADS` (llama-hparams.h:14 @8642541b2).
 const max_ple_heads: u32 = 64;
 
 /// `LLAMA_TOKEN_NULL`.
 const token_null: i32 = -1;
 
-/// Ports `qwen4exp_require_nonzero` (models/qwen4exp.cpp:10 @620d2225c):
+/// Ports `qwen4exp_require_nonzero` (models/qwen4exp.cpp:10 @8642541b2):
 /// bad metadata must be catchable, where a `GGML_ASSERT` would abort the
 /// whole process.
 fn requireNonzero(ml: *const loader.Loader, kid: arch_mod.Kv, value: u32, exc: *Exception) Thrown!void {
@@ -78,7 +78,7 @@ fn requireNonzero(ml: *const loader.Loader, kid: arch_mod.Kv, value: u32, exc: *
     }
 }
 
-/// Ports `qwen4exp_require_arr_len` (models/qwen4exp.cpp:17 @620d2225c):
+/// Ports `qwen4exp_require_arr_len` (models/qwen4exp.cpp:17 @8642541b2):
 /// `get_arr` copies a short array as it is, leaving a zero tail the n-gram
 /// hash would silently drop.
 fn requireArrLen(ml: *const loader.Loader, kid: arch_mod.Kv, n_min: u32, exc: *Exception) Thrown!void {
@@ -89,7 +89,7 @@ fn requireArrLen(ml: *const loader.Loader, kid: arch_mod.Kv, n_min: u32, exc: *E
     }
 }
 
-/// Ports `llama_model_qwen4exp`'s `load_arch_hparams` (models/qwen4exp.cpp:26 @620d2225c).
+/// Ports `llama_model_qwen4exp`'s `load_arch_hparams` (models/qwen4exp.cpp:26 @8642541b2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -188,6 +188,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 
         hp.ple_n_heads = (hp.ple_ngram_size -% 1) *% hp.ple_heads_per_ngram;
         hp.ple_head_dim = hp.n_embd_per_layer;
+        hp.ple_embd_token = @bitCast(if (hp.ple_image_token_id != 0) hp.ple_image_token_id else hp.ple_eos_token_id);
         if (hp.ple_ngram_size < 2 or hp.ple_ngram_size > max_ple_ngram) {
             return exc.throw(.runtime_error, "PLE n-gram size {d} is out of range", .{hp.ple_ngram_size});
         }
@@ -249,7 +250,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_qwen4exp`'s `load_arch_tensors` (models/qwen4exp.cpp:171 @620d2225c).
+/// Ports `llama_model_qwen4exp`'s `load_arch_tensors` (models/qwen4exp.cpp:174 @8642541b2).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -322,7 +323,25 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports the `load_block` lambda (models/qwen4exp.cpp:217 @620d2225c) of
+/// Ports the `create_merged` lambda (models/qwen4exp.cpp:235 @8642541b2) of
+/// `load_block`: for matmuls that read the same input, the merged `[a | b]`
+/// weight the converter writes, else the separate ones.
+fn createMerged(self: *Model, il: i32, flags: u32, t_merged: arch_mod.Tensor, t_a: arch_mod.Tensor, t_b: arch_mod.Tensor, n_in: i64, n_a: i64, n_b: i64, merged: *?*Tensor, a: *?*Tensor, b: *?*Tensor, exc: *Exception) Thrown!void {
+    if (flags & loader.tensor_skip != 0) {
+        const skip = loader.tensor_not_required | loader.tensor_skip;
+        _ = try self.createTensor(.{ .tensor = t_merged, .suffix = "weight", .bid = il }, &.{ n_in, n_a + n_b }, skip | loader.tensor_skip_if_virtual, exc);
+        _ = try self.createTensor(.{ .tensor = t_a, .suffix = "weight", .bid = il }, &.{ n_in, n_a }, skip, exc);
+        _ = try self.createTensor(.{ .tensor = t_b, .suffix = "weight", .bid = il }, &.{ n_in, n_b }, skip, exc);
+        return;
+    }
+    merged.* = try self.createTensor(.{ .tensor = t_merged, .suffix = "weight", .bid = il }, &.{ n_in, n_a + n_b }, flags | loader.tensor_not_required | loader.tensor_skip_if_virtual, exc);
+    if (merged.* == null) {
+        a.* = try self.createTensor(.{ .tensor = t_a, .suffix = "weight", .bid = il }, &.{ n_in, n_a }, flags, exc);
+        b.* = try self.createTensor(.{ .tensor = t_b, .suffix = "weight", .bid = il }, &.{ n_in, n_b }, flags, exc);
+    }
+}
+
+/// Ports the `load_block` lambda (models/qwen4exp.cpp:220 @8642541b2) of
 /// `load_arch_tensors`: one trunk or MTP block, every tensor created with
 /// `flags`.
 fn loadBlock(self: *Model, il: i32, flags: u32, exc: *Exception) Thrown!void {
@@ -348,13 +367,11 @@ fn loadBlock(self: *Model, il: i32, flags: u32, exc: *Exception) Thrown!void {
 
     // Two HC modules per layer: before the token mixer and before the MoE.
     layer.hc_attn_norm = try self.createTensor(.{ .tensor = .hc_attn_norm, .suffix = "weight", .bid = il }, &.{ l.n_embd, hc }, flags | loader.tensor_allow_reshape, exc);
-    layer.hc_attn_down = try self.createTensor(.{ .tensor = .hc_attn_down, .suffix = "weight", .bid = il }, &.{ hc_dim, hc_lr }, flags, exc);
     layer.hc_attn_up = try self.createTensor(.{ .tensor = .hc_attn_up, .suffix = "weight", .bid = il }, &.{ hc_lr, hc_dim }, flags, exc);
-    layer.hc_attn_inject = try self.createTensor(.{ .tensor = .hc_attn_inject, .suffix = "weight", .bid = il }, &.{ hc_dim, hc }, flags, exc);
+    try createMerged(self, il, flags, .hc_attn_down_inject, .hc_attn_down, .hc_attn_inject, hc_dim, hc_lr, hc, &layer.hc_attn_down_inject, &layer.hc_attn_down, &layer.hc_attn_inject, exc);
     layer.hc_ffn_norm = try self.createTensor(.{ .tensor = .hc_ffn_norm, .suffix = "weight", .bid = il }, &.{ l.n_embd, hc }, flags | loader.tensor_allow_reshape, exc);
-    layer.hc_ffn_down = try self.createTensor(.{ .tensor = .hc_ffn_down, .suffix = "weight", .bid = il }, &.{ hc_dim, hc_lr }, flags, exc);
     layer.hc_ffn_up = try self.createTensor(.{ .tensor = .hc_ffn_up, .suffix = "weight", .bid = il }, &.{ hc_lr, hc_dim }, flags, exc);
-    layer.hc_ffn_inject = try self.createTensor(.{ .tensor = .hc_ffn_inject, .suffix = "weight", .bid = il }, &.{ hc_dim, hc }, flags, exc);
+    try createMerged(self, il, flags, .hc_ffn_down_inject, .hc_ffn_down, .hc_ffn_inject, hc_dim, hc_lr, hc, &layer.hc_ffn_down_inject, &layer.hc_ffn_down, &layer.hc_ffn_inject, exc);
 
     if (!hp.isRecr(ilu)) {
         // Full attention: wq holds [q|gate] interleaved per head.
@@ -370,13 +387,11 @@ fn loadBlock(self: *Model, il: i32, flags: u32, exc: *Exception) Thrown!void {
         layer.index_q_norm = try self.createTensor(.{ .tensor = .indexer_q_norm, .suffix = "weight", .bid = il }, &.{idx_dim}, flags, exc);
         layer.index_k_norm = try self.createTensor(.{ .tensor = .indexer_k_norm, .suffix = "weight", .bid = il }, &.{idx_dim}, flags, exc);
     } else {
-        layer.wqkv = try self.createTensor(.{ .tensor = .attn_qkv, .suffix = "weight", .bid = il }, &.{ l.n_embd, key_dim * 2 + value_dim }, flags, exc);
-        layer.wqkv_gate = try self.createTensor(.{ .tensor = .attn_gate, .suffix = "weight", .bid = il }, &.{ l.n_embd, value_dim }, flags, exc);
+        try createMerged(self, il, flags, .attn_qkv_gate, .attn_qkv, .attn_gate, l.n_embd, key_dim * 2 + value_dim, value_dim, &layer.wqkv_z, &layer.wqkv, &layer.wqkv_gate, exc);
         layer.ssm_conv1d = try self.createTensor(.{ .tensor = .ssm_conv1d, .suffix = "weight", .bid = il }, &.{ hp.ssm_d_conv, conv_dim }, flags, exc);
         layer.ssm_dt = try self.createTensor(.{ .tensor = .ssm_dt, .suffix = "bias", .bid = il }, &.{hp.ssm_dt_rank}, flags, exc);
         layer.ssm_a = try self.createTensor(.{ .tensor = .ssm_a_noscan, .bid = il }, &.{hp.ssm_dt_rank}, flags, exc);
-        layer.ssm_beta = try self.createTensor(.{ .tensor = .ssm_beta, .suffix = "weight", .bid = il }, &.{ l.n_embd, n_v_heads }, flags, exc);
-        layer.ssm_alpha = try self.createTensor(.{ .tensor = .ssm_alpha, .suffix = "weight", .bid = il }, &.{ l.n_embd, n_v_heads }, flags, exc);
+        try createMerged(self, il, flags, .ssm_beta_alpha_cat, .ssm_beta, .ssm_alpha, l.n_embd, n_v_heads, n_v_heads, &layer.ssm_beta_alpha_cat, &layer.ssm_beta, &layer.ssm_alpha, exc);
         layer.ssm_norm = try self.createTensor(.{ .tensor = .ssm_norm, .suffix = "weight", .bid = il }, &.{head_v_dim}, flags, exc);
         layer.ssm_out = try self.createTensor(.{ .tensor = .ssm_out, .suffix = "weight", .bid = il }, &.{ value_dim, l.n_embd }, flags, exc);
     }
@@ -400,7 +415,7 @@ fn loadBlock(self: *Model, il: i32, flags: u32, exc: *Exception) Thrown!void {
     layer.ffn_down_shexp = try self.createTensor(.{ .tensor = .ffn_down_shexp, .suffix = "weight", .bid = il }, &.{ n_ff_shexp, l.n_embd }, flags, exc);
 }
 
-/// Ports `llama_model_qwen4exp`'s `build_arch_graph` (models/qwen4exp.cpp:304 @620d2225c).
+/// Ports `llama_model_qwen4exp`'s `build_arch_graph` (models/qwen4exp.cpp:324 @8642541b2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     var g: Graph = .{ .model = model, .b = b };
     defer g.deinit();
@@ -411,8 +426,8 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
     }
 }
 
-/// Ports `llama_model_qwen4exp`'s `llm_graph_input_kpool` (models/qwen4exp.cpp:647
-/// @620d2225c): the k-pool inputs the QSA layers share -- blocks of
+/// Ports `llama_model_qwen4exp`'s `llm_graph_input_kpool` (models/qwen4exp.cpp:722
+/// @8642541b2): the k-pool inputs the QSA layers share -- blocks of
 /// `compress_ratio` cells in sequence order, see `llama_memory_hybrid_idx`.
 pub const InpKpool = struct {
     /// I64 `[n_tokens]`.
@@ -428,6 +443,9 @@ pub const InpKpool = struct {
     tail_idxs: ?*Tensor = null,
     /// I32 `[kpool, n_new]`: members of the blocks to re-pool this ubatch.
     new_pool_idxs: ?*Tensor = null,
+    /// I32 `[kpool*n_new]`: a view of `new_pool_idxs`, shared by the QSA
+    /// layers.
+    new_pool_flat: ?*Tensor = null,
     /// I64 `[n_new]`: the cell to write each new pooled key into.
     new_pool_rep: ?*Tensor = null,
     /// I32 `[4*n_new]`: the M-RoPE position of each new block's first
@@ -441,14 +459,14 @@ pub const InpKpool = struct {
     n_sel: u32 = 0,
     n_kv: u32 = 0,
 
-    /// Ports `llm_graph_input_kpool`'s `set_input` (models/qwen4exp.cpp:652 @620d2225c).
+    /// Ports `llm_graph_input_kpool`'s `set_input` (models/qwen4exp.cpp:727 @8642541b2).
     pub fn setInput(self: *InpKpool, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         self.mctx.getIdx().?.setInputKIdxs(self.k_idxs.?, ubatch);
         self.mctx.setInputKpool(self.pool_cells.?, self.pool_idxs.?, self.pool_mask.?, self.tail_idxs.?, null, self.new_pool_idxs.?, self.new_pool_rep.?, ubatch, self.new_pool_pos);
     }
 
-    /// Ports `llm_graph_input_kpool`'s `can_reuse` (models/qwen4exp.cpp:658 @620d2225c).
+    /// Ports `llm_graph_input_kpool`'s `can_reuse` (models/qwen4exp.cpp:733 @8642541b2).
     pub fn canReuse(self: *InpKpool, params: *const graph.Params) bool {
         self.mctx = HybridIdxContext.fromBase(params.mctx.?.cast(HybridContext));
 
@@ -468,7 +486,7 @@ pub const InpKpool = struct {
     }
 };
 
-/// Ports `llm_graph_input_qwen4exp_ple` (models/qwen4exp.cpp:1196 @620d2225c): the
+/// Ports `llm_graph_input_qwen4exp_ple` (models/qwen4exp.cpp:1299 @8642541b2): the
 /// PLE n-gram hash embedding's rows. Each token gathers `ple_n_heads` rows
 /// of a shared table:
 ///
@@ -493,13 +511,13 @@ pub const InpPle = struct {
         self.prev.deinit(allocator);
     }
 
-    /// Ports `llm_graph_input_qwen4exp_ple`'s `can_reuse` (models/qwen4exp.cpp:1204 @620d2225c).
+    /// Ports `llm_graph_input_qwen4exp_ple`'s `can_reuse` (models/qwen4exp.cpp:1307 @8642541b2).
     pub fn canReuse(self: *InpPle, params: *const graph.Params) bool {
         self.mctx = HybridIdxContext.fromBase(params.mctx.?.cast(HybridContext)).getAttn();
         return self.rows.?.ne[0] == @as(i64, self.pmodel.hparams.ple_n_heads) * @as(i64, params.ubatch.n_tokens);
     }
 
-    /// Ports `llm_graph_input_qwen4exp_ple`'s `set_input` (models/qwen4exp.cpp:1220 @620d2225c).
+    /// Ports `llm_graph_input_qwen4exp_ple`'s `set_input` (models/qwen4exp.cpp:1323 @8642541b2).
     pub fn setInput(self: *InpPle, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         const hp = &self.pmodel.hparams;
@@ -522,12 +540,12 @@ pub const InpPle = struct {
         defer allocator.free(idx);
         @memset(idx, 0);
 
-        impl.assert(self.mctx != null, src, 1243, "mctx != nullptr");
+        impl.assert(self.mctx != null, src, 1346, "mctx != nullptr");
 
         var i: i64 = 0;
         while (i < n_tokens) : (i += 1) {
             // The preceding tokens would be ambiguous; see get_prev_tokens.
-            impl.assert(ubatch.n_seq_id[@intCast(i)] == 1, src, 1247, "ubatch->n_seq_id[i] == 1 && \"PLE n-gram embeddings do not support tokens shared by multiple sequences\"");
+            impl.assert(ubatch.n_seq_id[@intCast(i)] == 1, src, 1350, "ubatch->n_seq_id[i] == 1 && \"PLE n-gram embeddings do not support tokens shared by multiple sequences\"");
         }
 
         // The predecessors come from the KV cells (ext.tok); apply_ubatch
@@ -585,8 +603,25 @@ pub const InpPle = struct {
     }
 };
 
-/// Ports `llama_model_qwen4exp`'s `graph` (src/models/models.h:2574
-/// @620d2225c) and `graph_mtp` (src/models/models.h:2676 @620d2225c): the builder
+/// Ports `hc_stream_mean` (models/qwen4exp.cpp:332 @8642541b2): DFlash
+/// drafters read the layer inputs as `[n_embd, T]` rows, so the streams
+/// collapse.
+fn hcStreamMean(ctx: *c.ggml_context, x: *Tensor) *Tensor {
+    const n_embd = x.ne[0];
+    const hc = x.ne[1];
+    const nt = x.ne[2];
+
+    var acc: *Tensor = c.ggml_view_2d(ctx, x, n_embd, nt, x.nb[2], 0);
+    var s: i64 = 1;
+    while (s < hc) : (s += 1) {
+        acc = c.ggml_add(ctx, acc, c.ggml_view_2d(ctx, x, n_embd, nt, x.nb[2], @as(usize, @intCast(s)) * x.nb[1]));
+    }
+
+    return c.ggml_scale(ctx, acc, 1.0 / @as(f32, @floatFromInt(hc)));
+}
+
+/// Ports `llama_model_qwen4exp`'s `graph` (src/models/models.h:2763
+/// @8642541b2) and `graph_mtp` (src/models/models.h:2869 @8642541b2): the builder
 /// and the map it keeps for one build.
 const Graph = struct {
     model: *const Model,
@@ -600,11 +635,19 @@ const Graph = struct {
         self.rs_rows.deinit(allocator);
     }
 
-    /// Ports `llama_model_qwen4exp::graph`'s `build_hc_mix` (models/qwen4exp.cpp:313
-    /// @620d2225c): hyper-connections keep `hc` parallel residual streams,
+    /// Mirrors the graph's `hc_mix` (src/models/models.h:2772 @8642541b2).
+    const HcMix = struct {
+        /// The mixed `[n_embd, T]` stream.
+        cur: *Tensor,
+        /// The `[hc, T]` scatter weights, null when the inject weights are.
+        inject: ?*Tensor,
+    };
+
+    /// Ports `llama_model_qwen4exp::graph`'s `build_hc_mix` (models/qwen4exp.cpp:348
+    /// @8642541b2): hyper-connections keep `hc` parallel residual streams,
     /// `[n_embd, hc, T]`, in place of the layer norms. Returns the mixed
-    /// `[n_embd, T]` stream; `inject` gets the `[hc, T]` scatter weights.
-    fn buildHcMix(self: *Graph, x: *Tensor, w_norm: ?*Tensor, w_down: ?*Tensor, w_up: ?*Tensor, w_inject: ?*Tensor, inject: ?*?*Tensor, il: c_int) *Tensor {
+    /// `[n_embd, T]` stream and the `[hc, T]` scatter weights.
+    fn buildHcMix(self: *Graph, x: *Tensor, w_norm: ?*Tensor, w_down: ?*Tensor, w_up: ?*Tensor, w_inject: ?*Tensor, w_down_inject: ?*Tensor, il: c_int) HcMix {
         const b = self.b;
         const ctx = b.ctx0;
         const hp = b.hparams;
@@ -619,8 +662,22 @@ const Graph = struct {
         xn = c.ggml_reshape_2d(ctx, xn, hc_dim, nt);
         b.cb(xn, "hc_norm", il);
 
-        var lo = b.buildLoraMm(w_down.?, xn, null);
-        lo = c.ggml_silu(ctx, c.ggml_scale(ctx, lo, 1.0 / @as(f32, @floatFromInt(hc))));
+        var lo: *Tensor = undefined;
+        var inject: ?*Tensor = null;
+        if (w_down_inject) |wdi| {
+            // One matmul for both: the hc_down rows, then the hc_inject rows.
+            const n_lo = wdi.ne[1] - hc;
+            var lo_inject = b.buildLoraMm(wdi, xn, null);
+            // The combined rows are scaled before the split; both lo and
+            // inject use 1/hc.
+            lo_inject = c.ggml_scale(ctx, lo_inject, 1.0 / @as(f32, @floatFromInt(hc)));
+            lo = c.ggml_view_2d(ctx, lo_inject, n_lo, nt, lo_inject.nb[1], 0);
+            inject = c.ggml_view_2d(ctx, lo_inject, hc, nt, lo_inject.nb[1], c.ggml_row_size(lo_inject.type, n_lo));
+            b.cb(inject.?, "hc_inject", il);
+        } else {
+            lo = c.ggml_scale(ctx, b.buildLoraMm(w_down.?, xn, null), 1.0 / @as(f32, @floatFromInt(hc)));
+        }
+        lo = c.ggml_silu(ctx, lo);
         const gate: *Tensor = b.buildLoraMm(w_up.?, lo, null);
         b.cb(gate, "hc_gate", il);
 
@@ -647,16 +704,16 @@ const Graph = struct {
         }
         b.cb(mixed, "hc_mixed", il);
 
-        if (inject) |out| {
-            out.* = b.buildLoraMm(w_inject.?, xn, null);
-            b.cb(out.*.?, "hc_inject", il);
+        if (w_down_inject == null and w_inject != null) {
+            inject = c.ggml_scale(ctx, b.buildLoraMm(w_inject.?, xn, null), 1.0 / @as(f32, @floatFromInt(hc)));
+            b.cb(inject.?, "hc_inject", il);
         }
 
-        return mixed;
+        return .{ .cur = mixed, .inject = inject };
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_hc_combine`
-    /// (models/qwen4exp.cpp:369 @620d2225c): the block's output scattered
+    /// (models/qwen4exp.cpp:417 @8642541b2): the block's output scattered
     /// back into the streams by the injection weights.
     fn buildHcCombine(self: *Graph, residual: *Tensor, block_out: *Tensor, inject: *Tensor, il: c_int) *Tensor {
         const b = self.b;
@@ -666,7 +723,7 @@ const Graph = struct {
 
         // 2*sigmoid centres the scatter weights on 1, so a zero injection
         // is a plain residual add.
-        var w: *Tensor = c.ggml_sigmoid(ctx, c.ggml_scale(ctx, inject, 1.0 / @as(f32, @floatFromInt(hc))));
+        var w: *Tensor = c.ggml_sigmoid(ctx, inject);
         w = c.ggml_scale(ctx, w, 2.0);
 
         var cur: *Tensor = undefined;
@@ -689,7 +746,7 @@ const Graph = struct {
     }
 
     /// Ports the constructor of `llama_model_qwen4exp`'s `graph`
-    /// (models/qwen4exp.cpp:399 @620d2225c).
+    /// (models/qwen4exp.cpp:447 @8642541b2).
     fn build(self: *Graph) void {
         const b = self.b;
         const model = self.model;
@@ -697,7 +754,7 @@ const Graph = struct {
         const hp = b.hparams;
         const hc: i64 = hp.dsv4_hc_mult;
 
-        impl.assert(hp.nEmbdHeadV(0) == hp.nEmbdHeadK(0), src, 403, "hparams.n_embd_head_v() == hparams.n_embd_head_k()");
+        impl.assert(hp.nEmbdHeadV(0) == hp.nEmbdHeadK(0), src, 451, "hparams.n_embd_head_v() == hparams.n_embd_head_k()");
 
         var sections: [4]c_int = undefined;
         @memcpy(&sections, hp.rope_sections[0..4]);
@@ -711,7 +768,7 @@ const Graph = struct {
 
         const mctx_idx = mctx_hyb.getIdx();
         if (mctx_idx) |idx| {
-            impl.assert(idx.getNKv() == inp.mctx.getAttn().getNKv(), src, 416, "mctx_idx->get_n_kv() == inp->mctx->get_attn()->get_n_kv() && \"the indexer cache must track the attention cache cell for cell\"");
+            impl.assert(idx.getNKv() == inp.mctx.getAttn().getNKv(), src, 465, "mctx_idx->get_n_kv() == inp->mctx->get_attn()->get_n_kv() && \"the indexer cache must track the attention cache cell for cell\"");
         }
 
         var ple_emb: ?*Tensor = null;
@@ -745,14 +802,20 @@ const Graph = struct {
         var il: c_int = 0;
         while (il < b.n_layer) : (il += 1) {
             const layer = &model.layers[@intCast(il)];
-            b.res.t_layer_inp[@intCast(il)] = res_hc;
+            const uil: usize = @intCast(il);
+            if (uil < b.cparams.embeddings_layer_inp.len and b.cparams.embeddings_layer_inp[uil]) {
+                const t = hcStreamMean(ctx, res_hc);
+                b.res.t_layer_inp[uil] = t;
+                b.cb(t, "layer_inp", il);
+                c.ggml_build_forward_expand(b.gf, t);
+            }
 
             if (hp.isPle(@intCast(il))) {
                 res_hc = self.buildPle(inp.getRecr(), ple_emb.?, res_hc, il);
             }
 
-            var inject: ?*Tensor = null;
-            var cur = self.buildHcMix(res_hc, layer.hc_attn_norm, layer.hc_attn_down, layer.hc_attn_up, layer.hc_attn_inject, &inject, il);
+            var attn_mix = self.buildHcMix(res_hc, layer.hc_attn_norm, layer.hc_attn_down, layer.hc_attn_up, layer.hc_attn_inject, layer.hc_attn_down_inject, il);
+            var cur = attn_mix.cur;
 
             c.ggml_build_forward_expand(b.gf, cur);
 
@@ -766,21 +829,22 @@ const Graph = struct {
                 // Everything below is per token, so the rows that produce
                 // no output go.
                 cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-                inject = c.ggml_get_rows(ctx, inject, inp_out_ids);
+                attn_mix.inject = c.ggml_get_rows(ctx, attn_mix.inject, inp_out_ids);
 
                 res_hc = c.ggml_reshape_2d(ctx, res_hc, b.n_embd * hc, res_hc.ne[2]);
                 res_hc = c.ggml_get_rows(ctx, res_hc, inp_out_ids);
                 res_hc = c.ggml_reshape_3d(ctx, res_hc, b.n_embd, hc, res_hc.ne[1]);
             }
 
-            res_hc = self.buildHcCombine(res_hc, cur, inject.?, il);
+            res_hc = self.buildHcCombine(res_hc, cur, attn_mix.inject.?, il);
 
-            cur = self.buildHcMix(res_hc, layer.hc_ffn_norm, layer.hc_ffn_down, layer.hc_ffn_up, layer.hc_ffn_inject, &inject, il);
+            const ffn_mix = self.buildHcMix(res_hc, layer.hc_ffn_norm, layer.hc_ffn_down, layer.hc_ffn_up, layer.hc_ffn_inject, layer.hc_ffn_down_inject, il);
+            cur = ffn_mix.cur;
 
             cur = self.buildLayerFfn(cur, il);
             b.cb(cur, "ffn_out", il);
 
-            res_hc = self.buildHcCombine(res_hc, cur, inject.?, il);
+            res_hc = self.buildHcCombine(res_hc, cur, ffn_mix.inject.?, il);
 
             // "l_last" is the layer output's name that build_cvec and
             // imatrix look for.
@@ -800,7 +864,7 @@ const Graph = struct {
         }
 
         // The final mixer is the output norm: there is no separate one.
-        var cur = self.buildHcMix(res_hc, model.hc_head_norm, model.hc_head_down, model.hc_head_up, null, null, -1);
+        var cur = self.buildHcMix(res_hc, model.hc_head_norm, model.hc_head_down, model.hc_head_up, null, null, -1).cur;
 
         b.cb(cur, "result_norm", -1);
         b.res.t_embd = cur;
@@ -811,7 +875,7 @@ const Graph = struct {
     }
 
     /// Ports the constructor of `llama_model_qwen4exp`'s `graph_mtp`
-    /// (models/qwen4exp.cpp:524 @620d2225c): the MTP draft head, one QSA
+    /// (models/qwen4exp.cpp:580 @8642541b2): the MTP draft head, one QSA
     /// block after the trunk, fed by the trunk's hc-wide residual.
     fn buildMtp(self: *Graph) void {
         const b = self.b;
@@ -819,16 +883,16 @@ const Graph = struct {
         const ctx = b.ctx0;
         const hp = b.hparams;
 
-        impl.assert(hp.n_layer_nextn == 1, src, 526, "hparams.n_layer_nextn == 1 && \"qwen4exp MTP has a single block\"");
-        b.ubatch.assertEmbdOrToken(src, 527);
+        impl.assert(hp.n_layer_nextn == 1, src, 582, "hparams.n_layer_nextn == 1 && \"qwen4exp MTP has a single block\"");
+        b.ubatch.assertEmbdOrToken(src, 583);
 
         const hc: i64 = hp.dsv4_hc_mult;
-        impl.assert(hp.nEmbdOut() == @as(u32, @truncate(@as(u64, @bitCast(b.n_embd * hc)))), src, 530, "hparams.n_embd_out() == (uint32_t) (n_embd*hc) && \"qwen4exp MTP hidden width mismatch\"");
+        impl.assert(hp.nEmbdOut() == @as(u32, @truncate(@as(u64, @bitCast(b.n_embd * hc)))), src, 586, "hparams.n_embd_out() == (uint32_t) (n_embd*hc) && \"qwen4exp MTP hidden width mismatch\"");
 
         const il: c_int = @intCast(hp.nLayer());
         const layer = &model.layers[@intCast(il)];
 
-        impl.assert(layer.nextn.eh_proj != null and layer.nextn.enorm != null and layer.nextn.hnorm != null and layer.nextn.hc_head_norm != null, src, 535, "layer.nextn.eh_proj && layer.nextn.enorm && layer.nextn.hnorm && layer.nextn.hc_head_norm && \"MTP block missing, load the model with MTP enabled\"");
+        impl.assert(layer.nextn.eh_proj != null and layer.nextn.enorm != null and layer.nextn.hnorm != null and layer.nextn.hc_head_norm != null, src, 592, "layer.nextn.eh_proj && layer.nextn.enorm && layer.nextn.hnorm && layer.nextn.hc_head_norm && \"MTP block missing, load the model with MTP enabled\"");
 
         var sections: [4]c_int = undefined;
         @memcpy(&sections, hp.rope_sections[0..4]);
@@ -869,7 +933,7 @@ const Graph = struct {
 
         var inp_kpool: ?*InpKpool = null;
         if (mctx_hyb.getIdx() != null and hp.indexer_kpool > 0) {
-            impl.assert(mctx_hyb.getIdx().?.getNKv() == mctx_hyb.getAttn().getNKv(), src, 573, "mctx_hyb->get_idx()->get_n_kv() == mctx_hyb->get_attn()->get_n_kv() && \"the indexer cache must track the attention cache cell for cell\"");
+            impl.assert(mctx_hyb.getIdx().?.getNKv() == mctx_hyb.getAttn().getNKv(), src, 630, "mctx_hyb->get_idx()->get_n_kv() == mctx_hyb->get_attn()->get_n_kv() && \"the indexer cache must track the attention cache cell for cell\"");
             inp_kpool = self.buildInpKpool(mctx_hyb);
         }
 
@@ -886,14 +950,15 @@ const Graph = struct {
         var res_hc = b.buildLoraMm(layer.nextn.eh_proj.?, c.ggml_concat(ctx, e_norm, h_norm, 0), null); // [n_embd, hc, n_tokens]
         b.cb(res_hc, "mtp_eh_proj", il);
 
-        var inject: ?*Tensor = null;
-        var cur = self.buildHcMix(res_hc, layer.hc_attn_norm, layer.hc_attn_down, layer.hc_attn_up, layer.hc_attn_inject, &inject, il);
+        const attn_mix = self.buildHcMix(res_hc, layer.hc_attn_norm, layer.hc_attn_down, layer.hc_attn_up, layer.hc_attn_inject, layer.hc_attn_down_inject, il);
+        var cur = attn_mix.cur;
         cur = self.buildLayerAttn(inp_hyb.getAttn(), mctx_hyb, inp_kpool, cur, inp_pos, &sections, il);
-        res_hc = self.buildHcCombine(res_hc, cur, inject.?, il);
+        res_hc = self.buildHcCombine(res_hc, cur, attn_mix.inject.?, il);
 
-        cur = self.buildHcMix(res_hc, layer.hc_ffn_norm, layer.hc_ffn_down, layer.hc_ffn_up, layer.hc_ffn_inject, &inject, il);
+        const ffn_mix = self.buildHcMix(res_hc, layer.hc_ffn_norm, layer.hc_ffn_down, layer.hc_ffn_up, layer.hc_ffn_inject, layer.hc_ffn_down_inject, il);
+        cur = ffn_mix.cur;
         cur = self.buildLayerFfn(cur, il);
-        res_hc = self.buildHcCombine(res_hc, cur, inject.?, il);
+        res_hc = self.buildHcCombine(res_hc, cur, ffn_mix.inject.?, il);
 
         // The next draft step reads this residual as its h.
         const flat: *Tensor = c.ggml_reshape_2d(ctx, res_hc, b.n_embd * hc, b.n_tokens);
@@ -903,7 +968,7 @@ const Graph = struct {
         b.cb(h_nextn, "h_nextn", il);
         c.ggml_build_forward_expand(b.gf, h_nextn);
 
-        cur = self.buildHcMix(c.ggml_reshape_3d(ctx, flat_out, b.n_embd, hc, flat_out.ne[1]), layer.nextn.hc_head_norm, layer.nextn.hc_head_down, layer.nextn.hc_head_up, null, null, il);
+        cur = self.buildHcMix(c.ggml_reshape_3d(ctx, flat_out, b.n_embd, hc, flat_out.ne[1]), layer.nextn.hc_head_norm, layer.nextn.hc_head_down, layer.nextn.hc_head_up, null, null, il).cur;
         b.cb(cur, "result_norm", -1);
         b.res.t_embd = cur;
 
@@ -912,13 +977,33 @@ const Graph = struct {
         b.res.t_logits = cur;
     }
 
-    /// Ports `llama_model_qwen4exp::graph`'s `build_qkvz` (models/qwen4exp.cpp:618
-    /// @620d2225c): the mixed QKV projection and the gate, z.
+    /// Ports `llama_model_qwen4exp::graph`'s `build_qkvz` (models/qwen4exp.cpp:676
+    /// @8642541b2): the mixed QKV projection and the gate, z.
     fn buildQkvz(self: *Graph, input: *Tensor, il: c_int) struct { *Tensor, *Tensor } {
         const b = self.b;
         const layer = &self.model.layers[@intCast(il)];
         const n_seqs: i64 = b.ubatch.n_seqs;
         const n_seq_tokens: i64 = b.ubatch.n_seq_tokens;
+
+        if (layer.wqkv_z) |wqkv_z| {
+            // qkv and z read the same input: one matmul, then the qkv rows
+            // and the z rows.
+            const ctx = b.ctx0;
+            const hp = b.hparams;
+            const qkvz = b.buildLoraMm(wqkv_z, input, null);
+            b.cb(qkvz, "linear_attn_qkvz", il);
+
+            const n_z: i64 = @as(i64, hp.ssm_d_state) * hp.ssm_dt_rank;
+            const n_qkv = qkvz.ne[0] - n_z;
+
+            const qkv_mixed: *Tensor = c.ggml_view_3d(ctx, qkvz, n_qkv, n_seq_tokens, n_seqs, qkvz.nb[1], qkvz.nb[1] * @as(usize, @intCast(n_seq_tokens)), 0);
+            b.cb(qkv_mixed, "linear_attn_qkv_mixed", il);
+
+            const z: *Tensor = c.ggml_view_2d(ctx, qkvz, n_z, n_seq_tokens * n_seqs, qkvz.nb[1], c.ggml_row_size(qkvz.type, n_qkv));
+            b.cb(z, "z", il);
+
+            return .{ qkv_mixed, z };
+        }
 
         var qkv_mixed = b.buildLoraMm(layer.wqkv.?, input, layer.wqkv_s);
         qkv_mixed = c.ggml_reshape_3d(b.ctx0, qkv_mixed, qkv_mixed.ne[0], n_seq_tokens, n_seqs);
@@ -931,7 +1016,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_norm_gated`
-    /// (models/qwen4exp.cpp:634 @620d2225c): the one numerical difference
+    /// (models/qwen4exp.cpp:709 @8642541b2): the one numerical difference
     /// from Qwen3.5's delta net, a sigmoid output gate, not a SiLU.
     fn buildNormGated(self: *Graph, input: *Tensor, weights: ?*Tensor, gate: *Tensor, layer: c_int) *Tensor {
         const b = self.b;
@@ -942,14 +1027,14 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_inp_kpool`
-    /// (models/qwen4exp.cpp:695 @620d2225c): the one k-pool input set the
+    /// (models/qwen4exp.cpp:771 @8642541b2): the one k-pool input set the
     /// QSA layers share.
     fn buildInpKpool(self: *Graph, mctx_hyb: *const HybridIdxContext) *InpKpool {
         const b = self.b;
         const ctx = b.ctx0;
         const hp = b.hparams;
         const mctx_idx = mctx_hyb.getIdx();
-        impl.assert(mctx_idx != null, src, 697, "mctx_idx != nullptr");
+        impl.assert(mctx_idx != null, src, 773, "mctx_idx != nullptr");
 
         const kpool: u32 = hp.indexer_kpool;
         const n_pool: u32 = mctx_hyb.getNKpool();
@@ -981,6 +1066,9 @@ const Graph = struct {
 
         inp.new_pool_idxs = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_I32, kpool, inp.n_new);
         c.ggml_set_input(inp.new_pool_idxs);
+        // One view for all layers: each view of a host input is a separate
+        // upload.
+        inp.new_pool_flat = c.ggml_reshape_1d(ctx, inp.new_pool_idxs, @as(i64, kpool) * inp.n_new);
         // One scatter row per new pool, each a distinct rep row (see
         // kpool_build_state).
         inp.new_pool_rep = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I64, inp.n_new);
@@ -992,13 +1080,12 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_qsa_sel`
-    /// (models/qwen4exp.cpp:738 @620d2225c): QSA attends to the top blocks of
+    /// (models/qwen4exp.cpp:816 @8642541b2): QSA attends to the top blocks of
     /// `compress_ratio` cells plus the incomplete tail, like the glm5-next
     /// k-pool indexer. A block is scored by one pooled key: the mean of its
     /// raw indexer keys, normed and rotated to its first member. Returns the
-    /// additive mask `[n_kv, n_tokens]` of the kept cells, the KQ mask
-    /// included.
-    fn buildQsaSel(self: *Graph, mctx_hyb: *const HybridIdxContext, inp_kpool: *InpKpool, cur: *Tensor, inp_pos: *Tensor, kq_mask: *Tensor, sections: *[4]c_int, il: c_int) *Tensor {
+    /// additive mask `[n_kv, n_tokens]` of the kept cells.
+    fn buildQsaSel(self: *Graph, mctx_hyb: *const HybridIdxContext, inp_kpool: *InpKpool, cur: *Tensor, inp_pos: *Tensor, sections: *[4]c_int, il: c_int) *Tensor {
         const b = self.b;
         const ctx = b.ctx0;
         const hp = b.hparams;
@@ -1012,7 +1099,7 @@ const Graph = struct {
         const n_pool: i64 = inp_kpool.pool_cells.?.ne[0];
         const n_new: i64 = inp_kpool.n_new;
 
-        impl.assert(hp.dsv4_compress_ratios[@intCast(il)] == kpool, src, 754, "hparams.dsv4_compress_ratios[il] == kpool");
+        impl.assert(hp.dsv4_compress_ratios[@intCast(il)] == kpool, src, 831, "hparams.dsv4_compress_ratios[il] == kpool");
 
         // The cache rows store raw key | pooled key: pooling precedes the
         // norm and the rotation, so the raw key gets neither.
@@ -1028,7 +1115,7 @@ const Graph = struct {
         const kpool_cache = mctx_hyb.getKpoolAccess(ctx, il, idx_dim);
 
         // Only the blocks this ubatch completes or regroups are pooled.
-        var rows: *Tensor = kpool_cache.gatherKeyGate(c.ggml_reshape_1d(ctx, inp_kpool.new_pool_idxs, kpool * n_new));
+        var rows: *Tensor = kpool_cache.gatherKeyGate(inp_kpool.new_pool_flat.?);
         rows = c.ggml_reshape_3d(ctx, rows, idx_dim, kpool, n_new);
 
         // The mean over the members; kpool is small, so summing slices
@@ -1073,13 +1160,30 @@ const Graph = struct {
         const top_k: *Tensor = c.ggml_top_k(ctx, score, @intCast(n_top_pool)); // [n_top_pool, n_tokens], unordered
         b.cb(top_k, "indexer_top_k", il);
 
+        // Flash attention requires an f16 mask.
+        const type_mask: c.ggml_type = if (b.cparams.flash_attn) c.GGML_TYPE_F16 else c.GGML_TYPE_F32;
+
+        // Keep the cells of the live picked pools and the tail, -inf
+        // elsewhere. Every retained cell is in the token's sequence, so the
+        // kq_mask is not needed.
+        if (b.cparams.fused_top_k_mask) {
+            impl.assert(kpool * n_top_pool + inp_kpool.tail_idxs.?.ne[0] == inp_kpool.n_sel, src, 896, "kpool*n_top_pool + inp_kpool->tail_idxs->ne[0] == inp_kpool->n_sel");
+
+            const keep: *Tensor = c.ggml_fill(ctx, c.ggml_new_tensor_1d(ctx, type_mask, inp_kpool.n_kv), 0.0);
+            const sel: *Tensor = c.ggml_top_k_mask(ctx, keep, top_k, score, inp_kpool.pool_idxs, inp_kpool.tail_idxs); // [n_kv, n_tokens]
+            b.res.addFusedNode(.{ .op = .top_k_mask, .tensor = sel, .il = il });
+            b.cb(sel, "indexer_sel", il);
+
+            return sel;
+        }
+
         // The top blocks, then the incomplete tail with n_kv for missing
         // cells.
         var sel_idx: *Tensor = c.ggml_get_rows(ctx, inp_kpool.pool_idxs, c.ggml_reshape_1d(ctx, top_k, n_top_pool * n_tokens)); // [kpool, n_top_pool*n_tokens]
         sel_idx = c.ggml_reshape_2d(ctx, sel_idx, kpool * n_top_pool, n_tokens);
         sel_idx = c.ggml_concat(ctx, sel_idx, inp_kpool.tail_idxs, 0);
         const n_sel: i64 = sel_idx.ne[0];
-        impl.assert(n_sel == inp_kpool.n_sel, src, 819, "n_sel == inp_kpool->n_sel");
+        impl.assert(n_sel == inp_kpool.n_sel, src, 912, "n_sel == inp_kpool->n_sel");
 
         c.ggml_build_forward_expand(b.gf, sel_idx);
 
@@ -1088,12 +1192,12 @@ const Graph = struct {
         // ties the scatter storage's lifetime to this layer.
         const n_kv: i64 = inp_kpool.n_kv;
 
-        var mask_all: *Tensor = c.ggml_new_tensor_4d(ctx, kq_mask.type, n_kv + n_sel, 1, 1, 1);
+        var mask_all: *Tensor = c.ggml_new_tensor_4d(ctx, type_mask, n_kv + n_sel, 1, 1, 1);
         mask_all = c.ggml_fill(ctx, mask_all, -std.math.inf(f32));
         mask_all = c.ggml_repeat_4d(ctx, mask_all, n_kv + n_sel, n_tokens, 1, 1);
         mask_all = c.ggml_reshape_3d(ctx, mask_all, 1, n_kv + n_sel, n_tokens);
 
-        var zeros: *Tensor = c.ggml_new_tensor_4d(ctx, kq_mask.type, n_sel, 1, 1, 1);
+        var zeros: *Tensor = c.ggml_new_tensor_4d(ctx, type_mask, n_sel, 1, 1, 1);
         zeros = c.ggml_fill(ctx, zeros, 0.0);
         zeros = c.ggml_repeat_4d(ctx, zeros, n_sel, n_tokens, 1, 1);
         zeros = c.ggml_reshape_3d(ctx, zeros, 1, n_sel, n_tokens);
@@ -1122,21 +1226,17 @@ const Graph = struct {
 
         var sel: *Tensor = c.ggml_set_rows(ctx, mask_all, zeros, c.ggml_reshape_3d(ctx, sel_idx, n_sel, n_tokens, 1));
 
-        impl.assert(kq_mask.ne[0] == n_kv and kq_mask.ne[1] * kq_mask.ne[2] * kq_mask.ne[3] == n_tokens, src, 859, "kq_mask->ne[0] == n_kv && kq_mask->ne[1]*kq_mask->ne[2]*kq_mask->ne[3] == n_tokens");
-        const row = sel.nb[2];
-        const m1: usize = @intCast(kq_mask.ne[1]);
-        const m2: usize = @intCast(kq_mask.ne[2]);
-        sel = c.ggml_view_4d(ctx, sel, n_kv, kq_mask.ne[1], kq_mask.ne[2], kq_mask.ne[3], row, row * m1, row * m1 * m2, 0);
-        sel = c.ggml_add(ctx, sel, kq_mask);
+        sel = c.ggml_view_2d(ctx, sel, n_kv, n_tokens, sel.nb[2], 0);
+        sel = c.ggml_cont(ctx, sel);
         b.cb(sel, "indexer_sel", il);
 
         return sel;
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_attn_qsa`
-    /// (models/qwen4exp.cpp:870 @620d2225c): dense GQA self-attention over
+    /// (models/qwen4exp.cpp:960 @8642541b2): dense GQA self-attention over
     /// the cells the QSA mask keeps.
-    fn buildAttnQsa(self: *Graph, inp: *graph.InpAttnKv, q_cur_: *Tensor, k_cur_: *Tensor, v_cur_: *Tensor, sel: *Tensor, n_sel: i64, kq_scale: f32, il: c_int) *Tensor {
+    fn buildAttnQsa(self: *Graph, inp: *graph.InpAttnKv, q_cur_: *Tensor, k_cur_: *Tensor, v_cur_: *Tensor, sel_: *Tensor, n_sel: i64, kq_scale: f32, il: c_int) *Tensor {
         const b = self.b;
         const ctx = b.ctx0;
         var q_cur = q_cur_;
@@ -1173,15 +1273,16 @@ const Graph = struct {
             c.ggml_build_forward_expand(b.gf, mctx_cur.cpyV(ctx, v_cur, v_idxs, il));
         }
 
-        // The selection already carries the causal mask, and it comes in
-        // the mask's layout.
-        const kq_mask = inp.getKqMask().?;
-        impl.assert(c.ggml_are_same_shape(sel, kq_mask), src, 910, "ggml_are_same_shape(sel, kq_mask)");
-        b.cb(sel, "kq_mask_qsa", il);
-
         const q = q_cur;
         const k = mctx_cur.getK(ctx, il);
         const v = mctx_cur.getV(ctx, il);
+
+        // The selection replaces the kq_mask: split it into the streams of
+        // the K view.
+        const n_stream = k.ne[3];
+        impl.assert(sel_.ne[0] == k.ne[2] and @rem(sel_.ne[1], n_stream) == 0, src, 1004, "sel->ne[0] == k->ne[2] && sel->ne[1] % n_stream == 0");
+        const sel: *Tensor = c.ggml_reshape_4d(ctx, sel_, sel_.ne[0], @divTrunc(sel_.ne[1], n_stream), 1, n_stream);
+        b.cb(sel, "kq_mask_qsa", il);
 
         var cur = b.buildAttnMha(q, k, v, null, sel, null, null, n_sel, kq_scale, il);
         b.cb(cur, "kqv_out", il);
@@ -1196,7 +1297,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_layer_attn`
-    /// (models/qwen4exp.cpp:928 @620d2225c): a joint Q and gate
+    /// (models/qwen4exp.cpp:1019 @8642541b2): a joint Q and gate
     /// projection, Q and K norms, M-RoPE, dense or QSA attention, and the
     /// sigmoid gate.
     fn buildLayerAttn(self: *Graph, inp: *graph.InpAttnKv, mctx_hyb: *const HybridIdxContext, inp_kpool: ?*InpKpool, cur_: *Tensor, inp_pos: *Tensor, sections: *[4]c_int, il: c_int) *Tensor {
@@ -1205,7 +1306,7 @@ const Graph = struct {
         const hp = b.hparams;
         const layer = &self.model.layers[@intCast(il)];
         const n_embd_head: i64 = hp.nEmbdHeadV(0);
-        impl.assert(n_embd_head == hp.nEmbdHeadK(0), src, 937, "n_embd_head == hparams.n_embd_head_k()");
+        impl.assert(n_embd_head == hp.nEmbdHeadK(0), src, 1028, "n_embd_head == hparams.n_embd_head_k()");
         const n_head = b.n_head;
         const n_head_kv = b.n_head_kv;
         const n_tokens = b.n_tokens;
@@ -1214,7 +1315,7 @@ const Graph = struct {
         // input or no ratio means dense.
         const qsa = inp_kpool != null and hp.dsv4_compress_ratios[@intCast(il)] > 0;
 
-        const sel: ?*Tensor = if (qsa) self.buildQsaSel(mctx_hyb, inp_kpool.?, cur_, inp_pos, inp.getKqMask().?, sections, il) else null;
+        const sel: ?*Tensor = if (qsa) self.buildQsaSel(mctx_hyb, inp_kpool.?, cur_, inp_pos, sections, il) else null;
 
         // As Qwen3Next, one Q projection outputs the query and the gate.
         const Qcur_full = b.buildLoraMm(layer.wq.?, cur_, layer.wq_s); // [ (n_embd_head * 2) * n_head, n_tokens ]
@@ -1275,7 +1376,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_layer_attn_linear`
-    /// (models/qwen4exp.cpp:1015 @620d2225c): the gated delta-net layer.
+    /// (models/qwen4exp.cpp:1106 @8642541b2): the gated delta-net layer.
     fn buildLayerAttnLinear(self: *Graph, inp: *graph.InpRs, cur_: *Tensor, il: c_int) *Tensor {
         const b = self.b;
         const ctx = b.ctx0;
@@ -1291,23 +1392,36 @@ const Graph = struct {
         const head_v_dim: i64 = hp.ssm_d_state;
         const n_seq_tokens: i64 = b.ubatch.n_seq_tokens;
 
-        impl.assert(n_seqs != 0, src, 1029, "n_seqs != 0");
-        impl.assert(b.ubatch.equalSeqs(), src, 1030, "ubatch.equal_seqs()");
-        impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, src, 1031, "ubatch.n_tokens == n_seq_tokens * n_seqs");
-        impl.assert(head_v_dim * num_v_heads == d_inner, src, 1032, "head_v_dim * num_v_heads == d_inner");
+        impl.assert(n_seqs != 0, src, 1120, "n_seqs != 0");
+        impl.assert(b.ubatch.equalSeqs(), src, 1121, "ubatch.equal_seqs()");
+        impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, src, 1122, "ubatch.n_tokens == n_seq_tokens * n_seqs");
+        impl.assert(head_v_dim * num_v_heads == d_inner, src, 1123, "head_v_dim * num_v_heads == d_inner");
 
         const qkv_mixed, const z = self.buildQkvz(cur_, il);
 
-        var beta = b.buildLoraMm(layer.ssm_beta.?, cur_, layer.ssm_beta_s);
-        beta = c.ggml_reshape_4d(ctx, beta, 1, num_v_heads, n_seq_tokens, n_seqs);
+        var beta: *Tensor = undefined;
+        var alpha: *Tensor = undefined;
+        if (layer.ssm_beta_alpha_cat) |cat| {
+            // beta and alpha read the same input: one matmul, then the beta
+            // rows and the alpha rows.
+            const ba = b.buildLoraMm(cat, cur_, null);
+            b.cb(ba, "beta_alpha", il);
+
+            const nb1_tok: usize = ba.nb[1] * @as(usize, @intCast(n_seq_tokens));
+            beta = c.ggml_view_4d(ctx, ba, 1, num_v_heads, n_seq_tokens, n_seqs, c.ggml_element_size(ba), ba.nb[1], nb1_tok, 0);
+            alpha = c.ggml_view_3d(ctx, ba, num_v_heads, n_seq_tokens, n_seqs, ba.nb[1], nb1_tok, c.ggml_row_size(ba.type, num_v_heads));
+        } else {
+            beta = b.buildLoraMm(layer.ssm_beta.?, cur_, layer.ssm_beta_s);
+            beta = c.ggml_reshape_4d(ctx, beta, 1, num_v_heads, n_seq_tokens, n_seqs);
+
+            alpha = b.buildLoraMm(layer.ssm_alpha.?, cur_, layer.ssm_alpha_s);
+            alpha = c.ggml_reshape_3d(ctx, alpha, num_v_heads, n_seq_tokens, n_seqs);
+        }
         b.cb(beta, "beta", il);
+        b.cb(alpha, "alpha", il);
 
         beta = c.ggml_sigmoid(ctx, beta);
         b.cb(beta, "beta_sigmoid", il);
-
-        var alpha = b.buildLoraMm(layer.ssm_alpha.?, cur_, layer.ssm_alpha_s);
-        alpha = c.ggml_reshape_3d(ctx, alpha, num_v_heads, n_seq_tokens, n_seqs);
-        b.cb(alpha, "alpha", il);
 
         const alpha_biased: *Tensor = c.ggml_add(ctx, alpha, layer.ssm_dt);
         const alpha_softplus: *Tensor = c.ggml_softplus(ctx, alpha_biased);
@@ -1363,7 +1477,7 @@ const Graph = struct {
         // Repeated to match shapes when the key and value head counts
         // differ; the fused delta net does not need it.
         if (num_k_heads != num_v_heads and (!b.cparams.fused_gdn_ar or !b.cparams.fused_gdn_ch)) {
-            impl.assert(@rem(num_v_heads, num_k_heads) == 0, src, 1115, "num_v_heads % num_k_heads == 0");
+            impl.assert(@rem(num_v_heads, num_k_heads) == 0, src, 1219, "num_v_heads % num_k_heads == 0");
             q_conv = c.ggml_repeat_4d(ctx, q_conv, head_k_dim, num_v_heads, n_seq_tokens, n_seqs);
             k_conv = c.ggml_repeat_4d(ctx, k_conv, head_k_dim, num_v_heads, n_seq_tokens, n_seqs);
         }
@@ -1374,24 +1488,22 @@ const Graph = struct {
 
         const output = delta_net.buildRecurrentAttn(b, inp, ssm_states_all, q_conv, k_conv, v_conv, gate, beta, state, il);
 
-        const z_2d: *Tensor = c.ggml_reshape_4d(ctx, z, head_v_dim, num_v_heads, n_seq_tokens, n_seqs);
+        const z_2d: *Tensor = c.ggml_view_4d(ctx, z, head_v_dim, num_v_heads, n_seq_tokens, n_seqs, c.ggml_row_size(z.type, head_v_dim), z.nb[1], z.nb[1] * nst, 0);
 
         // The gated norm, self.norm(core_attn_out, z) in the reference.
         const attn_out_norm = self.buildNormGated(output, layer.ssm_norm, z_2d, il);
 
-        const final_output: *Tensor = c.ggml_reshape_3d(ctx, attn_out_norm, head_v_dim * num_v_heads, n_seq_tokens, n_seqs);
+        const final_output: *Tensor = c.ggml_reshape_2d(ctx, attn_out_norm, head_v_dim * num_v_heads, n_seq_tokens * n_seqs);
         b.cb(final_output, "final_output", il);
 
-        var cur = b.buildLoraMm(layer.ssm_out.?, final_output, layer.ssm_out_s);
+        const cur = b.buildLoraMm(layer.ssm_out.?, final_output, layer.ssm_out_s);
         b.cb(cur, "linear_attn_out", il);
-
-        cur = c.ggml_reshape_2d(ctx, cur, b.n_embd, n_seq_tokens * n_seqs);
 
         return cur;
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_layer_ffn`
-    /// (models/qwen4exp.cpp:1142 @620d2225c): the routed experts and the
+    /// (models/qwen4exp.cpp:1245 @8642541b2): the routed experts and the
     /// gated shared expert.
     fn buildLayerFfn(self: *Graph, cur_: *Tensor, il: c_int) *Tensor {
         const b = self.b;
@@ -1399,7 +1511,7 @@ const Graph = struct {
         const hp = b.hparams;
         const layer = &self.model.layers[@intCast(il)];
 
-        impl.assert(layer.ffn_gate_inp != null, src, 1143, "model.layers[il].ffn_gate_inp != nullptr");
+        impl.assert(layer.ffn_gate_inp != null, src, 1246, "model.layers[il].ffn_gate_inp != nullptr");
 
         const moe_out = b.buildMoeFfn(cur_, .{
             .gate_inp = layer.ffn_gate_inp,
@@ -1448,7 +1560,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_conv_state_at`
-    /// (models/qwen4exp.cpp:1295 @620d2225c): a conv history read out of
+    /// (models/qwen4exp.cpp:1398 @8642541b2): a conv history read out of
     /// its own recurrent row, and the new tail written back. The shared
     /// build_conv_state cannot do this: qwen4exp has two such rows per
     /// layer.
@@ -1464,7 +1576,7 @@ const Graph = struct {
 
         // The row is exactly this convolution's state, so the gather is
         // reused whole.
-        impl.assert(state_cols * channels == row_total, src, 1310, "state_cols * channels == row_total");
+        impl.assert(state_cols * channels == row_total, src, 1413, "state_cols * channels == row_total");
 
         const rows: *Tensor = for (self.rs_rows.items) |e| {
             if (e.key == conv_states_all) break e.rows;
@@ -1502,7 +1614,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_inp_ple`
-    /// (models/qwen4exp.cpp:1349 @620d2225c): the PLE rows' input and the
+    /// (models/qwen4exp.cpp:1452 @8642541b2): the PLE rows' input and the
     /// gathered embedding, `[ple_head_dim * ple_n_heads, n_tokens]`.
     fn buildInpPle(self: *Graph, mctx_hyb: *const HybridIdxContext) *Tensor {
         const b = self.b;
@@ -1538,8 +1650,8 @@ const Graph = struct {
         return c.ggml_mul(ctx, c.ggml_rms_norm(ctx, t, b.hparams.f_norm_rms_eps), w);
     }
 
-    /// Ports `llama_model_qwen4exp::graph`'s `build_ple` (models/qwen4exp.cpp:1369
-    /// @620d2225c): the PLE embedding gated against the residual, through a
+    /// Ports `llama_model_qwen4exp::graph`'s `build_ple` (models/qwen4exp.cpp:1472
+    /// @8642541b2): the PLE embedding gated against the residual, through a
     /// dilated causal convolution, added to every stream.
     fn buildPle(self: *Graph, inp: *graph.InpRs, emb: *Tensor, hidden: *Tensor, il: c_int) *Tensor {
         const b = self.b;

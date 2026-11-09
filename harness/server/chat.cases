@@ -109,6 +109,8 @@ POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is the
 # error's task cancellation races the decode loop's idle line, upstream
 # against itself too
 !server -m $QWEN3 -c 4096 -np 1 -lv 4 --chat-template-file $VOCAB/templates/openai-gpt-oss-120b.jinja
+# v0.8.0: the reasoning effort levels of the template, in chat_template_caps
+GET /props
 GET /props
 POST /apply-template {"messages": [{"role": "user", "content": "Hi"}], "reasoning_effort": "high"}
 POST /apply-template {"messages": [{"role": "user", "content": "Hi"}], "chat_template_kwargs": {"reasoning_effort": "low", "builtin_tools": ["browser"]}}

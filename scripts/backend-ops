@@ -41,7 +41,7 @@ DIFF=0
 SRC=llama.cpp/tests/test-backend-ops.cpp
 [ -f "$SRC" ] || { echo "missing $SRC -- run 'make clone'" >&2; exit 2; }
 
-PORT_LIBS=(zig-out/lib/libggml.a)
+PORT_LIBS=("${BACKEND_OPS_PORT_LIB:-zig-out/lib/libggml.a}")
 REF_LIBS=(
     cmake-build/apple/ggml/src/libggml.a
     cmake-build/apple/ggml/src/ggml-metal/libggml-metal.a

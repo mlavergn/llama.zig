@@ -31,7 +31,17 @@
 # all vector-path shapes), and MUL_MAT_ID with
 # experts repeated in a row and with experts spanning several tiles
 # (upstream's duplicate-id cases are disabled), and POOL_2D windows 4, 8
-# and 16 wide, the subgroup shader's threshold on smaller subgroups.
+# and 16 wide, the subgroup shader's threshold on smaller subgroups; since
+# v0.8.0 a src1 precision that forbids q8_1 on every path and a swapped
+# multiply it says nothing about, a bf16 accumulator request in the matmul
+# and flash attention, a non-contiguous f16 src0 broadcast over dim 3,
+# RMS_NORM and its fusions at the block sizes' thresholds, RMS_NORM + VIEW +
+# SET_ROWS past its block of 128, CONV_3D at 256 output channels (its
+# 256x128 tile needs a driver the GB10 lacks), and `supports_op` asked
+# directly (`supports_extra`) what no case can ask: the refused src1
+# precision, SUM over a strided view, TOP_K_MASK. The extras follow `-o`
+# as test-backend-ops does -- a comma list, a regex (`harness/op_filter.h`);
+# before v0.8.0's pickup a list or regex ran none of them.
 # `test-backend-ops` does not see
 # descriptor-set reuse (v0.6.0): an injection that reused every set whose
 # binding count matched passed ADD and GET_ROWS on llvmpipe -- a case

@@ -1,4 +1,6 @@
-// A backend device that is the CPU without GGML_OP_GATED_DELTA_NET.
+// A backend device that is the CPU without GGML_OP_GATED_DELTA_NET and, since
+// v0.8.0, GGML_OP_TOP_K_MASK, whose unfused selection graphs (the k-pool
+// indexers', `build_top_k_mask`'s) are likewise otherwise never run.
 //
 // **Not a port.** The harness's way into the paths a backend takes when it
 // lacks a fused op. Every device on this machine supports the fused Gated
@@ -25,7 +27,7 @@ static const char * proxy_name(ggml_backend_dev_t dev) {
 
 static const char * proxy_description(ggml_backend_dev_t dev) {
     (void) dev;
-    return "CPU without GATED_DELTA_NET";
+    return "CPU without GATED_DELTA_NET or TOP_K_MASK";
 }
 
 static enum ggml_backend_dev_type proxy_type(ggml_backend_dev_t dev) {
@@ -50,7 +52,7 @@ static ggml_backend_t proxy_init_backend(ggml_backend_dev_t dev, const char * pa
 
 static bool proxy_supports_op(ggml_backend_dev_t dev, const struct ggml_tensor * op) {
     (void) dev;
-    if (op->op == GGML_OP_GATED_DELTA_NET) {
+    if (op->op == GGML_OP_GATED_DELTA_NET || op->op == GGML_OP_TOP_K_MASK) {
         return false;
     }
     return cpu_dev->iface.supports_op(cpu_dev, op);

@@ -25,7 +25,7 @@ struct token_data {
 
 extern "C" {
 
-// llama-sampler.cpp:136 @620d2225c -- the comparator every candidate sort uses.
+// llama-sampler.cpp:137 @8642541b2 -- the comparator every candidate sort uses.
 void ref_sort_td(token_data * d, size_t n) {
     std::sort(d, d + n, [](const token_data & a, const token_data & b) { return a.logit > b.logit; });
 }
@@ -34,7 +34,7 @@ void ref_partial_sort_td(token_data * d, size_t n, size_t k) {
     std::partial_sort(d, d + k, d + n, [](const token_data & a, const token_data & b) { return a.logit > b.logit; });
 }
 
-// llama-sampler.cpp:1944 @620d2225c -- typical's index sort.
+// llama-sampler.cpp:1945 @8642541b2 -- typical's index sort.
 void ref_sort_idx(size_t * idx, size_t n, const float * scores) {
     std::sort(idx, idx + n, [&](size_t a, size_t b) { return scores[a] < scores[b]; });
 }
@@ -63,7 +63,7 @@ void ref_uniform_f32(uint32_t seed, float * out, size_t n) {
     for (size_t i = 0; i < n; i++) out[i] = dist(g);
 }
 
-// llama-sampler.cpp:217 @620d2225c -- a fresh distribution per draw, over
+// llama-sampler.cpp:218 @8642541b2 -- a fresh distribution per draw, over
 // the `p` fields, as llama_sample_dist builds it.
 void ref_discrete(const token_data * d, size_t n, uint32_t seed, int draws, int * out) {
     struct probs_iterator {
@@ -99,10 +99,15 @@ size_t ref_next_prime(size_t n) {
 
 // An unordered_map<string, int> built as llama-vocab.cpp builds token_to_id,
 // `m[key] = i` in order, then walked: `out` gets the values in iteration
-// order. `n` strings, the i-th at blob[offs[i], offs[i + 1]).
+// order. `n` strings, the i-th at blob[offs[i], offs[i + 1]). `reserve` is
+// passed to `reserve` first, as llama-vocab.cpp does since v0.8.0, unless it is
+// SIZE_MAX.
 // Return: the map's size; `*bc` gets its bucket count.
-size_t ref_umap(const char * blob, const size_t * offs, size_t n, int * out, size_t * bc) {
+size_t ref_umap(const char * blob, const size_t * offs, size_t n, size_t reserve, int * out, size_t * bc) {
     std::unordered_map<std::string, int> m;
+    if (reserve != SIZE_MAX) {
+        m.reserve(reserve);
+    }
     for (size_t i = 0; i < n; i++) {
         m[std::string(blob + offs[i], offs[i + 1] - offs[i])] = (int) i;
     }
@@ -117,7 +122,7 @@ struct pq_item {
     int   left;
 };
 
-// llama-vocab.cpp:99 @620d2225c -- llm_bigram_spm::comparator.
+// llama-vocab.cpp:93 @8642541b2 -- llm_bigram_spm::comparator.
 struct pq_less {
     bool operator()(const pq_item & l, const pq_item & r) const {
         return (l.score < r.score) || (l.score == r.score && l.left > r.left);

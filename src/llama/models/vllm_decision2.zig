@@ -12,11 +12,11 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/vllm-decision2.cpp` at v0.7.0
-//! (`620d2225c`): `llama_model_vllm_decision2`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/vllm-decision2.cpp` at v0.8.0
+//! (`8642541b2`): `llama_model_vllm_decision2`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, `decision2_rows` and
 //! `decision2_get_rows`, the graph input `input_decision`, and its `graph`
-//! with `build_head`; and from `llama.cpp/src/models/models.h` at v0.7.0,
+//! with `build_head`; and from `llama.cpp/src/models/models.h` at v0.8.0,
 //! `llama_model_vllm_decision2`'s members.
 
 const std = @import("std");
@@ -39,7 +39,7 @@ fn oom() noreturn {
     impl.abort("models/vllm-decision2.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_decision_order` (llama-ext.h:115 @620d2225c): what the
+/// Ports `llama_decision_order` (llama-ext.h:140 @8642541b2): what the
 /// decision head reads an entry as.
 const decision_order_none: i32 = 0;
 const decision_order_question_noul: i32 = 1;
@@ -48,7 +48,7 @@ const decision_order_question_score: i32 = 3;
 const decision_order_option: i32 = 4;
 
 /// The members `llama_model_vllm_decision2` adds to its base
-/// (src/models/models.h:612 @620d2225c), kept on the `Model` as
+/// (src/models/models.h:657 @8642541b2), kept on the `Model` as
 /// `vllm_decision2`, which only this file reads or writes. The tensors are
 /// the model's; the state owns nothing.
 pub const State = struct {
@@ -65,7 +65,7 @@ pub const State = struct {
 };
 
 /// Ports `llama_model_vllm_decision2`'s `load_arch_hparams`
-/// (models/vllm-decision2.cpp:7 @620d2225c).
+/// (models/vllm-decision2.cpp:7 @8642541b2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     try qwen3.loadArchHparams(self, ml, exc);
 
@@ -79,7 +79,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_vllm_decision2`'s `load_arch_tensors`
-/// (models/vllm-decision2.cpp:17 @620d2225c).
+/// (models/vllm-decision2.cpp:17 @8642541b2).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     try qwen3.loadArchTensors(self, ml, exc);
 
@@ -107,7 +107,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// Ports `llama_model_vllm_decision2`'s `build_arch_graph`
-/// (models/vllm-decision2.cpp:41 @620d2225c).
+/// (models/vllm-decision2.cpp:41 @8642541b2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
@@ -115,7 +115,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 // -----------------------------------------------------------------------------
 // The rows the head reads
 
-/// Ports `decision2_rows` (models/vllm-decision2.cpp:46 @620d2225c): the
+/// Ports `decision2_rows` (models/vllm-decision2.cpp:46 @8642541b2): the
 /// output rows the head reads, the last token of each option span and the
 /// last token of the question span.
 const Rows = struct {
@@ -128,7 +128,7 @@ const Rows = struct {
     }
 };
 
-/// Ports `decision2_get_rows` (models/vllm-decision2.cpp:54 @620d2225c): the
+/// Ports `decision2_get_rows` (models/vllm-decision2.cpp:54 @8642541b2): the
 /// rows of the batch's decision order (see
 /// `llama_batch_ext_set_decision_order`). A batch with no usable order gets
 /// one option at row 0.
@@ -183,7 +183,7 @@ fn getRows(ubatch: *const Ubatch) Rows {
     return res;
 }
 
-/// Ports `input_decision` (models/vllm-decision2.cpp:102 @620d2225c), a
+/// Ports `input_decision` (models/vllm-decision2.cpp:102 @8642541b2), a
 /// class of `llama_model_vllm_decision2`: the rows the head reads.
 const InpDecision = struct {
     /// I32 `[n_options]`.
@@ -196,7 +196,7 @@ const InpDecision = struct {
     n_options: usize,
 
     /// Ports `input_decision`'s constructor (models/vllm-decision2.cpp:104
-    /// @620d2225c).
+    /// @8642541b2).
     fn init(ubatch: *const Ubatch) InpDecision {
         var rows = getRows(ubatch);
         defer rows.deinit();
@@ -204,7 +204,7 @@ const InpDecision = struct {
     }
 
     /// Ports `input_decision`'s `set_input` (models/vllm-decision2.cpp:106
-    /// @620d2225c).
+    /// @8642541b2).
     pub fn setInput(self: *InpDecision, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         var rows = getRows(ubatch);
@@ -220,7 +220,7 @@ const InpDecision = struct {
     }
 
     /// Ports `input_decision`'s `can_reuse` (models/vllm-decision2.cpp:118
-    /// @620d2225c): `set_input` computes the values again, so only the
+    /// @8642541b2): `set_input` computes the values again, so only the
     /// shapes must match.
     pub fn canReuse(self: *InpDecision, params: *const graph.Params) bool {
         var rows = getRows(&params.ubatch);
@@ -233,7 +233,7 @@ const InpDecision = struct {
 // The graph
 
 /// Ports the constructor of `llama_model_vllm_decision2`'s `graph`
-/// (models/vllm-decision2.cpp:130 @620d2225c): Qwen3's backbone, then the
+/// (models/vllm-decision2.cpp:130 @8642541b2): Qwen3's backbone, then the
 /// head, which is always evaluated so that the graph has the same nodes for
 /// every batch.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
@@ -258,7 +258,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_vllm_decision2::graph`'s `build_head`
-/// (models/vllm-decision2.cpp:151 @620d2225c).
+/// (models/vllm-decision2.cpp:151 @8642541b2).
 ///
 /// Parameters:
 /// - `hidden`: `[n_embd, n_outputs]`.

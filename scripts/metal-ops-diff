@@ -1,0 +1,72 @@
+#!/bin/bash
+# Diff the Metal encoders' computed output against the reference, on bits.
+#
+# `harness/metal_ops_dump.c` runs TOP_K_MASK, the two-stage ARGMAX, POOL_1D,
+# `-1` expert ids and SCALE on the GPU, built once against the port and once
+# against `llama.cpp.zmake`. Both link the same `.m` files and the same
+# kernels, so only the host layer in `src/ggml/metal/` differs. Its header
+# says what `backend-ops`, `node-diff --gpu` and `metal-diff` each leave out.
+#
+# The reference runs twice first: a case the GPU does not reproduce is no
+# oracle, and would read as a port bug here.
+#
+# METAL_OPS_PORT_LIB names another port library, for a private build.
+#
+# Usage: scripts/metal-ops-diff
+#   Requires: zig build reference --release=fast
+#             cd llama.cpp.zmake && zig build lib --release=fast
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+. "$ROOT/scripts/check-reference-pin"
+
+REF_LIB=llama.cpp.zmake/zig-out/lib/libggml.a
+PORT_LIB="${METAL_OPS_PORT_LIB:-zig-out/lib/libggml.a}"
+[ -f "$REF_LIB" ] || { echo "missing $REF_LIB -- run 'make -C llama.cpp.zmake lib'" >&2; exit 2; }
+[ -f "$PORT_LIB" ] || { echo "missing $PORT_LIB -- run 'zig build reference --release=fast'" >&2; exit 2; }
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+
+build() {
+    zig cc -mcpu=baseline harness/metal_ops_dump.c -o "$1" -std=c11 -w -O2 \
+        -I llama.cpp/ggml/include -I llama.cpp/ggml/src "$2" \
+        -lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+        -F "$SDK/System/Library/Frameworks" 2>"$tmp/cc.log" \
+        || { echo "FAIL: could not link against $2" >&2; tail -20 "$tmp/cc.log" >&2; exit 1; }
+}
+build "$tmp/ref" "$REF_LIB"
+build "$tmp/port" "$PORT_LIB"
+
+"$tmp/ref" > "$tmp/ref.txt" 2>"$tmp/ref.err" \
+    || { echo "FAIL: reference run aborted" >&2; tail -3 "$tmp/ref.err" >&2; exit 1; }
+"$tmp/ref" > "$tmp/ref2.txt" 2>/dev/null \
+    || { echo "FAIL: second reference run aborted" >&2; exit 1; }
+cmp -s "$tmp/ref.txt" "$tmp/ref2.txt" \
+    || { echo "FAIL: the reference does not reproduce itself" >&2; diff "$tmp/ref.txt" "$tmp/ref2.txt" | head -20 >&2; exit 1; }
+
+n=$(grep -c 'hash=' "$tmp/ref.txt")
+[ "$n" -gt 0 ] || { echo "FAIL: the reference printed no cases" >&2; exit 1; }
+
+# A refused case or a kernel that wrote nothing compares equal on both sides.
+bad=$(grep -c 'supported=0\|status=[^0]\|untouched=[^0]' "$tmp/ref.txt")
+[ "$bad" -eq 0 ] || { echo "FAIL: $bad reference cases did not run" >&2; grep 'supported=0\|status=[^0]\|untouched=[^0]' "$tmp/ref.txt" | head -10 >&2; exit 1; }
+
+"$tmp/port" > "$tmp/port.txt" 2>"$tmp/port.err" \
+    || { echo "FAIL: ported run aborted" >&2; tail -3 "$tmp/port.err" >&2; exit 1; }
+
+# METAL_OPS_DIFF_OUT=<dir> keeps both outputs.
+if [ -n "${METAL_OPS_DIFF_OUT:-}" ]; then
+    mkdir -p "$METAL_OPS_DIFF_OUT" && cp "$tmp/ref.txt" "$tmp/port.txt" "$METAL_OPS_DIFF_OUT/"
+fi
+
+if diff -u "$tmp/ref.txt" "$tmp/port.txt" > "$tmp/diff.txt"; then
+    echo "PASS: $n Metal op results identical, ported vs reference"
+    exit 0
+fi
+echo "FAIL: $(grep -c '^-[^-]' "$tmp/diff.txt") of $n Metal op results differ"
+head -40 "$tmp/diff.txt"
+exit 1

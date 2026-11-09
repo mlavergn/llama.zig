@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! **Not a port.** Scaffolding this project owns. Everything it gathers ports
-//! `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` at v0.7.0 (`620d2225c`).
+//! `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` at v0.8.0 (`8642541b2`).
 //!
 //! # Only a third of that file compiles here
 //!

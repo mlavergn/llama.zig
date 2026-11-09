@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/common/fit.cpp` and `llama.cpp/common/fit.h`
-//! (v0.7.0, `620d2225c`), the whole file, and from the two structs of
+//! (v0.8.0, `8642541b2`), the whole file, and from the two structs of
 //! `llama.cpp/src/llama-ext.h` it measures with.
 //!
 //! # Why the CLI needs it
@@ -58,15 +58,15 @@ const lambda: [*:0]const u8 = "operator()";
 /// `common_log_get_verbosity_thold()` and where `common_log` writes: the
 /// part of upstream's logger this file's output depends on.
 pub const Log = struct {
-    /// `LOG_LEVEL_TRACE` (common/log.h:25 @620d2225c).
+    /// `LOG_LEVEL_TRACE` (common/log.h:25 @8642541b2).
     pub const level_trace: i32 = 4;
-    /// `LOG_LEVEL_WARN` (common/log.h:27 @620d2225c).
+    /// `LOG_LEVEL_WARN` (common/log.h:27 @8642541b2).
     pub const level_warn: i32 = 2;
-    /// `LOG_LEVEL_ERROR` (common/log.h:28 @620d2225c).
+    /// `LOG_LEVEL_ERROR` (common/log.h:28 @8642541b2).
     pub const level_error: i32 = 1;
 
     /// Messages whose verbosity is above this are dropped. `llama-cli`
-    /// sets `LOG_LEVEL_ERROR` (tools/cli/cli.cpp:36 @620d2225c).
+    /// sets `LOG_LEVEL_ERROR` (tools/cli/cli.cpp:36 @8642541b2).
     verbosity: i32 = level_error,
     /// Where messages go; null drops them all.
     out: ?*std.Io.Writer = null,
@@ -77,23 +77,23 @@ pub const Log = struct {
     /// logged at: the tools hand them to their own `common_log`, which keeps
     /// its threshold, prefix and timestamps.
     sink: ?*const fn (verbosity: i32, text: [*:0]const u8) void = null,
-    /// `LOG_JSON` (common/log.h:143 @620d2225c): where a structured record goes,
+    /// `LOG_JSON` (common/log.h:143 @8642541b2): where a structured record goes,
     /// as its type and its data's JSON text. Null drops them, as upstream's
     /// logger does without `--log-jsonl`; the tools hand them to their
     /// `common_log`, which checks the flag.
     json: ?*const fn (kind: [*:0]const u8, data: []const u8) void = null,
 
-    /// `LOG_TRC` (common/log.h:123 @620d2225c).
+    /// `LOG_TRC` (common/log.h:123 @8642541b2).
     fn trc(self: Log, format: [*:0]const u8, args: anytype) void {
         self.emit(level_trace, "I ", format, args);
     }
 
-    /// `LOG_WRN` (common/log.h:125 @620d2225c).
+    /// `LOG_WRN` (common/log.h:125 @8642541b2).
     fn wrn(self: Log, format: [*:0]const u8, args: anytype) void {
         self.emit(level_warn, "W ", format, args);
     }
 
-    /// `LOG_ERR` (common/log.h:126 @620d2225c).
+    /// `LOG_ERR` (common/log.h:126 @8642541b2).
     fn err(self: Log, format: [*:0]const u8, args: anytype) void {
         self.emit(level_error, "E ", format, args);
     }
@@ -127,7 +127,7 @@ pub const Log = struct {
     }
 };
 
-/// Ports `common_params_fit_status` (fit.h:8 @620d2225c).
+/// Ports `common_params_fit_status` (fit.h:9 @8642541b2).
 pub const Status = enum(c_int) {
     /// Found allocations that are projected to fit.
     success = 0,
@@ -137,7 +137,7 @@ pub const Status = enum(c_int) {
     @"error" = 2,
 };
 
-/// Ports `common_fit_extra_model` (fit.h:17 @620d2225c): a second model
+/// Ports `common_fit_extra_model` (fit.h:18 @8642541b2): a second model
 /// sharing the main model's devices, as a draft model does. Its context
 /// follows the main one's, so it is measured again whenever that changes.
 pub const ExtraModel = struct {
@@ -149,7 +149,7 @@ pub const ExtraModel = struct {
     shares_model: bool,
 };
 
-/// Ports `llama_memory_breakdown_data` (llama-ext.h:68 @620d2225c).
+/// Ports `llama_memory_breakdown_data` (llama-ext.h:93 @8642541b2).
 pub const MemoryBreakdownData = struct {
     model: usize = 0,
     context: usize = 0,
@@ -160,14 +160,14 @@ pub const MemoryBreakdownData = struct {
     }
 };
 
-/// Ports `llama_device_memory_data` (llama-ext.h:78 @620d2225c).
+/// Ports `llama_device_memory_data` (llama-ext.h:103 @8642541b2).
 pub const LlamaDeviceMemoryData = struct {
     total: i64 = 0,
     free: i64 = 0,
     mb: MemoryBreakdownData = .{},
 };
 
-/// Ports `common_device_memory_data` (fit.h:48 @620d2225c).
+/// Ports `common_device_memory_data` (fit.h:90 @8642541b2).
 pub const DeviceMemoryData = struct {
     total: i64,
     free: i64,
@@ -176,7 +176,7 @@ pub const DeviceMemoryData = struct {
     compute: usize,
 };
 
-/// Ports `common_layer_fraction_t` (fit.cpp:18 @620d2225c): which part of a
+/// Ports `common_layer_fraction_t` (fit.cpp:20 @8642541b2): which part of a
 /// layer's tensors overflows to the next device or system memory.
 const LayerFraction = enum(c_int) {
     none = 0,
@@ -212,7 +212,7 @@ pub const Patterns = struct {
     }
 };
 
-/// Ports `common_params_fit_exception` (fit.cpp:26 @620d2225c) as
+/// Ports `common_params_fit_exception` (fit.cpp:28 @8642541b2) as
 /// `error.Fit`, and the `std::runtime_error`s it derives from as
 /// `error.Runtime`; the message is `Fitter.what`.
 const Failure = error{ Fit, Runtime, OutOfMemory };
@@ -231,15 +231,27 @@ const Fitter = struct {
     }
 };
 
-/// What `common_get_device_memory_data_impl` installs as libllama's logger
-/// while it measures: messages below `min_level` are demoted to debug.
+/// Ports `common_fit_log_scope` (fit.cpp:33 @8642541b2): installs a logger
+/// that demotes libllama's messages below `min_level` to debug, and puts the
+/// original back. `install` is the constructor and `deinit` the destructor;
+/// the scope must not move between the two.
 const LogFilter = struct {
     original_callback: c.ggml_log_callback,
     original_user_data: ?*anyopaque,
     min_level: c.enum_ggml_log_level,
 
-    /// Ports the lambda `common_get_device_memory_data_impl` passes to
-    /// `llama_log_set` (fit.cpp:50 @620d2225c).
+    fn install(self: *LogFilter, min_level: c.enum_ggml_log_level) void {
+        self.* = .{ .original_callback = null, .original_user_data = null, .min_level = min_level };
+        api.impl.llama_log_get(&self.original_callback, &self.original_user_data);
+        api.impl.llama_log_set(LogFilter.callback, self);
+    }
+
+    fn deinit(self: *const LogFilter) void {
+        api.impl.llama_log_set(self.original_callback, self.original_user_data);
+    }
+
+    /// Ports the lambda the constructor passes to `llama_log_set`
+    /// (fit.cpp:36 @8642541b2).
     fn callback(level: c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
         const ud: *const LogFilter = @ptrCast(@alignCast(user_data));
         const level_eff = if (level >= ud.min_level) level else c.GGML_LOG_LEVEL_DEBUG;
@@ -247,7 +259,7 @@ const LogFilter = struct {
     }
 };
 
-/// Ports `common_get_device_memory_data_impl` (fit.cpp:30 @620d2225c):
+/// Ports `common_get_device_memory_data_impl` (fit.cpp:58 @8642541b2):
 /// loads the model and a context with `no_alloc` and reads what each device,
 /// and the host, would hold.
 ///
@@ -264,10 +276,9 @@ fn deviceMemoryDataImpl(
     hp_n_expert: *u32,
     log_level: c.enum_ggml_log_level,
 ) Failure![]LlamaDeviceMemoryData {
-    var ud: LogFilter = .{ .original_callback = null, .original_user_data = null, .min_level = log_level };
-    api.impl.llama_log_get(&ud.original_callback, &ud.original_user_data);
-    api.impl.llama_log_set(LogFilter.callback, &ud);
-    defer api.impl.llama_log_set(ud.original_callback, ud.original_user_data);
+    var log_scope: LogFilter = undefined;
+    log_scope.install(log_level);
+    defer log_scope.deinit();
 
     var mparams_copy = mparams.*;
     mparams_copy.no_alloc = true;
@@ -354,7 +365,7 @@ fn deviceMemoryDataImpl(
     return ret;
 }
 
-/// Ports `common_get_device_memory_data` (fit.cpp:156 @620d2225c): the
+/// Ports `common_get_device_memory_data` (fit.cpp:237 @8642541b2): the
 /// memory each device and the host would hold under `mparams` and
 /// `cparams`, without loading anything.
 ///
@@ -411,7 +422,7 @@ pub fn getDeviceMemoryData(
     return ret;
 }
 
-/// Ports `ngl_t` (fit.cpp:532 @620d2225c): how many layers a device gets,
+/// Ports `ngl_t` (fit.cpp:613 @8642541b2): how many layers a device gets,
 /// and how many of them only partly.
 const Ngl = struct {
     /// Total layers.
@@ -456,7 +467,7 @@ const FitImpl = struct {
         return deviceMemoryDataImpl(self.f, self.path_model, mparams, self.cparams, &self.devs, &self.hp_ngl, &self.hp_nct, &self.hp_nex, self.log_level);
     }
 
-    /// Ports the lambda `add_extra_memory` (fit.cpp:205 @620d2225c): the
+    /// Ports the lambda `add_extra_memory` (fit.cpp:286 @8642541b2): the
     /// extra model competes for the same memory, so it is added to every
     /// measurement, and measured again whenever its context changes. Its
     /// messages name `operator()`, which is what `__func__` is inside a C++
@@ -514,7 +525,7 @@ const FitImpl = struct {
         }
     }
 
-    /// Ports the lambda `get_overflow_pattern` (fit.cpp:493 @620d2225c):
+    /// Ports the lambda `get_overflow_pattern` (fit.cpp:574 @8642541b2):
     /// the regex matching one layer's tensors that overflow for a fraction.
     fn overflowPattern(self: *FitImpl, il: usize, lf: LayerFraction) Failure![*:0]const u8 {
         const n_strings = 1000;
@@ -534,7 +545,7 @@ const FitImpl = struct {
         return p.ptr;
     }
 
-    /// Ports the lambda `set_ngl_tensor_split_tbo` (fit.cpp:548 @620d2225c):
+    /// Ports the lambda `set_ngl_tensor_split_tbo` (fit.cpp:629 @8642541b2):
     /// writes a layer assignment into `mparams` through the caller's
     /// `tensor_split` and override buffers.
     fn setNglTensorSplitTbo(self: *FitImpl, ngl_per_device: []const Ngl, overflow_bufts: []const c.ggml_backend_buffer_type_t, mparams: *c.llama_model_params) Failure!void {
@@ -575,7 +586,7 @@ const FitImpl = struct {
         mparams.tensor_buft_overrides = tbo;
     }
 
-    /// Ports the lambda `get_memory_for_layers` (fit.cpp:589 @620d2225c): the
+    /// Ports the lambda `get_memory_for_layers` (fit.cpp:670 @8642541b2): the
     /// memory each device would use for a layer assignment.
     fn memoryForLayers(self: *FitImpl, func_name: [*:0]const u8, ngl_per_device: []const Ngl, overflow_bufts: []const c.ggml_backend_buffer_type_t) Failure![]i64 {
         var mparams_copy = self.mparams.*;
@@ -615,7 +626,7 @@ fn divMiB(size: usize) i64 {
     return @divTrunc(@as(i64, @bitCast(size)), MiB);
 }
 
-/// Ports `common_params_fit_impl` (fit.cpp:179 @620d2225c).
+/// Ports `common_params_fit_impl` (fit.cpp:260 @8642541b2).
 fn fitImpl(
     f: *Fitter,
     path_model: [*:0]const u8,
@@ -1119,7 +1130,7 @@ fn fitImpl(
     try s.setNglTensorSplitTbo(ngl_per_device, overflow_bufts, mparams);
 }
 
-/// Ports `common_fit_params` (fit.cpp:879 @620d2225c): fits `mparams` and
+/// Ports `common_fit_params` (fit.cpp:960 @8642541b2): fits `mparams` and
 /// `cparams` to free device memory, system memory taken as unlimited where
 /// there is a device. Only parameters still equal to
 /// `llama_model_default_params`'s are changed, and the context size only
@@ -1184,22 +1195,31 @@ pub fn fitParams(
     return status;
 }
 
-/// Ports `common_memory_breakdown_print` (fit.cpp:906 @620d2225c): a table
-/// of what each device, the host and any other buffer type holds, written at
-/// the trace level, and the same rows as one `LOG_JSON` record.
+/// Ports `common_memory_breakdown_row` (fit.h:50 @8642541b2): one row of the
+/// memory breakdown, a device, the host or another buffer type.
+pub const MemoryBreakdownRow = struct {
+    pub const Kind = enum { device, host, buffer_type };
+
+    kind: Kind = .device,
+    name: []const u8 = "", // device or buffer type name, "Host" for the host row
+    description: []const u8 = "", // device description, empty otherwise
+    total: i64 = 0, // device memory in bytes, 0 unless kind == device
+    free: i64 = 0, // free device memory in bytes, 0 unless kind == device
+    model: usize = 0, // bytes held by this context, by kind of buffer
+    context: usize = 0,
+    compute: usize = 0,
+};
+
+/// Ports `common_memory_breakdown_rows` (fit.cpp:987 @8642541b2): the rows of
+/// `memoryBreakdownPrint`, the model's devices first, then the host, then
+/// every remaining buffer type.
 ///
 /// Parameters:
-/// - `gpa`: allocates the table, freed before return.
-/// - `log`: where the table goes.
+/// - `arena`: holds the rows and their strings.
 /// - `ctx`: the context to break down.
 ///
-/// Return: nothing; `error.OutOfMemory` where the C would throw.
-pub fn memoryBreakdownPrint(gpa: std.mem.Allocator, log: Log, ctx: ?*const c.struct_llama_context) !void {
-    const func: [*:0]const u8 = "common_memory_breakdown_print";
-    var arena_state: std.heap.ArenaAllocator = .init(gpa);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
-
+/// Return: the rows, from `arena`.
+pub fn memoryBreakdownRows(arena: std.mem.Allocator, ctx: ?*const c.struct_llama_context) ![]MemoryBreakdownRow {
     const model = api.context.llama_get_model(ctx);
 
     const devices = try arena.alloc(c.ggml_backend_dev_t, @intCast(api.model.llama_model_n_devices(model)));
@@ -1207,19 +1227,6 @@ pub fn memoryBreakdownPrint(gpa: std.mem.Allocator, log: Log, ctx: ?*const c.str
 
     const memory_breakdown = try api.context.llama_get_memory_breakdown(ctx, arena);
 
-    const Row = [9][]const u8;
-    var table_data: std.ArrayList(Row) = .empty;
-    const template_header = "%s: | %s | %s   %s    %s   %s   %s   %s    %s |\n";
-    const template_gpu = "%s: | %s | %s = %s + (%s = %s + %s + %s) + %s |\n";
-    const template_other = "%s: | %s | %s   %s    %s = %s + %s + %s    %s |\n";
-
-    // same data as the table below, for --log-jsonl consumers
-    var rows: std.ArrayList(u8) = .empty;
-    try rows.append(arena, '[');
-
-    try table_data.append(arena, .{ template_header, "memory breakdown [MiB]", "total", "free", "self", "model", "context", "compute", "unaccounted" });
-
-    const mib: usize = 1024 * 1024;
     const desc_prefixes_strip = [_][]const u8{ "NVIDIA ", "GeForce ", "Tesla ", "AMD ", "Radeon ", "Instinct " };
 
     // Buffer types already reported, so none is counted twice.
@@ -1251,9 +1258,9 @@ pub fn memoryBreakdownPrint(gpa: std.mem.Allocator, log: Log, ctx: ?*const c.str
         }
     }
 
-    // each device
+    var rows: std.ArrayList(MemoryBreakdownRow) = .empty;
+
     for (devices, mb_dev) |dev, mb| {
-        const name = std.mem.span(c.ggml_backend_dev_name(dev));
         var desc: []const u8 = std.mem.span(c.ggml_backend_dev_description(dev));
         for (desc_prefixes_strip) |prefix| {
             if (std.mem.startsWith(u8, desc, prefix)) desc = desc[prefix.len..];
@@ -1263,90 +1270,179 @@ pub fn memoryBreakdownPrint(gpa: std.mem.Allocator, log: Log, ctx: ?*const c.str
         var total: usize = 0;
         c.ggml_backend_dev_memory(dev, &free, &total);
 
-        const self_size = mb.model +% mb.context +% mb.compute;
-        const unaccounted = @as(i64, @bitCast(total)) - @as(i64, @bitCast(free)) - @as(i64, @bitCast(self_size));
-
-        try table_data.append(arena, .{
-            template_gpu,
-            try std.fmt.allocPrint(arena, "  - {s} ({s})", .{ name, desc }),
-            try std.fmt.allocPrint(arena, "{d}", .{total / mib}),
-            try std.fmt.allocPrint(arena, "{d}", .{free / mib}),
-            try std.fmt.allocPrint(arena, "{d}", .{self_size / mib}),
-            try std.fmt.allocPrint(arena, "{d}", .{mb.model / mib}),
-            try std.fmt.allocPrint(arena, "{d}", .{mb.context / mib}),
-            try std.fmt.allocPrint(arena, "{d}", .{mb.compute / mib}),
-            try std.fmt.allocPrint(arena, "{d}", .{@divTrunc(unaccounted, @as(i64, mib))}),
+        try rows.append(arena, .{
+            .kind = .device,
+            .name = try arena.dupe(u8, std.mem.span(c.ggml_backend_dev_name(dev))),
+            .description = try arena.dupe(u8, desc),
+            .total = @bitCast(total),
+            .free = @bitCast(free),
+            .model = mb.model,
+            .context = mb.context,
+            .compute = mb.compute,
         });
-
-        if (rows.items.len > 1) try rows.append(arena, ',');
-        var row = try json.Object.begin(&rows, arena);
-        try row.string("kind", "device");
-        try row.string("name", name);
-        try row.string("description", desc);
-        try row.int("total", total / mib);
-        try row.int("free", free / mib);
-        try row.int("self", self_size / mib);
-        try row.int("model", mb.model / mib);
-        try row.int("context", mb.context / mib);
-        try row.int("compute", mb.compute / mib);
-        try row.int("unaccounted", @divTrunc(unaccounted, @as(i64, mib)));
-        try row.end();
     }
 
-    // the host
-    {
-        const self_size = mb_host.model +% mb_host.context +% mb_host.compute;
-        try table_data.append(arena, .{
-            template_other,
-            "  - Host",
-            "", // total
-            "", // free
-            try std.fmt.allocPrint(arena, "{d}", .{self_size / mib}),
-            try std.fmt.allocPrint(arena, "{d}", .{mb_host.model / mib}),
-            try std.fmt.allocPrint(arena, "{d}", .{mb_host.context / mib}),
-            try std.fmt.allocPrint(arena, "{d}", .{mb_host.compute / mib}),
-            "", // unaccounted
-        });
+    try rows.append(arena, .{
+        .kind = .host,
+        .name = "Host",
+        .model = mb_host.model,
+        .context = mb_host.context,
+        .compute = mb_host.compute,
+    });
 
-        if (rows.items.len > 1) try rows.append(arena, ',');
-        var row = try json.Object.begin(&rows, arena);
-        try row.string("kind", "host");
-        try row.string("name", "Host");
-        try row.int("self", self_size / mib);
-        try row.int("model", mb_host.model / mib);
-        try row.int("context", mb_host.context / mib);
-        try row.int("compute", mb_host.compute / mib);
-        try row.end();
-    }
-
-    // every remaining buffer type
+    // all remaining buffer types
     for (memory_breakdown) |e| {
         if (std.mem.indexOfScalar(c.ggml_backend_buffer_type_t, seen_buffer_types.items, e.buft) != null) continue;
-        const name = std.mem.span(c.ggml_backend_buft_name(e.buft));
-        const self_size = e.model +% e.context +% e.compute;
+        try rows.append(arena, .{
+            .kind = .buffer_type,
+            .name = try arena.dupe(u8, std.mem.span(c.ggml_backend_buft_name(e.buft))),
+            .model = e.model,
+            .context = e.context,
+            .compute = e.compute,
+        });
+        try seen_buffer_types.append(arena, e.buft);
+    }
+
+    return rows.items;
+}
+
+/// Ports `common_fit_measure` (fit.cpp:166 @8642541b2): loads the model and a
+/// context with `no_alloc`, the parameters used as they are, and returns the
+/// memory breakdown.
+///
+/// Parameters:
+/// - `arena`: holds the rows, and what a failure says.
+/// - `path_model`, `mparams`, `cparams`: what to measure.
+/// - `n_ctx_train`, `n_ctx`: optional outputs.
+/// - `log_level`: libllama's messages below it go to the debug log.
+///
+/// Return: the rows; `error.Runtime` where the C throws, with `what()` in
+/// `what_out`.
+pub fn fitMeasure(
+    arena: std.mem.Allocator,
+    path_model: [*:0]const u8,
+    mparams: *const c.llama_model_params,
+    cparams: *const c.llama_context_params,
+    n_ctx_train: ?*u32,
+    n_ctx: ?*u32,
+    log_level: c.enum_ggml_log_level,
+    what_out: *[]const u8,
+) ![]MemoryBreakdownRow {
+    var log_scope: LogFilter = undefined;
+    log_scope.install(log_level);
+    defer log_scope.deinit();
+
+    var mparams_copy = mparams.*;
+    mparams_copy.no_alloc = true;
+    mparams_copy.load_mode = c.LLAMA_LOAD_MODE_NONE;
+
+    const model = api.llama.llama_model_load_from_file(path_model, mparams_copy) orelse {
+        what_out.* = "failed to load model";
+        return error.Runtime;
+    };
+    defer api.model.llama_model_free(model);
+
+    const ctx = api.context.llama_init_from_model(model, cparams.*) orelse {
+        what_out.* = "failed to create llama_context from model";
+        return error.Runtime;
+    };
+    defer api.context.llama_free(ctx);
+
+    if (n_ctx_train) |p| p.* = @bitCast(api.model.llama_model_n_ctx_train(model));
+    if (n_ctx) |p| p.* = api.context.llama_n_ctx(ctx);
+
+    return memoryBreakdownRows(arena, ctx);
+}
+
+/// Ports `common_memory_breakdown_print` (fit.cpp:1092 @8642541b2): a table
+/// of what each device, the host and any other buffer type holds, written at
+/// the trace level, and the same rows as one `LOG_JSON` record.
+///
+/// Parameters:
+/// - `gpa`: allocates the table, freed before return.
+/// - `log`: where the table goes.
+/// - `ctx`: the context to break down.
+///
+/// Return: nothing; `error.OutOfMemory` where the C would throw.
+pub fn memoryBreakdownPrint(gpa: std.mem.Allocator, log: Log, ctx: ?*const c.struct_llama_context) !void {
+    const func: [*:0]const u8 = "common_memory_breakdown_print";
+    var arena_state: std.heap.ArenaAllocator = .init(gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const breakdown_rows = try memoryBreakdownRows(arena, ctx);
+
+    const Row = [9][]const u8;
+    var table_data: std.ArrayList(Row) = .empty;
+    const template_header = "%s: | %s | %s   %s    %s   %s   %s   %s    %s |\n";
+    const template_gpu = "%s: | %s | %s = %s + (%s = %s + %s + %s) + %s |\n";
+    const template_other = "%s: | %s | %s   %s    %s = %s + %s + %s    %s |\n";
+
+    // same data as the table below, for --log-jsonl consumers
+    var rows: std.ArrayList(u8) = .empty;
+    try rows.append(arena, '[');
+
+    try table_data.append(arena, .{ template_header, "memory breakdown [MiB]", "total", "free", "self", "model", "context", "compute", "unaccounted" });
+
+    const mib: usize = 1024 * 1024;
+
+    for (breakdown_rows) |r| {
+        const self_size = r.model +% r.context +% r.compute;
+
+        if (r.kind == .device) {
+            const total: usize = @bitCast(r.total);
+            const free: usize = @bitCast(r.free);
+            const unaccounted = r.total - r.free - @as(i64, @bitCast(self_size));
+
+            try table_data.append(arena, .{
+                template_gpu,
+                try std.fmt.allocPrint(arena, "  - {s} ({s})", .{ r.name, r.description }),
+                try std.fmt.allocPrint(arena, "{d}", .{total / mib}),
+                try std.fmt.allocPrint(arena, "{d}", .{free / mib}),
+                try std.fmt.allocPrint(arena, "{d}", .{self_size / mib}),
+                try std.fmt.allocPrint(arena, "{d}", .{r.model / mib}),
+                try std.fmt.allocPrint(arena, "{d}", .{r.context / mib}),
+                try std.fmt.allocPrint(arena, "{d}", .{r.compute / mib}),
+                try std.fmt.allocPrint(arena, "{d}", .{@divTrunc(unaccounted, @as(i64, mib))}),
+            });
+
+            if (rows.items.len > 1) try rows.append(arena, ',');
+            var row = try json.Object.begin(&rows, arena);
+            try row.string("kind", "device");
+            try row.string("name", r.name);
+            try row.string("description", r.description);
+            try row.int("total", total / mib);
+            try row.int("free", free / mib);
+            try row.int("self", self_size / mib);
+            try row.int("model", r.model / mib);
+            try row.int("context", r.context / mib);
+            try row.int("compute", r.compute / mib);
+            try row.int("unaccounted", @divTrunc(unaccounted, @as(i64, mib)));
+            try row.end();
+            continue;
+        }
+
         try table_data.append(arena, .{
             template_other,
-            try std.fmt.allocPrint(arena, "  - {s}", .{name}),
+            try std.fmt.allocPrint(arena, "  - {s}", .{r.name}),
             "", // total
             "", // free
             try std.fmt.allocPrint(arena, "{d}", .{self_size / mib}),
-            try std.fmt.allocPrint(arena, "{d}", .{e.model / mib}),
-            try std.fmt.allocPrint(arena, "{d}", .{e.context / mib}),
-            try std.fmt.allocPrint(arena, "{d}", .{e.compute / mib}),
+            try std.fmt.allocPrint(arena, "{d}", .{r.model / mib}),
+            try std.fmt.allocPrint(arena, "{d}", .{r.context / mib}),
+            try std.fmt.allocPrint(arena, "{d}", .{r.compute / mib}),
             "", // unaccounted
         });
 
         if (rows.items.len > 1) try rows.append(arena, ',');
         var row = try json.Object.begin(&rows, arena);
-        try row.string("kind", "buffer_type");
-        try row.string("name", name);
+        try row.string("kind", if (r.kind == .host) "host" else "buffer_type");
+        try row.string("name", r.name);
         try row.int("self", self_size / mib);
-        try row.int("model", e.model / mib);
-        try row.int("context", e.context / mib);
-        try row.int("compute", e.compute / mib);
+        try row.int("model", r.model / mib);
+        try row.int("context", r.context / mib);
+        try row.int("compute", r.compute / mib);
         try row.end();
-
-        try seen_buffer_types.append(arena, e.buft);
     }
 
     // Pad each column to its widest cell: the name column on the right,
@@ -1384,7 +1480,7 @@ pub fn memoryBreakdownPrint(gpa: std.mem.Allocator, log: Log, ctx: ?*const c.str
     }
 }
 
-/// Ports `common_fit_print` (fit.cpp:1088 @620d2225c): one line per device
+/// Ports `common_fit_print` (fit.cpp:1182 @8642541b2): one line per device
 /// and one for the host -- name, then model, context and compute in MiB --
 /// for `llama-fit-params`.
 ///

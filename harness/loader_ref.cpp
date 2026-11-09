@@ -12,6 +12,7 @@
 // checked against the real struct before it is used to read it.
 
 #include "llama-model-loader.h"
+#include "llama-ext.h"
 #include "llama-model.h"
 #include "ggml-backend-impl.h"
 
@@ -50,7 +51,6 @@ llama_model * ref_load_metadata(const char * path, const llama_model_kv_override
 
         llama_model * model = model_ptr.get();
         model->hparams.vocab_only = params.vocab_only;
-        model->hparams.no_alloc   = params.no_alloc;
 
         try {
             model->load_hparams(ml);
@@ -121,6 +121,15 @@ size_t ref_n_labels(const llama_model * model) {
 
 const char * ref_label(const llama_model * model, size_t i) {
     return model->classifier_labels[i].c_str();
+}
+
+// llama-ext.h's llama_model_decision_label, null past the last one.
+const char * ref_decision_label(const llama_model * model, uint32_t i) {
+    return llama_model_decision_label(model, i);
+}
+
+size_t ref_n_decision_labels(const llama_model * model) {
+    return model->decision_labels.size();
 }
 
 // gguf_kv, in iteration order: the i-th key and value.

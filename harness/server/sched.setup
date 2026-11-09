@@ -1,0 +1,40 @@
+#!/bin/bash
+# The models the router's memory scheduler (server-models-sched.cpp) measures:
+# two small fixtures, a file that is no model, and a preset whose repository
+# is not in the cache, so its measure child exits before reporting. Run by
+# scripts/server-diff.
+set -eu
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+FIX="$ROOT/zig-out/arch-fixtures/llama-dense.gguf"
+FIX2="$ROOT/zig-out/arch-fixtures/qwen3-dense.gguf"
+mkdir -p "$DATA/models" "$DATA/two" "$DATA/reload-a" "$DATA/reload-b"
+cp "$FIX" "$DATA/models/tiny.gguf"
+cp "$FIX2" "$DATA/models/tiny2.gguf"
+printf 'not a gguf\n' > "$DATA/models/broken.gguf"
+cp "$FIX" "$DATA/two/tiny.gguf"
+cp "$FIX2" "$DATA/two/tiny2.gguf"
+cat > "$DATA/norepo.ini" <<INI
+[norepo]
+hf-repo = test/absent:Q4_K_M
+[local]
+model = $FIX
+[crash]
+model = $FIX
+cache-type-k = bogus
+INI
+cat > "$DATA/reload-a/reload.ini" <<INI
+[kept]
+model = $FIX
+ctx-size = 256
+[changed]
+model = $FIX
+ctx-size = 256
+INI
+cat > "$DATA/reload-b/reload.ini" <<INI
+[kept]
+model = $FIX
+ctx-size = 256
+[changed]
+model = $FIX
+ctx-size = 512
+INI

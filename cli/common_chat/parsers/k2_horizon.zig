@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/k2-horizon.cpp` (llama.cpp v0.7.0,
-//! `620d2225c`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/k2-horizon.cpp` (llama.cpp v0.8.0,
+//! `8642541b2`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -161,7 +161,7 @@ const Build = struct {
         const p = self.cb;
         const b = &p.b;
         const rule_name = try parsers.argName(self.a, self.tool_index, param_index, "");
-        const types = prm.schema.valueTypes();
+        const types = prm.schema.valueTypes() catch |e| return peg.errors.fromSchema(e);
         var arg_value = self.arg_string;
         if (!types.has(.string)) {
             const schema_name = try std.mem.concat(self.a, u8, &.{ rule_name, "-schema" });
@@ -199,7 +199,7 @@ const Build = struct {
 };
 
 /// Ports `common_chat_params_init_k2_horizon` (parsers/k2-horizon.cpp:8
-/// @620d2225c).
+/// @8642541b2).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

@@ -49,13 +49,17 @@ void ref_audio_hparams_set_parakeet(void * p, const float * mel_filters, size_t 
     hp->window.assign(window, window + n_window);
 }
 
+void ref_audio_hparams_set_patches(void * p, const int32_t * sizes, size_t n) {
+    ((clip_hparams *) p)->audio_patch_sizes.assign(sizes, sizes + n);
+}
+
 void ref_audio_set_log(ggml_log_callback cb, void * ud) {
     g_logger_state.log_callback = cb;
     g_logger_state.log_callback_user_data = ud;
 }
 
-// the twelve preprocessors, in mtmd-audio.h's order -- d1omni (v0.7.0) last,
-// as the Zig `audio.Kind` keeps it
+// the fourteen preprocessors, in mtmd-audio.h's order -- d1omni (v0.7.0) and
+// the two of v0.8.0 last, as the Zig `audio.Kind` keeps it
 static mtmd_audio_preprocessor * make(int kind, const clip_ctx * ctx) {
     switch (kind) {
         case 0:  return new mtmd_audio_preprocessor_whisper(ctx);
@@ -70,6 +74,8 @@ static mtmd_audio_preprocessor * make(int kind, const clip_ctx * ctx) {
         case 9:  return new mtmd_audio_preprocessor_pockettts(ctx);
         case 10: return new mtmd_audio_preprocessor_parakeet((clip_ctx *) ctx);
         case 11: return new mtmd_audio_preprocessor_d1omni(ctx);
+        case 12: return new mtmd_audio_preprocessor_lfm3a(ctx);
+        case 13: return new mtmd_audio_preprocessor_muse_spark_audio(ctx);
         default: return nullptr;
     }
 }
@@ -111,6 +117,19 @@ int ref_audio_proc_run(void * r, const float * samples, size_t n_samples, void *
     memcpy(*out, blob.data(), blob.size());
     *out_len = blob.size();
     return ok ? 1 : 0;
+}
+
+// mtmd_audio_log_mel_frame over a cache built as the Voxtral stream builds it
+void * ref_mel_frame_new(int n_fft, int window, int n_mel, int sample_rate) {
+    auto * cache = new mtmd_audio_cache();
+    cache->fill_sin_cos_table(n_fft);
+    cache->fill_hann_window(window, true);
+    cache->fill_mel_filterbank_matrix(n_mel, n_fft, sample_rate);
+    return cache;
+}
+void ref_mel_frame_free(void * c) { delete (mtmd_audio_cache *) c; }
+void ref_mel_frame_run(void * c, const float * samples, int n_fft, int n_mel, float * out) {
+    mtmd_audio_log_mel_frame(*(const mtmd_audio_cache *) c, samples, n_fft, n_mel, out);
 }
 
 void * ref_istft_new(int n_fft, int hop) { return new mtmd_audio_streaming_istft(n_fft, hop); }

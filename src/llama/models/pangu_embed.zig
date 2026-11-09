@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/pangu-embed.cpp` at v0.7.0 (`620d2225c`):
+//! Ported from `llama.cpp/src/models/pangu-embed.cpp` at v0.8.0 (`8642541b2`):
 //! `llama_model_pangu_embed`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -19,7 +19,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_pangu_embed`'s `load_arch_hparams` (models/pangu-embed.cpp:3 @620d2225c).
+/// Ports `llama_model_pangu_embed`'s `load_arch_hparams` (models/pangu-embed.cpp:3 @8642541b2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
@@ -31,7 +31,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_pangu_embed`'s `load_arch_tensors` (models/pangu-embed.cpp:13 @620d2225c).
+/// Ports `llama_model_pangu_embed`'s `load_arch_tensors` (models/pangu-embed.cpp:13 @8642541b2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -76,13 +76,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_pangu_embed`'s `build_arch_graph` (models/pangu-embed.cpp:54 @620d2225c).
+/// Ports `llama_model_pangu_embed`'s `build_arch_graph` (models/pangu-embed.cpp:54 @8642541b2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_pangu_embed`'s `graph` (models/pangu-embed.cpp:58
-/// @620d2225c).
+/// @8642541b2).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

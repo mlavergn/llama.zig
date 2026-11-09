@@ -45,6 +45,22 @@ GET /slots
 # the llama state payload ("SCKP"), so a hybrid slot restored from it can
 # still roll back to one; a checkpoint restored from a file that no longer
 # loads falls back to re-processing instead of aborting
+# v0.8.0 (#30666): a checkpoint past the shared prefix is erased even when its
+# pos_max is not past pos_next: the second prompt shares the first half, a
+# restored earlier checkpoint moves pos_next back, later ones stay wrong
+!server -m $MM/text-gemma3.gguf -c 2048 -np 1 --no-jinja --no-warmup --ctx-checkpoints 4 --checkpoint-min-step 8 -b 16 -ub 16 -lv 4
+!fulllog
+POST /completion {"prompt": "aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk llll mmmm nnnn oooo pppp qqqq rrrr ssss tttt uuuu vvvv wwww xxxx yyyy zzzz", "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": "aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk llll mmmm nnnn oooo pppp ZZZZ YYYY XXXX WWWW VVVV UUUU TTTT SSSS RRRR QQQQ", "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": "aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk llll mmmm nnnn oooo pppp ZZZZ YYYY XXXX WWWW VVVV UUUU TTTT SSSS RRRR QQQQ MORE", "n_predict": 2, "temperature": 0}
+# the boundary itself: one token per character, the first checkpoint has pos_max
+# 113 and n_tokens 114, this prompt shares exactly 113 tokens. pos_max > pos_next
+# keeps it (113 > 113 is false), n_tokens > n_prefix (114 > 113) erases it
+!server -m $MM/text-gemma3.gguf -c 2048 -np 1 --no-jinja --no-warmup --ctx-checkpoints 4 --checkpoint-min-step 8 -b 16 -ub 16 -lv 4
+!fulllog
+POST /completion {"prompt": "aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk llll mmmm nnnn oooo pppp qqqq rrrr ssss tttt uuuu vvvv wwww xxxx yyyy zzzz", "n_predict": 2, "temperature": 0}
+POST /completion {"prompt": "aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk llll mmmm nnnn oooo pppp qqqq rrrr ssss tttt uuuu vvvv wwZZ XXXX YYYY ZZZZ", "n_predict": 2, "temperature": 0}
+
 !server -m $QWEN35 -c 2048 -np 2 -b 32 -ub 32 --no-jinja --ctx-checkpoints 4 --checkpoint-min-step 16 --slot-save-path ./ -lv 4
 !fulllog
 POST /completion {"prompt": "The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.", "n_predict": 6, "temperature": 0, "id_slot": 0}

@@ -3,13 +3,13 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/argsort.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/argsort.cuh` at v0.7.0 (`620d2225c`). The
+//! `llama.cpp/ggml/src/ggml-cuda/argsort.cuh` at v0.8.0 (`8642541b2`). The
 //! kernels -- `init_indices`, `init_offsets`, `k_argsort_f32_i32` -- stay
 //! CUDA.
 //!
 //! # CUB
 //!
-//! `GGML_CUDA_USE_CUB` is defined for this build (common.cuh:116 @620d2225c), so rows
+//! `GGML_CUDA_USE_CUB` is defined for this build (common.cuh:116 @8642541b2), so rows
 //! too long for the bitonic kernel go to CUB's device-wide sorts. Their
 //! host-side dispatch is CUB's header templates, which Zig cannot
 //! instantiate; `cub_shim.cu` wraps exactly upstream's six calls behind a C
@@ -55,7 +55,7 @@ comptime {
 // -----------------------------------------------------------------------------
 // CUB
 
-/// Ports `ggml_cuda_chunk_nrows` (argsort.cu:32 @620d2225c): the suggested
+/// Ports `ggml_cuda_chunk_nrows` (argsort.cu:32 @8642541b2): the suggested
 /// maximum number of rows to process at once, given the temporary buffer
 /// bytes per row. v0.7.0 renamed it from `argsort_f32_i32_cuda_cub_chunk_nrows`
 /// and took it out of `GGML_CUDA_USE_CUB`, for `top_k.zig`'s chunking too.
@@ -71,7 +71,7 @@ pub fn chunkNrows(row_bytes: usize, nrows: i64) c_int {
     return @truncate(@min(@as(i64, chunk_nrows), nrows));
 }
 
-/// Ports `argsort_f32_i32_cuda_cub` (argsort.cu:46 @620d2225c). The keys
+/// Ports `argsort_f32_i32_cuda_cub` (argsort.cu:46 @8642541b2). The keys
 /// sort out of place, into `temp_keys_out`: CUB's device-wide sorts do not
 /// allow their input and output to alias.
 pub fn argsortF32I32CudaCub(pool: *common.Pool, x: ?*const anyopaque, dst: [*]c_int, ncols: c_int, nrows: c_int, order: c.ggml_sort_order, stream: cu.cudaStream_t) void {
@@ -155,7 +155,7 @@ pub fn argsortF32I32CudaCub(pool: *common.Pool, x: ?*const anyopaque, dst: [*]c_
 // -----------------------------------------------------------------------------
 // Bitonic
 
-/// Ports `next_power_of_2` (argsort.cu:230 @620d2225c).
+/// Ports `next_power_of_2` (argsort.cu:230 @8642541b2).
 pub fn nextPowerOf2(x: c_int) c_int {
     var n: c_int = 1;
     while (n < x) {
@@ -164,10 +164,10 @@ pub fn nextPowerOf2(x: c_int) c_int {
     return n;
 }
 
-/// Ports `CUDA_ARGSORT_BLOCK_SIZE` (argsort.cuh:3 @620d2225c).
+/// Ports `CUDA_ARGSORT_BLOCK_SIZE` (argsort.cuh:3 @8642541b2).
 pub const argsort_block_size: c_int = 1024;
 
-/// Ports `argsort_f32_i32_cuda_bitonic` (argsort.cu:238 @620d2225c).
+/// Ports `argsort_f32_i32_cuda_bitonic` (argsort.cu:238 @8642541b2).
 pub fn argsortF32I32CudaBitonic(x: ?*const anyopaque, dst: ?*anyopaque, ncols: c_int, nrows: c_int, order: c.ggml_sort_order, stream: cu.cudaStream_t) void {
     // bitonic sort requires ncols to be power of 2
     const ncols_pad = nextPowerOf2(ncols);
@@ -195,7 +195,7 @@ pub fn argsortF32I32CudaBitonic(x: ?*const anyopaque, dst: ?*anyopaque, ncols: c
 // -----------------------------------------------------------------------------
 // The op
 
-/// Ports `ggml_cuda_op_argsort` (argsort.cu:267 @620d2225c), the
+/// Ports `ggml_cuda_op_argsort` (argsort.cu:267 @8642541b2), the
 /// `GGML_CUDA_USE_CUB` arm.
 pub fn opArgsort(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);

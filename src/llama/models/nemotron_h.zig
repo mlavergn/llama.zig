@@ -6,8 +6,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/nemotron-h.cpp` at v0.7.0
-//! (`620d2225c`): `llama_model_nemotron_h`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/nemotron-h.cpp` at v0.8.0
+//! (`8642541b2`): `llama_model_nemotron_h`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` with
 //! `build_attention_layer` and `build_ffn_layer`, which Nemotron-H MoE
 //! shares.
@@ -32,7 +32,7 @@ fn divI64(a: i64, b: i64) i64 {
 }
 
 /// Ports `llama_model_nemotron_h`'s `load_arch_hparams`
-/// (models/nemotron-h.cpp:5 @620d2225c).
+/// (models/nemotron-h.cpp:5 @8642541b2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -83,7 +83,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_nemotron_h`'s `load_arch_tensors`
-/// (models/nemotron-h.cpp:49 @620d2225c).
+/// (models/nemotron-h.cpp:49 @8642541b2).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -241,13 +241,13 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// Ports `llama_model_nemotron_h`'s `build_arch_graph`
-/// (models/nemotron-h.cpp:198 @620d2225c).
+/// (models/nemotron-h.cpp:198 @8642541b2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_nemotron_h`'s `graph`
-/// (models/nemotron-h.cpp:202 @620d2225c).
+/// (models/nemotron-h.cpp:202 @8642541b2).
 pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -328,7 +328,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_nemotron_h::graph`'s `build_attention_layer`
-/// (models/nemotron-h.cpp:278 @620d2225c): attention without RoPE.
+/// (models/nemotron-h.cpp:278 @8642541b2): attention without RoPE.
 fn buildAttentionLayer(model: *const Model, b: *const graph.Builder, cur_: *Tensor, inp_attn: *graph.InpAttnKv, n_embd_head: i64, il: c_int) *Tensor {
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
@@ -341,7 +341,7 @@ fn buildAttentionLayer(model: *const Model, b: *const graph.Builder, cur_: *Tens
 }
 
 /// Ports `llama_model_nemotron_h::graph`'s `build_ffn_layer`
-/// (models/nemotron-h.cpp:294 @620d2225c): a squared-ReLU FFN, or the
+/// (models/nemotron-h.cpp:294 @8642541b2): a squared-ReLU FFN, or the
 /// mixture of experts beside a shared expert.
 fn buildFfnLayer(model: *const Model, b: *const graph.Builder, cur_: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;

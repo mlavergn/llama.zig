@@ -6,7 +6,7 @@
 //! `dump_integer`, `dump_float`, `hex_bytes` and `decode` -- and
 //! `basic_json::dump` from `llama.cpp/vendor/nlohmann/json.hpp`, and
 //! `common_json::dump`/`dump_safe` from `llama.cpp/common/json.cpp`
-//! (llama.cpp v0.7.0, `620d2225c`). Each declaration names what it ports and
+//! (llama.cpp v0.8.0, `8642541b2`). Each declaration names what it ports and
 //! the line it began at. The number text is `dtoa.zig`'s.
 //!
 //! The C writes strings through a 512-byte buffer it flushes only at a code
@@ -42,11 +42,11 @@ pub const Options = struct {
     error_handler: ErrorHandler = .strict,
 };
 
-/// `UTF8_ACCEPT` and `UTF8_REJECT` (json.hpp:18789, 18790 @620d2225c).
+/// `UTF8_ACCEPT` and `UTF8_REJECT` (json.hpp:18789, 18790 @8642541b2).
 const utf8_accept: u8 = 0;
 const utf8_reject: u8 = 1;
 
-/// The table of `decode` (json.hpp:19872 @620d2225c): a byte's class, then
+/// The table of `decode` (json.hpp:19872 @8642541b2): a byte's class, then
 /// the transitions, Bjoern Hoehrmann's UTF-8 automaton.
 const utf8d = [400]u8{
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 00..1F
@@ -65,7 +65,7 @@ const utf8d = [400]u8{
     1, 3, 1, 1, 1, 1, 1, 3, 1, 3, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // s7..s8
 };
 
-/// Ports `decode` (json.hpp:19872 @620d2225c), a member of `serializer`:
+/// Ports `decode` (json.hpp:19872 @8642541b2), a member of `serializer`:
 /// one step of the automaton.
 fn decode(state: *u8, codep: *u32, byte: u8) u8 {
     const t = utf8d[byte];
@@ -77,7 +77,7 @@ fn decode(state: *u8, codep: *u32, byte: u8) u8 {
     return state.*;
 }
 
-/// Ports `hex_bytes` (json.hpp:19649 @620d2225c): two uppercase digits.
+/// Ports `hex_bytes` (json.hpp:19649 @8642541b2): two uppercase digits.
 fn hexByte(byte: u8) [2]u8 {
     const nibble_to_hex = "0123456789ABCDEF";
     return .{ nibble_to_hex[byte / 16], nibble_to_hex[byte % 16] };
@@ -89,7 +89,7 @@ fn appendU16(out: *std.ArrayList(u8), a: std.mem.Allocator, cp: u16) !void {
     try out.appendSlice(a, &.{ '\\', 'u', hex[cp >> 12], hex[(cp >> 8) & 0xF], hex[(cp >> 4) & 0xF], hex[cp & 0xF] });
 }
 
-/// Ports `dump_escaped` (json.hpp:19363 @620d2225c): `s` without its
+/// Ports `dump_escaped` (json.hpp:19363 @8642541b2): `s` without its
 /// quotes, escaped as JSON, with `\b \t \n \f \r \" \\` short, other
 /// controls as `\u00xx`, and -- with `ensure_ascii` -- everything from
 /// U+007F up as `\uxxxx`, astral code points as a surrogate pair.
@@ -196,7 +196,7 @@ pub fn dumpEscaped(out: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8,
     }
 }
 
-/// Ports `dump_float` (json.hpp:19771 @620d2225c): `null` for NaN and the
+/// Ports `dump_float` (json.hpp:19771 @8642541b2): `null` for NaN and the
 /// infinities, `to_chars` otherwise.
 fn dumpFloat(out: *std.ArrayList(u8), a: std.mem.Allocator, x: f64) !void {
     if (!std.math.isFinite(x)) return out.appendSlice(a, "null");
@@ -216,10 +216,10 @@ fn indentBy(out: *std.ArrayList(u8), a: std.mem.Allocator, c: u8, n: usize) !voi
     try out.appendNTimes(a, ' ', n - k);
 }
 
-/// Ports `serializer`'s `dump` (json.hpp:18842 @620d2225c): one value,
+/// Ports `serializer`'s `dump` (json.hpp:18842 @8642541b2): one value,
 /// recursively, up to `dump_depth_limit` levels deep; a container nested
 /// deeper is written by `dumpIteratively` without the call stack, in the
-/// same bytes. Integers are `dump_integer` (json.hpp:19686 @620d2225c),
+/// same bytes. Integers are `dump_integer` (json.hpp:19686 @8642541b2),
 /// which is plain decimal.
 fn dumpValue(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, pretty_print: bool, opts: Options, indent_step: usize, current_indent: usize, depth: usize) Error!void {
     switch (val.*) {
@@ -291,11 +291,11 @@ fn dumpValue(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, p
     }
 }
 
-/// Ports `dump_depth_limit` (json.hpp:19127 @620d2225c): how many levels
+/// Ports `dump_depth_limit` (json.hpp:19127 @8642541b2): how many levels
 /// `dumpValue` descends before it hands over to `dumpIteratively`.
 const dump_depth_limit: usize = 128;
 
-/// Ports `dump_frame` (json.hpp:19133 @620d2225c): a container that has
+/// Ports `dump_frame` (json.hpp:19133 @8642541b2): a container that has
 /// been opened but not closed yet. `next` is the element to write next,
 /// the C's `object_it` or `array_it` as an index.
 const DumpFrame = struct {
@@ -308,7 +308,7 @@ const DumpFrame = struct {
     child_indent: usize,
 };
 
-/// Ports `dump_iteratively` (json.hpp:19161 @620d2225c): `val` and
+/// Ports `dump_iteratively` (json.hpp:19161 @8642541b2): `val` and
 /// everything below it, in the bytes `dumpValue` writes, keeping the
 /// containers it has entered on an explicit stack instead of the call
 /// stack. Reached only for a value nested deeper than `dump_depth_limit`.
@@ -363,7 +363,7 @@ fn dumpIteratively(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Va
     }
 }
 
-/// Ports `dump_value` (json.hpp:19286 @620d2225c): `val`, but not the
+/// Ports `dump_value` (json.hpp:19286 @8642541b2): `val`, but not the
 /// elements of a container. An object or array with elements is opened and
 /// pushed onto `stack` for `dumpIteratively` to walk; anything else is
 /// written out in full by `dumpValue`.
@@ -389,7 +389,7 @@ fn dumpValueShallow(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const V
     try stack.append(a, .{ .value = val, .current_indent = current_indent, .child_indent = child_indent });
 }
 
-/// Ports `basic_json`'s `dump` (json.hpp:22136 @620d2225c): `val` as text,
+/// Ports `basic_json`'s `dump` (json.hpp:22136 @8642541b2): `val` as text,
 /// appended to `out`.
 ///
 /// Parameters:
@@ -408,7 +408,7 @@ pub fn dumpTo(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, 
     }
 }
 
-/// Ports `common_json`'s `dump` (json.cpp:339 @620d2225c): strict about
+/// Ports `common_json`'s `dump` (json.cpp:339 @8642541b2): strict about
 /// UTF-8, non-ASCII written as is.
 ///
 /// Parameters:
@@ -421,7 +421,7 @@ pub fn dump(a: std.mem.Allocator, val: *const Value, indent: i32) Error![]u8 {
     return dumpOptions(a, val, .{ .indent = indent });
 }
 
-/// Ports `common_json`'s `dump_safe` (json.cpp:343 @620d2225c): as `dump`,
+/// Ports `common_json`'s `dump_safe` (json.cpp:343 @8642541b2): as `dump`,
 /// with invalid UTF-8 replaced by U+FFFD, so it cannot fail but for memory.
 ///
 /// Return: the text, owned by the caller.

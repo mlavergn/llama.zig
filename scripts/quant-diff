@@ -28,7 +28,9 @@ done
 FIXTURES="${ARCH_FIXTURES:-zig-out/arch-fixtures}"
 save_fixtures=("$FIXTURES/hrm_text-dense.gguf" "$FIXTURES/gemma3-dense.gguf"
                "$FIXTURES/cohere2moe-moe.gguf" "$FIXTURES/olmo2-dense.gguf"
-               "$FIXTURES/exaone-moe-moe.gguf")
+               "$FIXTURES/exaone-moe-moe.gguf"
+               "$FIXTURES/deepseek41-moe.gguf" "$FIXTURES/qwen4exp-moe.gguf"
+               "$FIXTURES/muse-spark-moe.gguf")
 for m in "${save_fixtures[@]}"; do
     [ -f "$m" ] || { echo "FAIL: missing $m -- run 'make arch-fixtures'" >&2; exit 2; }
 done

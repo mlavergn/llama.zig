@@ -31,7 +31,7 @@
 !fail -m $MM/text-qwen3tts.gguf -mm $MM/gemma3.gguf -p "hello"
 
 # Qwen3-TTS: languages, seeds, lengths, an output name, a speaker
-!fail -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "hello world" -n 8 --seed 42
+-m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "hello world" -n 8 --seed 42
 -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "hello world" -n 8 --seed 43 -o other.wav
 !fail -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "bonjour tout le monde" -n 20 --seed 1 --tts-lang fr
 !fail -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "x" -n 4 --seed 1 --tts-lang klingon
@@ -42,8 +42,8 @@
 !fail -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "uncapped" --seed 9 -o uncapped.wav -c 1024
 -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "speaker" -n 6 --seed 2 --tts-speaker-file $DATA/tone16k.wav
 # a code predictor that shares the talker's hidden size has no proj_in (v0.4.0)
-!fail -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts_shared.gguf -p "shared width" -n 8 --seed 6 -o shared.wav
-!fail -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts_shared.gguf -p "speaker" -n 6 --seed 2 --tts-speaker-file $DATA/tone16k.wav -o shared-spk.wav
+-m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts_shared.gguf -p "shared width" -n 8 --seed 6 -o shared.wav
+-m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts_shared.gguf -p "speaker" -n 6 --seed 2 --tts-speaker-file $DATA/tone16k.wav -o shared-spk.wav
 -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "speaker" -n 6 --seed 2 --tts-speaker-file $DATA/tone44k.wav
 !fail -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "speaker" -n 6 --seed 2 --tts-speaker-file /nonexistent.wav
 -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -p "cpu" -n 6 --seed 3 --no-mmproj-offload
@@ -56,3 +56,16 @@
 -m $MM/text-pockettts.gguf -mm $MM/pockettts.gguf -p "one two. three four five; six seven eight nine ten eleven twelve thirteen fourteen fifteen. sixteen seventeen eighteen nineteen twenty, twenty one twenty two twenty three twenty four twenty five twenty six. end" -n 60 --seed 11
 -m $MM/text-pockettts.gguf -mm $MM/pockettts.gguf -p "voice" -n 6 --seed 2 --tts-speaker-file $DATA/tone16k.wav
 !fail -m $MM/text-pockettts.gguf -mm $MM/pockettts.gguf -p "   " -n 6 --seed 2
+
+# Soprano and LFM3-Audio (v0.8.0): the decoder alone over sampled tokens, and
+# MaskGIT frames fed back into the backbone; the LFM3 text model carries a
+# "tts" chat template, which the prompt is rendered through
+-m $MM/text-qwen3-soprano.gguf -mm $MM/soprano.gguf -p "hello world" -n 6 --seed 7
+-m $MM/text-qwen3-soprano.gguf -mm $MM/soprano-linear.gguf -p "hello world" -n 6 --seed 8 -o linear.wav
+-m $MM/text-qwen3-soprano.gguf -mm $MM/soprano.gguf -p "cpu" -n 4 --seed 3 --no-mmproj-offload -ngl 0
+!fail -m $MM/text-qwen3-soprano.gguf -mm $MM/soprano.gguf -p "speaker" -n 6 --seed 2 --tts-speaker-file $DATA/tone16k.wav
+-m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -p "hello" -n 8 --seed 3
+-m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -p "bonjour" -n 6 --seed 4 --tts-lang fr --tts-voice alice -o voice.wav
+-m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -p "speaker" -n 4 --seed 5 --tts-speaker-file $DATA/tone16k.wav
+-m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -p "cpu" -n 4 --seed 3 --no-mmproj-offload -ngl 0
+-m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen-eos.gguf -p "ends" -n 20 --seed 6

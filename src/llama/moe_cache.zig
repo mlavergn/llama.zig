@@ -5,11 +5,11 @@
 //! Ported from, in the reference checkout:
 //!
 //! - `llama.cpp/src/llama-moe-cache.h` -- `llama_moe_cache`
-//! - `llama.cpp/src/llama-moe-cache.cpp` -- `moe_cache_lru`, the three
+//! - `llama.cpp/src/llama-moe-cache.cpp` -- `moe_cache_slru`, the three
 //!   layer helpers and `llama_moe_cache::impl`, whose members `MoeCache`
 //!   holds directly (the C++'s pimpl is only a compile firewall)
 //!
-//! Both at v0.7.0 (`620d2225c`).
+//! Both at v0.8.0 (`8642541b2`).
 //!
 //! # How it works
 //!
@@ -27,6 +27,7 @@
 
 const std = @import("std");
 const impl = @import("impl.zig");
+const memory = @import("memory.zig");
 const model_mod = @import("model.zig");
 
 const c = impl.c;
@@ -45,10 +46,10 @@ fn pad(x: usize, n: usize) usize {
     return (x + n - 1) & ~(n - 1);
 }
 
-/// Ports `moe_cache_lru` (llama-moe-cache.cpp:16 @620d2225c): the LRU of the
-/// experts of a group of layers; the slot of each expert is kept in the
+/// Ports `moe_cache_slru` (llama-moe-cache.cpp:17 @8642541b2): the SLRU of
+/// the experts of a group of layers; the slot of each expert is kept in the
 /// slot map of its layer.
-const Lru = struct {
+pub const Slru = struct {
     n_expert: i32 = 0,
     n_slots: i32 = 0,
 
@@ -58,34 +59,37 @@ const Lru = struct {
     /// `[n_slots]`: `il*n_expert + expert`, -1 when empty.
     key_of: []i32 = &.{},
 
-    /// The doubly linked list of the slots; `head` is the least recently
-    /// used.
+    /// The probation and protected LRU lists, in that order; hits promote
+    /// slots to the protected half.
     prev: []i32 = &.{},
     next: []i32 = &.{},
-    head: i32 = -1,
-    tail: i32 = -1,
+    head: [2]i32 = .{ -1, -1 },
+    tail: [2]i32 = .{ -1, -1 },
+    is_protected: []bool = &.{},
+    n_protected: i32 = 0,
 
     /// `[n_expert]`.
     seen: []u32 = &.{},
     seen_gen: u32 = 0,
     uniq: std.ArrayList(i32) = .empty,
 
-    const Fill = struct {
+    pub const Fill = struct {
         expert: i32,
         slot: i32,
     };
 
-    fn deinit(self: *Lru) void {
+    pub fn deinit(self: *Slru) void {
         allocator.free(self.slot_map);
         allocator.free(self.key_of);
         allocator.free(self.prev);
         allocator.free(self.next);
+        allocator.free(self.is_protected);
         allocator.free(self.seen);
         self.uniq.deinit(allocator);
     }
 
-    /// Ports `moe_cache_lru`'s `init` (llama-moe-cache.cpp:33 @620d2225c).
-    fn init(self: *Lru, n_layer: usize, n_expert: i32, n_slots: i32) void {
+    /// Ports `moe_cache_slru`'s `init` (llama-moe-cache.cpp:36 @8642541b2).
+    pub fn init(self: *Slru, n_layer: usize, n_expert: i32, n_slots: i32) void {
         self.n_expert = n_expert;
         self.n_slots = n_slots;
         self.slot_map = allocator.alloc(?[*]i32, n_layer) catch oom();
@@ -100,39 +104,78 @@ const Lru = struct {
             self.prev[@intCast(s)] = s - 1;
             self.next[@intCast(s)] = if (s + 1 < n_slots) s + 1 else -1;
         }
-        self.head = 0;
-        self.tail = n_slots - 1;
+        self.head[0] = 0;
+        self.tail[0] = n_slots - 1;
+        self.is_protected = allocator.alloc(bool, ns) catch oom();
+        @memset(self.is_protected, false);
         self.seen = allocator.alloc(u32, @intCast(n_expert)) catch oom();
         @memset(self.seen, 0);
     }
 
-    /// Ports `moe_cache_lru`'s `touch` (llama-moe-cache.cpp:50 @620d2225c):
-    /// moves slot `s` to the tail, the most recently used.
-    fn touch(self: *Lru, s: i32) void {
-        if (s == self.tail) {
+    /// Ports `moe_cache_slru`'s `move` (llama-moe-cache.cpp:54 @8642541b2):
+    /// moves slot `s` to the most recently used end of a segment.
+    fn move(self: *Slru, s: i32, protect: bool) void {
+        const su: usize = @intCast(s);
+        const from: usize = @intFromBool(self.is_protected[su]);
+        const to: usize = @intFromBool(protect);
+        if (from == to and s == self.tail[from]) {
             return;
         }
-        const su: usize = @intCast(s);
         if (self.prev[su] >= 0) {
             self.next[@intCast(self.prev[su])] = self.next[su];
         } else {
-            self.head = self.next[su];
+            self.head[from] = self.next[su];
         }
-        self.prev[@intCast(self.next[su])] = self.prev[su];
+        if (self.next[su] >= 0) {
+            self.prev[@intCast(self.next[su])] = self.prev[su];
+        } else {
+            self.tail[from] = self.prev[su];
+        }
 
-        self.prev[su] = self.tail;
+        self.prev[su] = self.tail[to];
         self.next[su] = -1;
-        self.next[@intCast(self.tail)] = s;
-        self.tail = s;
+        if (self.tail[to] >= 0) {
+            self.next[@intCast(self.tail[to])] = s;
+        } else {
+            self.head[to] = s;
+        }
+        self.tail[to] = s;
+        self.is_protected[su] = protect;
+        self.n_protected += @as(i32, @intCast(to)) - @as(i32, @intCast(from));
     }
 
-    /// Ports `moe_cache_lru`'s `plan` (llama-moe-cache.cpp:74 @620d2225c):
-    /// gives a slot to each expert `ids` selects in layer `il`; the misses
-    /// evict the least recently used experts.
+    /// Ports `moe_cache_slru`'s `touch` (llama-moe-cache.cpp:82 @8642541b2):
+    /// promotes slot `s`, keeping the protected half at most half the slots.
+    fn touch(self: *Slru, s: i32) void {
+        self.move(s, true);
+        if (self.n_protected > @divTrunc(self.n_slots, 2)) {
+            self.move(self.head[1], false);
+        }
+    }
+
+    /// Ports `moe_cache_slru`'s `victim` (llama-moe-cache.cpp:89 @8642541b2):
+    /// the slot a miss in layer `il` takes, probation first, keeping every
+    /// expert selected by this request, including earlier fills.
+    fn victim(self: *const Slru, il: i32) i32 {
+        for (0..2) |segment| {
+            var s = self.head[segment];
+            while (s >= 0) : (s = self.next[@intCast(s)]) {
+                const key = self.key_of[@intCast(s)];
+                if (key < 0 or @divTrunc(key, self.n_expert) != il or self.seen[@intCast(@rem(key, self.n_expert))] != self.seen_gen) {
+                    return s;
+                }
+            }
+        }
+        impl.abort("llama-moe-cache.cpp", 99, "no SLRU victim");
+    }
+
+    /// Ports `moe_cache_slru`'s `plan` (llama-moe-cache.cpp:109 @8642541b2):
+    /// gives a slot to each expert `ids` selects in layer `il`, evicting
+    /// from probation first.
     ///
     /// Return: false when the ids select more distinct experts than there
     /// are slots.
-    fn plan(self: *Lru, il: i32, ids: []const i32, fills: *std.ArrayList(Fill), n_hit: *usize) bool {
+    pub fn plan(self: *Slru, il: i32, ids: []const i32, fills: *std.ArrayList(Fill), n_hit: *usize) bool {
         fills.clearRetainingCapacity();
         n_hit.* = 0;
 
@@ -143,7 +186,7 @@ const Lru = struct {
         }
         self.uniq.clearRetainingCapacity();
         for (ids) |id| {
-            impl.assert(id >= 0 and id < self.n_expert, "llama-moe-cache.cpp", 84, "ids[i] >= 0 && ids[i] < n_expert");
+            impl.assert(id >= 0 and id < self.n_expert, "llama-moe-cache.cpp", 119, "ids[i] >= 0 && ids[i] < n_expert");
             if (self.seen[@intCast(id)] != self.seen_gen) {
                 self.seen[@intCast(id)] = self.seen_gen;
                 self.uniq.append(allocator, id) catch oom();
@@ -155,7 +198,7 @@ const Lru = struct {
 
         const slots = self.slot_map[@intCast(il)].?;
 
-        // the hits go to the tail first, so the head can be evicted below
+        // promote hits before choosing victims for misses
         for (self.uniq.items) |e| {
             if (slots[@intCast(e)] >= 0) {
                 self.touch(slots[@intCast(e)]);
@@ -168,7 +211,7 @@ const Lru = struct {
             if (slots[@intCast(e)] >= 0) {
                 continue;
             }
-            const s = self.head;
+            const s = self.victim(il);
             const su: usize = @intCast(s);
             if (self.key_of[su] >= 0) {
                 const k = self.key_of[su];
@@ -176,15 +219,15 @@ const Lru = struct {
             }
             self.key_of[su] = il * self.n_expert + e;
             slots[@intCast(e)] = s;
-            self.touch(s);
+            self.move(s, false);
             fills.append(allocator, .{ .expert = e, .slot = s }) catch oom();
         }
         return true;
     }
 };
 
-/// Ports `llama_moe_cache_layer_experts` (llama-moe-cache.cpp:123
-/// @620d2225c): gate, up, down, or gate_up, down.
+/// Ports `llama_moe_cache_layer_experts` (llama-moe-cache.cpp:158
+/// @8642541b2): gate, up, down, or gate_up, down.
 ///
 /// Return: the tensors, at most four, in `out`'s first slots.
 fn layerExperts(layer: *const model_mod.Layer, out: *[4]*Tensor) usize {
@@ -198,7 +241,7 @@ fn layerExperts(layer: *const model_mod.Layer, out: *[4]*Tensor) usize {
     return n;
 }
 
-/// Ports `llama_moe_cache_same_layout` (llama-moe-cache.cpp:133 @620d2225c).
+/// Ports `llama_moe_cache_same_layout` (llama-moe-cache.cpp:168 @8642541b2).
 fn sameLayout(a: []const *Tensor, b: []const *Tensor) bool {
     if (a.len != b.len) {
         return false;
@@ -211,15 +254,15 @@ fn sameLayout(a: []const *Tensor, b: []const *Tensor) bool {
     return true;
 }
 
-/// Ports `llama_moe_cache_is_host_weight` (llama-moe-cache.cpp:145 @620d2225c).
+/// Ports `llama_moe_cache_is_host_weight` (llama-moe-cache.cpp:180 @8642541b2).
 fn isHostWeight(t: *const Tensor) bool {
     return t.buffer != null and
         c.ggml_backend_buffer_get_usage(t.buffer) == c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS and
         c.ggml_backend_buffer_is_host(t.buffer);
 }
 
-/// Ports `llama_moe_cache` (llama-moe-cache.h:13 @620d2225c) and its `impl`
-/// (llama-moe-cache.cpp:153 @620d2225c): keeps the most recently used
+/// Ports `llama_moe_cache` (llama-moe-cache.h:13 @8642541b2) and its `impl`
+/// (llama-moe-cache.cpp:188 @8642541b2): keeps recently and repeatedly used
 /// experts of host-resident MoE layers in a device buffer.
 pub const MoeCache = struct {
     /// A GPU with its own budget and banks; it caches the layers assigned
@@ -250,7 +293,7 @@ pub const MoeCache = struct {
         banks: std.ArrayList(*Tensor) = .empty,
         host_bytes: usize = 0,
         n_slots: i32 = 0,
-        lru: Lru = .{},
+        slru: Slru = .{},
     };
 
     const Layer = struct {
@@ -296,7 +339,7 @@ pub const MoeCache = struct {
     layer_of: std.AutoHashMapUnmanaged(*const Tensor, i32) = .empty,
 
     ids: std.ArrayList(i32) = .empty,
-    fills: std.ArrayList(Lru.Fill) = .empty,
+    fills: std.ArrayList(Slru.Fill) = .empty,
 
     /// The slot maps, in host memory.
     ctx_host: ?*c.ggml_context = null,
@@ -306,8 +349,8 @@ pub const MoeCache = struct {
     /// The views `copyExperts` makes.
     ctx_views: ?*c.ggml_context = null,
 
-    /// Ports the constructor of `llama_moe_cache` (llama-moe-cache.cpp:602
-    /// @620d2225c) and of its `impl` (llama-moe-cache.cpp:221 @620d2225c).
+    /// Ports the constructor of `llama_moe_cache` (llama-moe-cache.cpp:619
+    /// @8642541b2) and of its `impl` (llama-moe-cache.cpp:256 @8642541b2).
     ///
     /// Parameters:
     /// - `model`: the model; borrowed for the cache's lifetime.
@@ -318,7 +361,7 @@ pub const MoeCache = struct {
     /// - `exc`: receives what is thrown.
     ///
     /// Return: the cache, the caller's to `destroy`, or `error.Thrown`.
-    pub fn create(model: *const Model, backends: []const c.ggml_backend_t, bufts: []const c.ggml_backend_buffer_type_t, size: usize, exc: *Exception) Thrown!*MoeCache {
+    pub fn create(model: *const Model, no_alloc: bool, backends: []const c.ggml_backend_t, bufts: []const c.ggml_backend_buffer_type_t, size: usize, exc: *Exception) Thrown!*MoeCache {
         // `__func__` in the constructor of `struct impl`
         const func = "impl";
         const self = allocator.create(MoeCache) catch oom();
@@ -415,7 +458,7 @@ pub const MoeCache = struct {
                         break;
                     }
                 }
-                impl.assert(at != null, "llama-moe-cache.cpp", 297, "it != model.devices.end()");
+                impl.assert(at != null, "llama-moe-cache.cpp", 332, "it != model.devices.end()");
                 d.split = tensor_split[at.?];
             }
             split_sum += d.split;
@@ -447,7 +490,7 @@ pub const MoeCache = struct {
                 g.n_slots = 0;
                 continue;
             }
-            g.lru.init(model.layers.len, n_expert, g.n_slots);
+            g.slru.init(model.layers.len, n_expert, g.n_slots);
             n_tensors[@intCast(g.id)] += g.ref.items.len * (1 + g.layers.items.len);
             n_tensors_host += g.layers.items.len;
         }
@@ -473,7 +516,7 @@ pub const MoeCache = struct {
             const ctx = self.devices.items[@intCast(g.id)].ctx;
             for (g.ref.items) |t| {
                 const bank: *Tensor = c.ggml_new_tensor_3d(ctx, t.type, t.ne[0], t.ne[1], g.n_slots + 1);
-                impl.assert(bank.nb[2] == t.nb[2], "llama-moe-cache.cpp", 365, "bank->nb[2] == t->nb[2]");
+                impl.assert(bank.nb[2] == t.nb[2], "llama-moe-cache.cpp", 400, "bank->nb[2] == t->nb[2]");
                 _ = c.ggml_format_name(bank, "moe_cache.%zu.%s", ig, c.ggml_get_name(t));
                 g.banks.append(allocator, bank) catch oom();
             }
@@ -496,46 +539,25 @@ pub const MoeCache = struct {
             self.devices.items[@intCast(g.id)].buf_size += self.allocSize(g, g.n_slots);
         }
 
-        if (model.hparams.no_alloc) {
-            // only used to measure the memory use, see llama_context::memory_breakdown
-            for (self.devices.items) |*d| {
-                if (d.ctx == null) {
-                    continue;
-                }
-                d.buf = c.ggml_backend_buft_alloc_buffer(d.buft, 0);
-                var t = c.ggml_get_first_tensor(d.ctx);
-                while (t != null) : (t = c.ggml_get_next_tensor(d.ctx, t)) {
-                    t.*.buffer = d.buf;
-                }
-            }
-            self.buf_host = c.ggml_backend_buft_alloc_buffer(buft_host, 0);
-            var t = c.ggml_get_first_tensor(self.ctx_host);
-            while (t != null) : (t = c.ggml_get_next_tensor(self.ctx_host, t)) {
-                t.*.buffer = self.buf_host;
-            }
-        } else {
-            for (self.devices.items) |*d| {
-                if (d.ctx == null) {
-                    continue;
-                }
-                d.buf = c.ggml_backend_alloc_ctx_tensors_from_buft(d.ctx, d.buft);
-                if (d.buf == null) {
-                    return exc.throw(.runtime_error, "failed to allocate the MoE cache buffers", .{});
-                }
+        // with no_alloc, dummy buffers are attached so the memory use can
+        // still be measured, see llama_context::memory_breakdown
+        for (self.devices.items) |*d| {
+            const ctx = d.ctx orelse continue;
+            d.buf = try memory.Bufs.allocBuf(ctx, d.buft, no_alloc, "MoE cache", exc);
+            if (!no_alloc) {
                 c.ggml_backend_buffer_clear(d.buf, 0);
                 d.buf_size = c.ggml_backend_buffer_get_size(d.buf);
             }
-            self.buf_host = c.ggml_backend_alloc_ctx_tensors_from_buft(self.ctx_host, buft_host);
-            if (self.buf_host == null) {
-                return exc.throw(.runtime_error, "failed to allocate the MoE cache buffers", .{});
-            }
+        }
+        self.buf_host = try memory.Bufs.allocBuf(self.ctx_host.?, buft_host, no_alloc, "MoE cache slot maps", exc);
+        if (!no_alloc) {
             c.ggml_backend_buffer_clear(self.buf_host, 0xff); // all slots are -1
             self.buf_host_size = c.ggml_backend_buffer_get_size(self.buf_host);
 
             for (self.groups.items) |*g| {
                 for (g.layers.items) |il| {
                     if (self.layers[@intCast(il)].slot_map) |sm| {
-                        g.lru.slot_map[@intCast(il)] = @ptrCast(@alignCast(sm.data));
+                        g.slru.slot_map[@intCast(il)] = @ptrCast(@alignCast(sm.data));
                     }
                 }
             }
@@ -577,8 +599,8 @@ pub const MoeCache = struct {
         return self;
     }
 
-    /// The `init_ctx` lambda of the constructor (llama-moe-cache.cpp:334
-    /// @620d2225c).
+    /// The `init_ctx` lambda of the constructor (llama-moe-cache.cpp:369
+    /// @8642541b2).
     fn initCtx(n_tensors: usize, exc: *Exception) Thrown!*c.ggml_context {
         return c.ggml_init(.{
             .mem_size = n_tensors * c.ggml_tensor_overhead(),
@@ -587,8 +609,8 @@ pub const MoeCache = struct {
         }) orelse return exc.throw(.runtime_error, "failed to create the MoE cache context", .{});
     }
 
-    /// The `alloc_size` lambda of the constructor (llama-moe-cache.cpp:271
-    /// @620d2225c): one extra slot at the end, as CUDA's MMQ can read past
+    /// The `alloc_size` lambda of the constructor (llama-moe-cache.cpp:306
+    /// @8642541b2): one extra slot at the end, as CUDA's MMQ can read past
     /// the last expert.
     fn allocSize(self: *const MoeCache, g: *const Group, n_slots: i32) usize {
         const alignment = c.ggml_backend_buft_get_alignment(self.devices.items[@intCast(g.id)].buft);
@@ -600,7 +622,7 @@ pub const MoeCache = struct {
     }
 
     /// Ports the destructor of `llama_moe_cache`'s `impl`
-    /// (llama-moe-cache.cpp:458 @620d2225c): logs the statistics, then frees
+    /// (llama-moe-cache.cpp:475 @8642541b2): logs the statistics, then frees
     /// the members.
     ///
     /// Return: nothing.
@@ -616,7 +638,7 @@ pub const MoeCache = struct {
         self.bindings.deinit(allocator);
         allocator.free(self.layers);
         for (self.groups.items) |*g| {
-            g.lru.deinit();
+            g.slru.deinit();
             g.banks.deinit(allocator);
             g.layers.deinit(allocator);
             g.ref.deinit(allocator);
@@ -630,17 +652,17 @@ pub const MoeCache = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `llama_moe_cache`'s `backend` (llama-moe-cache.cpp:608
-    /// @620d2225c).
+    /// Ports `llama_moe_cache`'s `backend` (llama-moe-cache.cpp:625
+    /// @8642541b2).
     ///
     /// Return: the device that caches layer `il`.
     pub fn backend(self: *const MoeCache, il: i32) c.ggml_backend_t {
         return self.devices.items[@intCast(self.groups.items[@intCast(self.layers[@intCast(il)].ig)].id)].backend;
     }
 
-    /// Ports `llama_moe_cache`'s `get_slot_map` (llama-moe-cache.cpp:612
-    /// @620d2225c), through the impl's `get_slot_map` (llama-moe-cache.cpp:462
-    /// @620d2225c).
+    /// Ports `llama_moe_cache`'s `get_slot_map` (llama-moe-cache.cpp:629
+    /// @8642541b2), through the impl's `get_slot_map` (llama-moe-cache.cpp:479
+    /// @8642541b2).
     /// Large batches use most experts of a layer, so they gain little from
     /// the cache and would evict the experts used in generation.
     ///
@@ -658,8 +680,8 @@ pub const MoeCache = struct {
         return l.slot_map;
     }
 
-    /// Ports `llama_moe_cache`'s `get_experts` (llama-moe-cache.cpp:616
-    /// @620d2225c).
+    /// Ports `llama_moe_cache`'s `get_experts` (llama-moe-cache.cpp:633
+    /// @8642541b2).
     ///
     /// Return: the experts of `w` in the cache, or null when `w` is not
     /// cached.
@@ -668,9 +690,9 @@ pub const MoeCache = struct {
         return b.cached;
     }
 
-    /// Ports `llama_moe_cache`'s `copy_experts` (llama-moe-cache.cpp:624
-    /// @620d2225c), through the impl's `copy_experts` (llama-moe-cache.cpp:480
-    /// @620d2225c):
+    /// Ports `llama_moe_cache`'s `copy_experts` (llama-moe-cache.cpp:641
+    /// @8642541b2), through the impl's `copy_experts` (llama-moe-cache.cpp:497
+    /// @8642541b2):
     /// for large batches, copies the experts of `w` that are in the cache,
     /// from expert `e` up to `last`, to `dst`, the copy of `w`. Large
     /// batches only read the cache, so the experts used in generation stay.
@@ -684,7 +706,7 @@ pub const MoeCache = struct {
             return 0;
         }
 
-        const slots = g.lru.slot_map[@intCast(b.il)] orelse return 0;
+        const slots = g.slru.slot_map[@intCast(b.il)] orelse return 0;
         if (slots[@intCast(e)] < 0) {
             return 0;
         }
@@ -707,8 +729,8 @@ pub const MoeCache = struct {
         return n;
     }
 
-    /// Ports `llama_moe_cache`'s `copy` (llama-moe-cache.cpp:620 @620d2225c),
-    /// through the impl's `copy` (llama-moe-cache.cpp:515 @620d2225c): the
+    /// Ports `llama_moe_cache`'s `copy` (llama-moe-cache.cpp:637 @8642541b2),
+    /// through the impl's `copy` (llama-moe-cache.cpp:532 @8642541b2): the
     /// scheduler's copy callback for a slot map.
     ///
     /// Return: false when `src` is not a slot map.
@@ -717,7 +739,7 @@ pub const MoeCache = struct {
         const l = &self.layers[@intCast(il)];
         const g = &self.groups.items[@intCast(l.ig)];
 
-        impl.assert(backend_ == self.devices.items[@intCast(g.id)].backend, "llama-moe-cache.cpp", 524, "backend == devices[g.id].backend");
+        impl.assert(backend_ == self.devices.items[@intCast(g.id)].backend, "llama-moe-cache.cpp", 541, "backend == devices[g.id].backend");
 
         // the get_rows that looks up the slots of the selected experts
         const n_nodes = c.ggml_graph_n_nodes(graph);
@@ -729,7 +751,7 @@ pub const MoeCache = struct {
                 lookup = node;
             }
         }
-        impl.assert(lookup != null, "llama-moe-cache.cpp", 535, "lookup != nullptr");
+        impl.assert(lookup != null, "llama-moe-cache.cpp", 552, "lookup != nullptr");
 
         // the selected experts must be computed in an earlier split: the
         // scheduler starts a new split at the lookup because it reads a host
@@ -739,18 +761,18 @@ pub const MoeCache = struct {
         while (i < n_nodes) : (i += 1) {
             const node: *const Tensor = c.ggml_graph_node(graph, i);
             if (node == sel or node == @as(?*const Tensor, sel.view_src)) {
-                c.ggml_abort("llama-moe-cache.cpp", 543, "the experts of layer %d are selected in the same split as their MoE cache lookup", il);
+                c.ggml_abort("llama-moe-cache.cpp", 560, "the experts of layer %d are selected in the same split as their MoE cache lookup", il);
             }
         }
-        impl.assert(c.ggml_is_contiguous(sel), "llama-moe-cache.cpp", 546, "ggml_is_contiguous(sel)");
+        impl.assert(c.ggml_is_contiguous(sel), "llama-moe-cache.cpp", 563, "ggml_is_contiguous(sel)");
 
         self.ids.resize(allocator, @intCast(c.ggml_nelements(sel))) catch oom();
         c.ggml_backend_tensor_get_async(backend_, sel, if (self.ids.items.len == 0) null else self.ids.items.ptr, 0, c.ggml_nbytes(sel));
         c.ggml_backend_synchronize(backend_);
 
         var n_hit: usize = 0;
-        if (!g.lru.plan(il, self.ids.items, &self.fills, &n_hit)) {
-            c.ggml_abort("llama-moe-cache.cpp", 554, "the MoE cache is too small for the experts selected in layer %d", il);
+        if (!g.slru.plan(il, self.ids.items, &self.fills, &n_hit)) {
+            c.ggml_abort("llama-moe-cache.cpp", 571, "the MoE cache is too small for the experts selected in layer %d", il);
         }
 
         // upload the missing experts; consecutive experts going to
@@ -784,7 +806,7 @@ pub const MoeCache = struct {
         return true;
     }
 
-    /// Ports `impl`'s `log_stats` (llama-moe-cache.cpp:585 @620d2225c).
+    /// Ports `impl`'s `log_stats` (llama-moe-cache.cpp:602 @8642541b2).
     fn logStats(self: *const MoeCache) void {
         logOne("ubatch <= 8", &self.stats_small);
         logOne("ubatch  > 8", &self.stats_large);
@@ -808,8 +830,8 @@ pub const MoeCache = struct {
         });
     }
 
-    /// Ports `llama_moe_cache`'s `memory_breakdown` (llama-moe-cache.cpp:628
-    /// @620d2225c): bytes per buffer type, in the `std::map`'s pointer order.
+    /// Ports `llama_moe_cache`'s `memory_breakdown` (llama-moe-cache.cpp:645
+    /// @8642541b2): bytes per buffer type, in the `std::map`'s pointer order.
     ///
     /// Return: the entries, the caller's to free with `impl.allocator`.
     pub fn memoryBreakdown(self: *const MoeCache) []model_mod.BuftSize {
@@ -834,35 +856,52 @@ test {
     std.testing.refAllDecls(MoeCache);
 }
 
-test "the LRU evicts the least recently used slot and merges sorted misses" {
-    var lru: Lru = .{};
-    defer lru.deinit();
-    lru.init(2, 4, 3);
+test "the SLRU evicts from probation first, promotes hits and merges sorted misses" {
+    var slru: Slru = .{};
+    defer slru.deinit();
+    slru.init(2, 4, 3);
     var maps: [2][4]i32 = .{ @splat(-1), @splat(-1) };
-    lru.slot_map[0] = &maps[0];
-    lru.slot_map[1] = &maps[1];
+    slru.slot_map[0] = &maps[0];
+    slru.slot_map[1] = &maps[1];
 
-    var fills: std.ArrayList(Lru.Fill) = .empty;
+    var fills: std.ArrayList(Slru.Fill) = .empty;
     defer fills.deinit(allocator);
     var n_hit: usize = 0;
 
     // two misses in layer 0, sorted, to the first free slots
-    try std.testing.expect(lru.plan(0, &.{ 3, 1, 3 }, &fills, &n_hit));
+    try std.testing.expect(slru.plan(0, &.{ 3, 1, 3 }, &fills, &n_hit));
     try std.testing.expectEqual(@as(usize, 0), n_hit);
     try std.testing.expectEqual(@as(usize, 2), fills.items.len);
-    try std.testing.expectEqual(Lru.Fill{ .expert = 1, .slot = 0 }, fills.items[0]);
-    try std.testing.expectEqual(Lru.Fill{ .expert = 3, .slot = 1 }, fills.items[1]);
+    try std.testing.expectEqual(Slru.Fill{ .expert = 1, .slot = 0 }, fills.items[0]);
+    try std.testing.expectEqual(Slru.Fill{ .expert = 3, .slot = 1 }, fills.items[1]);
+    try std.testing.expectEqual(@as(i32, 0), slru.n_protected);
 
-    // a hit and a miss: the miss takes the last free slot
-    try std.testing.expect(lru.plan(0, &.{ 1, 2 }, &fills, &n_hit));
+    // a hit and a miss: the hit is protected, the miss takes the last free slot
+    try std.testing.expect(slru.plan(0, &.{ 1, 2 }, &fills, &n_hit));
     try std.testing.expectEqual(@as(usize, 1), n_hit);
-    try std.testing.expectEqual(Lru.Fill{ .expert = 2, .slot = 2 }, fills.items[0]);
+    try std.testing.expectEqual(Slru.Fill{ .expert = 2, .slot = 2 }, fills.items[0]);
+    try std.testing.expectEqual(@as(i32, 1), slru.n_protected);
 
-    // layer 1 evicts expert 3 of layer 0, the least recently used
-    try std.testing.expect(lru.plan(1, &.{0}, &fills, &n_hit));
-    try std.testing.expectEqual(Lru.Fill{ .expert = 0, .slot = 1 }, fills.items[0]);
+    // layer 1 evicts expert 3 of layer 0, the oldest on probation
+    try std.testing.expect(slru.plan(1, &.{0}, &fills, &n_hit));
+    try std.testing.expectEqual(Slru.Fill{ .expert = 0, .slot = 1 }, fills.items[0]);
     try std.testing.expectEqual(@as(i32, -1), maps[0][3]);
 
+    // a second hit overflows the protected half, whose oldest goes back
+    try std.testing.expect(slru.plan(0, &.{ 1, 2 }, &fills, &n_hit));
+    try std.testing.expectEqual(@as(usize, 2), n_hit);
+    try std.testing.expectEqual(@as(i32, 1), slru.n_protected);
+    try std.testing.expect(!slru.is_protected[0]);
+    try std.testing.expect(slru.is_protected[2]);
+
+    // a miss never evicts what the same request selected: expert 1 is on
+    // probation, so without that the older slot 1 aside it would go
+    try std.testing.expect(slru.plan(0, &.{ 1, 3 }, &fills, &n_hit));
+    try std.testing.expectEqual(@as(usize, 1), n_hit);
+    try std.testing.expectEqual(@as(usize, 1), fills.items.len);
+    try std.testing.expectEqual(@as(i32, 3), fills.items[0].expert);
+    try std.testing.expect(maps[0][1] >= 0);
+
     // more distinct experts than slots
-    try std.testing.expect(!lru.plan(0, &.{ 0, 1, 2, 3 }, &fills, &n_hit));
+    try std.testing.expect(!slru.plan(0, &.{ 0, 1, 2, 3 }, &fills, &n_hit));
 }

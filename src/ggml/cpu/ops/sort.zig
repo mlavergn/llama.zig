@@ -1,14 +1,15 @@
-//! `argsort`, `top_k`, `tri`, `fill` and `fwht`.
+//! `argsort`, `top_k`, `top_k_mask`, `tri`, `fill` and `fwht`.
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.7.0 (`620d2225c`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.8.0 (`8642541b2`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! The grouping is ours. `argsort` and `top_k` sit together in the C; `fill`
 //! and `tri` sit among the activations, and `fwht` near the end of the file.
-//! They are gathered here because none of them computes anything but an
-//! ordering, a mask, a constant or a butterfly.
+//! `top_k_mask` sits among the `dsv4_hc` ops. They are gathered here because
+//! none of them computes anything but an ordering, a mask, a constant or a
+//! butterfly.
 //!
 //! # Where the C's own answer is unspecified
 //!
@@ -46,7 +47,7 @@ const off = common.byteOff;
 // fill
 
 /// Ports `ggml_compute_forward_fill_f32` and `ggml_compute_forward_fill_f16`
-/// (ops.cpp:2280, 2299 @620d2225c).
+/// (ops.cpp:2172, 2191 @8642541b2).
 ///
 /// The two differ only in the element type and which `ggml_vec_set_*` they
 /// call. The `f16` constant is narrowed once, before the loop, as the C does.
@@ -77,7 +78,7 @@ fn fillTyped(comptime T: type, params: *const ComputeParams, dst: *Tensor) void 
     }
 }
 
-/// Ports `ggml_compute_forward_fill` (ops.cpp:2318 @620d2225c).
+/// Ports `ggml_compute_forward_fill` (ops.cpp:2210 @8642541b2).
 pub export fn ggml_compute_forward_fill(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -91,7 +92,7 @@ pub export fn ggml_compute_forward_fill(params: *const ComputeParams, dst: *Tens
 // -----------------------------------------------------------------------------
 // tri
 
-/// Ports `ggml_compute_forward_tri_f32` (ops.cpp:2339 @620d2225c).
+/// Ports `ggml_compute_forward_tri_f32` (ops.cpp:2231 @8642541b2).
 ///
 /// The C picks one of four lambdas into a function pointer before the loop;
 /// here the switch is on the row/column comparison itself, which is the same
@@ -139,7 +140,7 @@ fn triF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_tri` (ops.cpp:2374 @620d2225c).
+/// Ports `ggml_compute_forward_tri` (ops.cpp:2266 @8642541b2).
 pub export fn ggml_compute_forward_tri(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -152,7 +153,7 @@ pub export fn ggml_compute_forward_tri(params: *const ComputeParams, dst: *Tenso
 // -----------------------------------------------------------------------------
 // argsort
 
-/// Ports `cmp_argsort` (ops.cpp:8784 @620d2225c), the comparator.
+/// Ports `cmp_argsort` (ops.cpp:8682 @8642541b2), the comparator.
 ///
 /// `template<enum ggml_sort_order order>` becomes a comptime `bool`. A strict
 /// `<` or `>` on the referenced floats, exactly as the C compares.
@@ -168,7 +169,7 @@ fn CmpArgsort(comptime ascending: bool) type {
     };
 }
 
-/// Ports `ggml_compute_forward_argsort_f32` (ops.cpp:8795 @620d2225c).
+/// Ports `ggml_compute_forward_argsort_f32` (ops.cpp:8693 @8642541b2).
 ///
 /// `std::sort` becomes a stable sort; see the file header for why that is the
 /// right answer to an unstable sort's ties.
@@ -211,7 +212,7 @@ fn argsortF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_argsort` (ops.cpp:8836 @620d2225c).
+/// Ports `ggml_compute_forward_argsort` (ops.cpp:8734 @8642541b2).
 pub export fn ggml_compute_forward_argsort(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -224,9 +225,9 @@ pub export fn ggml_compute_forward_argsort(params: *const ComputeParams, dst: *T
 // -----------------------------------------------------------------------------
 // top_k
 
-/// Ports `ggml_compute_forward_top_k_f32` (ops.cpp:8863 @620d2225c).
+/// Ports `ggml_compute_forward_top_k_f32` (ops.cpp:8761 @8642541b2).
 ///
-/// `std::partial_sort` with `cmp_top_k` (ops.cpp:8856 @620d2225c), a strict `>`, leaves
+/// `std::partial_sort` with `cmp_top_k` (ops.cpp:8754 @8642541b2), a strict `>`, leaves
 /// the `top_k` largest keys at the front in descending order. A stable sort of
 /// the whole row leaves exactly the same prefix whenever the keys are
 /// distinct; among equal keys it keeps index order, where libc++'s heap-based
@@ -276,7 +277,7 @@ fn topKF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_top_k` (ops.cpp:8902 @620d2225c).
+/// Ports `ggml_compute_forward_top_k` (ops.cpp:8800 @8642541b2).
 pub export fn ggml_compute_forward_top_k(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -292,7 +293,7 @@ pub export fn ggml_compute_forward_top_k(params: *const ComputeParams, dst: *Ten
 /// `GGML_F32_EPR`; see `simd.F32`.
 const f32_epr = simd.F32.epr;
 
-/// Ports `ggml_compute_forward_fwht_impl` (ops.cpp:12333 @620d2225c), the
+/// Ports `ggml_compute_forward_fwht_impl` (ops.cpp:12317 @8642541b2), the
 /// `GGML_SIMD` arm without SVE. `S` is the template's `src_t`, `f32` or
 /// `ggml_fp16_t`; an `f16` element widens exactly, before the scale.
 ///
@@ -347,8 +348,8 @@ fn fwhtImpl(comptime S: type, params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_fwht_load` (ops.cpp:12324 @620d2225c) and its `ggml_fp16_t`
-/// overload, `ggml_fwht_load` (ops.cpp:12328 @620d2225c).
+/// Ports `ggml_fwht_load` (ops.cpp:12308 @8642541b2) and its `ggml_fp16_t`
+/// overload, `ggml_fwht_load` (ops.cpp:12312 @8642541b2).
 inline fn fwhtLoad(comptime S: type, value: S) f32 {
     return if (S == f32) value else impl.fp16ToFp32(value);
 }
@@ -366,7 +367,7 @@ inline fn butterfly(row: [*]f32, n: usize, len: usize) void {
     }
 }
 
-/// Ports `ggml_compute_forward_fwht` (ops.cpp:12409 @620d2225c).
+/// Ports `ggml_compute_forward_fwht` (ops.cpp:12393 @8642541b2).
 pub export fn ggml_compute_forward_fwht(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src1 = impl.one(Tensor, dst.src[1]);
 
@@ -375,6 +376,122 @@ pub export fn ggml_compute_forward_fwht(params: *const ComputeParams, dst: *Tens
         c.GGML_TYPE_F16 => fwhtImpl(c.ggml_fp16_t, params, dst),
         else => impl.abort("fatal error - fwht supports F32 and F16 input"),
     }
+}
+
+/// Ports `ggml_compute_forward_top_k_mask` (ops.cpp:11626 @8642541b2), new at
+/// v0.8.0: top-k sparse attention's mask.
+///
+/// Each row of `dst` starts at -inf and takes `mask`'s cell back for every
+/// cell of a live pick and every extra cell. `score`, `blocks` and `extra` are
+/// each optional: without `score` every pick is live, without `blocks` a pick
+/// is a cell, and `mask` broadcasts over the rows of `top_k`. A pick or cell
+/// out of range is skipped, not an error.
+pub export fn ggml_compute_forward_top_k_mask(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
+    const mask = impl.one(Tensor, dst.src[0]);
+    const top_k = impl.one(Tensor, dst.src[1]);
+    const score: ?*const Tensor = dst.src[2];
+    const blocks: ?*const Tensor = dst.src[3];
+    const extra: ?*const Tensor = dst.src[4];
+
+    impl.assert(dst.type == mask.type, "dst->type == mask->type");
+    impl.assert(dst.nb[0] == c.ggml_type_size(dst.type), "dst->nb[0] == ggml_type_size(dst->type)");
+
+    const n_kv = mask.ne[0];
+    const ne1 = dst.ne[1];
+    const ne2 = dst.ne[2];
+    const n_rows: i64 = @intCast(c.ggml_nrows(dst));
+    const n_top = top_k.ne[0];
+    const n_blk: i64 = if (blocks) |bl| bl.ne[0] else 1;
+    const n_pick: i64 = if (blocks) |bl| bl.ne[1] else if (score) |sc| sc.ne[0] else n_kv;
+    const n_extra: i64 = if (extra) |ex| ex.ne[0] else 0;
+
+    const ts = c.ggml_type_size(dst.type);
+
+    const ith: i64 = params.ith;
+    const nth: i64 = params.nth;
+
+    const mask_data: [*]const u8 = @ptrCast(mask.data.?);
+    const top_k_data: [*]const u8 = @ptrCast(top_k.data.?);
+    const dst_data: [*]u8 = @ptrCast(dst.data.?);
+
+    const Row = struct {
+        dst_row: [*]u8,
+        mask_row: [*]const u8,
+        n_kv: i64,
+        ts: usize,
+
+        /// The C's `keep` lambda.
+        inline fn keep(r: @This(), cell: i32) void {
+            if (cell >= 0 and cell < r.n_kv) {
+                const at = common.byteOff(cell, r.ts);
+                @memcpy((r.dst_row + at)[0..r.ts], (r.mask_row + at)[0..r.ts]);
+            }
+        }
+    };
+
+    var ir = ith;
+    while (ir < n_rows) : (ir += nth) {
+        const j1 = @rem(ir, ne1);
+        const j2 = @rem(@divTrunc(ir, ne1), ne2);
+        const j3 = @divTrunc(ir, ne1 * ne2);
+
+        const mask_row = mask_data + common.byteOff(@rem(j1, mask.ne[1]), mask.nb[1]) +
+            common.byteOff(@rem(j2, mask.ne[2]), mask.nb[2]) + common.byteOff(@rem(j3, mask.ne[3]), mask.nb[3]);
+        const dst_row = dst_data + common.byteOff(j1, dst.nb[1]) + common.byteOff(j2, dst.nb[2]) + common.byteOff(j3, dst.nb[3]);
+
+        if (dst.type == c.GGML_TYPE_F16) {
+            const ninf = convert.cpuFp32ToFp16(-std.math.inf(f32));
+            const row: [*]align(1) c.ggml_fp16_t = @ptrCast(dst_row);
+            @memset(row[0..@intCast(n_kv)], ninf);
+        } else {
+            const row: [*]align(1) f32 = @ptrCast(dst_row);
+            @memset(row[0..@intCast(n_kv)], -std.math.inf(f32));
+        }
+
+        const row: Row = .{ .dst_row = dst_row, .mask_row = mask_row, .n_kv = n_kv, .ts = ts };
+
+        const top_k_row = top_k_data + common.byteOff(j1, top_k.nb[1]) + common.byteOff(j2, top_k.nb[2]) + common.byteOff(j3, top_k.nb[3]);
+
+        var j: i64 = 0;
+        while (j < n_top) : (j += 1) {
+            const p = readI32(top_k_row + common.byteOff(j, top_k.nb[0]));
+            if (p < 0 or p >= n_pick) continue;
+
+            if (score) |sc| {
+                const score_data: [*]const u8 = @ptrCast(sc.data.?);
+                const s: *align(1) const f32 = @ptrCast(score_data + common.byteOff(p, sc.nb[0]) +
+                    common.byteOff(j1, sc.nb[1]) + common.byteOff(j2, sc.nb[2]) + common.byteOff(j3, sc.nb[3]));
+                // Written as the C writes it: a NaN score is not live either.
+                if (!(s.* > -std.math.inf(f32))) continue;
+            }
+
+            const bl = blocks orelse {
+                row.keep(p);
+                continue;
+            };
+
+            const blocks_data: [*]const u8 = @ptrCast(bl.data.?);
+            var k: i64 = 0;
+            while (k < n_blk) : (k += 1) {
+                row.keep(readI32(blocks_data + common.byteOff(k, bl.nb[0]) + common.byteOff(p, bl.nb[1])));
+            }
+        }
+
+        if (extra) |ex| {
+            const extra_data: [*]const u8 = @ptrCast(ex.data.?);
+            const extra_row = extra_data + common.byteOff(j1, ex.nb[1]) + common.byteOff(j2, ex.nb[2]) + common.byteOff(j3, ex.nb[3]);
+            var e: i64 = 0;
+            while (e < n_extra) : (e += 1) {
+                row.keep(readI32(extra_row + common.byteOff(e, ex.nb[0])));
+            }
+        }
+    }
+}
+
+/// An `int32_t` at `p`, however the view it came from is aligned.
+inline fn readI32(p: [*]const u8) i32 {
+    const v: *align(1) const i32 = @ptrCast(p);
+    return v.*;
 }
 
 // -----------------------------------------------------------------------------

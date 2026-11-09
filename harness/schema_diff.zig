@@ -230,16 +230,27 @@ fn describe(n: *const schema.Node, depth: usize, out: *std.ArrayList(u8)) void {
     };
     out.appendNTimes(gpa, ' ', depth) catch oom();
     w.s(out, schema.kindName(n.kind()));
-    const types = n.valueTypes();
-    w.s(out, " types=");
-    for (0..7) |ti| {
-        const t: schema.ValueType = @fromBackingInt(@intCast(ti));
-        if (types.has(t)) {
-            w.s(out, schema.typeName(t));
-            w.s(out, ",");
+    // a $ref chain past COMMON_RECURSIVE_LIMIT throws out of both questions
+    if (n.valueTypes()) |types| {
+        w.s(out, " types=");
+        for (0..7) |ti| {
+            const t: schema.ValueType = @fromBackingInt(@intCast(ti));
+            if (types.has(t)) {
+                w.s(out, schema.typeName(t));
+                w.s(out, ",");
+            }
         }
+        w.f(out, " empty={d}", .{@intFromBool(types.empty())});
+    } else |_| {
+        w.s(out, " types!");
+        w.s(out, schema.what());
     }
-    w.f(out, " empty={d} str={d}", .{ @intFromBool(types.empty()), @intFromBool(n.mayBeString()) });
+    if (n.mayBeString()) |str| {
+        w.f(out, " str={d}", .{@intFromBool(str)});
+    } else |_| {
+        w.s(out, " str!");
+        w.s(out, schema.what());
+    }
     switch (n.*) {
         .ref => |r| {
             w.s(out, " ref=");
@@ -984,7 +995,79 @@ fn genBuild(texts: []const []const u8) void {
     buildCase("build", text, chance(50), steps.items);
 }
 
+/// `n` copies of `head`, `core`, `n` copies of `tail`.
+fn nested(head: []const u8, core: []const u8, tail: []const u8, n: usize) []const u8 {
+    var t: Text = .empty;
+    for (0..n) |_| put(&t, head);
+    put(&t, core);
+    for (0..n) |_| put(&t, tail);
+    return t.items;
+}
+
+/// A chain of `n` `$ref`s, listed tail first in an `anyOf` so the builder
+/// reaches each target already built: its recursion stays shallow, and the
+/// chain's length is left for `value_types`, `may_be_string` and `visit`.
+fn refChain(n: usize, comptime wrap_all_of: bool) []const u8 {
+    var t: Text = .empty;
+    put(&t, if (wrap_all_of) "{\"allOf\": [" else "{\"anyOf\": [");
+    var i = n + 1;
+    while (i > 0) {
+        i -= 1;
+        putf(&t, "{{\"$ref\": \"#/$defs/a{d}\"}}", .{i});
+        if (i != 0) put(&t, ", ");
+    }
+    put(&t, "], \"$defs\": {");
+    for (0..n) |k| putf(&t, "\"a{d}\": {{\"$ref\": \"#/$defs/a{d}\"}}, ", .{ k, k + 1 });
+    putf(&t, "\"a{d}\": {{\"type\": \"string\"}}}}}}", .{n});
+    return t.items;
+}
+
+/// As `refChain`, the tail-first list hidden from `visit`: `_visit_all_of`
+/// ignores an array component, so the chain is entered at its head, where
+/// each `$ref` visits the next and only `visit`'s own guard stops it.
+fn refChainVisit(n: usize) []const u8 {
+    var t: Text = .empty;
+    put(&t, "{\"allOf\": [{\"type\": \"array\", \"items\": {\"anyOf\": [");
+    var i = n + 1;
+    while (i > 0) {
+        i -= 1;
+        putf(&t, "{{\"$ref\": \"#/$defs/a{d}\"}}", .{i});
+        if (i != 0) put(&t, ", ");
+    }
+    put(&t, "]}}, {\"type\": \"object\", \"properties\": {\"x\": {\"$ref\": \"#/$defs/a0\"}}}], \"$defs\": {");
+    for (0..n) |k| putf(&t, "\"a{d}\": {{\"$ref\": \"#/$defs/a{d}\"}}, ", .{ k, k + 1 });
+    putf(&t, "\"a{d}\": {{\"type\": \"string\"}}}}}}", .{n});
+    return t.items;
+}
+
+/// v0.8.0's recursion limits, on either side of each.
+fn depthCases() void {
+    for ([_]usize{ 126, 127, 128, 129, 400 }) |n| {
+        const label = std.fmt.allocPrint(gpa, "depth-{d}", .{n}) catch oom();
+        schemaCase(label, nested("{\"type\": \"array\", \"items\": ", "{\"type\": \"string\"}", "}", n));
+        schemaCase(label, nested("{\"anyOf\": [", "{\"type\": \"string\"}", "]}", n));
+        schemaCase(label, nested("{\"type\": \"object\", \"properties\": {\"k\": ", "{\"type\": \"string\"}", "}}", n));
+        schemaCase(label, refChain(n, false));
+        schemaCase(label, refChain(n, true));
+        schemaCase(label, refChainVisit(n));
+
+        // one level of the name's trie per char
+        var t: Text = .empty;
+        put(&t, "{\"type\": \"object\", \"properties\": {\"");
+        t.appendNTimes(gpa, 'a', n) catch oom();
+        put(&t, "\": {\"type\": \"string\"}}, \"additionalProperties\": true}");
+        schemaCase(label, t.items);
+
+        var p: Text = .empty;
+        put(&p, "{\"type\": \"string\", \"pattern\": \"^");
+        put(&p, nested("(", "a", ")", n));
+        put(&p, "$\"}");
+        schemaCase(label, p.items);
+    }
+}
+
 fn handwritten() void {
+    depthCases();
     const xs = [_][]const u8{
         // a ref cycle through allOf: the C++ recurses without bound
         \\{"allOf": [{"$ref": "#/$defs/a"}], "$defs": {"a": {"$ref": "#/$defs/a"}}}
@@ -1113,6 +1196,8 @@ const required_phrases = [_][]const u8{
     "dot ::= [^\\x0A\\x0D]",                              "-additional-k ::= [\"]",
     "date-time-string ::=",                               "uuid ::=",
     "-rest ::=",                                          "P:[json.exception.parse_error",
+    "JSON schema is nested more than 128 levels deep",    "JSON schema property name is longer than 128 chars",
+    "types!JSON schema is nested",                        "str!JSON schema is nested",
 };
 
 fn envUsize(name: [*:0]const u8, def: usize) usize {

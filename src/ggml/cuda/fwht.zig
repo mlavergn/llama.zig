@@ -6,7 +6,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/fwht.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/fwht.cuh` at v0.7.0 (`620d2225c`). The
+//! `llama.cpp/ggml/src/ggml-cuda/fwht.cuh` at v0.8.0 (`8642541b2`). The
 //! kernels, `fwht_cuda` and (since v0.7.0) `fwht_cuda_block`, stay CUDA.
 
 const std = @import("std");
@@ -17,11 +17,11 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `GGML_CUDA_FWHT_BLOCK_NT` (fwht.cu:6 @620d2225c): wide FWHT blocks
+/// Ports `GGML_CUDA_FWHT_BLOCK_NT` (fwht.cu:6 @8642541b2): wide FWHT blocks
 /// use one row per thread block with this many threads.
 const block_nt = 256;
 
-/// Ports `ggml_cuda_op_fwht_impl` (fwht.cu:147 @620d2225c): the launch, for
+/// Ports `ggml_cuda_op_fwht_impl` (fwht.cu:147 @8642541b2): the launch, for
 /// an F32 or (since v0.6.0) F16 source `T`; the output is F32. v0.7.0 added
 /// rows of 1024 to 8192 (the `!GGML_USE_MUSA` arm), one row per thread
 /// block of `GGML_CUDA_FWHT_BLOCK_NT` threads.
@@ -70,7 +70,7 @@ fn opFwhtImpl(comptime T: type, ctx: *common.Context, src: *const Tensor, dst: *
     }
 }
 
-/// Ports `ggml_cuda_op_mul_mat_use_fwht` (fwht.cu:215 @620d2225c), new at
+/// Ports `ggml_cuda_op_mul_mat_use_fwht` (fwht.cu:215 @8642541b2), new at
 /// v0.6.0: whether a `MUL_MAT` is the Hadamard transform `opFwht` can take
 /// -- the hint, F32 `src0` and output, and an F32 or F16 contiguous `src1`
 /// of the output's shape. `mulmat.zig` asks it before `opFwht`, and
@@ -85,7 +85,7 @@ pub fn opMulMatUseFwht(op: *const Tensor) bool {
         c.ggml_are_same_shape(b, op);
 }
 
-/// Ports `ggml_cuda_op_fwht` (fwht.cu:225 @620d2225c).
+/// Ports `ggml_cuda_op_fwht` (fwht.cu:225 @8642541b2).
 ///
 /// Return: whether the transform could be used -- false for a
 /// non-contiguous operand, a non-F32 output, a source other than F32 or

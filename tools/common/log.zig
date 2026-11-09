@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/log.cpp` and the macros of `common/log.h` (v0.7.0,
-//! `620d2225c`), and `tty_can_use_colors`, `tty_enable_ansi` and
+//! Ports `llama.cpp/common/log.cpp` and the macros of `common/log.h` (v0.8.0,
+//! `8642541b2`), and `tty_can_use_colors`, `tty_enable_ansi` and
 //! `common_is_tty` from `common/common.cpp`. Each declaration names what it
 //! ports and the line it began at.
 //!
@@ -35,7 +35,7 @@ extern fn _isatty(fd: c_int) c_int;
 pub const Level = enum(c_int) { none = 0, debug = 1, info = 2, warn = 3, err = 4, cont = 5 };
 
 /// `LOG_LEVEL_DEBUG`, `LOG_LEVEL_TRACE`, `LOG_LEVEL_INFO`, `LOG_LEVEL_WARN`,
-/// `LOG_LEVEL_ERROR`, `LOG_LEVEL_OUTPUT` (common/log.h:24, 25, 26, 27, 28, 29 @620d2225c).
+/// `LOG_LEVEL_ERROR`, `LOG_LEVEL_OUTPUT` (common/log.h:24, 25, 26, 27, 28, 29 @8642541b2).
 pub const level_debug: c_int = 5;
 pub const level_trace: c_int = 4;
 pub const level_info: c_int = 3;
@@ -43,19 +43,19 @@ pub const level_warn: c_int = 2;
 pub const level_error: c_int = 1;
 pub const level_output: c_int = 0;
 
-/// Ports `common_log_verbosity_thold` (common/log.cpp:17 @620d2225c):
+/// Ports `common_log_verbosity_thold` (common/log.cpp:17 @8642541b2):
 /// `LOG_DEFAULT_LLAMA`.
 pub var verbosity_thold: c_int = level_info;
 
-/// Ports `common_log_jsonl` (common/log.cpp:27 @620d2225c): `--log-jsonl`.
+/// Ports `common_log_jsonl` (common/log.cpp:27 @8642541b2): `--log-jsonl`.
 var jsonl: bool = false;
 
-/// Ports `common_log_get_jsonl` (common/log.cpp:29 @620d2225c).
+/// Ports `common_log_get_jsonl` (common/log.cpp:29 @8642541b2).
 pub fn getJsonl() bool {
     return jsonl;
 }
 
-/// Ports `common_log_set_jsonl` (common/log.cpp:33 @620d2225c): every message is
+/// Ports `common_log_set_jsonl` (common/log.cpp:33 @8642541b2): every message is
 /// then one JSON object on stdout.
 pub fn setJsonl(on: bool) void {
     jsonl = on;
@@ -65,15 +65,15 @@ pub fn setJsonl(on: bool) void {
 var colors: ?bool = null;
 var paused: bool = false;
 var file: ?*anyopaque = null;
-/// Ports `stdo` (common/log.cpp:194 @620d2225c), a member of `common_log`:
+/// Ports `stdo` (common/log.cpp:194 @8642541b2), a member of `common_log`:
 /// whether messages go to stdout and stderr; set to true by its constructor
-/// (common/log.cpp:163 @620d2225c).
+/// (common/log.cpp:163 @8642541b2).
 var stdo: bool = true;
 var prefix: bool = false;
 var timestamps: bool = false;
 var t_start: i64 = 0;
 
-/// Ports `g_col` (common/log.cpp:55 @620d2225c): default, bold, red, green,
+/// Ports `g_col` (common/log.cpp:55 @8642541b2): default, bold, red, green,
 /// yellow, blue, magenta, cyan, white, when colours are on.
 const col_on = [_][*:0]const u8{ "\x1b[0m", "\x1b[1m", "\x1b[31m", "\x1b[32m", "\x1b[33m", "\x1b[34m", "\x1b[35m", "\x1b[36m", "\x1b[37m" };
 const col_default = 0;
@@ -88,20 +88,20 @@ fn col(i: usize) [*:0]const u8 {
 }
 
 /// `common_log_main`'s first call sets the colours from the terminal
-/// (common/log.cpp:464 @620d2225c).
+/// (common/log.cpp:464 @8642541b2).
 fn useColors() bool {
     if (colors == null) setColorsImpl(ttyCanUseColors());
     return colors.?;
 }
 
-/// Ports `set_colors` (common/log.cpp:419 @620d2225c), a member of `common_log`:
+/// Ports `set_colors` (common/log.cpp:419 @8642541b2), a member of `common_log`:
 /// colours only where the console renders them.
 fn setColorsImpl(on: bool) void {
     colors = on and ttyEnableAnsi();
 }
 
-/// Ports `get_colors` (common/log.cpp:415 @620d2225c), a member of `common_log`,
-/// through `common_log_get_colors` (common/log.cpp:531 @620d2225c).
+/// Ports `get_colors` (common/log.cpp:415 @8642541b2), a member of `common_log`,
+/// through `common_log_get_colors` (common/log.cpp:531 @8642541b2).
 pub fn getColors() bool {
     main();
     return useColors();
@@ -110,7 +110,7 @@ pub fn getColors() bool {
 extern fn fileno(stream: *anyopaque) c_int;
 extern fn _fileno(stream: *anyopaque) c_int;
 
-/// Ports `common_is_tty` (common/common.cpp:1041 @620d2225c): whether
+/// Ports `common_is_tty` (common/common.cpp:1052 @8642541b2): whether
 /// `file` is attached to a terminal.
 pub fn isTty(stream: *anyopaque) bool {
     if (comptime builtin.os.tag == .windows) return _isatty(_fileno(stream)) != 0;
@@ -127,7 +127,7 @@ const win = struct {
     const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
 };
 
-/// Ports `tty_enable_ansi` (common/common.cpp:1069 @620d2225c): false when
+/// Ports `tty_enable_ansi` (common/common.cpp:1080 @8642541b2): false when
 /// stdout or stderr is a console that cannot render ANSI sequences.
 pub fn ttyEnableAnsi() bool {
     if (comptime builtin.os.tag == .windows) {
@@ -143,7 +143,7 @@ pub fn ttyEnableAnsi() bool {
     return true;
 }
 
-/// Ports `tty_can_use_colors` (common/common.cpp:1049 @620d2225c).
+/// Ports `tty_can_use_colors` (common/common.cpp:1060 @8642541b2).
 pub fn ttyCanUseColors() bool {
     // Check NO_COLOR environment variable (https://no-color.org/)
     if (getenv("NO_COLOR")) |no_color| {
@@ -158,21 +158,21 @@ pub fn ttyCanUseColors() bool {
     return isTty(io.cStdout()) or isTty(io.cStderr());
 }
 
-/// Ports `common_log_set_colors` (common/log.cpp:516 @620d2225c) for an explicit
+/// Ports `common_log_set_colors` (common/log.cpp:516 @8642541b2) for an explicit
 /// choice; `null` is `LOG_COLORS_AUTO`.
 pub fn setColors(on: ?bool) void {
     main();
     setColorsImpl(on orelse ttyCanUseColors());
 }
 
-/// Ports `common_log_pause` (common/log.cpp:481 @620d2225c): messages logged while
+/// Ports `common_log_pause` (common/log.cpp:481 @8642541b2): messages logged while
 /// paused are discarded.
 pub fn pause() void {
     main();
     paused = true;
 }
 
-/// Ports `common_log_resume` (common/log.cpp:485 @620d2225c): messages are written
+/// Ports `common_log_resume` (common/log.cpp:485 @8642541b2): messages are written
 /// again. (`resume` is a Zig keyword.)
 pub fn unpause() void {
     main();
@@ -182,7 +182,7 @@ pub fn unpause() void {
 extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
 extern fn fclose(f: *anyopaque) c_int;
 
-/// Ports `common_log_set_file` (common/log.cpp:508 @620d2225c): every message is
+/// Ports `common_log_set_file` (common/log.cpp:508 @8642541b2): every message is
 /// also written to `path`.
 pub fn setFile(path: ?[*:0]const u8) void {
     main();
@@ -191,7 +191,7 @@ pub fn setFile(path: ?[*:0]const u8) void {
 }
 
 /// Ports `common_log_set_stdo` and `set_stdo` (common/log.cpp:512, 407
-/// @620d2225c), a member of `common_log`: whether messages go to stdout
+/// @8642541b2), a member of `common_log`: whether messages go to stdout
 /// and stderr. The C++ pauses and resumes the worker around the change, so
 /// the logger runs afterwards.
 pub fn setStdo(enabled: bool) void {
@@ -200,30 +200,30 @@ pub fn setStdo(enabled: bool) void {
     paused = false; // `resume()`
 }
 
-/// Ports `common_log_set_prefix` (common/log.cpp:535 @620d2225c).
+/// Ports `common_log_set_prefix` (common/log.cpp:535 @8642541b2).
 pub fn setPrefix(on: bool) void {
     main();
     prefix = on;
 }
 
-/// Ports `common_log_set_timestamps` (common/log.cpp:539 @620d2225c).
+/// Ports `common_log_set_timestamps` (common/log.cpp:539 @8642541b2).
 pub fn setTimestamps(on: bool) void {
     main();
     timestamps = on;
 }
 
-/// `t_us`, the system clock in microseconds (common/log.cpp:37 @620d2225c).
+/// `t_us`, the system clock in microseconds (common/log.cpp:37 @8642541b2).
 fn tUs() i64 {
     return @import("clock.zig").realtimeUs();
 }
 
 /// `common_log_main`'s first call constructs the logger, which starts its
-/// clock (common/log.cpp:464 @620d2225c); every entry point here is such a call.
+/// clock (common/log.cpp:464 @8642541b2); every entry point here is such a call.
 fn main() void {
     if (t_start == 0) t_start = tUs();
 }
 
-/// Ports `common_log_add` and `add` (common/log.cpp:493, 239 @620d2225c), a member
+/// Ports `common_log_add` and `add` (common/log.cpp:493, 239 @8642541b2), a member
 /// of `common_log`, one message, written at once. Whether it is written as
 /// JSON is decided here, when it is logged, as the C records it in the
 /// entry.
@@ -248,7 +248,7 @@ pub fn add(level: Level, comptime fmt: [*:0]const u8, args: anytype) void {
 }
 
 /// Ports `common_log_add_json` and `add_json` (common/log.cpp:500, 299
-/// @620d2225c), a member of `common_log`: one `LOG_JSON` record, already
+/// @8642541b2), a member of `common_log`: one `LOG_JSON` record, already
 /// serialized, wrapped as `{"type":...,"data":...}`, on stdout.
 ///
 /// Parameters:
@@ -274,7 +274,7 @@ pub fn addJson(kind: [*:0]const u8, data: []const u8) void {
     printEntry(entry);
 }
 
-/// Ports `print_entry` (common/log.cpp:207 @620d2225c), a member of `common_log`.
+/// Ports `print_entry` (common/log.cpp:207 @8642541b2), a member of `common_log`.
 fn printEntry(entry: Entry) void {
     if (stdo) {
         print(entry, null);
@@ -282,7 +282,7 @@ fn printEntry(entry: Entry) void {
     if (file) |f| print(entry, f);
 }
 
-/// Ports `level_str` (common/log.cpp:67 @620d2225c).
+/// Ports `level_str` (common/log.cpp:67 @8642541b2).
 fn levelStr(level: Level) []const u8 {
     return switch (level) {
         .debug => "debug",
@@ -294,7 +294,7 @@ fn levelStr(level: Level) []const u8 {
     };
 }
 
-/// Ports `common_log_entry` (common/log.cpp:78 @620d2225c), the members `print`
+/// Ports `common_log_entry` (common/log.cpp:78 @8642541b2), the members `print`
 /// reads.
 const Entry = struct {
     level: Level,
@@ -305,7 +305,7 @@ const Entry = struct {
     is_json: bool = false,
 };
 
-/// Ports `print` (common/log.cpp:91 @620d2225c), a member of `common_log_entry`: to `to`, or to
+/// Ports `print` (common/log.cpp:91 @8642541b2), a member of `common_log_entry`: to `to`, or to
 /// `stdout` or `stderr` by level -- or, as JSONL, to `stdout` whatever the
 /// level. A warning's, error's or debug message's colour reset goes before
 /// its trailing newlines, so that every line carries its own colours.
@@ -396,48 +396,48 @@ fn fprintfTo(stream: *anyopaque, comptime fmt: [*:0]const u8, args: anytype) voi
     _ = @call(.auto, fprintf, .{ stream, fmt } ++ args);
 }
 
-/// Ports `LOG_TMPL` (common/log.h:112 @620d2225c): `LOGV`, `LOG_DBGV` and the other
+/// Ports `LOG_TMPL` (common/log.h:112 @8642541b2): `LOGV`, `LOG_DBGV` and the other
 /// `*V` macros are this with an explicit verbosity.
 pub fn tmpl(level: Level, verbosity: c_int, comptime fmt: [*:0]const u8, args: anytype) void {
     if (verbosity <= verbosity_thold) add(level, fmt, args);
 }
 
-/// Ports `LOG` (common/log.h:119 @620d2225c): output, on stdout.
+/// Ports `LOG` (common/log.h:119 @8642541b2): output, on stdout.
 pub fn out(comptime fmt: [*:0]const u8, args: anytype) void {
     tmpl(.none, level_output, fmt, args);
 }
 
-/// Ports `LOG_DBG` (common/log.h:122 @620d2225c).
+/// Ports `LOG_DBG` (common/log.h:122 @8642541b2).
 pub fn dbg(comptime fmt: [*:0]const u8, args: anytype) void {
     tmpl(.debug, level_debug, fmt, args);
 }
 
-/// Ports `LOG_TRC` (common/log.h:123 @620d2225c).
+/// Ports `LOG_TRC` (common/log.h:123 @8642541b2).
 pub fn trc(comptime fmt: [*:0]const u8, args: anytype) void {
     tmpl(.info, level_trace, fmt, args);
 }
 
-/// Ports `LOG_INF` (common/log.h:124 @620d2225c).
+/// Ports `LOG_INF` (common/log.h:124 @8642541b2).
 pub fn inf(comptime fmt: [*:0]const u8, args: anytype) void {
     tmpl(.info, level_info, fmt, args);
 }
 
-/// Ports `LOG_WRN` (common/log.h:125 @620d2225c).
+/// Ports `LOG_WRN` (common/log.h:125 @8642541b2).
 pub fn wrn(comptime fmt: [*:0]const u8, args: anytype) void {
     tmpl(.warn, level_warn, fmt, args);
 }
 
-/// Ports `LOG_ERR` (common/log.h:126 @620d2225c).
+/// Ports `LOG_ERR` (common/log.h:126 @8642541b2).
 pub fn err(comptime fmt: [*:0]const u8, args: anytype) void {
     tmpl(.err, level_error, fmt, args);
 }
 
-/// Ports `LOG_CNT` (common/log.h:127 @620d2225c).
+/// Ports `LOG_CNT` (common/log.h:127 @8642541b2).
 pub fn cnt(comptime fmt: [*:0]const u8, args: anytype) void {
     tmpl(.cont, level_info, fmt, args);
 }
 
-/// Ports `COM_ERR` (common/common.h:38 @620d2225c): `LOG_ERR` with the calling
+/// Ports `COM_ERR` (common/common.h:40 @8642541b2): `LOG_ERR` with the calling
 /// function's name, as `cmn  %12.*s: `.
 pub fn comErr(comptime func: [*:0]const u8, comptime fmt: []const u8, args: anytype) void {
     err("cmn  %12.*s: " ++ fmt, .{ @as(c_int, 12), func } ++ args);

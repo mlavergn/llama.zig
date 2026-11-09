@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/server/server-cors-proxy.h` (llama.cpp v0.7.0,
-//! `620d2225c`) -- `proxy_header_to_lower`, `proxy_request` and the two
+//! Ports `llama.cpp/tools/server/server-cors-proxy.h` (llama.cpp v0.8.0,
+//! `8642541b2`) -- `proxy_header_to_lower`, `proxy_request` and the two
 //! handlers -- and `common_http_parse_url` from `llama.cpp/common/http.h`.
 //! Each declaration names what it ports and the line it began at. The
 //! forwarding itself is `proxy.zig`'s `server_http_proxy`.
@@ -20,7 +20,7 @@ const Allocator = std.mem.Allocator;
 const srv = common.srv;
 const throw = common.throw;
 
-/// Ports `common_http_url` (common/http.h:15 @620d2225c).
+/// Ports `common_http_url` (common/http.h:17 @8642541b2).
 pub const HttpUrl = struct {
     scheme: []const u8 = "",
     user: []const u8 = "",
@@ -41,7 +41,7 @@ fn stoi(a: Allocator, s: []const u8) !c_int {
     };
 }
 
-/// Ports `common_http_parse_url` (common/http.h:29 @620d2225c): scheme, user and
+/// Ports `common_http_parse_url` (common/http.h:31 @8642541b2): scheme, user and
 /// password, host (an IPv6 literal unbracketed), port and path.
 pub fn parseUrl(a: Allocator, url: []const u8) !HttpUrl {
     var parts: HttpUrl = .{};
@@ -95,12 +95,12 @@ pub fn parseUrl(a: Allocator, url: []const u8) !HttpUrl {
     return parts;
 }
 
-/// Ports `proxy_header_to_lower` (server-cors-proxy.h:15 @620d2225c).
+/// Ports `proxy_header_to_lower` (server-cors-proxy.h:15 @8642541b2).
 fn proxyHeaderToLower(a: Allocator, header: []const u8) ![]u8 {
     return std.ascii.allocLowerString(a, header);
 }
 
-/// Ports `proxy_request` (server-cors-proxy.h:22 @620d2225c): the `url`
+/// Ports `proxy_request` (server-cors-proxy.h:22 @8642541b2): the `url`
 /// parameter's target, and the request's `x-llama-server-proxy-header-*`
 /// headers with that prefix removed, forwarded.
 fn proxyRequest(req: *const http.Req, method: []const u8) !*http.Res {
@@ -151,9 +151,9 @@ fn proxyRequest(req: *const http.Req, method: []const u8) !*http.Res {
     );
 }
 
-/// Ports `proxy_handler_post` (server-cors-proxy.h:77 @620d2225c).
+/// Ports `proxy_handler_post` (server-cors-proxy.h:77 @8642541b2).
 pub const handler_post: http.Handler = .{ .ctx = null, .func = post };
-/// Ports `proxy_handler_get` (server-cors-proxy.h:81 @620d2225c).
+/// Ports `proxy_handler_get` (server-cors-proxy.h:81 @8642541b2).
 pub const handler_get: http.Handler = .{ .ctx = null, .func = get };
 
 fn post(_: ?*anyopaque, req: *const http.Req) anyerror!*http.Res {

@@ -6,7 +6,7 @@
 //! `common_batch`, the typed decision models and the rest of what the tools
 //! reach from `llama.cpp/common/common.cpp` and `llama.cpp/common/common.h`,
 //! and `common_log_get_verbosity` and `common_log_default_callback` from
-//! `common/log.cpp` (v0.7.0, `620d2225c`). Each declaration names what it
+//! `common/log.cpp` (v0.8.0, `8642541b2`). Each declaration names what it
 //! ports and the line it began at.
 
 const std = @import("std");
@@ -20,7 +20,7 @@ const llama = @import("llama");
 extern fn SetConsoleOutputCP(cp: c_uint) callconv(.winapi) c_int;
 extern fn SetConsoleCP(cp: c_uint) callconv(.winapi) c_int;
 
-/// Ports `common_log_get_verbosity` (common/log.cpp:548 @620d2225c), which v0.4.0
+/// Ports `common_log_get_verbosity` (common/log.cpp:548 @8642541b2), which v0.4.0
 /// exports from `log.h`: the `common_log` verbosity a ggml log level maps to.
 pub fn logGetVerbosity(level: c.ggml_log_level) c_int {
     return switch (level) {
@@ -33,13 +33,13 @@ pub fn logGetVerbosity(level: c.ggml_log_level) c_int {
     };
 }
 
-/// Ports `common_log_default_callback` (common/log.cpp:561 @620d2225c): libllama's
+/// Ports `common_log_default_callback` (common/log.cpp:561 @8642541b2): libllama's
 /// messages through `common_log`, at `common_log_get_verbosity`'s level.
 pub fn defaultLogCallback(level: c.ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
     if (logGetVerbosity(level) <= log.verbosity_thold) log.add(@fromBackingInt(@intCast(level)), "%s", .{text});
 }
 
-/// Ports `common_init` (common/common.cpp:388 @620d2225c).
+/// Ports `common_init` (common/common.cpp:389 @8642541b2).
 pub fn init() void {
     if (comptime builtin.os.tag == .windows) {
         _ = SetConsoleOutputCP(65001);
@@ -52,7 +52,7 @@ pub fn init() void {
     c.llama_log_set(defaultLogCallback, null);
 }
 
-/// Ports `common_tokenize` (common/common.cpp:1837 @620d2225c).
+/// Ports `common_tokenize` (common/common.cpp:1866 @8642541b2).
 ///
 /// Return: the tokens, the allocator's.
 pub fn tokenize(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, text: []const u8, add_special: bool, parse_special: bool) ![]c.llama_token {
@@ -72,7 +72,7 @@ pub fn tokenize(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, text: []cons
     return result[0..@intCast(n_tokens)];
 }
 
-/// Ports `common_token_to_piece` (common/common.cpp:1865 @620d2225c): the first
+/// Ports `common_token_to_piece` (common/common.cpp:1894 @8642541b2): the first
 /// try fits libc++'s short-string buffer, 22 bytes.
 pub fn tokenToPiece(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, token: c.llama_token, special: bool) ![:0]u8 {
     var piece = try a.alloc(u8, 22 + 1);
@@ -88,7 +88,7 @@ pub fn tokenToPiece(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, token: c
     return piece[0..@intCast(n_chars) :0];
 }
 
-/// Ports `common_detokenize` (common/common.cpp:1887 @620d2225c): the first try
+/// Ports `common_detokenize` (common/common.cpp:1916 @8642541b2): the first try
 /// fits libc++'s short-string buffer, 22 bytes, or the token count.
 ///
 /// Return: the text, the allocator's.
@@ -99,12 +99,12 @@ pub fn detokenize(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, tokens: []
         text = try a.realloc(text, @intCast(-n_chars));
         n_chars = c.llama_detokenize(vocab, tokens.ptr, @intCast(tokens.len), text.ptr, @intCast(text.len), false, special);
         // whitespace trimming is performed after per-token detokenization
-        if (n_chars > @as(i32, @intCast(text.len))) _ = c.ggml_abort("common.cpp", 1894, "GGML_ASSERT(%s) failed", "n_chars <= (int32_t)text.size()");
+        if (n_chars > @as(i32, @intCast(text.len))) _ = c.ggml_abort("common.cpp", 1923, "GGML_ASSERT(%s) failed", "n_chars <= (int32_t)text.size()");
     }
     return text[0..@intCast(n_chars)];
 }
 
-/// Ports `common_model_params_to_llama` (common/common.cpp:1671 @620d2225c).
+/// Ports `common_model_params_to_llama` (common/common.cpp:1700 @8642541b2).
 pub fn modelParamsToLlama(p: *Params) c.llama_model_params {
     var mparams = c.llama_model_default_params();
 
@@ -144,7 +144,7 @@ pub fn modelParamsToLlama(p: *Params) c.llama_model_params {
     return mparams;
 }
 
-/// Ports `common_context_params_to_llama` (common/common.cpp:1710 @620d2225c).
+/// Ports `common_context_params_to_llama` (common/common.cpp:1739 @8642541b2).
 pub fn contextParamsToLlama(p: *const Params) c.llama_context_params {
     var cparams = c.llama_context_default_params();
 
@@ -185,11 +185,11 @@ pub fn contextParamsToLlama(p: *const Params) c.llama_context_params {
     return cparams;
 }
 
-/// Ports `common_batch` (common/common.h:1075 @620d2225c): a wrapper around
+/// Ports `common_batch` (common/common.h:1092 @8642541b2): a wrapper around
 /// `llama_batch_ext` holding its entries, which may exceed `n_batch`; render
 /// them with `get` or `getSubBatch`, and decode them in chunks.
 pub const Batch = struct {
-    /// Ports `token` (common/common.h:1076 @620d2225c), a member of
+    /// Ports `token` (common/common.h:1093 @8642541b2), a member of
     /// `common_batch`.
     pub const Token = struct {
         id: c.llama_token,
@@ -214,7 +214,7 @@ pub const Batch = struct {
         return .{ .a = a };
     }
 
-    /// Ports `common_batch` (common/common.cpp:2169 @620d2225c), the
+    /// Ports `common_batch` (common/common.cpp:2198 @8642541b2), the
     /// constructor over a context.
     pub fn init(a: std.mem.Allocator, ctx: ?*c.llama_context) Batch {
         const rope_type = c.llama_model_rope_type(c.llama_get_model(ctx));
@@ -249,29 +249,29 @@ pub const Batch = struct {
         return @intCast(self.tokens.items.len);
     }
 
-    /// Ports `clear` (common/common.cpp:2174 @620d2225c).
+    /// Ports `clear` (common/common.cpp:2203 @8642541b2).
     pub fn clear(self: *Batch) void {
         for (self.tokens.items) |*t| t.seq_ids_extra.deinit(self.a);
         self.tokens.clearRetainingCapacity();
     }
 
-    /// Ports `add` (common/common.cpp:2178 @620d2225c): the batch index.
+    /// Ports `add` (common/common.cpp:2207 @8642541b2): the batch index.
     pub fn add(self: *Batch, id: c.llama_token, pos: c.llama_pos, seq_id: c.llama_seq_id, output: bool) i32 {
         self.tokens.append(self.a, .{ .id = id, .pos = .{ pos, 0, 0, 0 }, .seq_id = seq_id, .output = output, .embd = .{ .data = null, .n_rows = 0, .n_embd = 0 }, .state = .{ .data = null, .n_rows = 0, .n_embd = 0 } }) catch oom();
         return self.size() - 1;
     }
 
-    /// Ports `add` (common/common.cpp:2183 @620d2225c), the overload with
+    /// Ports `add` (common/common.cpp:2212 @8642541b2), the overload with
     /// the entry shared by all of `seq_ids`, which must not be empty.
     pub fn addSeqs(self: *Batch, id: c.llama_token, pos: c.llama_pos, seq_ids: []const c.llama_seq_id, output: bool) i32 {
-        if (seq_ids.len == 0) _ = c.ggml_abort("common.cpp", 2184, "GGML_ASSERT(%s) failed", "!seq_ids.empty()");
+        if (seq_ids.len == 0) _ = c.ggml_abort("common.cpp", 2213, "GGML_ASSERT(%s) failed", "!seq_ids.empty()");
 
         const idx = self.add(id, pos, seq_ids[0], output);
         for (seq_ids[1..]) |s| _ = self.addSeq(idx, s);
         return idx;
     }
 
-    /// Ports `add_seq` (common/common.cpp:2193 @620d2225c): the entry at
+    /// Ports `add_seq` (common/common.cpp:2222 @8642541b2): the entry at
     /// `idx` in another sequence too; `tokens[idx].seq_id` keeps the first.
     pub fn addSeq(self: *Batch, idx: i32, seq_id: c.llama_seq_id) bool {
         if (idx < 0 or idx >= self.size()) return false;
@@ -279,14 +279,14 @@ pub const Batch = struct {
         return true;
     }
 
-    /// Ports `set_output` (common/common.cpp:2201 @620d2225c).
+    /// Ports `set_output` (common/common.cpp:2230 @8642541b2).
     pub fn setOutput(self: *Batch, idx: i32, value: bool) bool {
         if (idx < 0 or idx >= self.size()) return false;
         self.tokens.items[@intCast(idx)].output = value;
         return true;
     }
 
-    /// Ports `set_embd` (common/common.cpp:2209 @620d2225c): a token
+    /// Ports `set_embd` (common/common.cpp:2238 @8642541b2): a token
     /// embedding for the entry at `idx`, once.
     pub fn setEmbd(self: *Batch, idx: i32, embd: c.llama_embd) bool {
         if (idx < 0 or idx >= self.size() or self.tokens.items[@intCast(idx)].embd.data != null) return false;
@@ -294,7 +294,7 @@ pub const Batch = struct {
         return true;
     }
 
-    /// Ports `set_embd_state` (common/common.cpp:2217 @620d2225c): a state
+    /// Ports `set_embd_state` (common/common.cpp:2246 @8642541b2): a state
     /// embedding (the target's hidden state for MTP, say) for the entry at
     /// `idx`, once.
     pub fn setEmbdState(self: *Batch, idx: i32, state: c.llama_embd) bool {
@@ -303,7 +303,7 @@ pub const Batch = struct {
         return true;
     }
 
-    /// Ports `add_embd` (common/common.cpp:2225 @620d2225c): an
+    /// Ports `add_embd` (common/common.cpp:2254 @8642541b2): an
     /// embedding-only entry; `pos` points to `n_pos` positions.
     pub fn addEmbd(self: *Batch, embd: c.llama_embd, pos: [*]const c.llama_pos, seq_id: c.llama_seq_id, output: bool) i32 {
         var t: Token = .{ .id = c.LLAMA_TOKEN_NULL, .pos = .{ 0, 0, 0, 0 }, .seq_id = seq_id, .output = output, .embd = embd, .state = .{ .data = null, .n_rows = 0, .n_embd = 0 } };
@@ -312,15 +312,15 @@ pub const Batch = struct {
         return self.size() - 1;
     }
 
-    /// Ports `get_sub_batch` (common/common.cpp:2234 @620d2225c): entries
+    /// Ports `get_sub_batch` (common/common.cpp:2263 @8642541b2): entries
     /// `[off, off + n)` rendered into the `llama_batch_ext`, which the next
     /// call overwrites.
     pub fn getSubBatch(self: *Batch, off: i32, n: i32) ?*c.llama_batch_ext {
         const res = self.batch orelse {
-            _ = c.ggml_abort("common.cpp", 2235, "GGML_ASSERT(%s) failed", "batch && \"common_batch was not initialized with a context\"");
+            _ = c.ggml_abort("common.cpp", 2264, "GGML_ASSERT(%s) failed", "batch && \"common_batch was not initialized with a context\"");
             unreachable;
         };
-        if (!(off >= 0 and n >= 0 and off + n <= self.size())) _ = c.ggml_abort("common.cpp", 2236, "GGML_ASSERT(%s) failed", "off >= 0 && n >= 0 && off + n <= size()");
+        if (!(off >= 0 and n >= 0 and off + n <= self.size())) _ = c.ggml_abort("common.cpp", 2265, "GGML_ASSERT(%s) failed", "off >= 0 && n >= 0 && off + n <= size()");
 
         c.llama_batch_ext_clear(res);
 
@@ -333,24 +333,24 @@ pub const Batch = struct {
             if (t.id != c.LLAMA_TOKEN_NULL) {
                 idx = c.llama_batch_ext_add_token(res, t.seq_id, t.id);
                 if (idx < 0) {
-                    _ = c.ggml_abort("common.cpp", 2248, "%s: failed to add token %d at index %d (error %d, n = %d)\n", func, t.id, i, idx, n);
+                    _ = c.ggml_abort("common.cpp", 2277, "%s: failed to add token %d at index %d (error %d, n = %d)\n", func, t.id, i, idx, n);
                 }
                 _ = c.llama_batch_ext_set_pos(res, idx, &t.pos);
                 if (t.embd.data != null and !c.llama_batch_ext_set_embd_token(res, idx, t.embd)) {
-                    _ = c.ggml_abort("common.cpp", 2252, "%s: failed to set the embedding of token %d at index %d\n", func, t.id, i);
+                    _ = c.ggml_abort("common.cpp", 2281, "%s: failed to set the embedding of token %d at index %d\n", func, t.id, i);
                 }
             } else {
                 idx = c.llama_batch_ext_add_embd(res, t.seq_id, t.embd);
                 if (idx < 0) {
-                    _ = c.ggml_abort("common.cpp", 2257, "%s: failed to add embedding at index %d (error %d, n = %d)\n", func, i, idx, n);
+                    _ = c.ggml_abort("common.cpp", 2286, "%s: failed to add embedding at index %d (error %d, n = %d)\n", func, i, idx, n);
                 }
                 _ = c.llama_batch_ext_set_pos(res, idx, &t.pos);
             }
-            if (idx != i - off) _ = c.ggml_abort("common.cpp", 2261, "GGML_ASSERT(%s) failed", "idx == i - off");
+            if (idx != i - off) _ = c.ggml_abort("common.cpp", 2290, "GGML_ASSERT(%s) failed", "idx == i - off");
 
             for (t.seq_ids_extra.items) |seq_id| {
                 if (!c.llama_batch_ext_add_seq(res, idx, seq_id)) {
-                    _ = c.ggml_abort("common.cpp", 2265, "%s: failed to add seq %d to the entry at index %d\n", func, seq_id, i);
+                    _ = c.ggml_abort("common.cpp", 2294, "%s: failed to add seq %d to the entry at index %d\n", func, seq_id, i);
                 }
             }
             if (t.output) {
@@ -368,7 +368,7 @@ pub const Batch = struct {
     }
 };
 
-/// Ports `common_batch_get_one` (common/common.cpp:2282 @620d2225c): a
+/// Ports `common_batch_get_one` (common/common.cpp:2311 @8642541b2): a
 /// single-sequence batch of `tokens`, positions continuing from the memory,
 /// output on the last.
 pub fn batchGetOne(a: std.mem.Allocator, ctx: ?*c.llama_context, tokens: []const c.llama_token) Batch {
@@ -386,7 +386,7 @@ pub fn batchGetOne(a: std.mem.Allocator, ctx: ?*c.llama_context, tokens: []const
     return batch;
 }
 
-/// Ports `common_replay_last_token` (common/common.cpp:2158 @620d2225c).
+/// Ports `common_replay_last_token` (common/common.cpp:2187 @8642541b2).
 pub fn replayLastToken(a: std.mem.Allocator, ctx: ?*c.llama_context, last_token: c.llama_token, pos: i32) bool {
     var batch = Batch.init(a, ctx);
     defer batch.deinit();
@@ -407,7 +407,7 @@ fn oom() noreturn {
 // -----------------------------------------------------------------------------
 // typed decision models
 
-/// Ports `common_decision_type` (common/common.h:960 @620d2225c): typed
+/// Ports `common_decision_type` (common/common.h:968 @8642541b2): typed
 /// decision models, see `<arch>.decision.type` in the model metadata.
 pub const DecisionType = enum(c_int) {
     none, // not a decision model
@@ -422,10 +422,15 @@ pub const DecisionType = enum(c_int) {
     vllm_d3, // same as pplx-decider, non-causal attention
     lfm2_d1, // same as openjev, the labels depend on the question type
     lfm2_d1_omni, // same as laya, other prompt layout
+    granite_switch, // same as openjev, run by the decision aLoRA of granite switch
+    h2o_lightning, // same as openjev, the labels are read after an answer prefill
+    minicpm_ocr_jev, // one score per class, the pooled embeddings output of the last token
+    lfm3_d1, // same as lfm2-d1, non-causal, label codes A..Z then AA, AB..
+    lfm3_d1_omni, // same as lfm3-d1
     unknown, // a decision model of a type that is not supported
 };
 
-/// Ports `COMMON_DECISION_TYPE_NAMES` (common/common.cpp:1165 @620d2225c),
+/// Ports `COMMON_DECISION_TYPE_NAMES` (common/common.cpp:1176 @8642541b2),
 /// in the `std::map`'s order, which is the enum's.
 const decision_type_names = [_]struct { DecisionType, []const u8 }{
     .{ .openjev, "openjev" },
@@ -439,10 +444,15 @@ const decision_type_names = [_]struct { DecisionType, []const u8 }{
     .{ .vllm_d3, "vllm-d3" },
     .{ .lfm2_d1, "lfm2-d1" },
     .{ .lfm2_d1_omni, "lfm2-d1-omni" },
+    .{ .granite_switch, "granite-switch" },
+    .{ .h2o_lightning, "h2o-lightning" },
+    .{ .minicpm_ocr_jev, "openbmb-minicpm-ocr-jev" },
+    .{ .lfm3_d1, "lfm3-d1" },
+    .{ .lfm3_d1_omni, "lfm3-d1-omni" },
     // for future models, ALWAYS add org name prefix to avoid name collisions, e.g. "orgname-modelname"
 };
 
-/// Ports `common_decision_type_from_string` (common/common.cpp:1180 @620d2225c).
+/// Ports `common_decision_type_from_string` (common/common.cpp:1196 @8642541b2).
 fn decisionTypeFromString(str: []const u8) DecisionType {
     for (decision_type_names) |pair| {
         if (std.mem.eql(u8, pair[1], str)) return pair[0];
@@ -450,7 +460,7 @@ fn decisionTypeFromString(str: []const u8) DecisionType {
     return .unknown;
 }
 
-/// Ports `common_get_decision_type` (common/common.cpp:1189 @620d2225c),
+/// Ports `common_get_decision_type` (common/common.cpp:1205 @8642541b2),
 /// the overload over a loaded model.
 pub fn getDecisionType(model: ?*const c.llama_model) DecisionType {
     var buf: [64]u8 = undefined;
@@ -466,14 +476,15 @@ pub fn getDecisionType(model: ?*const c.llama_model) DecisionType {
     return decisionTypeFromString(std.mem.sliceTo(&buf, 0));
 }
 
-/// Ports `common_gguf_info` (common/common.h:979 @620d2225c): metadata of
+/// Ports `common_gguf_info` (common/common.h:992 @8642541b2): metadata of
 /// a GGUF file, read without loading the model.
 pub const GgufInfo = struct {
     decision_type: DecisionType = .unknown, // unknown if the file is missing, unreadable, or invalid
     n_ctx_train: u32 = 0, // 0 if unknown
+    has_chat_tmpl: bool = false, // has the default tokenizer.chat_template
 };
 
-/// Ports `common_get_gguf_info` (common/common.cpp:1201 @620d2225c), which
+/// Ports `common_get_gguf_info` (common/common.cpp:1217 @8642541b2), which
 /// replaces v0.6.0's `common_get_decision_type` over a file name: the
 /// decision type and the training context of a GGUF file, read without
 /// loading the model.
@@ -514,6 +525,9 @@ pub fn getGgufInfo(fname: []const u8) GgufInfo {
         info.n_ctx_train = c.gguf_get_val_u32(gguf_ctx, ctx_id);
     }
 
+    // same key as llama_model_chat_template(model, nullptr)
+    info.has_chat_tmpl = c.gguf_find_key(gguf_ctx, "tokenizer.chat_template") >= 0;
+
     return info;
 }
 
@@ -528,7 +542,7 @@ pub fn fitLogSink(verbosity: i32, text: [*:0]const u8) void {
     if (verbosity <= log.verbosity_thold) log.add(level, "%s", .{text});
 }
 
-/// `fit.Log.json` for the tools: `LOG_JSON` (common/log.h:143 @620d2225c), a
+/// `fit.Log.json` for the tools: `LOG_JSON` (common/log.h:143 @8642541b2), a
 /// structured record through `common_log`, written only under `--log-jsonl`.
 pub fn fitLogJson(kind: [*:0]const u8, data: []const u8) void {
     log.addJson(kind, data);
@@ -553,7 +567,7 @@ fn hardwareConcurrency() usize {
     return std.Thread.getCpuCount() catch 0;
 }
 
-/// Ports `common_params_get_system_info` (common/common.cpp:424 @620d2225c).
+/// Ports `common_params_get_system_info` (common/common.cpp:425 @8642541b2).
 ///
 /// Return: owned by `a`.
 pub fn paramsGetSystemInfo(a: std.mem.Allocator, params: *const Params) ![:0]u8 {
@@ -566,7 +580,7 @@ pub fn paramsGetSystemInfo(a: std.mem.Allocator, params: *const Params) ![:0]u8 
     return a.dupeSentinel(u8, os.items, 0);
 }
 
-/// Ports `common_params_print_info` (common/common.cpp:400 @620d2225c): the
+/// Ports `common_params_print_info` (common/common.cpp:401 @8642541b2): the
 /// build, the verbosity, the devices and the system, at the trace level but
 /// for the verbosity line.
 pub fn paramsPrintInfo(a: std.mem.Allocator, params: *const Params, print_devices: bool) !void {
@@ -596,7 +610,7 @@ pub fn paramsPrintInfo(a: std.mem.Allocator, params: *const Params, print_device
     }
 }
 
-/// Ports `common_context_seq_rm_type` (common/common.h:1046 @620d2225c).
+/// Ports `common_context_seq_rm_type` (common/common.h:1063 @8642541b2).
 pub const SeqRmType = enum(c_int) {
     no = 0, // cannot seq_rm at all
     part = 1, // can seq_rm partial sequences
@@ -604,7 +618,7 @@ pub const SeqRmType = enum(c_int) {
     rs = 3, // can seq_rm partial sequences, bounded by n_rs_seq
 };
 
-/// Ports `common_batch_set_zero_state` (common/common.cpp:1410 @620d2225c):
+/// Ports `common_batch_set_zero_state` (common/common.cpp:1439 @8642541b2):
 /// zeros for every entry's state embedding, the dummy input of warmup and
 /// probe decodes. `zeros`, allocated with `a`, is resized; it must outlive
 /// the batch's use.
@@ -618,7 +632,7 @@ pub fn batchSetZeroState(a: std.mem.Allocator, batch: *Batch, model: ?*const c.l
     }
 }
 
-/// Ports `common_context_can_seq_rm` (common/common.cpp:1569 @620d2225c):
+/// Ports `common_context_can_seq_rm` (common/common.cpp:1598 @8642541b2):
 /// whether the context can remove part of a sequence, found by trying.
 /// Clears the context's memory.
 pub fn contextCanSeqRm(ctx: ?*c.llama_context) SeqRmType {
@@ -666,48 +680,48 @@ pub fn contextCanSeqRm(ctx: ?*c.llama_context) SeqRmType {
     return res;
 }
 
-/// Ports `common_context_seq_rm` (common/common.cpp:1616 @620d2225c): aborts
+/// Ports `common_context_seq_rm` (common/common.cpp:1645 @8642541b2): aborts
 /// when the memory refuses.
 fn contextSeqRm(ctx: ?*c.llama_context, seq_id: c.llama_seq_id, p0: c.llama_pos, p1: c.llama_pos) void {
     const mem = c.llama_get_memory(ctx);
     if (!c.llama_memory_seq_rm(mem, seq_id, p0, p1)) {
-        _ = c.ggml_abort("common.cpp", 1619, "failed to remove sequence %d with p0=%d, p1=%d\n", seq_id, p0, p1);
+        _ = c.ggml_abort("common.cpp", 1648, "failed to remove sequence %d with p0=%d, p1=%d\n", seq_id, p0, p1);
     }
 }
 
-/// Ports `common_memory` (common/common.h:1057 @620d2225c): the target's
+/// Ports `common_memory` (common/common.h:1074 @8642541b2): the target's
 /// and the draft's memory, edited together.
 pub const Memory = struct {
     ctx_tgt: ?*c.llama_context = null,
     ctx_dft: ?*c.llama_context = null,
 
-    /// Ports `common_memory`'s `init` (common/common.cpp:1633 @620d2225c).
+    /// Ports `common_memory`'s `init` (common/common.cpp:1662 @8642541b2).
     pub fn init(self: *Memory, ctx_tgt: ?*c.llama_context, ctx_dft: ?*c.llama_context) void {
         self.ctx_tgt = ctx_tgt;
         self.ctx_dft = ctx_dft;
     }
 
-    /// Ports `common_memory`'s `seq_rm` (common/common.cpp:1638 @620d2225c):
+    /// Ports `common_memory`'s `seq_rm` (common/common.cpp:1667 @8642541b2):
     /// aborts on failure.
     pub fn seqRm(self: *const Memory, seq_id: c.llama_seq_id, p0: c.llama_pos, p1: c.llama_pos) void {
         contextSeqRm(self.ctx_tgt, seq_id, p0, p1);
         if (self.ctx_dft) |d| contextSeqRm(d, seq_id, p0, p1);
     }
 
-    /// Ports `common_memory`'s `seq_cp` (common/common.cpp:1645 @620d2225c).
+    /// Ports `common_memory`'s `seq_cp` (common/common.cpp:1674 @8642541b2).
     pub fn seqCp(self: *const Memory, seq_id_src: c.llama_seq_id, seq_id_dst: c.llama_seq_id, p0: c.llama_pos, p1: c.llama_pos) void {
         c.llama_memory_seq_cp(c.llama_get_memory(self.ctx_tgt), seq_id_src, seq_id_dst, p0, p1);
         if (self.ctx_dft) |d| c.llama_memory_seq_cp(c.llama_get_memory(d), seq_id_src, seq_id_dst, p0, p1);
     }
 
-    /// Ports `common_memory`'s `seq_add` (common/common.cpp:1652 @620d2225c).
+    /// Ports `common_memory`'s `seq_add` (common/common.cpp:1681 @8642541b2).
     pub fn seqAdd(self: *const Memory, seq_id: c.llama_seq_id, p0: c.llama_pos, p1: c.llama_pos, delta: c.llama_pos) void {
         c.llama_memory_seq_add(c.llama_get_memory(self.ctx_tgt), seq_id, p0, p1, delta);
         if (self.ctx_dft) |d| c.llama_memory_seq_add(c.llama_get_memory(d), seq_id, p0, p1, delta);
     }
 };
 
-/// Ports `common_set_adapter_lora` (common/common.cpp:1659 @620d2225c): the
+/// Ports `common_set_adapter_lora` (common/common.cpp:1688 @8642541b2): the
 /// adapters and their scales onto the context.
 pub fn setAdapterLora(a: std.mem.Allocator, ctx: ?*c.llama_context, lora: []const @import("params.zig").LoraInfo) !void {
     const loras = try a.alloc(?*c.llama_adapter_lora, lora.len);
@@ -724,7 +738,7 @@ pub fn setAdapterLora(a: std.mem.Allocator, ctx: ?*c.llama_context, lora: []cons
 
 extern fn pow(x: f64, y: f64) f64;
 
-/// Ports `common_embd_normalize` (common/common.cpp:1907 @620d2225c).
+/// Ports `common_embd_normalize` (common/common.cpp:1936 @8642541b2).
 pub fn embdNormalize(inp: [*]const f32, out: [*]f32, n: c_int, embd_norm: c_int) void {
     var sum: f64 = 0.0;
     const len: usize = @intCast(@max(n, 0));

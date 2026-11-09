@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/cohere2moe.cpp` (llama.cpp v0.7.0,
-//! `620d2225c`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/cohere2moe.cpp` (llama.cpp v0.8.0,
+//! `8642541b2`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -99,7 +99,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_cohere2moe` (parsers/cohere2moe.cpp:19 @620d2225c).
+/// Ports `common_chat_params_init_cohere2moe` (parsers/cohere2moe.cpp:19 @8642541b2).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/clamp.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/clamp.cuh` at v0.7.0 (`620d2225c`). The
+//! `llama.cpp/ggml/src/ggml-cuda/clamp.cuh` at v0.8.0 (`8642541b2`). The
 //! kernel, `op_clamp_kernel`, stays CUDA.
 //!
 //! For `F16` the bounds are converted to `half` on the host, `(half)min`,
@@ -19,7 +19,7 @@ const cu = common.cu;
 const Tensor = c.ggml_tensor;
 const half = kernels.half;
 
-/// Ports `CUDA_CLAMP_BLOCK_SIZE` (clamp.cuh:3 @620d2225c).
+/// Ports `CUDA_CLAMP_BLOCK_SIZE` (clamp.cuh:3 @8642541b2).
 const block_size = 256;
 
 /// `(half) x`.
@@ -32,7 +32,7 @@ fn u32Of(x: usize) u32 {
     return @truncate(x);
 }
 
-/// Ports `clamp_cuda` (clamp.cu:30 @620d2225c), which launches with `<<<>>>`.
+/// Ports `clamp_cuda` (clamp.cu:30 @8642541b2), which launches with `<<<>>>`.
 /// Since v0.7.0 `src0` and `dst` may be views: rows are contiguous, dims
 /// 1..3 follow the strides, in elements, and the kernel divides the flat
 /// index with `fast_div_modulo`.
@@ -56,7 +56,7 @@ fn clampCuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, min: T, m
     });
 }
 
-/// Ports `ggml_cuda_op_clamp` (clamp.cu:46 @620d2225c).
+/// Ports `ggml_cuda_op_clamp` (clamp.cu:46 @8642541b2).
 pub fn opClamp(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;

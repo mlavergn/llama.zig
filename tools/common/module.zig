@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Barrel for `tools/common/`. `build_info.zig` ports
-//! `llama.cpp/common/build-info.cpp.in` (v0.7.0, `620d2225c`) as
+//! `llama.cpp/common/build-info.cpp.in` (v0.8.0, `8642541b2`) as
 //! `llama.cpp.zmake` fills it in; the rest says what it ports where it does.
 //!
 //! # One import of the headers
@@ -44,7 +44,7 @@ pub const fs_stat = @import("fs_stat.zig");
 pub const clock = @import("clock.zig");
 
 /// `LLM_KV_SPLIT_NO`, `LLM_KV_SPLIT_COUNT`, `LLM_KV_SPLIT_TENSORS_COUNT`
-/// (common/common.h:1232, 1233, 1234 @620d2225c).
+/// (common/common.h:1249, 1250, 1251 @8642541b2).
 pub const kv_split_no = "split.no";
 pub const kv_split_count = "split.count";
 pub const kv_split_tensors_count = "split.tensors.count";

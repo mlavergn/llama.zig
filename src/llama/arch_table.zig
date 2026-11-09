@@ -7,7 +7,7 @@
 //! - `llama.cpp/src/llama-arch.h` -- the four enums
 //! - `llama.cpp/src/llama-arch.cpp` -- the four `std::map` initializers
 //!
-//! Both at v0.7.0 (`620d2225c`). **Do not edit**: regenerate after moving the
+//! Both at v0.8.0 (`8642541b2`). **Do not edit**: regenerate after moving the
 //! pin, and `make arch-diff` compares every lookup against the C++.
 //!
 //! Each table is indexed by its enum's ordinal, which is the `std::map`'s
@@ -17,7 +17,7 @@
 
 const c = @import("impl.zig").c;
 
-/// Mirrors `llm_arch` (llama-arch.h:13 @620d2225c).
+/// Mirrors `llm_arch` (llama-arch.h:13 @8642541b2).
 pub const Arch = enum(c_int) {
     clip,
     llama,
@@ -46,8 +46,10 @@ pub const Arch = enum(c_int) {
     qwen2,
     qwen2moe,
     qwen2vl,
+    sensenova_u1,
     qwen3,
     qwen3moe,
+    flint,
     qwen3next,
     qwen3vl,
     qwen3vlmoe,
@@ -90,6 +92,7 @@ pub const Arch = enum(c_int) {
     olmo2,
     olmoe,
     muse_glimmer,
+    muse_spark,
     openelm,
     arctic,
     deepseek,
@@ -97,6 +100,7 @@ pub const Arch = enum(c_int) {
     deepseek2ocr,
     deepseek32,
     deepseek4,
+    deepseek41,
     chatglm,
     glm4,
     glm4_moe,
@@ -143,6 +147,7 @@ pub const Arch = enum(c_int) {
     openai_moe,
     lfm2,
     lfm2moe,
+    lfm3,
     dream,
     smallthinker,
     llada,
@@ -177,10 +182,12 @@ pub const Arch = enum(c_int) {
     minimax_01,
     hrm_text,
     k2_horizon,
+    beam,
+    kolibri1,
     unknown,
 };
 
-/// Mirrors `llm_kv` (llama-arch.h:175 @620d2225c).
+/// Mirrors `llm_kv` (llama-arch.h:182 @8642541b2).
 pub const Kv = enum(c_int) {
     general_type,
     general_architecture,
@@ -241,6 +248,7 @@ pub const Kv = enum(c_int) {
     experts_per_group,
     moe_every_n_layers,
     moe_latent_size,
+    post_norm_eps,
     nextn_predict_layers,
     num_deepstack_layers,
     deepstack_mapping,
@@ -272,6 +280,7 @@ pub const Kv = enum(c_int) {
     hrm_h_cycles,
     hrm_l_cycles,
     hrm_prefix_lm,
+    realtime_delay_tokens,
     attention_head_count,
     attention_head_count_kv,
     attention_max_alibi_bias,
@@ -315,6 +324,11 @@ pub const Kv = enum(c_int) {
     attention_indexer_types,
     attention_indexer_kpool,
     attention_indexer_kpool_select_tail,
+    attention_indexer_source_layers,
+    attention_indexer_candidate_source_layer,
+    attention_indexer_candidate_top_k_blocks,
+    attention_indexer_candidate_block_size,
+    attention_kv_source_layers,
     attention_output_group_count,
     attention_output_lora_rank,
     attention_compress_rope_freq_base,
@@ -326,6 +340,9 @@ pub const Kv = enum(c_int) {
     hyper_connection_epsilon,
     hyper_connection_magnitude,
     hyper_connection_low_rank,
+    hyper_connection_single_pass,
+    engram_pad_token_id,
+    engram_token_map,
     ple_layers,
     ple_ngram_size,
     ple_heads_per_ngram,
@@ -341,6 +358,7 @@ pub const Kv = enum(c_int) {
     rope_dimension_sections,
     rope_section_order,
     rope_freq_base,
+    rope_freq_base_spatial,
     rope_freq_base_swa,
     rope_scale_linear,
     rope_scaling_type,
@@ -386,8 +404,10 @@ pub const Kv = enum(c_int) {
     tokenizer_add_bos,
     tokenizer_add_eos,
     tokenizer_add_sep,
+    tokenizer_dna_auto_tags,
     tokenizer_add_prefix,
     tokenizer_remove_extra_ws,
+    tokenizer_clean_spaces,
     tokenizer_precompiled_charsmap,
     tokenizer_hf_json,
     tokenizer_rwkv,
@@ -395,6 +415,7 @@ pub const Kv = enum(c_int) {
     tokenizer_normalizer_nfc,
     tokenizer_normalizer_lowercase,
     tokenizer_normalizer_strip_accents,
+    tokenizer_metaspace_prepend_scheme,
     tokenizer_fim_pre_id,
     tokenizer_fim_suf_id,
     tokenizer_fim_mid_id,
@@ -417,6 +438,7 @@ pub const Kv = enum(c_int) {
     decision_block_count,
     decision_routing_block_count,
     decision_head_count,
+    decision_labels,
     target_layers,
     target_hidden_size,
     dflash_block_size,
@@ -459,7 +481,7 @@ pub const Kv = enum(c_int) {
     dense_3_feat_out,
 };
 
-/// Mirrors `llm_tensor` (llama-arch.h:478 @620d2225c).
+/// Mirrors `llm_tensor` (llama-arch.h:501 @8642541b2).
 pub const Tensor = enum(c_int) {
     token_embd,
     token_embd_norm,
@@ -485,12 +507,16 @@ pub const Tensor = enum(c_int) {
     attn_rot_embd,
     attn_sinks,
     attn_gate,
+    attn_resid_alpha,
+    attn_resid_beta,
     ffn_gate_inp,
     ffn_gate_inp_shexp,
     ffn_norm,
     ffn_post_norm,
     ffn_post_norm_1,
     ffn_post_norm_2,
+    ffn_norm_ada_down,
+    ffn_norm_ada_up,
     ffn_pre_norm_2,
     ffn_gate,
     ffn_down,
@@ -514,6 +540,10 @@ pub const Tensor = enum(c_int) {
     ffn_exp_probs_b_vl,
     ffn_latent_down,
     ffn_latent_up,
+    ffn_pre_exp_norm,
+    ffn_post_exp_norm,
+    ffn_resid_alpha,
+    ffn_resid_beta,
     attn_q_norm,
     attn_k_norm,
     layer_out_norm,
@@ -633,6 +663,10 @@ pub const Tensor = enum(c_int) {
     hc_ffn_down,
     hc_ffn_up,
     hc_ffn_inject,
+    hc_attn_down_inject,
+    hc_ffn_down_inject,
+    attn_qkv_gate,
+    ssm_beta_alpha_cat,
     ple_key,
     ple_value,
     ple_norm_key,
@@ -752,6 +786,8 @@ pub const Tensor = enum(c_int) {
     dspark_markov_w1,
     dspark_markov_w2,
     dspark_conf_proj,
+    engram_kv,
+    engram_gate,
     dflash_attn_conv_base,
     dflash_attn_conv_proj,
     dflash_ffn_conv_base,
@@ -776,20 +812,20 @@ pub const Tensor = enum(c_int) {
     attn_v_exps,
 };
 
-/// Mirrors `llm_tensor_layer` (llama-arch.h:796 @620d2225c).
+/// Mirrors `llm_tensor_layer` (llama-arch.h:833 @8642541b2).
 pub const TensorLayer = enum(c_int) {
     input,
     repeating,
     output,
 };
 
-/// Mirrors `llm_tensor_info` (llama-arch.h:859 @620d2225c).
+/// Mirrors `llm_tensor_info` (llama-arch.h:896 @8642541b2).
 pub const TensorInfo = struct {
     layer: TensorLayer,
     op: c.enum_ggml_op,
 };
 
-/// Ports `LLM_ARCH_NAMES` (llama-arch.cpp:8 @620d2225c), by `Arch` ordinal.
+/// Ports `LLM_ARCH_NAMES` (llama-arch.cpp:9 @8642541b2), by `Arch` ordinal.
 pub const arch_names = [_]?[:0]const u8{
     "clip",
     "llama",
@@ -818,8 +854,10 @@ pub const arch_names = [_]?[:0]const u8{
     "qwen2",
     "qwen2moe",
     "qwen2vl",
+    "sensenova_u1",
     "qwen3",
     "qwen3moe",
+    "flint",
     "qwen3next",
     "qwen3vl",
     "qwen3vlmoe",
@@ -862,6 +900,7 @@ pub const arch_names = [_]?[:0]const u8{
     "olmo2",
     "olmoe",
     "muse-glimmer",
+    "muse-spark",
     "openelm",
     "arctic",
     "deepseek",
@@ -869,6 +908,7 @@ pub const arch_names = [_]?[:0]const u8{
     "deepseek2-ocr",
     "deepseek32",
     "deepseek4",
+    "deepseek41",
     "chatglm",
     "glm4",
     "glm4moe",
@@ -915,6 +955,7 @@ pub const arch_names = [_]?[:0]const u8{
     "gpt-oss",
     "lfm2",
     "lfm2moe",
+    "lfm3",
     "dream",
     "smallthinker",
     "llada",
@@ -949,10 +990,12 @@ pub const arch_names = [_]?[:0]const u8{
     "minimax-01",
     "hrm_text",
     "k2-horizon",
+    "beam",
+    "kolibri1",
     "(unknown)",
 };
 
-/// Ports `LLM_KV_NAMES` (llama-arch.cpp:170 @620d2225c), by `Kv` ordinal.
+/// Ports `LLM_KV_NAMES` (llama-arch.cpp:178 @8642541b2), by `Kv` ordinal.
 pub const kv_names = [_]?[:0]const u8{
     "general.type",
     "general.architecture",
@@ -1013,6 +1056,7 @@ pub const kv_names = [_]?[:0]const u8{
     "%s.experts_per_group",
     "%s.moe_every_n_layers",
     "%s.moe_latent_size",
+    "%s.post_norm_epsilon",
     "%s.nextn_predict_layers",
     "%s.n_deepstack_layers",
     "%s.deepstack_mapping",
@@ -1044,6 +1088,7 @@ pub const kv_names = [_]?[:0]const u8{
     "%s.hrm.h_cycles",
     "%s.hrm.l_cycles",
     "%s.hrm.prefix_lm",
+    "%s.realtime_delay_tokens",
     "%s.attention.head_count",
     "%s.attention.head_count_kv",
     "%s.attention.max_alibi_bias",
@@ -1087,6 +1132,11 @@ pub const kv_names = [_]?[:0]const u8{
     "%s.attention.indexer.types",
     "%s.attention.indexer.kpool",
     "%s.attention.indexer.kpool_select_tail",
+    "%s.attention.indexer.source_layers",
+    "%s.attention.indexer.candidate_source_layer",
+    "%s.attention.indexer.candidate_top_k_blocks",
+    "%s.attention.indexer.candidate_block_size",
+    "%s.attention.kv_source_layers",
     "%s.attention.output_group_count",
     "%s.attention.output_lora_rank",
     "%s.attention.compress_rope_freq_base",
@@ -1098,6 +1148,9 @@ pub const kv_names = [_]?[:0]const u8{
     "%s.hyper_connection.epsilon",
     "%s.hyper_connection.magnitude",
     "%s.hyper_connection.low_rank",
+    "%s.hyper_connection.single_pass",
+    "%s.engram.pad_token_id",
+    "%s.engram.token_map",
     "%s.ple.layers",
     "%s.ple.ngram_size",
     "%s.ple.heads_per_ngram",
@@ -1113,6 +1166,7 @@ pub const kv_names = [_]?[:0]const u8{
     "%s.rope.dimension_sections",
     "%s.rope.section_order",
     "%s.rope.freq_base",
+    "%s.rope.freq_base_spatial",
     "%s.rope.freq_base_swa",
     "%s.rope.scale_linear",
     "%s.rope.scaling.type",
@@ -1158,8 +1212,10 @@ pub const kv_names = [_]?[:0]const u8{
     "tokenizer.ggml.add_bos_token",
     "tokenizer.ggml.add_eos_token",
     "tokenizer.ggml.add_sep_token",
+    "tokenizer.ggml.dna_auto_tags",
     "tokenizer.ggml.add_space_prefix",
     "tokenizer.ggml.remove_extra_whitespaces",
+    "tokenizer.ggml.clean_spaces",
     "tokenizer.ggml.precompiled_charsmap",
     "tokenizer.huggingface.json",
     "tokenizer.rwkv.world",
@@ -1167,6 +1223,7 @@ pub const kv_names = [_]?[:0]const u8{
     "tokenizer.ggml.normalizer.nfc",
     "tokenizer.ggml.normalizer.lowercase",
     "tokenizer.ggml.normalizer.strip_accents",
+    "tokenizer.ggml.metaspace.prepend_scheme",
     "tokenizer.ggml.fim_pre_token_id",
     "tokenizer.ggml.fim_suf_token_id",
     "tokenizer.ggml.fim_mid_token_id",
@@ -1189,6 +1246,7 @@ pub const kv_names = [_]?[:0]const u8{
     "%s.decision.block_count",
     "%s.decision.routing_block_count",
     "%s.decision.head_count",
+    "%s.decision.labels",
     "%s.target_layers",
     "%s.target_hidden_size",
     "%s.block_size",
@@ -1231,7 +1289,7 @@ pub const kv_names = [_]?[:0]const u8{
     "%s.dense_3_feat_out",
 };
 
-/// Ports `LLM_TENSOR_NAMES` (llama-arch.cpp:474 @620d2225c), by `Tensor` ordinal.
+/// Ports `LLM_TENSOR_NAMES` (llama-arch.cpp:498 @8642541b2), by `Tensor` ordinal.
 pub const tensor_names = [_]?[:0]const u8{
     "token_embd",
     "token_embd_norm",
@@ -1257,12 +1315,16 @@ pub const tensor_names = [_]?[:0]const u8{
     "blk.%d.attn_rot_embd",
     "blk.%d.attn_sinks",
     "blk.%d.attn_gate",
+    "blk.%d.attn_resid_alpha",
+    "blk.%d.attn_resid_beta",
     "blk.%d.ffn_gate_inp",
     "blk.%d.ffn_gate_inp_shexp",
     "blk.%d.ffn_norm",
     "blk.%d.post_ffw_norm",
     "blk.%d.post_ffw_norm_1",
     "blk.%d.post_ffw_norm_2",
+    "blk.%d.ffn_norm_ada_down",
+    "blk.%d.ffn_norm_ada_up",
     "blk.%d.pre_ffw_norm_2",
     "blk.%d.ffn_gate",
     "blk.%d.ffn_down",
@@ -1286,6 +1348,10 @@ pub const tensor_names = [_]?[:0]const u8{
     "blk.%d.exp_probs_b_vl",
     "blk.%d.ffn_latent_down",
     "blk.%d.ffn_latent_up",
+    "blk.%d.ffn_pre_exp_norm",
+    "blk.%d.ffn_post_exp_norm",
+    "blk.%d.ffn_resid_alpha",
+    "blk.%d.ffn_resid_beta",
     "blk.%d.attn_q_norm",
     "blk.%d.attn_k_norm",
     "blk.%d.layer_output_norm",
@@ -1405,6 +1471,10 @@ pub const tensor_names = [_]?[:0]const u8{
     "blk.%d.hc_ffn_down",
     "blk.%d.hc_ffn_up",
     "blk.%d.hc_ffn_inject",
+    "blk.%d.hc_attn_down_inject",
+    "blk.%d.hc_ffn_down_inject",
+    "blk.%d.attn_qkv_gate",
+    "blk.%d.ssm_beta_alpha",
     "blk.%d.ple_key",
     "blk.%d.ple_value",
     "blk.%d.ple_norm_key",
@@ -1524,6 +1594,8 @@ pub const tensor_names = [_]?[:0]const u8{
     "markov_w1",
     "markov_w2",
     "conf_proj",
+    "blk.%d.engram_kv",
+    "blk.%d.engram_gate",
     "blk.%d.attn_conv_base",
     "blk.%d.attn_conv_proj",
     "blk.%d.ffn_conv_base",
@@ -1548,7 +1620,7 @@ pub const tensor_names = [_]?[:0]const u8{
     "blk.%d.attn_v_exps",
 };
 
-/// Ports `LLM_TENSOR_INFOS` (llama-arch.cpp:799 @620d2225c), by `Tensor` ordinal.
+/// Ports `LLM_TENSOR_INFOS` (llama-arch.cpp:837 @8642541b2), by `Tensor` ordinal.
 pub const tensor_infos = [_]?TensorInfo{
     .{ .layer = .input, .op = c.GGML_OP_GET_ROWS },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },
@@ -1574,12 +1646,16 @@ pub const tensor_infos = [_]?TensorInfo{
     null, // LLM_TENSOR_ATTN_ROT_EMBD
     .{ .layer = .repeating, .op = c.GGML_OP_SCALE },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL_MAT },
+    .{ .layer = .repeating, .op = c.GGML_OP_MUL },
+    .{ .layer = .repeating, .op = c.GGML_OP_MUL },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL_MAT },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL_MAT },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },
+    .{ .layer = .repeating, .op = c.GGML_OP_MUL_MAT },
+    .{ .layer = .repeating, .op = c.GGML_OP_MUL_MAT },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL_MAT },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL_MAT },
@@ -1603,6 +1679,10 @@ pub const tensor_infos = [_]?TensorInfo{
     .{ .layer = .repeating, .op = c.GGML_OP_ADD },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL_MAT },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL_MAT },
+    .{ .layer = .repeating, .op = c.GGML_OP_MUL },
+    .{ .layer = .repeating, .op = c.GGML_OP_MUL },
+    .{ .layer = .repeating, .op = c.GGML_OP_MUL },
+    .{ .layer = .repeating, .op = c.GGML_OP_MUL },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },
@@ -1724,6 +1804,10 @@ pub const tensor_infos = [_]?TensorInfo{
     .{ .layer = .repeating, .op = c.GGML_OP_MUL_MAT },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL_MAT },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL_MAT },
+    .{ .layer = .repeating, .op = c.GGML_OP_MUL_MAT },
+    .{ .layer = .repeating, .op = c.GGML_OP_MUL_MAT },
+    .{ .layer = .repeating, .op = c.GGML_OP_MUL_MAT },
+    .{ .layer = .repeating, .op = c.GGML_OP_MUL_MAT },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },
@@ -1837,10 +1921,12 @@ pub const tensor_infos = [_]?TensorInfo{
     .{ .layer = .input, .op = c.GGML_OP_NONE },
     .{ .layer = .repeating, .op = c.GGML_OP_ADD },
     .{ .layer = .output, .op = c.GGML_OP_MUL_MAT },
-    .{ .layer = .output, .op = c.GGML_OP_GET_ROWS },
+    .{ .layer = .output, .op = c.GGML_OP_SET_ROWS },
     .{ .layer = .output, .op = c.GGML_OP_GET_ROWS },
     .{ .layer = .output, .op = c.GGML_OP_MUL_MAT },
     .{ .layer = .output, .op = c.GGML_OP_MUL_MAT },
+    .{ .layer = .repeating, .op = c.GGML_OP_MUL_MAT },
+    .{ .layer = .repeating, .op = c.GGML_OP_MUL },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL_MAT },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },

@@ -55,10 +55,14 @@ zig cc -mcpu=baseline -c harness/proxy_dev.c -o "$tmp/proxy_dev.o" -O2 \
     -I llama.cpp/ggml/include -I llama.cpp/ggml/src 2>"$tmp/perr" \
     || { echo "FAIL: cannot compile harness/proxy_dev.c" >&2; head -20 "$tmp/perr" >&2; exit 1; }
 
+zig c++ -mcpu=baseline -c harness/context_ref.cpp -o "$tmp/context_ref.o" -std=c++17 -O2 -w \
+    -I llama.cpp/src -I llama.cpp/include -I llama.cpp/ggml/include 2>"$tmp/cerr" \
+    || { echo "FAIL: cannot compile harness/context_ref.cpp" >&2; head -20 "$tmp/cerr" >&2; exit 1; }
+
 zig build-exe -mcpu baseline -femit-bin="$tmp/context_diff" -Ofast -lc \
     --dep harness_root -Mroot=harness/context_diff.zig \
     --dep llama_c -Mharness_root=src/llama/harness_root.zig -Mllama_c="$tmp/llama_c.zig" \
-    "$tmp/proxy_dev.o" zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
+    "$tmp/proxy_dev.o" "$tmp/context_ref.o" zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
     "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
 
@@ -78,6 +82,10 @@ if [ $explicit_model = 0 ] && [ $# = 0 ]; then
 fi
 
 status=0
+# The MoE cache's eviction policy, which no node hash can see.
+if [ $explicit_model = 0 ] && [ $# = 0 ]; then
+    ./scripts/moe-slru-diff || status=1
+fi
 CONTEXT_DIFF_TMP="$tmp" "$tmp/context_diff" "$model" "$@" || status=1
 if [ $extra = 1 ]; then
     run() { echo "== context_diff $*"; CONTEXT_DIFF_TMP="$tmp" MOE_CACHE_SIZE="${MOE_CACHE_SIZE:-2000000}" "$tmp/context_diff" "$@" || status=1; }
@@ -93,5 +101,15 @@ if [ $extra = 1 ]; then
     run "$FIXTURES/llama-dense.gguf" --hadamard-tied --model gpu
     run "$model" --section-order zyxt --model gpu --case-exact default
     run "$FIXTURES/dflash-gemma.gguf" --target "$FIXTURES/qwen3-dense.gguf" --model gpu --case-exact default
+    # v0.8.0: `no_alloc` is a parameter of every memory, not a hparam, so each
+    # kind of memory builds with dummy buffers and reports the same breakdown.
+    for f in qwen3-dense gemma3-dense mamba-dense qwen35moe-moe jamba-dense glm-dsa-moe deepseek32-moe deepseek4-moe minimax-m3-moe glm5-next-moe; do
+        run "$FIXTURES/$f.gguf" --model no-alloc --case-exact default
+    done
+    run "$FIXTURES/deepseek2-moe.gguf" --model no-alloc-moe-cache --case-exact default
+    # DeepSeek-V4.1's cross-layer KV across devices (the mirrors), and tokens
+    # shared by sequences whose Engram n-gram histories differ.
+    run "$FIXTURES/deepseek41-moe.gguf" --model partial-2 --case-exact default
+    run "$FIXTURES/deepseek41-moe.gguf" --model gpu --case-exact "shared history"
 fi
 exit $status

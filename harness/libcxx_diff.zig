@@ -32,7 +32,7 @@ extern fn ref_uniform_f32(seed: u32, out: [*]f32, n: usize) void;
 extern fn ref_discrete(d: [*]const TokenData, n: usize, seed: u32, draws: c_int, out: [*]c_int) void;
 extern fn ref_hash_string(s: [*]const u8, n: usize) usize;
 extern fn ref_next_prime(n: usize) usize;
-extern fn ref_umap(blob: [*]const u8, offs: [*]const usize, n: usize, out: [*]c_int, bc: *usize) usize;
+extern fn ref_umap(blob: [*]const u8, offs: [*]const usize, n: usize, reserve: usize, out: [*]c_int, bc: *usize) usize;
 
 const PqItem = extern struct { score: f32, left: c_int };
 extern fn ref_pq(items: [*]const PqItem, ops: [*]const c_int, n_ops: usize, out: [*]PqItem) usize;
@@ -326,7 +326,7 @@ pub fn main() !void {
         var buf: [80]u8 = undefined;
         const out = try gpa.alloc(c_int, 300000);
         defer gpa.free(out);
-        for ([_]usize{ 0, 1, 2, 3, 5, 12, 13, 29, 30, 97, 1000, 32000, 151936, 248320 }) |n| {
+        for ([_]usize{ 0, 1, 2, 3, 4, 5, 8, 12, 13, 29, 30, 97, 256, 1000, 1024, 4096, 32000, 65536, 151936, 248320 }) |n| {
             blob.clearRetainingCapacity();
             offs.clearRetainingCapacity();
             try offs.append(gpa, 0);
@@ -335,26 +335,33 @@ pub fn main() !void {
                 try blob.appendSlice(gpa, randomString(r, &buf, len));
                 try offs.append(gpa, blob.items.len);
             }
-            var rbc: usize = 0;
-            const rn = ref_umap(blob.items.ptr, offs.items.ptr, n, out.ptr, &rbc);
+            // Grown by insertion, then `reserve` of the size -- what
+            // `llama-vocab.cpp` does since v0.8.0, which keeps a power of two
+            // -- and of less and more than it, so growth continues from a
+            // reserved table, power of two or not.
+            for ([_]usize{ std.math.maxInt(usize), n, n / 2, n / 2 + 1, 2 * n + 1, 2 * n }) |reserve| {
+                var rbc: usize = 0;
+                const rn = ref_umap(blob.items.ptr, offs.items.ptr, n, reserve, out.ptr, &rbc);
 
-            var m = try libcxx.StringMap(c_int).init(gpa);
-            defer m.deinit();
-            for (0..n) |i| {
-                const slot = try m.getOrPut(blob.items[offs.items[i]..offs.items[i + 1]], 0);
-                slot.value.* = @intCast(i);
-            }
-            checks += 1;
-            var same = rn == m.count() and rbc == m.bucketCount();
-            var it = m.iterator();
-            var k: usize = 0;
-            while (it.next()) |e| : (k += 1) {
-                if (k >= rn or out[k] != e.value.*) same = false;
-            }
-            if (k != rn) same = false;
-            if (!same) {
-                failures += 1;
-                std.debug.print("FAIL unordered_map n={d}: ref size {d} buckets {d}, zig size {d} buckets {d}\n", .{ n, rn, rbc, m.count(), m.bucketCount() });
+                var m = try libcxx.StringMap(c_int).init(gpa);
+                defer m.deinit();
+                if (reserve != std.math.maxInt(usize)) try m.reserve(reserve);
+                for (0..n) |i| {
+                    const slot = try m.getOrPut(blob.items[offs.items[i]..offs.items[i + 1]], 0);
+                    slot.value.* = @intCast(i);
+                }
+                checks += 1;
+                var same = rn == m.count() and rbc == m.bucketCount();
+                var it = m.iterator();
+                var k: usize = 0;
+                while (it.next()) |e| : (k += 1) {
+                    if (k >= rn or out[k] != e.value.*) same = false;
+                }
+                if (k != rn) same = false;
+                if (!same) {
+                    failures += 1;
+                    std.debug.print("FAIL unordered_map n={d} reserve={d}: ref size {d} buckets {d}, zig size {d} buckets {d}\n", .{ n, reserve, rn, rbc, m.count(), m.bucketCount() });
+                }
             }
         }
     }

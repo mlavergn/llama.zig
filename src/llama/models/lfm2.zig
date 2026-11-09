@@ -12,14 +12,15 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/lfm2.cpp` at v0.7.0 (`620d2225c`):
+//! Ported from `llama.cpp/src/models/lfm2.cpp` at v0.8.0 (`8642541b2`):
 //! `llama_model_lfm2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `graph<iswa>` with the lambdas inside it, and
 //! the decision model's `N_DECISION_TYPES`, `lfm2_is_media`, the graph
 //! inputs `llm_graph_input_attn_media` and `llm_graph_input_conv_mask`, and
 //! `graph_decision` with `build_decision_head`; and from
-//! `llama.cpp/src/models/models.h` at v0.7.0, `llama_model_lfm2`'s
-//! `graph_decision`. LFM2-MoE (`lfm2moe.zig`) builds the same graph.
+//! `llama.cpp/src/models/models.h` at v0.8.0, `llama_model_lfm2`'s
+//! `graph_decision`. The short convolution and the feed-forwards are
+//! `lfm_base.zig`'s. LFM2-MoE (`lfm2moe.zig`) builds the same graph.
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -29,6 +30,7 @@ const graph = @import("../graph.zig");
 const hparams_mod = @import("../hparams.zig");
 const memory_hybrid = @import("../memory_hybrid.zig");
 const memory_hybrid_iswa = @import("../memory_hybrid_iswa.zig");
+const lfm_base = @import("lfm_base.zig");
 
 const batch = @import("../batch.zig");
 
@@ -44,11 +46,11 @@ fn oom() noreturn {
     impl.abort("models/lfm2.cpp", 0, "out of memory");
 }
 
-/// Ports `N_DECISION_TYPES` (models/lfm2.cpp:8 @620d2225c): the question
+/// Ports `N_DECISION_TYPES` (models/lfm2.cpp:8 @8642541b2): the question
 /// types of a decision model -- choice, score, noul.
 const n_decision_types: u32 = 3;
 
-/// Ports `llama_model_lfm2`'s `load_arch_hparams` (models/lfm2.cpp:10 @620d2225c).
+/// Ports `llama_model_lfm2`'s `load_arch_hparams` (models/lfm2.cpp:10 @8642541b2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -93,7 +95,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_lfm2`'s `load_arch_tensors` (models/lfm2.cpp:46
-/// @620d2225c); LFM2-MoE's (models/lfm2moe.cpp:23 @620d2225c) is the same
+/// @8642541b2); LFM2-MoE's (models/lfm2moe.cpp:23 @8642541b2) is the same
 /// body without the decision head, which it never reaches: LFM2-MoE reads
 /// no decision block count, so its `n_layer_decision` is 0.
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
@@ -201,7 +203,7 @@ pub fn loadTensors(self: *Model, comptime file: [:0]const u8, comptime line_moe:
 }
 
 /// Ports `llama_model_lfm2`'s `build_arch_graph` (models/lfm2.cpp:137
-/// @620d2225c); LFM2-MoE's (models/lfm2moe.cpp:78 @620d2225c) is the same
+/// @8642541b2); LFM2-MoE's (models/lfm2moe.cpp:78 @8642541b2) is the same
 /// without the decision graph, which its `n_layer_decision` of 0 never
 /// takes.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
@@ -217,43 +219,13 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
     }
 }
 
-/// The constructor's `build_dense_feed_forward` lambda (models/lfm2.cpp:156
-/// @620d2225c).
-fn buildDenseFeedForward(model: *const Model, b: *const graph.Builder, cur: *Tensor, il: c_int) *Tensor {
-    const layer = &model.layers[@intCast(il)];
-    impl.assert(layer.ffn_up_b == null, "models/lfm2.cpp", 157, "!model.layers[il].ffn_up_b");
-    impl.assert(layer.ffn_gate_b == null, "models/lfm2.cpp", 158, "!model.layers[il].ffn_gate_b");
-    impl.assert(layer.ffn_down_b == null, "models/lfm2.cpp", 159, "!model.layers[il].ffn_down_b");
-    return b.buildFfn(cur, layer.ffn_up, null, null, layer.ffn_gate, null, null, layer.ffn_down, null, null, null, .silu, .par, il);
-}
-
-/// The constructor's `build_moe_feed_forward` lambda (models/lfm2.cpp:166
-/// @620d2225c).
-fn buildMoeFeedForward(model: *const Model, b: *const graph.Builder, cur: *Tensor, il: c_int) *Tensor {
-    const layer = &model.layers[@intCast(il)];
-    const hp = b.hparams;
-    return b.buildMoeFfn(cur, .{
-        .gate_inp = layer.ffn_gate_inp,
-        .up_exps = layer.ffn_up_exps,
-        .gate_exps = layer.ffn_gate_exps,
-        .down_exps = layer.ffn_down_exps.?,
-        .exp_probs_b = layer.ffn_exp_probs_b,
-        .n_expert = b.n_expert,
-        .n_expert_used = b.n_expert_used,
-        .type_op = .silu,
-        .norm_w = true,
-        .w_scale = hp.expert_weights_scale,
-        .gating_op = @fromBackingInt(@intCast(hp.expert_gating_func)),
-    }, il);
-}
-
-/// The constructor's `build_attn_block` lambda (models/lfm2.cpp:179
-/// @620d2225c): Q/K norms, RoPE and attention.
+/// The constructor's `build_attn_block` lambda (models/lfm2.cpp:155
+/// @8642541b2): Q/K norms, RoPE and attention.
 fn buildAttnBlock(model: *const Model, b: *const graph.Builder, cur_: *Tensor, inp_pos: *Tensor, inp_attn: anytype, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
-    impl.assert(hp.nEmbdVGqa(@intCast(il)) == hp.nEmbdKGqa(@intCast(il)), "models/lfm2.cpp", 183, "hparams.n_embd_v_gqa(il) == hparams.n_embd_k_gqa(il)");
+    impl.assert(hp.nEmbdVGqa(@intCast(il)) == hp.nEmbdKGqa(@intCast(il)), "models/lfm2.cpp", 159, "hparams.n_embd_v_gqa(il) == hparams.n_embd_k_gqa(il)");
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
     const n_head_kv: i64 = hp.nHeadKv(@intCast(il));
 
@@ -279,90 +251,12 @@ fn buildAttnBlock(model: *const Model, b: *const graph.Builder, cur_: *Tensor, i
     return cur;
 }
 
-/// The constructor's `build_shortconv_block` lambda (models/lfm2.cpp:210
-/// @620d2225c): a gated depthwise convolution over the last
-/// `n_shortconv_l_cache` tokens, whose state is the recurrent memory.
-fn buildShortconvBlock(comptime iswa: bool, model: *const Model, b: *const graph.Builder, cur_: *Tensor, inp_recr: *const graph.InpRs, il: c_int) *Tensor {
-    const ctx = b.ctx0;
-    const hp = b.hparams;
-    const layer = &model.layers[@intCast(il)];
-    const MemHybridCtx = if (iswa) memory_hybrid_iswa.HybridIswaContext else memory_hybrid.HybridContext;
-    const mctx_cur = b.mctx.?.cast(MemHybridCtx).getRecr();
-    const kv_head: u32 = mctx_cur.getHead();
-    const n_seq_tokens: i64 = b.ubatch.n_seq_tokens;
-    const n_seqs: i64 = b.ubatch.n_seqs;
-    impl.assert(n_seqs != 0, "models/lfm2.cpp", 217, "n_seqs != 0");
-    impl.assert(b.ubatch.equalSeqs(), "models/lfm2.cpp", 218, "ubatch.equal_seqs()");
-    impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "models/lfm2.cpp", 219, "ubatch.n_tokens == n_seq_tokens * n_seqs");
-
-    impl.assert(hp.n_shortconv_l_cache > 1, "models/lfm2.cpp", 221, "hparams.n_shortconv_l_cache > 1");
-    const d_conv: u32 = hp.n_shortconv_l_cache - 1;
-
-    // {n_embd, n_tokens} => {n_embd, n_seq_tokens, n_seqs}
-    var cur: *Tensor = c.ggml_reshape_3d(ctx, cur_, cur_.ne[0], n_seq_tokens, n_seqs);
-
-    const bcx = b.buildLoraMm(layer.shortconv.in_proj.?, cur, null);
-    b.cb(bcx, "model.layers.{}.conv.in_proj", il);
-
-    const n_chunks = 3;
-    impl.assert(@rem(bcx.ne[0], n_chunks) == 0, "models/lfm2.cpp", 231, "bcx->ne[0] % n_chunks == 0");
-    const chunk_size = @divTrunc(bcx.ne[0], n_chunks);
-    const es = c.ggml_element_size(bcx);
-    const chunk_bytes: usize = @intCast(chunk_size);
-    const bv: *Tensor = c.ggml_view_3d(ctx, bcx, chunk_size, bcx.ne[1], bcx.ne[2], bcx.nb[1], bcx.nb[2], 0 * chunk_bytes * es);
-    const cv: *Tensor = c.ggml_view_3d(ctx, bcx, chunk_size, bcx.ne[1], bcx.ne[2], bcx.nb[1], bcx.nb[2], 1 * chunk_bytes * es);
-    const xv: *Tensor = c.ggml_view_3d(ctx, bcx, chunk_size, bcx.ne[1], bcx.ne[2], bcx.nb[1], bcx.nb[2], 2 * chunk_bytes * es);
-
-    var bx: *Tensor = c.ggml_transpose(ctx, c.ggml_mul(ctx, bv, xv));
-
-    // Read the conv state.
-    const conv_state = mctx_cur.getRL(il);
-    const conv_rs = b.buildRs(inp_recr, conv_state, @intCast(hp.nEmbdR()), @intCast(n_seqs), null);
-    const conv: *Tensor = c.ggml_reshape_3d(ctx, conv_rs, d_conv, hp.n_embd, n_seqs);
-
-    // Causal prepends the state; non-causal pads symmetrically for a
-    // centered window.
-    if (hp.causal_attn) {
-        bx = c.ggml_concat(ctx, conv, bx, 0);
-    } else {
-        const pad: i64 = @divTrunc(@as(i64, hp.n_shortconv_l_cache) - 1, 2);
-        const left: *Tensor = c.ggml_cont(ctx, c.ggml_view_3d(ctx, conv, pad, hp.n_embd, n_seqs, conv.nb[1], conv.nb[2], @as(usize, @intCast(@as(i64, d_conv) - pad)) * conv.nb[0]));
-        bx = c.ggml_pad_ext(ctx, c.ggml_concat(ctx, left, bx, 0), 0, @intCast(pad), 0, 0, 0, 0, 0, 0);
-    }
-    impl.assert(bx.ne[0] > conv.ne[0], "models/lfm2.cpp", 256, "bx->ne[0] > conv->ne[0]");
-
-    // Write the conv states: slot 0 is the final state, slot s the state s
-    // tokens back (for a partial rollback).
-    const K: i64 = if (hp.causal_attn and b.cparams.n_rs_seq > 0) @as(i64, b.cparams.n_rs_seq) + 1 else 1;
-    const n_written: i64 = @min(n_seq_tokens, K);
-    const mem_size: usize = mctx_cur.getSize();
-    const row_size: usize = c.ggml_row_size(conv_state.type, @as(i64, d_conv) * b.n_embd);
-
-    var slot: i64 = 0;
-    while (slot < n_written) : (slot += 1) {
-        const conv_snap: *Tensor = c.ggml_view_3d(ctx, bx, d_conv, bx.ne[1], bx.ne[2], bx.nb[1], bx.nb[2], @as(usize, @intCast(bx.ne[0] - d_conv - slot)) * c.ggml_element_size(bx));
-        c.ggml_build_forward_expand(b.gf, c.ggml_cpy(ctx, conv_snap, c.ggml_view_2d(ctx, conv_state, @as(i64, d_conv) * b.n_embd, n_seqs, conv_state.nb[1], (@as(usize, @intCast(slot)) * mem_size + kv_head) * row_size)));
-    }
-
-    const conv_kernel = layer.shortconv.conv;
-    const conv_out: *Tensor = c.ggml_ssm_conv(ctx, bx, conv_kernel);
-    b.cb(conv_out, "model.layers.{}.conv.conv", il);
-
-    var y: *Tensor = c.ggml_mul(ctx, cv, conv_out);
-    y = b.buildLoraMm(layer.shortconv.out_proj.?, y, null);
-    b.cb(y, "model.layers.{}.conv.out_proj", il);
-    // {n_embd, n_seq_tokens, n_seqs} => {n_embd, n_tokens}
-    y = c.ggml_reshape_2d(ctx, y, y.ne[0], n_seq_tokens * n_seqs);
-
-    cur = y;
-    return cur;
-}
-
 /// Ports the constructor of `llama_model_lfm2`'s `graph<iswa>`
-/// (models/lfm2.cpp:149 @620d2225c).
+/// (models/lfm2.cpp:149 @8642541b2).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
+    const MemHybridCtx = if (iswa) memory_hybrid_iswa.HybridIswaContext else memory_hybrid.HybridContext;
 
     var cur = b.buildInpEmbd(model.tok_embd.?);
     b.cb(cur, "model.embed_tokens", -1);
@@ -385,10 +279,12 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
         cur = b.buildNorm(cur, layer.attn_norm, null, .rms, il);
         b.cb(cur, "model.layers.{}.operator_norm", il);
 
-        cur = if (hp.isRecr(@intCast(il)))
-            buildShortconvBlock(iswa, model, b, cur, inp_hybrid.getRecr(), il)
-        else
-            buildAttnBlock(model, b, cur, inp_pos, inp_hybrid.getAttn(), il);
+        if (hp.isRecr(@intCast(il))) {
+            const mctx_recr = b.mctx.?.cast(MemHybridCtx).getRecr();
+            cur = lfm_base.buildLfmShortconv(model, b, mctx_recr, inp_hybrid.getRecr(), cur, il);
+        } else {
+            cur = buildAttnBlock(model, b, cur, inp_pos, inp_hybrid.getAttn(), il);
+        }
 
         if (il == b.n_layer - 1) {
             cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
@@ -400,7 +296,7 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
         const ffn_norm_out = b.buildNorm(cur, layer.ffn_norm, null, .rms, il);
         b.cb(ffn_norm_out, "model.layers.{}.ffn_norm", il);
 
-        const ffn_out = if (is_moe_layer) buildMoeFeedForward(model, b, ffn_norm_out, il) else buildDenseFeedForward(model, b, ffn_norm_out, il);
+        const ffn_out = if (is_moe_layer) lfm_base.buildLfmMoeFfn(model, b, ffn_norm_out, il) else lfm_base.buildLfmDenseFfn(model, b, ffn_norm_out, il);
         // The C++ names the norm's output here, not the FFN's.
         b.cb(ffn_norm_out, "model.layers.{}.ffn_out", il);
 
@@ -425,13 +321,13 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
 // -----------------------------------------------------------------------------
 // The decision model
 
-/// Ports `lfm2_is_media` (models/lfm2.cpp:347 @620d2225c): a media entry
+/// Ports `lfm2_is_media` (models/lfm2.cpp:251 @8642541b2): a media entry
 /// (an image or audio prefix) is an embedding, a text entry a token.
 fn isMedia(ubatch: *const Ubatch, i: usize) bool {
     return if (ubatch.isMixed()) ubatch.type[i] != 0 else ubatch.token == null;
 }
 
-/// Ports `llm_graph_input_attn_media` (models/lfm2.cpp:353 @620d2225c):
+/// Ports `llm_graph_input_attn_media` (models/lfm2.cpp:257 @8642541b2):
 /// non-causal within a sequence, the media never reading the text, so that
 /// it is a function of the media alone; in the head, the text and the
 /// media each read only their own kind. The C++ derives from
@@ -457,8 +353,8 @@ const InpAttnMedia = struct {
         }
     }
 
-    /// Ports `llm_graph_input_attn_media`'s `set_input` (models/lfm2.cpp:358
-    /// @620d2225c).
+    /// Ports `llm_graph_input_attn_media`'s `set_input` (models/lfm2.cpp:262
+    /// @8642541b2).
     pub fn setInput(self: *InpAttnMedia, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         const n_tokens: usize = ubatch.n_tokens;
@@ -468,7 +364,7 @@ const InpAttnMedia = struct {
         for (is_media, 0..) |*m, i| m.* = isMedia(ubatch, i);
 
         const m = self.base.self_kq_mask.?;
-        impl.assert(c.ggml_backend_buffer_is_host(m.buffer), "models/lfm2.cpp", 380, "ggml_backend_buffer_is_host(self_kq_mask->buffer)");
+        impl.assert(c.ggml_backend_buffer_is_host(m.buffer), "models/lfm2.cpp", 284, "ggml_backend_buffer_is_host(self_kq_mask->buffer)");
         if (m.type == c.GGML_TYPE_F16) {
             self.fillMask(u16, @ptrCast(@alignCast(m.data)), ubatch, is_media, c.ggml_fp32_to_fp16(0.0), c.ggml_fp32_to_fp16(-std.math.inf(f32)));
         } else {
@@ -477,7 +373,7 @@ const InpAttnMedia = struct {
     }
 };
 
-/// Ports `llm_graph_input_conv_mask` (models/lfm2.cpp:393 @620d2225c): 1
+/// Ports `llm_graph_input_conv_mask` (models/lfm2.cpp:297 @8642541b2): 1
 /// where the previous (next) token is the left (right) neighbour in the
 /// same sequence; the last media entry does not read the text on its
 /// right.
@@ -487,8 +383,8 @@ const InpConvMask = struct {
     /// F32 `[1, n_tokens]`.
     right: ?*Tensor = null,
 
-    /// Ports `llm_graph_input_conv_mask`'s `set_input` (models/lfm2.cpp:395
-    /// @620d2225c).
+    /// Ports `llm_graph_input_conv_mask`'s `set_input` (models/lfm2.cpp:299
+    /// @8642541b2).
     pub fn setInput(self: *InpConvMask, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         const n_tokens: usize = ubatch.n_tokens;
@@ -511,11 +407,11 @@ const InpConvMask = struct {
 };
 
 /// Ports the constructor of `llama_model_lfm2`'s `graph_decision`
-/// (models/lfm2.cpp:413 @620d2225c): the non-causal trunk without a
+/// (models/lfm2.cpp:317 @8642541b2): the non-causal trunk without a
 /// memory, then the decision head. The trunk's short convolution is a
 /// centred three-tap one over the batch, a tap outside the sequence
 /// reading 0. `llama_model_lfm2` declares it as `graph_decision`
-/// (src/models/models.h:2241 @620d2225c).
+/// (src/models/models.h:2415 @8642541b2).
 fn buildGraphDecision(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -576,7 +472,7 @@ fn buildGraphDecision(model: *const Model, b: *const graph.Builder) void {
             const prv: *Tensor = c.ggml_view_2d(ctx, bxp, n_embd, n_tokens, bxp.nb[1], 0);
             const nxt: *Tensor = c.ggml_view_2d(ctx, bxp, n_embd, n_tokens, bxp.nb[1], 2 * bxp.nb[1]);
 
-            impl.assert(hp.n_shortconv_l_cache == 3, "models/lfm2.cpp", 465, "hparams.n_shortconv_l_cache == 3");
+            impl.assert(hp.n_shortconv_l_cache == 3, "models/lfm2.cpp", 369, "hparams.n_shortconv_l_cache == 3");
             const taps: *Tensor = c.ggml_cont(ctx, c.ggml_transpose(ctx, layer.shortconv.conv));
             const tap0: *Tensor = c.ggml_view_1d(ctx, taps, n_embd, 0 * taps.nb[1]);
             const tap1: *Tensor = c.ggml_view_1d(ctx, taps, n_embd, 1 * taps.nb[1]);
@@ -623,7 +519,7 @@ fn buildGraphDecision(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_lfm2::graph_decision`'s `build_decision_head`
-/// (models/lfm2.cpp:518 @620d2225c): ModernBERT's
+/// (models/lfm2.cpp:422 @8642541b2): ModernBERT's
 /// (`modern_bert.zig`'s `buildDecisionHead`) with the head counts of the
 /// head layers. The question type is not a graph input, so the head is
 /// evaluated once per type: `[n_decision_types, n_outputs]`.

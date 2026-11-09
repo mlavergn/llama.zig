@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/gpt-oss.cpp` (llama.cpp v0.7.0,
-//! `620d2225c`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/gpt-oss.cpp` (llama.cpp v0.8.0,
+//! `8642541b2`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -154,7 +154,7 @@ fn adjustMessages(a: Allocator, messages: *const Value) Error!Value {
     return adjusted;
 }
 
-/// Ports `common_chat_params_init_gpt_oss` (parsers/gpt-oss.cpp:3 @620d2225c).
+/// Ports `common_chat_params_init_gpt_oss` (parsers/gpt-oss.cpp:3 @8642541b2).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

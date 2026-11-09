@@ -6,8 +6,8 @@
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-buffers.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-debug.cpp`, and
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.7.0
-//! (`620d2225c`). Upstream split `ggml-vulkan.cpp` into those files at
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.8.0
+//! (`8642541b2`). Upstream split `ggml-vulkan.cpp` into those files at
 //! v0.5.0. A `vk_buffer` is a `std::shared_ptr` whose destructor frees the
 //! memory; here it is reference counted by hand, and only the holders the
 //! C++'s lifetimes depend on take a reference.
@@ -29,7 +29,7 @@ fn oom() noreturn {
     impl.abort("ggml_vulkan: out of memory");
 }
 
-/// Ports `vk_buffer_struct` (ggml-vulkan-types.h:1035 @620d2225c).
+/// Ports `vk_buffer_struct` (ggml-vulkan-types.h:1037 @8642541b2).
 pub const Buffer = struct {
     buffer: vk.VkBuffer = null,
     device_memory: vk.VkDeviceMemory = null,
@@ -61,7 +61,7 @@ pub const Buffer = struct {
     }
 };
 
-/// Ports `vk_subbuffer` (ggml-vulkan-types.h:1058 @620d2225c). Transient: it
+/// Ports `vk_subbuffer` (ggml-vulkan-types.h:1060 @8642541b2). Transient: it
 /// does not keep its buffer alive, and nothing in the C++ relies on it to.
 pub const Subbuffer = struct {
     buffer: ?*Buffer = null,
@@ -77,7 +77,7 @@ pub const Subbuffer = struct {
 // -----------------------------------------------------------------------------
 // The memory logger
 
-/// Ports `format_size` (ggml-vulkan-types.h:1144 @620d2225c).
+/// Ports `format_size` (ggml-vulkan-types.h:1146 @8642541b2).
 fn formatSize(size: usize, buf: []u8) [:0]const u8 {
     const kib: usize = 1024;
     const mib = kib * 1024;
@@ -93,7 +93,7 @@ fn formatSize(size: usize, buf: []u8) [:0]const u8 {
         std.fmt.bufPrintSentinel(buf, "{d} B", .{size}, 0)) catch unreachable;
 }
 
-/// Ports `vk_memory_logger` (ggml-vulkan-types.h:1165 @620d2225c), one per
+/// Ports `vk_memory_logger` (ggml-vulkan-types.h:1167 @8642541b2), one per
 /// process here where the C++ keeps one per device; its totals are per
 /// device in the C++, so they are keyed by device.
 const memory_logger = struct {
@@ -101,7 +101,7 @@ const memory_logger = struct {
     var allocations: std.AutoHashMapUnmanaged(vk.VkBuffer, usize) = .empty;
     var totals: std.AutoHashMapUnmanaged(*Device, [2]usize) = .empty;
 
-    /// Ports `vk_memory_logger`'s `log_allocation` (ggml-vulkan-debug.cpp:15 @620d2225c).
+    /// Ports `vk_memory_logger`'s `log_allocation` (ggml-vulkan-debug.cpp:15 @8642541b2).
     fn logAllocation(buf: *Buffer, size: usize) void {
         if (!m.instance.loggers.memory_logger_enabled) return;
         _ = std.c.pthread_mutex_lock(&mutex);
@@ -116,7 +116,7 @@ const memory_logger = struct {
         impl.fprintfStderr("ggml_vulkan memory: %s: +%s %s at %p. Total device: %s, total host: %s\n", .{ buf.device.name.ptr, formatSize(size, &a).ptr, @as([*:0]const u8, if (device) "device" else "host"), @as(?*anyopaque, buf.buffer), formatSize(t.value_ptr[0], &b).ptr, formatSize(t.value_ptr[1], &e).ptr });
     }
 
-    /// Ports `vk_memory_logger`'s `log_deallocation` (ggml-vulkan-debug.cpp:29 @620d2225c).
+    /// Ports `vk_memory_logger`'s `log_deallocation` (ggml-vulkan-debug.cpp:29 @8642541b2).
     fn logDeallocation(buf: *Buffer) void {
         if (buf.size == 0 or !m.instance.loggers.memory_logger_enabled) return;
         _ = std.c.pthread_mutex_lock(&mutex);
@@ -136,7 +136,7 @@ const memory_logger = struct {
     }
 };
 
-/// `VK_LOG_MEMORY` (ggml-vulkan-types.h:1142 @620d2225c), for its plain-text uses.
+/// `VK_LOG_MEMORY` (ggml-vulkan-types.h:1144 @8642541b2), for its plain-text uses.
 pub fn logMemory(comptime fmt: []const u8, args: anytype) void {
     if (m.instance.loggers.memory_logger_enabled) impl.fprintfStderr("ggml_vulkan memory: " ++ fmt ++ "\n", args);
 }
@@ -144,7 +144,7 @@ pub fn logMemory(comptime fmt: []const u8, args: anytype) void {
 // -----------------------------------------------------------------------------
 // Creation
 
-/// Ports `ggml_vk_find_memory_properties` (ggml-vulkan-buffers.cpp:36 @620d2225c).
+/// Ports `ggml_vk_find_memory_properties` (ggml-vulkan-buffers.cpp:39 @8642541b2).
 fn findMemoryProperties(mem_props: *const vk.VkPhysicalDeviceMemoryProperties, mem_req: *const vk.VkMemoryRequirements, flags: vk.VkMemoryPropertyFlags, out: *[vk.VK_MAX_MEMORY_TYPES]u32) usize {
     var n: usize = 0;
     for (0..mem_props.memoryTypeCount) |i| {
@@ -174,7 +174,7 @@ fn getMemoryProperties(device: *Device) vk.VkPhysicalDeviceMemoryProperties {
     return props;
 }
 
-/// Ports `ggml_vk_create_buffer` (ggml-vulkan-buffers.cpp:50 @620d2225c): a buffer
+/// Ports `ggml_vk_create_buffer` (ggml-vulkan-buffers.cpp:53 @8642541b2): a buffer
 /// backed by the first memory type, trying each set of flags in order,
 /// that allocates; or, given `import_ptr`, imported host memory.
 ///
@@ -324,7 +324,7 @@ pub fn createBuffer(device: *Device, size: usize, req_flags_list: []const vk.VkM
     return buf;
 }
 
-/// Ports `ggml_vk_create_buffer_check` (ggml-vulkan-buffers.cpp:207 @620d2225c): a
+/// Ports `ggml_vk_create_buffer_check` (ggml-vulkan-buffers.cpp:210 @8642541b2): a
 /// failure prints the size and rethrows, and nothing catches it.
 pub fn createBufferCheck(device: *Device, size: usize, req_flags: vk.VkMemoryPropertyFlags, fallback_flags: vk.VkMemoryPropertyFlags) *Buffer {
     return (createBuffer(device, size, &.{ req_flags, fallback_flags }, null) catch {
@@ -334,7 +334,7 @@ pub fn createBufferCheck(device: *Device, size: usize, req_flags: vk.VkMemoryPro
     }).?;
 }
 
-/// Ports `ggml_vk_create_buffer_device` (ggml-vulkan-buffers.cpp:217 @620d2225c):
+/// Ports `ggml_vk_create_buffer_device` (ggml-vulkan-buffers.cpp:220 @8642541b2):
 /// device memory for a ggml buffer, with the fallbacks the device's
 /// settings allow.
 ///
@@ -365,7 +365,7 @@ pub fn createBufferDevice(device: *Device, size: usize) common.VkError!*Buffer {
     return buf.?;
 }
 
-/// Ports `ggml_vk_destroy_buffer` (ggml-vulkan-buffers.cpp:256 @620d2225c): drops
+/// Ports `ggml_vk_destroy_buffer` (ggml-vulkan-buffers.cpp:259 @8642541b2): drops
 /// this holder's reference and clears it.
 pub fn destroyBuffer(buf: *?*Buffer) void {
     const b = buf.* orelse return;
@@ -377,21 +377,23 @@ pub fn destroyBuffer(buf: *?*Buffer) void {
 // -----------------------------------------------------------------------------
 // Pinned host memory
 
-/// Ports `portable_aligned_malloc` (ggml-vulkan-buffers.cpp:9 @620d2225c).
+/// Ports `portable_aligned_malloc` (ggml-vulkan-buffers.cpp:8 @8642541b2).
 fn portableAlignedMalloc(alignment: usize, size: usize) ?*anyopaque {
     if (builtin.os.tag == .windows) return win32._aligned_malloc(size, alignment);
-    return aligned_alloc(alignment, size);
+    var ptr: ?*anyopaque = null;
+    if (posix_memalign(&ptr, alignment, size) != 0) return null;
+    return ptr;
 }
 
-/// Ports `portable_aligned_free` (ggml-vulkan-buffers.cpp:17 @620d2225c).
+/// Ports `portable_aligned_free` (ggml-vulkan-buffers.cpp:20 @8642541b2).
 fn portableAlignedFree(ptr: ?*anyopaque) void {
     if (builtin.os.tag == .windows) return win32._aligned_free(ptr);
     std.c.free(ptr);
 }
 
-extern "c" fn aligned_alloc(alignment: usize, size: usize) ?*anyopaque;
+extern "c" fn posix_memalign(memptr: *?*anyopaque, alignment: usize, size: usize) c_int;
 
-/// Ports `vk_host_allocation` (ggml-vulkan-types.h:1313 @620d2225c): one
+/// Ports `vk_host_allocation` (ggml-vulkan-types.h:1315 @8642541b2): one
 /// pinned host allocation and the buffer each device maps it through.
 pub const HostAllocation = struct {
     base: ?*anyopaque = null,
@@ -402,13 +404,13 @@ pub const HostAllocation = struct {
 };
 
 /// Ports `vk_instance_t`'s members `host_allocations` and
-/// `host_allocations_mutex` (ggml-vulkan-types.h:1334, 1335 @620d2225c), which
+/// `host_allocations_mutex` (ggml-vulkan-types.h:1337, 1338 @8642541b2), which
 /// live here rather than in `instance.zig`'s `Instance`. Every lock the C++ takes on the
 /// `std::shared_mutex` is a unique one, so a write lock stands for each.
 var host_allocations: std.ArrayList(HostAllocation) = .empty;
 var host_allocations_mutex: std.c.pthread_rwlock_t = .{};
 
-/// Ports `ggml_vk_host_allocation_find` (ggml-vulkan-buffers.cpp:269 @620d2225c).
+/// Ports `ggml_vk_host_allocation_find` (ggml-vulkan-buffers.cpp:272 @8642541b2).
 /// The caller must hold `host_allocations_mutex`.
 ///
 /// Return: the index of the allocation holding `ptr`, or null.
@@ -421,7 +423,7 @@ fn hostAllocationFind(ptr: ?*const anyopaque) ?usize {
     return null;
 }
 
-/// Ports `ggml_vk_host_malloc` (ggml-vulkan-buffers.cpp:279 @620d2225c). With
+/// Ports `ggml_vk_host_malloc` (ggml-vulkan-buffers.cpp:282 @8642541b2). With
 /// several devices that can all import host memory, the allocation is plain
 /// aligned host memory each device maps on first use; otherwise it is a
 /// host-visible buffer of device 0.
@@ -466,7 +468,7 @@ pub fn hostMalloc(size: usize) ?*anyopaque {
     return entry.base;
 }
 
-/// Ports `ggml_vk_host_free` (ggml-vulkan-buffers.cpp:327 @620d2225c).
+/// Ports `ggml_vk_host_free` (ggml-vulkan-buffers.cpp:330 @8642541b2).
 pub fn hostFree(ptr: ?*anyopaque) void {
     if (ptr == null) return;
     logMemory("ggml_vk_host_free(%p)", .{ptr});
@@ -485,10 +487,11 @@ pub fn hostFree(ptr: ?*anyopaque) void {
     if (m.instance.instance.multi_device) portableAlignedFree(entry.base);
 }
 
-/// Ports `ggml_vk_host_get` (ggml-vulkan-buffers.cpp:353 @620d2225c): the
+/// Ports `ggml_vk_host_get` (ggml-vulkan-buffers.cpp:356 @8642541b2): the
 /// buffer through which `device` sees the pinned memory holding `ptr`, and
 /// the offset of `ptr` in it. With several devices, a device maps the
-/// allocation the first time it asks.
+/// allocation the first time it asks; a device whose import failed once is
+/// not asked again, and stages from then on.
 ///
 /// Return: the buffer, borrowed, or null when `ptr` is not pinned or this
 /// device cannot map it.
@@ -502,48 +505,43 @@ pub fn hostGet(device: *Device, ptr: ?*const anyopaque, buf_offset: *usize) ?*Bu
     const entry = &host_allocations.items[index];
 
     if (entry.views[device.idx] == null) {
-        if (!m.instance.instance.multi_device) return null;
-        if (!device.external_memory_host) {
-            const bit = @as(u32, 1) << @intCast(device.idx);
-            if (host_get_warned_mask.fetchOr(bit, .seq_cst) & bit == 0) {
-                impl.logWarn("ggml_vulkan: %s does not support VK_EXT_external_memory_host; host memory " ++
-                    "will be staged, not pinned, on this device\n", .{device.name.ptr});
-            }
+        const inst = &m.instance.instance;
+        const bit = @as(u32, 1) << @intCast(device.idx);
+        if (!inst.multi_device or !inst.device_host_buffer_import.items[device.idx] or (inst.host_import_failed & bit) != 0) return null;
+        impl.assert(device.external_memory_host, "device->external_memory_host");
+        entry.views[device.idx] = m.iface.bufferFromHostPtr(device, entry.base, entry.size);
+        if (entry.views[device.idx] == null) {
+            inst.host_import_failed |= bit;
+            impl.logWarn("ggml_vulkan: %s: host memory import failed, using staging\n", .{device.name.ptr});
             return null;
         }
-        entry.views[device.idx] = m.iface.bufferFromHostPtr(device, entry.base, entry.size);
-        if (entry.views[device.idx] == null) return null;
     }
 
     buf_offset.* = @intFromPtr(ptr) - @intFromPtr(entry.base);
     return entry.views[device.idx];
 }
 
-/// `ggml_vk_host_get`'s function-local `static std::atomic<uint32_t>
-/// warned_mask`.
-var host_get_warned_mask = std.atomic.Value(u32).init(0);
-
 // -----------------------------------------------------------------------------
 // The device buffer
 
-/// Ports `vk_ptr_base` (ggml-vulkan.cpp:258 @620d2225c): the fake base
+/// Ports `vk_ptr_base` (ggml-vulkan.cpp:258 @8642541b2): the fake base
 /// address tensors in a Vulkan buffer are placed at.
 pub const ptr_base: usize = 0x1000;
 
-/// Ports `vk_tensor_offset` (ggml-vulkan.cpp:260 @620d2225c).
+/// Ports `vk_tensor_offset` (ggml-vulkan.cpp:260 @8642541b2).
 pub fn tensorOffset(tensor: *const c.ggml_tensor) u64 {
     if (tensor.view_src) |vs| return @intFromPtr(vs.*.data) -% ptr_base;
     return @intFromPtr(tensor.data) -% ptr_base;
 }
 
-/// Ports `ggml_backend_vk_buffer_context` (ggml-vulkan-types.h:1298 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_context` (ggml-vulkan-types.h:1300 @8642541b2).
 pub const BufferCtx = struct {
     device: *Device,
     dev_buffer: ?*Buffer,
     name: [:0]const u8,
 };
 
-/// Ports `ggml_backend_vk_buffer_type_context` (ggml-vulkan-types.h:297 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_type_context` (ggml-vulkan-types.h:297 @8642541b2).
 pub const BufferTypeCtx = struct {
     name: [:0]const u8,
     device: *Device,
@@ -559,7 +557,7 @@ fn bufCtx(buffer: c.ggml_backend_buffer_t) *BufferCtx {
     return @ptrCast(@alignCast(buffer.*.context));
 }
 
-/// Ports `ggml_backend_buffer_is_vk` (ggml-vulkan.cpp:13002 @620d2225c).
+/// Ports `ggml_backend_buffer_is_vk` (ggml-vulkan.cpp:13095 @8642541b2).
 pub fn bufferIsVk(buffer: c.ggml_backend_buffer_t) bool {
     return isVkBufferType(buffer.*.buft);
 }
@@ -575,7 +573,7 @@ pub fn tensorBuffer(tensor: *const c.ggml_tensor) *Buffer {
     return bufCtx(tensor.buffer).dev_buffer.?;
 }
 
-/// Ports `ggml_backend_vk_buffer_free_buffer` (ggml-vulkan.cpp:13006 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_free_buffer` (ggml-vulkan.cpp:13099 @8642541b2).
 fn bufferFreeBuffer(buffer: c.ggml_backend_buffer_t) callconv(.c) void {
     logMemory("ggml_backend_vk_buffer_free_buffer()", .{});
     const ctx = bufCtx(buffer);
@@ -583,19 +581,19 @@ fn bufferFreeBuffer(buffer: c.ggml_backend_buffer_t) callconv(.c) void {
     allocator.destroy(ctx);
 }
 
-/// Ports `ggml_backend_vk_buffer_get_base` (ggml-vulkan.cpp:13013 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_get_base` (ggml-vulkan.cpp:13106 @8642541b2).
 fn bufferGetBase(_: c.ggml_backend_buffer_t) callconv(.c) ?*anyopaque {
     return @ptrFromInt(ptr_base);
 }
 
-/// Ports `ggml_backend_vk_buffer_init_tensor` (ggml-vulkan.cpp:13019 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_init_tensor` (ggml-vulkan.cpp:13112 @8642541b2).
 fn bufferInitTensor(buffer: c.ggml_backend_buffer_t, tensor: [*c]c.ggml_tensor) callconv(.c) c.enum_ggml_status {
     const t = impl.one(c.ggml_tensor, tensor);
     if (t.view_src) |vs| impl.assert(vs.*.buffer.*.buft == buffer.*.buft, "tensor->view_src->buffer->buft == buffer->buft");
     return c.GGML_STATUS_SUCCESS;
 }
 
-/// Ports `ggml_backend_vk_buffer_memset_tensor` (ggml-vulkan.cpp:13027 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_memset_tensor` (ggml-vulkan.cpp:13120 @8642541b2).
 fn bufferMemsetTensor(buffer: c.ggml_backend_buffer_t, tensor: [*c]c.ggml_tensor, value: u8, offset: usize, size: usize) callconv(.c) void {
     const buf = bufCtx(buffer).dev_buffer.?;
     if (size == 0) return;
@@ -604,7 +602,7 @@ fn bufferMemsetTensor(buffer: c.ggml_backend_buffer_t, tensor: [*c]c.ggml_tensor
     m.submit.bufferMemset(buf, tensorOffset(t) + t.view_offs + offset, val32, size);
 }
 
-/// Ports `ggml_backend_vk_buffer_set_tensor` (ggml-vulkan.cpp:13040 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_set_tensor` (ggml-vulkan.cpp:13133 @8642541b2).
 fn bufferSetTensor(buffer: c.ggml_backend_buffer_t, tensor: [*c]c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize) callconv(.c) void {
     const buf = bufCtx(buffer).dev_buffer.?;
     if (size == 0) return;
@@ -612,7 +610,7 @@ fn bufferSetTensor(buffer: c.ggml_backend_buffer_t, tensor: [*c]c.ggml_tensor, d
     m.submit.bufferWrite(buf, tensorOffset(t) + t.view_offs + offset, @ptrCast(data.?), size);
 }
 
-/// Ports `ggml_backend_vk_buffer_set_tensor_2d` (ggml-vulkan.cpp:13052 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_set_tensor_2d` (ggml-vulkan.cpp:13145 @8642541b2).
 fn bufferSetTensor2d(buffer: c.ggml_backend_buffer_t, tensor: [*c]c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize, n_copies: usize, stride_tensor: usize, stride_data: usize) callconv(.c) void {
     const buf = bufCtx(buffer).dev_buffer.?;
     if (size == 0) return;
@@ -620,7 +618,7 @@ fn bufferSetTensor2d(buffer: c.ggml_backend_buffer_t, tensor: [*c]c.ggml_tensor,
     m.submit.bufferWrite2d(buf, tensorOffset(t) + t.view_offs + offset, @ptrCast(data.?), stride_data, stride_tensor, size, n_copies);
 }
 
-/// Ports `ggml_backend_vk_buffer_get_tensor` (ggml-vulkan.cpp:13066 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_get_tensor` (ggml-vulkan.cpp:13159 @8642541b2).
 fn bufferGetTensor(buffer: c.ggml_backend_buffer_t, tensor: [*c]const c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize) callconv(.c) void {
     if (size == 0) return;
     const buf = bufCtx(buffer).dev_buffer.?;
@@ -628,7 +626,7 @@ fn bufferGetTensor(buffer: c.ggml_backend_buffer_t, tensor: [*c]const c.ggml_ten
     m.submit.bufferRead(buf, tensorOffset(t) + t.view_offs + offset, @ptrCast(data.?), size);
 }
 
-/// Ports `ggml_backend_vk_buffer_get_tensor_2d` (ggml-vulkan.cpp:13079 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_get_tensor_2d` (ggml-vulkan.cpp:13172 @8642541b2).
 fn bufferGetTensor2d(buffer: c.ggml_backend_buffer_t, tensor: [*c]const c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize, n_copies: usize, stride_tensor: usize, stride_data: usize) callconv(.c) void {
     if (size == 0) return;
     const buf = bufCtx(buffer).dev_buffer.?;
@@ -636,7 +634,7 @@ fn bufferGetTensor2d(buffer: c.ggml_backend_buffer_t, tensor: [*c]const c.ggml_t
     m.submit.bufferRead2d(buf, tensorOffset(t) + t.view_offs + offset, @ptrCast(data.?), stride_tensor, stride_data, size, n_copies);
 }
 
-/// Ports `ggml_backend_vk_buffer_cpy_tensor` (ggml-vulkan.cpp:13094 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_cpy_tensor` (ggml-vulkan.cpp:13187 @8642541b2).
 fn bufferCpyTensor(_: c.ggml_backend_buffer_t, src: [*c]const c.ggml_tensor, dst: [*c]c.ggml_tensor) callconv(.c) bool {
     if (c.ggml_nbytes(src) == 0) return true;
     const s = impl.one(c.ggml_tensor, @constCast(src));
@@ -650,13 +648,13 @@ fn bufferCpyTensor(_: c.ggml_backend_buffer_t, src: [*c]const c.ggml_tensor, dst
     return false;
 }
 
-/// Ports `ggml_backend_vk_buffer_clear` (ggml-vulkan.cpp:13115 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_clear` (ggml-vulkan.cpp:13208 @8642541b2).
 /// The C++ passes the byte straight through as the fill value.
 fn bufferClear(buffer: c.ggml_backend_buffer_t, value: u8) callconv(.c) void {
     m.submit.bufferMemset(bufCtx(buffer).dev_buffer.?, 0, value, buffer.*.size);
 }
 
-/// Ports `ggml_backend_vk_buffer_interface` (ggml-vulkan-buffers.cpp:830 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_interface` (ggml-vulkan-buffers.cpp:828 @8642541b2).
 const buffer_iface: c.struct_ggml_backend_buffer_i = .{
     .free_buffer = &bufferFreeBuffer,
     .get_base = &bufferGetBase,
@@ -675,12 +673,12 @@ fn buftCtx(buft: c.ggml_backend_buffer_type_t) *BufferTypeCtx {
     return @ptrCast(@alignCast(buft.*.context));
 }
 
-/// Ports `ggml_backend_vk_buffer_type_name` (ggml-vulkan.cpp:13121 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_type_name` (ggml-vulkan.cpp:13214 @8642541b2).
 fn bufferTypeName(buft: c.ggml_backend_buffer_type_t) callconv(.c) [*c]const u8 {
     return buftCtx(buft).name.ptr;
 }
 
-/// Ports `ggml_backend_vk_buffer_type_alloc_buffer` (ggml-vulkan.cpp:13127 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_type_alloc_buffer` (ggml-vulkan.cpp:13220 @8642541b2).
 fn bufferTypeAllocBuffer(buft: c.ggml_backend_buffer_type_t, size: usize) callconv(.c) c.ggml_backend_buffer_t {
     logMemory("ggml_backend_vk_buffer_type_alloc_buffer(%zu)", .{size});
     const ctx = buftCtx(buft);
@@ -696,22 +694,22 @@ pub fn wrapBuffer(buft: c.ggml_backend_buffer_type_t, device: *Device, dev_buffe
     return c.ggml_backend_buffer_init(buft, buffer_iface, bufctx, size);
 }
 
-/// Ports `ggml_backend_vk_buffer_type_get_alignment` (ggml-vulkan.cpp:13143 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_type_get_alignment` (ggml-vulkan.cpp:13236 @8642541b2).
 fn bufferTypeGetAlignment(buft: c.ggml_backend_buffer_type_t) callconv(.c) usize {
     return @intCast(buftCtx(buft).device.properties.limits.minStorageBufferOffsetAlignment);
 }
 
-/// Ports `ggml_backend_vk_buffer_type_get_max_size` (ggml-vulkan.cpp:13148 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_type_get_max_size` (ggml-vulkan.cpp:13241 @8642541b2).
 fn bufferTypeGetMaxSize(buft: c.ggml_backend_buffer_type_t) callconv(.c) usize {
     return @intCast(buftCtx(buft).device.suballocation_block_size);
 }
 
-/// Ports `ggml_backend_vk_buffer_type_get_alloc_size` (ggml-vulkan.cpp:13153 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_type_get_alloc_size` (ggml-vulkan.cpp:13246 @8642541b2).
 fn bufferTypeGetAllocSize(_: c.ggml_backend_buffer_type_t, tensor: [*c]const c.ggml_tensor) callconv(.c) usize {
     return c.ggml_nbytes(tensor);
 }
 
-/// Ports `ggml_backend_vk_buffer_type_interface` (ggml-vulkan-buffers.cpp:25 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_type_interface` (ggml-vulkan-buffers.cpp:28 @8642541b2).
 pub const buffer_type_iface: c.struct_ggml_backend_buffer_type_i = .{
     .get_name = &bufferTypeName,
     .alloc_buffer = &bufferTypeAllocBuffer,
@@ -723,7 +721,7 @@ pub const buffer_type_iface: c.struct_ggml_backend_buffer_type_i = .{
     .is_host = null,
 };
 
-/// Ports `ggml_backend_vk_buffer_type` (ggml-vulkan.cpp:13159 @620d2225c).
+/// Ports `ggml_backend_vk_buffer_type` (ggml-vulkan.cpp:13252 @8642541b2).
 pub fn bufferType(dev_num: usize) callconv(.c) c.ggml_backend_buffer_type_t {
     m.instance.instanceInitOrAbort();
     const dev = m.device.getDevice(dev_num);
@@ -733,18 +731,18 @@ pub fn bufferType(dev_num: usize) callconv(.c) c.ggml_backend_buffer_type_t {
 // -----------------------------------------------------------------------------
 // The pinned host buffer type
 
-/// Ports `ggml_backend_vk_host_buffer_type_name` (ggml-vulkan.cpp:13169 @620d2225c).
+/// Ports `ggml_backend_vk_host_buffer_type_name` (ggml-vulkan.cpp:13262 @8642541b2).
 fn hostBufferTypeName(_: c.ggml_backend_buffer_type_t) callconv(.c) [*c]const u8 {
     return common.name ++ "_Host";
 }
 
-/// Ports `ggml_backend_vk_host_buffer_free_buffer` (ggml-vulkan.cpp:13175 @620d2225c).
+/// Ports `ggml_backend_vk_host_buffer_free_buffer` (ggml-vulkan.cpp:13268 @8642541b2).
 fn hostBufferFreeBuffer(buffer: c.ggml_backend_buffer_t) callconv(.c) void {
     logMemory("ggml_backend_vk_host_buffer_free_buffer()", .{});
     hostFree(buffer.*.context);
 }
 
-/// Ports `ggml_backend_vk_host_buffer_type_alloc_buffer` (ggml-vulkan.cpp:13180 @620d2225c).
+/// Ports `ggml_backend_vk_host_buffer_type_alloc_buffer` (ggml-vulkan.cpp:13273 @8642541b2).
 fn hostBufferTypeAllocBuffer(buft: c.ggml_backend_buffer_type_t, size_in: usize) callconv(.c) c.ggml_backend_buffer_t {
     logMemory("ggml_backend_vk_host_buffer_type_alloc_buffer(%zu)", .{size_in});
     const size = size_in + 32; // Behave like the CPU buffer type
@@ -759,12 +757,12 @@ fn hostBufferTypeAllocBuffer(buft: c.ggml_backend_buffer_type_t, size_in: usize)
     return buffer;
 }
 
-/// Ports `ggml_backend_vk_host_buffer_type_get_alignment` (ggml-vulkan.cpp:13200 @620d2225c).
+/// Ports `ggml_backend_vk_host_buffer_type_get_alignment` (ggml-vulkan.cpp:13293 @8642541b2).
 fn hostBufferTypeGetAlignment(_: c.ggml_backend_buffer_type_t) callconv(.c) usize {
     return @intCast(m.device.devices[0].?.properties.limits.minMemoryMapAlignment);
 }
 
-/// Ports `ggml_backend_vk_host_buffer_type_get_max_size` (ggml-vulkan.cpp:13206 @620d2225c).
+/// Ports `ggml_backend_vk_host_buffer_type_get_max_size` (ggml-vulkan.cpp:13299 @8642541b2).
 fn hostBufferTypeGetMaxSize(_: c.ggml_backend_buffer_type_t) callconv(.c) usize {
     return @intCast(m.device.devices[0].?.suballocation_block_size);
 }
@@ -790,7 +788,7 @@ fn initHostBufferType() void {
     };
 }
 
-/// Ports `ggml_backend_vk_host_buffer_type` (ggml-vulkan.cpp:13212 @620d2225c):
+/// Ports `ggml_backend_vk_host_buffer_type` (ggml-vulkan.cpp:13305 @8642541b2):
 /// a function-local static, initialised on first call.
 pub fn hostBufferType() callconv(.c) c.ggml_backend_buffer_type_t {
     _ = std.c.pthread_mutex_lock(&host_buffer_type_mutex);

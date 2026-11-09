@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/src/llama-grammar.cpp` and `llama-grammar.h`
-//! (v0.7.0, `620d2225c`). Each declaration below names the C++ it replaces
+//! (v0.8.0, `8642541b2`). Each declaration below names the C++ it replaces
 //! and the line it began at.
 //!
 //! # Contract
@@ -49,19 +49,19 @@ pub const GreType = parser.GreType;
 const ElemPtr = [*]const Element;
 const Token = c.llama_token;
 
-/// Ports `llama_grammar_stack` (llama-grammar.h:65 @620d2225c).
+/// Ports `llama_grammar_stack` (llama-grammar.h:65 @8642541b2).
 pub const Stack = std.ArrayList(ElemPtr);
-/// Ports `llama_grammar_stacks` (llama-grammar.h:68 @620d2225c).
+/// Ports `llama_grammar_stacks` (llama-grammar.h:68 @8642541b2).
 pub const Stacks = std.ArrayList(Stack);
 
-/// Ports `llama_partial_utf8` (llama-grammar.h:52 @620d2225c).
+/// Ports `llama_partial_utf8` (llama-grammar.h:52 @8642541b2).
 pub const PartialUtf8 = struct {
     value: u32 = 0,
     /// Bytes still to come; -1 marks an invalid sequence.
     n_remain: c_int = 0,
 };
 
-/// Ports `llama_grammar_candidate` (llama-grammar.h:57 @620d2225c).
+/// Ports `llama_grammar_candidate` (llama-grammar.h:57 @8642541b2).
 const Candidate = struct {
     index: usize,
     code_points: [*]const u32,
@@ -92,12 +92,12 @@ fn containsStack(stacks: []const Stack, s: []const ElemPtr) bool {
     return false;
 }
 
-/// Ports `llama_grammar_trigger_pattern` (llama-grammar.h:119 @620d2225c).
+/// Ports `llama_grammar_trigger_pattern` (llama-grammar.h:121 @8642541b2).
 pub const TriggerPattern = struct {
     pattern: []u8,
     re: regex.Regex,
 
-    /// Ports `llama_grammar_trigger_pattern`'s `find` (llama-grammar.cpp:382 @620d2225c).
+    /// Ports `llama_grammar_trigger_pattern`'s `find` (llama-grammar.cpp:384 @8642541b2).
     ///
     /// A pattern that starts with `^` and ends with `$` is first tried as a
     /// whole-input match; otherwise, or when that fails, it is searched for.
@@ -146,14 +146,14 @@ pub const TriggerPattern = struct {
     }
 };
 
-/// Ports `llama_grammar`'s `token_pos` (llama-grammar.h:128 @620d2225c).
+/// Ports `llama_grammar`'s `token_pos` (llama-grammar.h:130 @8642541b2).
 const TokenPos = struct {
     token: Token,
     start: usize,
     end: usize,
 };
 
-/// Ports `llama_grammar` (llama-grammar.h:126 @620d2225c).
+/// Ports `llama_grammar` (llama-grammar.h:128 @8642541b2).
 pub const Grammar = struct {
     vocab: ?*const c.struct_llama_vocab,
 
@@ -177,7 +177,7 @@ fn freeRules(rules: [][]Element) void {
     impl.allocator.free(rules);
 }
 
-/// Ports the `std::string` overload of `decode_utf8` (llama-grammar.cpp:34 @620d2225c).
+/// Ports the `std::string` overload of `decode_utf8` (llama-grammar.cpp:36 @8642541b2).
 ///
 /// Decodes `src_bytes` -- up to its first NUL, as the C++ reads it through
 /// `c_str()` -- continuing any sequence `partial_start` left open.
@@ -247,7 +247,7 @@ fn decodeUtf8(src_bytes: []const u8, partial_start: PartialUtf8, out: *std.Array
     return .{ .value = value, .n_remain = n_remain };
 }
 
-/// Ports `llama_grammar_is_end_of_sequence` (llama-grammar.cpp:755 @620d2225c).
+/// Ports `llama_grammar_is_end_of_sequence` (llama-grammar.cpp:762 @8642541b2).
 fn isEndOfSequence(pos: ElemPtr) bool {
     return switch (pos[0].type) {
         .end, .alt => true,
@@ -255,7 +255,7 @@ fn isEndOfSequence(pos: ElemPtr) bool {
     };
 }
 
-/// Ports `llama_grammar_match_char` (llama-grammar.cpp:765 @620d2225c).
+/// Ports `llama_grammar_match_char` (llama-grammar.cpp:772 @8642541b2).
 ///
 /// Return: whether `chr` satisfies the char range at `pos_in`, and the
 /// element after the range.
@@ -264,7 +264,7 @@ fn matchChar(pos_in: ElemPtr, chr: u32) struct { bool, ElemPtr } {
     var found = false;
     const is_positive_char = pos[0].type == .char or pos[0].type == .char_any;
 
-    impl.assert(is_positive_char or pos[0].type == .char_not, src, 767, "is_positive_char || pos->type == LLAMA_GRETYPE_CHAR_NOT");
+    impl.assert(is_positive_char or pos[0].type == .char_not, src, 778, "is_positive_char || pos->type == LLAMA_GRETYPE_CHAR_NOT");
 
     while (true) {
         if (pos[1].type == .char_rng_upper) {
@@ -283,13 +283,13 @@ fn matchChar(pos_in: ElemPtr, chr: u32) struct { bool, ElemPtr } {
     return .{ found == is_positive_char, pos };
 }
 
-/// Ports `llama_grammar_match_partial_char` (llama-grammar.cpp:795 @620d2225c).
+/// Ports `llama_grammar_match_partial_char` (llama-grammar.cpp:802 @8642541b2).
 ///
 /// Return: whether some completion of `partial_utf8` could satisfy the range.
 fn matchPartialChar(pos_in: ElemPtr, partial_utf8: PartialUtf8) bool {
     var pos = pos_in;
     const is_positive_char = pos[0].type == .char or pos[0].type == .char_any;
-    impl.assert(is_positive_char or pos[0].type == .char_not, src, 795, "is_positive_char || pos->type == LLAMA_GRETYPE_CHAR_NOT");
+    impl.assert(is_positive_char or pos[0].type == .char_not, src, 806, "is_positive_char || pos->type == LLAMA_GRETYPE_CHAR_NOT");
 
     const partial_value = partial_utf8.value;
     const n_remain = partial_utf8.n_remain;
@@ -324,9 +324,9 @@ fn matchPartialChar(pos_in: ElemPtr, partial_utf8: PartialUtf8) bool {
     return !is_positive_char;
 }
 
-/// Ports `llama_grammar_match_token` (llama-grammar.cpp:845 @620d2225c).
+/// Ports `llama_grammar_match_token` (llama-grammar.cpp:852 @8642541b2).
 fn matchToken(pos: ElemPtr, token: Token) bool {
-    impl.assert(pos[0].type == .token or pos[0].type == .token_not, src, 844, "pos->type == LLAMA_GRETYPE_TOKEN || pos->type == LLAMA_GRETYPE_TOKEN_NOT");
+    impl.assert(pos[0].type == .token or pos[0].type == .token_not, src, 855, "pos->type == LLAMA_GRETYPE_TOKEN || pos->type == LLAMA_GRETYPE_TOKEN_NOT");
     if (pos[0].type == .token) return pos[0].value == @as(u32, @bitCast(token));
     if (pos[0].type == .token_not) return pos[0].value != @as(u32, @bitCast(token));
     return false;
@@ -342,7 +342,7 @@ const StackSetCtx = struct {
     }
 };
 
-/// Ports `llama_grammar_advance_stack` (llama-grammar.cpp:860 @620d2225c).
+/// Ports `llama_grammar_advance_stack` (llama-grammar.cpp:867 @8642541b2).
 ///
 /// Expands `stack` through rule references until every resulting stack is
 /// empty or has a terminal on top, appending the new ones to `new_stacks`.
@@ -411,33 +411,18 @@ fn advanceStack(rules: []const []Element, stack: []const ElemPtr, new_stacks: *S
                     curr_stack.deinit(impl.allocator);
                 }
             },
-            else => impl.abort(src, 935, "fatal error"),
+            else => impl.abort(src, 946, "fatal error"),
         }
     }
 }
 
-/// Ports `llama_grammar_reject_candidates` (llama-grammar.cpp:944 @620d2225c).
+/// Ports `llama_grammar_detect_left_recursion` (llama-grammar.cpp:951 @8642541b2).
 ///
-/// Return: the candidates no stack accepts; owned by the caller.
-fn rejectCandidates(rules: []const []Element, stacks: []const Stack, candidates: []const Candidate) std.ArrayList(Candidate) {
-    impl.assert(stacks.len != 0, src, 943, "!stacks.empty()");
-
-    if (candidates.len == 0) return .empty;
-
-    var rejects = rejectCandidatesForStack(rules, stacks[0].items, candidates);
-
-    for (stacks[1..]) |s| {
-        const next = rejectCandidatesForStack(rules, s.items, rejects.items);
-        rejects.deinit(impl.allocator);
-        rejects = next;
-    }
-
-    return rejects;
-}
-
-/// Ports `llama_grammar_detect_left_recursion` (llama-grammar.cpp:963 @620d2225c).
-fn detectLeftRecursion(rules: []const []Element, rule_index: usize, rules_visited: []bool, rules_in_progress: []bool, rules_may_be_empty: []bool) bool {
+/// Return: whether the rule is left-recursive, or `error.TooDeep` where the
+/// C++ throws "grammar rules are chained more than 256 levels deep".
+fn detectLeftRecursion(rules: []const []Element, rule_index: usize, rules_visited: []bool, rules_in_progress: []bool, rules_may_be_empty: []bool, depth: u32) error{TooDeep}!bool {
     if (rules_in_progress[rule_index]) return true;
+    if (depth > parser.GRAMMAR_RECURSIVE_LIMIT) return error.TooDeep;
 
     rules_in_progress[rule_index] = true;
 
@@ -462,7 +447,7 @@ fn detectLeftRecursion(rules: []const []Element, rule_index: usize, rules_visite
     var recurse_into_nonterminal = true;
     for (0..rule.len) |i| {
         if (rule[i].type == .rule_ref and recurse_into_nonterminal) {
-            if (detectLeftRecursion(rules, rule[i].value, rules_visited, rules_in_progress, rules_may_be_empty)) {
+            if (try detectLeftRecursion(rules, rule[i].value, rules_visited, rules_in_progress, rules_may_be_empty, depth + 1)) {
                 return true;
             }
             if (!rules_may_be_empty[rule[i].value]) {
@@ -481,7 +466,7 @@ fn detectLeftRecursion(rules: []const []Element, rule_index: usize, rules_visite
     return false;
 }
 
-/// Ports `llama_grammar_accept_chr` (llama-grammar.cpp:1024 @620d2225c).
+/// Ports `llama_grammar_accept_chr` (llama-grammar.cpp:1016 @8642541b2).
 fn acceptChr(g: *Grammar, stack: []const ElemPtr, chr: u32, new_stacks: *Stacks) void {
     if (stack.len == 0) return;
 
@@ -501,51 +486,69 @@ fn acceptChr(g: *Grammar, stack: []const ElemPtr, chr: u32, new_stacks: *Stacks)
     }
 }
 
-/// Ports `llama_grammar_reject_candidates_for_stack` (llama-grammar.cpp:1061 @620d2225c).
+/// Ports `llama_grammar_reject_step` (llama-grammar.cpp:1055 @8642541b2):
+/// checks the code point at `depth` of each candidate (an index into
+/// `candidates`) against the stack.
 ///
-/// Return: the candidates this stack rejects; owned by the caller.
-fn rejectCandidatesForStack(rules: []const []Element, stack: []const ElemPtr, candidates: []const Candidate) std.ArrayList(Candidate) {
-    var rejects: std.ArrayList(Candidate) = .empty;
-    rejects.ensureTotalCapacity(impl.allocator, candidates.len) catch oom();
+/// Parameters:
+/// - `cur`: the indices of the candidates to check.
+/// - `rejects`: receives those the stack rejects here.
+/// - `next`: receives those that matched.
+/// - `next_stacks`: receives the stacks that follow.
+///
+/// Return: true when some may match, so `next` and `next_stacks` are to be
+/// walked at the next code point.
+fn rejectStep(
+    rules: []const []Element,
+    stack: []const ElemPtr,
+    candidates: []const Candidate,
+    depth: usize,
+    cur: []const u32,
+    rejects: *std.ArrayList(u32),
+    next: *std.ArrayList(u32),
+    next_stacks: *Stacks,
+) bool {
+    rejects.ensureTotalCapacity(impl.allocator, cur.len) catch oom();
 
     if (stack.len == 0) {
-        for (candidates) |tok| {
-            if (tok.code_points[0] != 0 or tok.partial_utf8.n_remain != 0) {
-                rejects.appendAssumeCapacity(tok);
+        for (cur) |i| {
+            const tok = candidates[i];
+            if (tok.code_points[depth] != 0 or tok.partial_utf8.n_remain != 0) {
+                rejects.appendAssumeCapacity(i);
             }
         }
-        return rejects;
+        return false;
     }
 
     const stack_pos = stack[stack.len - 1];
 
     // A token rule on top: only the token id matters.
     if (stack_pos[0].type == .token or stack_pos[0].type == .token_not) {
-        for (candidates) |tok| {
-            if (tok.code_points[0] == 0) {
+        for (cur) |i| {
+            const tok = candidates[i];
+            if (tok.code_points[depth] == 0) {
                 // A token consumed by char rules ends here; reject only if it
                 // ended mid-sequence.
-                if (tok.partial_utf8.n_remain != 0) rejects.appendAssumeCapacity(tok);
+                if (tok.partial_utf8.n_remain != 0) rejects.appendAssumeCapacity(i);
             } else if (!matchToken(stack_pos, tok.id)) {
-                rejects.appendAssumeCapacity(tok);
+                rejects.appendAssumeCapacity(i);
             }
         }
-        return rejects;
+        return false;
     }
 
-    var next_candidates: std.ArrayList(Candidate) = .empty;
-    defer next_candidates.deinit(impl.allocator);
-    next_candidates.ensureTotalCapacity(impl.allocator, candidates.len) catch oom();
+    next.ensureTotalCapacity(impl.allocator, cur.len) catch oom();
 
-    for (candidates) |tok| {
-        if (tok.code_points[0] == 0) {
+    for (cur) |i| {
+        const tok = candidates[i];
+        if (tok.code_points[depth] == 0) {
             if (tok.partial_utf8.n_remain != 0 and !matchPartialChar(stack_pos, tok.partial_utf8)) {
-                rejects.appendAssumeCapacity(tok);
+                rejects.appendAssumeCapacity(i);
             }
-        } else if (matchChar(stack_pos, tok.code_points[0])[0]) {
-            next_candidates.appendAssumeCapacity(.{ .index = tok.index, .code_points = tok.code_points + 1, .partial_utf8 = tok.partial_utf8, .id = tok.id });
+        } else if (matchChar(stack_pos, tok.code_points[depth])[0]) {
+            next.appendAssumeCapacity(i);
         } else {
-            rejects.appendAssumeCapacity(tok);
+            rejects.appendAssumeCapacity(i);
         }
     }
 
@@ -556,21 +559,100 @@ fn rejectCandidatesForStack(rules: []const []Element, stack: []const ElemPtr, ca
     if (!isEndOfSequence(stack_pos_after)) {
         stack_after.append(impl.allocator, stack_pos_after) catch oom();
     }
-    var next_stacks: Stacks = .empty;
-    defer freeStacks(&next_stacks);
-    advanceStack(rules, stack_after.items, &next_stacks);
+    advanceStack(rules, stack_after.items, next_stacks);
 
-    var next_rejects = rejectCandidates(rules, next_stacks.items, next_candidates.items);
-    defer next_rejects.deinit(impl.allocator);
-    for (next_rejects.items) |tok| {
-        rejects.append(impl.allocator, .{ .index = tok.index, .code_points = tok.code_points - 1, .partial_utf8 = tok.partial_utf8, .id = tok.id }) catch oom();
+    return true;
+}
+
+/// One level of `rejectCandidates`, which checks the candidates that reach
+/// its code point against its stacks in turn: `level` in
+/// `llama_grammar_reject_candidates`.
+const RejectLevel = struct {
+    stacks: []const Stack,
+    /// The stacks this level owns; the first level's are the caller's.
+    owned: Stacks = .empty,
+    /// The stack in progress.
+    i: usize = 0,
+    /// The candidates rejected by `stacks[0..i]`.
+    cur: std.ArrayList(u32),
+    /// The rejects of `stacks[i]` at this code point.
+    rejects: std.ArrayList(u32) = .empty,
+
+    fn deinit(self: *RejectLevel) void {
+        freeStacks(&self.owned);
+        self.cur.deinit(impl.allocator);
+        self.rejects.deinit(impl.allocator);
+    }
+};
+
+/// Ports `llama_grammar_reject_candidates` (llama-grammar.cpp:1127 @8642541b2):
+/// the candidates no stack accepts, each stack narrowing the rejects of the
+/// previous one. No recursion: a level per code point, and a token from the
+/// GGUF can be long.
+///
+/// `llama_grammar_reject_candidates_for_stack` (llama-grammar.cpp:1187
+/// @8642541b2) is this over one stack and serves upstream's tests, which this
+/// project does not build; it is not ported.
+///
+/// Return: the candidates no stack accepts; owned by the caller.
+fn rejectCandidates(rules: []const []Element, stacks: []const Stack, candidates: []const Candidate) std.ArrayList(Candidate) {
+    impl.assert(stacks.len != 0, src, 1131, "!stacks.empty()");
+
+    var all: std.ArrayList(u32) = .empty;
+    all.ensureTotalCapacity(impl.allocator, candidates.len) catch oom();
+    for (0..candidates.len) |i| all.appendAssumeCapacity(@intCast(i));
+
+    var levels: std.ArrayList(RejectLevel) = .empty;
+    defer {
+        for (levels.items) |*lv| lv.deinit();
+        levels.deinit(impl.allocator);
+    }
+    levels.append(impl.allocator, .{ .stacks = stacks, .cur = all }) catch oom();
+
+    while (true) {
+        const lv = &levels.items[levels.items.len - 1];
+
+        if (lv.i == lv.stacks.len or lv.cur.items.len == 0) {
+            if (levels.items.len == 1) break;
+            // the rejects at the next code point belong to stacks[i] of the
+            // parent level
+            const parent = &levels.items[levels.items.len - 2];
+            parent.rejects.appendSlice(impl.allocator, lv.cur.items) catch oom();
+            lv.deinit();
+            levels.items.len -= 1;
+            parent.cur.deinit(impl.allocator);
+            parent.cur = parent.rejects;
+            parent.rejects = .empty;
+            parent.i += 1;
+            continue;
+        }
+
+        var rejects: std.ArrayList(u32) = .empty;
+        var next: std.ArrayList(u32) = .empty;
+        var next_stacks: Stacks = .empty;
+
+        if (!rejectStep(rules, lv.stacks[lv.i].items, candidates, levels.items.len - 1, lv.cur.items, &rejects, &next, &next_stacks)) {
+            next.deinit(impl.allocator);
+            lv.cur.deinit(impl.allocator);
+            lv.cur = rejects;
+            lv.i += 1;
+            continue;
+        }
+
+        impl.assert(next_stacks.items.len != 0, src, 1174, "!next_stacks.empty()");
+        lv.rejects.deinit(impl.allocator);
+        lv.rejects = rejects;
+        levels.append(impl.allocator, .{ .stacks = next_stacks.items, .owned = next_stacks, .cur = next }) catch oom();
     }
 
+    var rejects: std.ArrayList(Candidate) = .empty;
+    rejects.ensureTotalCapacity(impl.allocator, levels.items[0].cur.items.len) catch oom();
+    for (levels.items[0].cur.items) |i| rejects.appendAssumeCapacity(candidates[i]);
     return rejects;
 }
 
 /// Ports the grammar-text overload of `llama_grammar_init_impl`
-/// (llama-grammar.cpp:1215 @620d2225c).
+/// (llama-grammar.cpp:1282 @8642541b2).
 ///
 /// Parameters:
 /// - `vocab`: the vocabulary; borrowed for the grammar's lifetime.
@@ -629,7 +711,12 @@ pub fn initImpl(
         @memset(rules_may_be_empty, false);
         for (0..n_rules) |i| {
             if (rules_visited[i]) continue;
-            if (detectLeftRecursion(vec_rules, i, rules_visited, rules_in_progress, rules_may_be_empty)) {
+            const recursive = detectLeftRecursion(vec_rules, i, rules_visited, rules_in_progress, rules_may_be_empty, 0) catch {
+                impl.logError("unsupported grammar: %s\n", .{std.fmt.comptimePrint("grammar rules are chained more than {d} levels deep", .{parser.GRAMMAR_RECURSIVE_LIMIT}).ptr});
+                freeRules(vec_rules);
+                return null;
+            };
+            if (recursive) {
                 impl.logError("unsupported grammar, left recursion detected for nonterminal at index %zu\n", .{i});
                 freeRules(vec_rules);
                 return null;
@@ -676,7 +763,7 @@ pub fn initImpl(
     return g;
 }
 
-/// Ports `llama_grammar_free_impl` (llama-grammar.cpp:1321 @620d2225c).
+/// Ports `llama_grammar_free_impl` (llama-grammar.cpp:1393 @8642541b2).
 ///
 /// Parameters:
 /// - `g`: the grammar, or null.
@@ -694,7 +781,7 @@ pub fn freeImpl(g: ?*Grammar) void {
     impl.allocator.destroy(grammar);
 }
 
-/// Ports `llama_grammar_clone_impl` (llama-grammar.cpp:1329 @620d2225c).
+/// Ports `llama_grammar_clone_impl` (llama-grammar.cpp:1401 @8642541b2).
 ///
 /// Copies everything, then repoints each stack element from the source's
 /// rules to the copy's.
@@ -753,7 +840,7 @@ fn tokenToPiece(vocab: ?*const c.struct_llama_vocab, token: Token, buf: *std.Arr
     return buf.items[0..@intCast(n)];
 }
 
-/// Ports `llama_grammar_apply_impl` (llama-grammar.cpp:1359 @620d2225c).
+/// Ports `llama_grammar_apply_impl` (llama-grammar.cpp:1431 @8642541b2).
 ///
 /// Sets every candidate the grammar cannot continue with to -inf. EOG is
 /// allowed only when some stack is complete.
@@ -764,7 +851,7 @@ fn tokenToPiece(vocab: ?*const c.struct_llama_vocab, token: Token, buf: *std.Arr
 ///
 /// Return: nothing.
 pub fn applyImpl(grammar: *const Grammar, cur_p: *c.llama_token_data_array) void {
-    impl.assert(grammar.vocab != null, src, 1355, "grammar.vocab != nullptr");
+    impl.assert(grammar.vocab != null, src, 1432, "grammar.vocab != nullptr");
 
     if (grammar.awaiting_trigger) return;
 
@@ -820,7 +907,7 @@ pub fn applyImpl(grammar: *const Grammar, cur_p: *c.llama_token_data_array) void
     }
 }
 
-/// Ports `llama_grammar_accept_impl` (llama-grammar.cpp:1402 @620d2225c).
+/// Ports `llama_grammar_accept_impl` (llama-grammar.cpp:1474 @8642541b2).
 ///
 /// While a lazy grammar waits, tokens are buffered; a trigger token, or a
 /// trigger pattern matching the buffer, starts it, replaying the buffered
@@ -832,7 +919,7 @@ pub fn applyImpl(grammar: *const Grammar, cur_p: *c.llama_token_data_array) void
 ///
 /// Return: nothing.
 pub fn acceptImpl(grammar: *Grammar, token: Token) void {
-    impl.assert(grammar.vocab != null, src, 1398, "grammar.vocab != nullptr");
+    impl.assert(grammar.vocab != null, src, 1475, "grammar.vocab != nullptr");
 
     var piece_buf: std.ArrayList(u8) = .empty;
     defer piece_buf.deinit(impl.allocator);
@@ -886,13 +973,13 @@ pub fn acceptImpl(grammar: *Grammar, token: Token) void {
         for (grammar.stacks.items) |s| {
             if (s.items.len == 0) return;
         }
-        impl.abort(src, 1450, "fatal error");
+        impl.abort(src, 1527, "fatal error");
     }
 
     acceptToken(grammar, token, piece);
 }
 
-/// Ports `llama_grammar_accept_token` (llama-grammar.cpp:1476 @620d2225c).
+/// Ports `llama_grammar_accept_token` (llama-grammar.cpp:1548 @8642541b2).
 ///
 /// Advances every stack over `piece` (or over the token itself, for a token
 /// rule on top) and keeps the distinct survivors.

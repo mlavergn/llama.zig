@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.7.0, `620d2225c`), lines
+//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.8.0, `8642541b2`), lines
 //! 2314-2485. Each function names the C function it replaces and the line it
 //! began at.
 //!
@@ -47,7 +47,7 @@ inline fn lround(v: f32) i32 {
     return impl.truncTo(i32, @round(v));
 }
 
-/// Ports `quantize_row_tq1_0_ref` (ggml-quants.c:2317 @620d2225c).
+/// Ports `quantize_row_tq1_0_ref` (ggml-quants.c:2317 @8642541b2).
 ///
 /// Three passes over the block because the trit count does not divide evenly:
 /// 32 bytes at a time while a full 5x32 span remains, then 16 at a time, then
@@ -119,7 +119,7 @@ inline fn ceilDiv243(q: u8) u8 {
     return @intCast((@as(u16, q) * 256 + (243 - 1)) / 243);
 }
 
-/// Ports `dequantize_row_tq1_0` (ggml-quants.c:2429 @620d2225c).
+/// Ports `dequantize_row_tq1_0` (ggml-quants.c:2429 @8642541b2).
 pub export fn dequantize_row_tq1_0(x: [*c]const blocks.TQ1_0, y_in: [*c]f32, k: i64) void {
     std.debug.assert(@rem(k, QK_K) == 0);
     const nb: usize = @intCast(@divExact(k, QK_K));
@@ -168,7 +168,7 @@ pub export fn dequantize_row_tq1_0(x: [*c]const blocks.TQ1_0, y_in: [*c]f32, k: 
     }
 }
 
-/// Ports `quantize_row_tq2_0_ref` (ggml-quants.c:2383 @620d2225c).
+/// Ports `quantize_row_tq2_0_ref` (ggml-quants.c:2383 @8642541b2).
 pub export fn quantize_row_tq2_0_ref(x_in: [*c]const f32, y: [*c]blocks.TQ2_0, k: i64) void {
     std.debug.assert(@rem(k, QK_K) == 0);
     const nb: usize = @intCast(@divExact(k, QK_K));
@@ -200,7 +200,7 @@ pub export fn quantize_row_tq2_0_ref(x_in: [*c]const f32, y: [*c]blocks.TQ2_0, k
     }
 }
 
-/// Ports `dequantize_row_tq2_0` (ggml-quants.c:2468 @620d2225c).
+/// Ports `dequantize_row_tq2_0` (ggml-quants.c:2468 @8642541b2).
 pub export fn dequantize_row_tq2_0(x: [*c]const blocks.TQ2_0, y_in: [*c]f32, k: i64) void {
     std.debug.assert(@rem(k, QK_K) == 0);
     const nb: usize = @intCast(@divExact(k, QK_K));

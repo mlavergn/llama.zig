@@ -303,6 +303,20 @@ static void run_result(const json & j) {
         x->n_tokens = f.value("n_tokens", 0);
         x->res_type = (task_response_type) f.value("res_type", 0);
         r.reset(x);
+    } else if (kind == "realtime") {
+        auto * x = new server_task_result_realtime();
+        x->text = f.value("text", std::string());
+        x->audio = f.value("audio", std::vector<float>());
+        x->response_done = f.value("response_done", false);
+        x->cancelled = f.value("cancelled", false);
+        x->n_decoded = f.value("n_decoded", 0);
+        r.reset(x);
+    } else if (kind == "tts") {
+        auto * x = new server_task_result_tts();
+        x->audio = f.value("audio", std::string());
+        x->sample_rate = f.value("sample_rate", 0);
+        x->final = f.value("final", false);
+        r.reset(x);
     } else if (kind == "rerank") {
         auto * x = new server_task_result_rerank();
         if (f.contains("score")) x->score = f.value("score", 0.0f);
@@ -623,6 +637,18 @@ static void run(const std::string & op, const std::string & payload) {
             str("state.init", st.chat_msg.content);
             str("state.role", st.chat_msg.role);
         });
+    } else if (op == "RTOOLS") {
+        guarded([&] { str("conv", server_chat_convert_responses_tools(j.at("tools")).dump()); });
+    } else if (op == "TS") {
+        guarded([&] {
+            server_task t(SERVER_TASK_TYPE_TTS);
+            server_schema::eval_tts_schema(params_base, t, j);
+            str("tts_params", json{
+                {"top_k", t.tts_inp.data.top_k}, {"top_p", t.tts_inp.data.top_p}, {"seed", t.tts_inp.data.seed},
+                {"n_predict", t.params.n_predict}, {"repeat", t.params.sampling.penalty_repeat},
+                {"stream", t.params.stream}, {"sampling_seed", t.params.sampling.seed},
+            }.dump());
+        });
     } else if (op == "RC") {
         guarded([&] { str("conv", server_chat_convert_responses_to_chatcmpl(j).dump()); });
     } else if (op == "AC") {
@@ -718,9 +744,21 @@ static void run(const std::string & op, const std::string & payload) {
         });
     } else if (op == "Q") {
         guarded([&] {
-            auto t = format_prompt_rerank(vocab_models.at(j.value("v", 0)), vocab_at(j), nullptr,
-                                          j.at("query").get<std::string>(), j.at("doc").get<std::string>(), init_opt);
+            std::vector<raw_buffer> qf;
+            std::vector<raw_buffer> df;
+            for (int i = 0; i < j.value("n_qf", 0); i++) {
+                handle_media(qf, j.at("media").get<std::string>(), "");
+            }
+            for (int i = 0; i < j.value("n_df", 0); i++) {
+                handle_media(df, j.at("media").get<std::string>(), "");
+            }
+            auto t = format_prompt_rerank(vocab_models.at(j.value("v", 0)), vocab_at(j), j.value("mtmd", false) ? mctx : nullptr,
+                                          j.at("query").get<std::string>(), j.at("doc").get<std::string>(), qf, df, init_opt);
             show_tokens("rerank_prompt", t);
+        });
+    } else if (op == "RT") {
+        guarded([&] {
+            str("rerank_template", format_rerank_template(j.at("tmpl").get<std::string>(), j.at("query").get<std::string>(), j.at("doc").get<std::string>()));
         });
     } else if (op == "G") {
         guarded([&] {
@@ -867,7 +905,8 @@ static void run(const std::string & op, const std::string & payload) {
             server_decision_context dc;
             dc.init(model);
             line(std::string("flags share") + (dc.can_share_prompt() ? "1" : "0") + " joint" + (dc.is_joint() ? "1" : "0") +
-                 " images" + (dc.can_use_images() ? "1" : "0") + " type" + std::to_string((int) dc.type));
+                 " images" + (dc.can_use_images() ? "1" : "0") + " generate" + (dc.can_generate() ? "1" : "0") + " lfm3" + (dc.is_lfm3_d1() ? "1" : "0") +
+                 " type" + std::to_string((int) dc.type));
             if (dc.type == COMMON_DECISION_TYPE_NONE) {
                 return;
             }
@@ -880,7 +919,7 @@ static void run(const std::string & op, const std::string & payload) {
                 line("variants " + std::to_string(dc.n_variants(q)));
             }
             std::vector<raw_buffer> files;
-            const json state = dc.parse_state(body, files);
+            const json state = dc.prepare_state(dc.parse_state(body, files));
             str("state", state.dump());
             for (const auto & f : files) {
                 line("file " + std::to_string(f.size()) + " " + std::to_string(fnv(f.data(), f.size())));
@@ -895,7 +934,8 @@ static void run(const std::string & op, const std::string & payload) {
                                 " column" + std::to_string(t.decision.column) + " pointer" + std::to_string(t.decision.pointer) +
                                 " first" + std::to_string(t.decision.pos_first()) + " order" + toks_str(t.decision.order) +
                                 " n_scores" + std::to_string(t.decision.n_scores) +
-                                " embd" + (t.need_embd() ? "1" : "0") + " logits" + (t.need_logits() ? "1" : "0");
+                                " embd" + (t.need_embd() ? "1" : "0") + " logits" + (t.need_logits() ? "1" : "0") +
+                                " no_batching" + (t.decision.no_batching ? "1" : "0") + " pooled" + (t.decision.pooled ? "1" : "0");
                 line(s);
                 show_tokens("prompt", t.tokens);
             };
@@ -965,7 +1005,7 @@ static void run(const std::string & op, const std::string & payload) {
         });
     } else if (op == "MA") {
         guarded([&] {
-            const auto out_mod = server_model_output_modalities((common_decision_type) j.value("type", 0));
+            const auto out_mod = server_model_output_modalities((common_decision_type) j.value("type", 0), j.value("chat", true), j.value("tts", false));
             str("arch", server_model_architecture_json(j.value("image", false), j.value("audio", false), j.value("video", false), out_mod).dump());
         });
     } else if (op == "OE") {
@@ -1001,7 +1041,11 @@ int main(int argc, char ** argv) {
 
     for (int i = 5; i < argc; i++) {
         auto mp = llama_model_default_params();
-        mp.vocab_only = true;
+        // a decision model's labels and classes are read past where a vocab-only load stops
+        const std::string path = argv[i];
+        const std::string full = "-full.gguf";
+        mp.vocab_only = path.size() < full.size() || path.compare(path.size() - full.size(), full.size(), full) != 0;
+        mp.n_gpu_layers = 0;
         llama_model * m = llama_model_load_from_file(argv[i], mp);
         if (!m) {
             fprintf(stderr, "cannot load %s\n", argv[i]);

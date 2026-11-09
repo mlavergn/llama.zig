@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/rnd1.cpp` at v0.7.0 (`620d2225c`):
+//! Ported from `llama.cpp/src/models/rnd1.cpp` at v0.8.0 (`8642541b2`):
 //! `llama_model_rnd1`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -19,7 +19,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_rnd1`'s `load_arch_hparams` (models/rnd1.cpp:3 @620d2225c).
+/// Ports `llama_model_rnd1`'s `load_arch_hparams` (models/rnd1.cpp:3 @8642541b2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -36,7 +36,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.causal_attn = false;
 }
 
-/// Ports `llama_model_rnd1`'s `load_arch_tensors` (models/rnd1.cpp:16 @620d2225c).
+/// Ports `llama_model_rnd1`'s `load_arch_tensors` (models/rnd1.cpp:16 @8642541b2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -85,13 +85,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_rnd1`'s `build_arch_graph` (models/rnd1.cpp:60 @620d2225c).
+/// Ports `llama_model_rnd1`'s `build_arch_graph` (models/rnd1.cpp:60 @8642541b2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_rnd1`'s `graph`
-/// (models/rnd1.cpp:65 @620d2225c).
+/// (models/rnd1.cpp:65 @8642541b2).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

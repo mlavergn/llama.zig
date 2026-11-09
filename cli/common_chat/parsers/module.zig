@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/parsers/parsers.h` and
-//! `llama.cpp/common/parsers/parsers.cpp` (llama.cpp v0.7.0, `620d2225c`):
+//! `llama.cpp/common/parsers/parsers.cpp` (llama.cpp v0.8.0, `8642541b2`):
 //! `foreach_function` and `foreach_parameter`. Each per-model file names its
 //! own source; `common_chat_try_specialized_template` in `../templates.zig`
 //! chooses between them.
@@ -36,6 +36,7 @@ pub const functionary_v3_2 = @import("functionary_v3_2.zig");
 pub const gemma4 = @import("gemma4.zig");
 pub const gigachat_v3 = @import("gigachat_v3.zig");
 pub const gpt_oss = @import("gpt_oss.zig");
+pub const harmony_xml = @import("harmony_xml.zig");
 pub const k2_horizon = @import("k2_horizon.zig");
 pub const kimi_k2 = @import("kimi_k2.zig");
 pub const kimi_k3 = @import("kimi_k3.zig");
@@ -46,10 +47,11 @@ pub const minicpm5 = @import("minicpm5.zig");
 pub const minimax_m3 = @import("minimax_m3.zig");
 pub const ministral3 = @import("ministral3.zig");
 pub const muse_glimmer = @import("muse_glimmer.zig");
+pub const muse_spark = @import("muse_spark.zig");
 pub const qwen3_coder = @import("qwen3_coder.zig");
 pub const translate_gemma = @import("translate_gemma.zig");
 
-/// Ports `foreach_function` (parsers.cpp:5 @620d2225c): `f` over each
+/// Ports `foreach_function` (parsers.cpp:5 @8642541b2): `f` over each
 /// function tool of an OpenAI-style `tools`, with its index in the array,
 /// logging and skipping the rest. Indexes as the C++ loop does,
 /// `tools[i]` for `i < tools.size()` through `common_json`'s const
@@ -77,7 +79,7 @@ pub fn foreachFunction(tools: *const Value, ctx: anytype, comptime f: fn (@TypeO
     }
 }
 
-/// Ports `foreach_parameter` (parsers.cpp:16 @620d2225c): `f` over each
+/// Ports `foreach_parameter` (parsers.cpp:16 @8642541b2): `f` over each
 /// property of a function tool's parameters schema, in schema order, with
 /// its index and the document that owns them -- nothing when the schema is
 /// not an object.

@@ -14,6 +14,13 @@ const api = @import("api/module.zig");
 /// C++ linkage: they are no part of `llama.h`'s C contract, and the
 /// reference exports none of them by these names.
 const ext_only = [_][]const u8{
+    "llama_arch_all",
+    "llama_arch_from_string",
+    "llama_arch_kv_name",
+    "llama_arch_name",
+    "llama_arch_supports_mixed_batch",
+    "llama_arch_supports_save",
+    "llama_arch_supports_sm_tensor",
     "llama_batch_ext_set_decision_order",
     "llama_get_ctx_other",
     "llama_get_embeddings_layer_inp",
@@ -21,11 +28,14 @@ const ext_only = [_][]const u8{
     "llama_get_embeddings_nextn_ith",
     "llama_get_memory_breakdown",
     "llama_memory_get_buffers",
+    "llama_model_decision_label",
     "llama_model_dflash_selector_top_k",
     "llama_model_get_device",
     "llama_model_get_tok_embd",
+    "llama_model_get_tok_embd_rows",
     "llama_model_n_devices",
     "llama_model_n_expert",
+    "llama_model_n_tokens_delay",
     "llama_model_set_attn_rot",
     "llama_model_target_layer_ids",
     "llama_model_target_layer_ids_n",

@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! **Not a port.** This is our own code. The *flag surface* it accepts is
-//! modelled on `llama.cpp/common/arg.cpp` (v0.7.0, `620d2225c`) and the
+//! modelled on `llama.cpp/common/arg.cpp` (v0.8.0, `8642541b2`) and the
 //! defaults on `llama.cpp/common/common.h`, so a command line written for
 //! upstream's `llama-cli` runs unchanged against this binary for the features
 //! that are ported. Each option below names the upstream spelling it matches.
@@ -68,7 +68,7 @@ pub const Args = struct {
     /// `-fitc, --fit-ctx N`: the least context `--fit` shrinks to. An
     /// explicit `-c 0` sets it to `maxInt(u32)`, which forbids shrinking:
     /// upstream's `-c` handler sets `fit_params_min_ctx` so
-    /// (common/arg.cpp:1648 @620d2225c). The later of the two flags wins.
+    /// (common/arg.cpp:1656 @8642541b2). The later of the two flags wins.
     fit_min_ctx: u32 = 4096,
     /// `-t, --threads`. 0 lets llama.cpp pick.
     n_threads: i32 = 0,
@@ -137,7 +137,7 @@ pub const Args = struct {
     /// `--grammar`, `--grammar-file`, `-j, --json-schema` and
     /// `-jf, --json-schema-file`: where the grammar constraining generation
     /// comes from. Each sets upstream's `params.sampling.grammar` outright
-    /// in its handler in `common_params_parser_init` (common/arg.cpp:1397 @620d2225c),
+    /// in its handler in `common_params_parser_init` (common/arg.cpp:1405 @8642541b2),
     /// so the last one given wins.
     grammar_source: GrammarSource = .none,
     /// The GBNF `grammar_source` resolves to, filled in by `main.zig` before
@@ -664,7 +664,7 @@ fn pushKwarg(args: *Args, op: KwargOp) bool {
 }
 
 /// The `what()` of the exception the flag's handler in
-/// `common_params_parser_init` throws on `v` (common/arg.cpp @620d2225c):
+/// `common_params_parser_init` throws on `v` (common/arg.cpp @8642541b2):
 /// `common_reasoning_format_from_name`'s, `--reasoning`'s and `--color`'s
 /// own, and `--reasoning-budget`'s "invalid value".
 fn writeWhat(w: *std.Io.Writer, flag: []const u8, v: []const u8) !void {
@@ -679,21 +679,21 @@ fn writeWhat(w: *std.Io.Writer, flag: []const u8, v: []const u8) !void {
     }
 }
 
-/// `llama_max_devices` (src/llama.cpp:86 @620d2225c), which sizes upstream's
+/// `llama_max_devices` (src/llama.cpp:86 @8642541b2), which sizes upstream's
 /// `fit_params_target`.
 pub const max_devices = 16;
 
-/// Ports `is_truthy` (arg.cpp:1337 @620d2225c), in `common_arg_utils`.
+/// Ports `is_truthy` (arg.cpp:1345 @8642541b2), in `common_arg_utils`.
 fn isTruthy(v: []const u8) bool {
     return eq(v, &.{ "on", "enabled", "true", "1" });
 }
 
-/// Ports `is_falsey` (arg.cpp:1341 @620d2225c), in `common_arg_utils`.
+/// Ports `is_falsey` (arg.cpp:1349 @8642541b2), in `common_arg_utils`.
 fn isFalsey(v: []const u8) bool {
     return eq(v, &.{ "off", "disabled", "false", "0" });
 }
 
-/// Ports `is_autoy` (arg.cpp:1345 @620d2225c), in `common_arg_utils`.
+/// Ports `is_autoy` (arg.cpp:1353 @8642541b2), in `common_arg_utils`.
 fn isAutoy(v: []const u8) bool {
     return eq(v, &.{ "auto", "-1" });
 }
@@ -942,7 +942,7 @@ test "a real upstream flag is refused differently from a typo" {
 test "v0.6.0's new flags are real upstream flags this CLI does not take" {
     // `--spec-draft-sampling` (no speculative decoding here), `--rpc` (no RPC
     // backend) and `--nextn` (llama-imatrix's) are refused as ours to add,
-    // not as typos: cli/upstream_flags.zig lists them at 620d2225c.
+    // not as typos: cli/upstream_flags.zig lists them at 8642541b2.
     for ([_][]const u8{ "--spec-draft-sampling", "--rpc", "--nextn" }) |f| {
         const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", f, "x" });
         try testing.expectEqual(Error.UnsupportedFlag, r.fail.err);

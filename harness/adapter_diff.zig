@@ -32,10 +32,16 @@
 //! shows as a node diff. Each step also records the order directly, and a
 //! sweep over synthetic pointers compares `adapter.Loras` with the template.
 //!
-//! Usage: adapter_diff <tmpdir> <model.gguf> [--quick]
+//! With `--hadamard` the model first gets `prism.hadamard` metadata (see
+//! `derive_hadamard.zig`), as `scripts/adapter-diff`'s second run does: a
+//! delta on a folded weight reads the primal input, and the one file over
+//! the token embedding, a latent lookup table, is refused (v0.8.0).
+//!
+//! Usage: adapter_diff <tmpdir> <model.gguf> [--quick] [--hadamard]
 
 const std = @import("std");
 const input_tensor_order = @import("input_tensor_order.zig");
+const derive_hadamard = @import("derive_hadamard.zig");
 const harness_root = @import("harness_root");
 
 const c = harness_root.impl.c;
@@ -956,10 +962,12 @@ pub fn main(init: std.process.Init) !void {
         std.process.exit(2);
     }
     const dir = args[1];
-    const path = try gpa.dupeSentinel(u8, args[2], 0);
+    var path = try gpa.dupeSentinel(u8, args[2], 0);
     var quick = false;
+    var hadamard = false;
     for (args[3..]) |a| {
         if (std.mem.eql(u8, a, "--quick")) quick = true;
+        if (std.mem.eql(u8, a, "--hadamard")) hadamard = true;
     }
     const out_dir: ?[]const u8 = if (std.c.getenv("ADAPTER_DIFF_OUT")) |d| std.mem.span(d) else null;
 
@@ -968,6 +976,12 @@ pub fn main(init: std.process.Init) !void {
     harness_root.api.impl.llama_log_set(logCb, null);
     c.ggml_log_set(logCb, null);
     c.llama_backend_init();
+
+    if (hadamard) {
+        const dst = pathFor(dir, "hadamard-model");
+        derive_hadamard.deriveHadamard(path, dst, false);
+        path = dst;
+    }
 
     computeEffective();
     sweepOrder();
@@ -979,6 +993,7 @@ pub fn main(init: std.process.Init) !void {
 
     // Control-vector data: layers 1.. of n_embd each, and a short one.
     const n_layer: i32 = @intCast(info.n_layer);
+    few_layers = n_layer <= 5;
     const ne: usize = @intCast(info.n_embd);
     cvec_full = try gpa.alloc(f32, ne * @as(usize, @intCast(n_layer - 1)));
     for (cvec_full) |*v| v.* = rnd() * 0.25;
@@ -1118,7 +1133,10 @@ pub fn main(init: std.process.Init) !void {
             A.lora_free(d);
             note("freed d", .{});
             checks += 1;
-            if (pm.loras.items.len != n_good + 1) fail("{s}: the port's model holds {d} adapters, not {d}", .{ mc.name, pm.loras.items.len, n_good + 1 });
+            // The file over the token embedding is kept, unless it is refused
+            // as a latent lookup table.
+            const n_held = @as(usize, n_good) + @intFromBool(!hadamard);
+            if (pm.loras.items.len != n_held) fail("{s}: the port's model holds {d} adapters, not {d}", .{ mc.name, pm.loras.items.len, n_held });
         }
         rec = null;
         compare(init.io, out_dir, mc.name, "load", ref.items, port.items, 0);
@@ -1201,6 +1219,9 @@ fn compare(io: std.Io, out_dir: ?[]const u8, cfg: []const u8, what: []const u8, 
 
 /// Every adapted decode must give logits the unadapted one did not, or the
 /// adapters are not reaching the graph and the comparison proves nothing.
+/// Whether the model ends before the layers step 16's control vector covers.
+var few_layers = false;
+
 fn vacuity(cfg: []const u8, ref: []const u8) void {
     var it = std.mem.splitScalar(u8, ref, '\n');
     var step: usize = 0;
@@ -1225,6 +1246,8 @@ fn vacuity(cfg: []const u8, ref: []const u8) void {
         // set, and after the null set with the control vector cleared --
         // and must give the unadapted logits back; every other must not.
         const expect_changed = step != 12 and step != 25;
+        // Step 16's control vector covers layers 5 to 10, past a fixture's end.
+        if (step == 16 and few_layers) continue;
         checks += 1;
         if (expect_changed == std.mem.eql(u8, line, baseline.?)) {
             fail("{s}: step {d} decoded {s} the unadapted decode", .{ cfg, step, if (expect_changed) "exactly as" else "differently from" });

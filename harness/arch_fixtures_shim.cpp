@@ -10,7 +10,7 @@
 // what `scripts/arch-model-diff` loads through the C++ and the port.
 //
 // `common_batch`'s four members the test links against are copied from
-// `llama.cpp/common/common.cpp` at v0.7.0 (`620d2225c`); the logging is
+// `llama.cpp/common/common.cpp` at v0.8.0 (`8642541b2`); the logging is
 // reduced to stderr, which is all the test needs: it only ever logs progress
 // and errors.
 
@@ -22,7 +22,7 @@
 #include <cstdio>
 
 // The threshold the LOG_* macros compare against, as `common/log.cpp` keeps
-// it (log.cpp:17, 19, 23 @620d2225c): since v0.4.0 the test raises it to
+// it (log.cpp:17, 19, 23 @8642541b2): since v0.4.0 the test raises it to
 // LOG_LEVEL_DEBUG at start-up and filters libllama's log by
 // `common_log_get_verbosity` itself.
 int common_log_verbosity_thold = LOG_DEFAULT_LLAMA;
@@ -35,7 +35,7 @@ void common_log_set_verbosity_thold(int verbosity) {
     common_log_verbosity_thold = verbosity;
 }
 
-// Copied from `common/log.cpp` (log.cpp:548 @620d2225c).
+// Copied from `common/log.cpp` (log.cpp:548 @8642541b2).
 int common_log_get_verbosity(enum ggml_log_level level) {
     switch (level) {
         case GGML_LOG_LEVEL_DEBUG: return LOG_LEVEL_DEBUG;
@@ -72,7 +72,7 @@ void common_init() {
     }, nullptr);
 }
 
-// Copied from `common/common.cpp` (common.cpp:2169, 2174, 2178, 2234 @620d2225c).
+// Copied from `common/common.cpp` (common.cpp:2198, 2203, 2207, 2263 @8642541b2).
 // Only `test_backends` reaches them, never the `-o` path the fixtures use.
 common_batch::common_batch(llama_context * ctx) : batch(llama_batch_ext_init(ctx)) {
     const auto rope_type = llama_model_rope_type(llama_get_model(ctx));

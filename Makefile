@@ -25,7 +25,7 @@ LINT_FILES := $(filter-out $(LINT_EXCLUDE),build.zig $(shell find $(LINT_DIRS) -
 
 .DEFAULT_GOAL := build
 
-.PHONY: test distclean build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-toolchain vk-repro vk-builds vk-backend-diff vk-node-diff vk-ops-diff vk-push-layout vk-parity-cli blas-builds blas-diff blas-node-diff x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates win-host-diffs libcxx-diff regex-diff json-diff schema-diff peg-diff chat-msg-diff chat-parse-diff spec-diff server-diff server-task-diff http-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff jinja-diff context-diff arch-fixtures arch-model-diff mtp-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff backend-ops parity-cli cnv-diff fit-diff tools-diff parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port oneshot chat ref ref-chat web ui validate xcframework xcframework-check perf perf-cpu
+.PHONY: test distclean build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-toolchain vk-repro vk-builds vk-backend-diff vk-node-diff vk-ops-diff vk-push-layout vk-parity-cli blas-builds blas-diff blas-node-diff x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates win-host-diffs libcxx-diff regex-diff json-diff schema-diff peg-diff chat-msg-diff chat-parse-diff spec-diff server-diff server-task-diff http-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff jinja-diff context-diff moe-slru-diff arch-fixtures arch-model-diff mtp-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff metal-ops-diff backend-ops parity-cli cnv-diff fit-diff tools-diff parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port oneshot chat ref ref-chat web ui validate xcframework xcframework-check perf perf-cpu
 
 # $(shell), not $(wildcard): make splits a function's arguments on spaces, and
 # the checkout may live under a path with one ("/Volumes/Macintosh HD").
@@ -271,6 +271,14 @@ metal-diff:
 	zig build reference --release=fast
 	./scripts/metal-diff
 
+# Diff the Metal encoders' output on bits against llama.cpp.zmake's: the new
+# v0.8.0 ops, which backend-ops holds only to a tolerance and no decode
+# reaches. See the header of harness/metal_ops_dump.c.
+metal-ops-diff:
+	cd llama.cpp.zmake && zig build lib --release=fast
+	zig build reference --release=fast
+	./scripts/metal-ops-diff
+
 # Compare the hand-declared Metal structs against the real headers.
 # device_c.zig hand-declares ggml_metal_device_props rather than widening
 # impl.zig's cImport; this asks the C compiler whether the transcription is
@@ -504,7 +512,7 @@ server-task-diff:
 # See the header of scripts/server-diff.
 # Both servers embed the web UI bundle `make ui` builds (build/ui.zig);
 # `ui` holds its asset routes.
-SERVER_CASES ?= core slots embd lora cache auth parallel spec sleep stream chat responses anthropic asr vision audio tools mcp proxy router hub ui decision
+SERVER_CASES ?= core slots embd lora cache auth parallel spec sleep stream chat responses anthropic asr vision audio tools mcp proxy router sched connect hub ui decision rerank tts realtime
 server-diff: ui
 	@set -e; for n in $(SERVER_CASES); do SERVER_UI=$(UI_DIST) ./scripts/server-diff $$n; done
 
@@ -577,6 +585,11 @@ context-diff:
 api-diff:
 	zig build reference --release=fast
 	./scripts/api-diff
+
+# The MoE cache's eviction policy, Zig against the C++ in one process.
+moe-slru-diff:
+	zig build reference --release=fast
+	./scripts/moe-slru-diff $(ARGS)
 
 # LoRA and control-vector adapters, Zig against the C++ in one process.
 adapter-diff:

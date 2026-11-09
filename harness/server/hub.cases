@@ -58,6 +58,65 @@ GET /props
 !fulllog
 !mocklog
 
+# --- v0.8.0: a partial is kept, and resumed only when it can be. /trunc
+# leaves half of p1 and its ETag; a changed ETag discards it
+!server -m $CWD/dl/p1.gguf -mu $MOCK/trunc/p1.gguf -c 256 -np 1 -lv 4
+!mocklog
+!tree $CWD/dl
+!server -m $CWD/dl/p1.gguf -mu $MOCK/etag/w1/p1.gguf -c 256 -np 1 -lv 4
+!fulllog
+!mocklog
+!tree $CWD/dl
+# the same ETag: resumed, from where it stopped
+!server -m $CWD/dl/p2.gguf -mu $MOCK/trunc/p2.gguf -c 256 -np 1
+!mocklog
+!server -m $CWD/dl/p2.gguf -mu $MOCK/files/p2.gguf -c 256 -np 1 -lv 4
+!fulllog
+!mocklog
+!tree $CWD/dl
+# a server that answers the resume with 416, then one that ignores it
+!server -m $CWD/dl/r1.gguf -mu $MOCK/trunc/r1.gguf -c 256 -np 1
+!mocklog
+!server -m $CWD/dl/r1.gguf -mu $MOCK/r416/r1.gguf -c 256 -np 1 -lv 4
+!fulllog
+!mocklog
+!server -m $CWD/dl/r2.gguf -mu $MOCK/trunc/r2.gguf -c 256 -np 1
+!mocklog
+!server -m $CWD/dl/r2.gguf -mu $MOCK/norange200/r2.gguf -c 256 -np 1 -lv 4
+!fulllog
+!mocklog
+!tree $CWD/dl
+# another process holds the file's lock: this one waits, then finds it
+!lock $CWD/dl/lk.gguf.lock 12
+!server -m $CWD/dl/lk.gguf -mu $MOCK/files/lk.gguf -c 256 -np 1 -lv 4
+!fulllog
+!mocklog
+
+# --- v0.8.0: HTTP_PROXY, the absolute-form target; its credentials go to the
+# proxy; loopback and NO_PROXY go direct; a malformed one is ignored
+!env HTTP_PROXY=$MOCK
+!server -m $CWD/dl/p3.gguf -mu http://example.invalid/files/p3.gguf -c 256 -np 1
+!mocklog
+# an HTTP_PROXY set empty would shadow the lower-case name, so it goes altogether
+!noenv
+!env LLAMA_CACHE=$CWD/cache
+!env MODEL_ENDPOINT=$MOCK
+!env http_proxy=http://user:secret@$MOCKADDR
+!server -m $CWD/dl/p4.gguf -mu http://example.invalid:8080/files/p4.gguf -c 256 -np 1
+!mocklog
+!env http_proxy=
+!env HTTP_PROXY=http://127.0.0.1:1
+!server -m $CWD/dl/p5.gguf -mu $MOCK/files/p5.gguf -c 256 -np 1 -lv 4
+!mocklog
+!env NO_PROXY=example.invalid,.other
+!server -m $CWD/dl/p6.gguf -mu http://a.example.invalid/files/p6.gguf -c 256 -np 1
+!env HTTP_PROXY=notaurl
+!env NO_PROXY=
+!server -m $CWD/dl/p6.gguf -mu http://127.0.0.1:1/files/p6.gguf -c 256 -np 1
+!server -m $CWD/dl/p6.gguf -mu http://x.invalid/files/p6.gguf -c 256 -np 1 -lv 4
+!env HTTP_PROXY=
+!mocklog
+
 # --- downloads that fail
 !server -m $CWD/dl/404 -mu $MOCK/status/404 -c 256 -np 1
 !mocklog
@@ -152,7 +211,8 @@ POST /models {"model":"test/slowpoke"}
 !waitfor /models "id":"test/slowpoke"[^{]*\{"value":"downloading"
 # both sides' children well into their ~15 s download before either is
 # cancelled (each request goes to one side, then the other)
-!sleep 3
+!mockwait GET /test/slowpoke/resolve
+!sleep 1
 POST /models/unload {"model":"test/slowpoke"}
 !sleep 1
 !sseend
@@ -163,6 +223,77 @@ DELETE /models?model=test/vision:Q4_K_M
 DELETE /models
 DELETE /models?model=test/split:Q8_0
 GET /models
+!mocklog
+
+# --- v0.8.0: POST /models takes the sidecars to pull, by kind; GET /models
+# reports the ones on disk; DELETE takes one off
+!server -c 256 -np 1 -lv 4
+!fulllog
+POST /models {"model":"test/side","sidecars":["nope"]}
+POST /models {"model":"test/side","sidecars":["mmproj","mtp"]}
+!waitfor /models "id":"test/side:Q4_K_M"(?:(?!"id":).)*"value":"unloaded"
+!tree $CWD/cache/models--test--side
+GET /models
+!mocklog
+POST /models {"model":"test/side:Q4_K_M","sidecars":["dflash"]}
+!waitfor /models "id":"test/side:Q4_K_M"(?:(?!"id":).)*"value":"unloaded"(?:(?!"id":).)*"dflash"
+GET /models
+DELETE /models?model=test/side:Q4_K_M&sidecar=nope
+DELETE /models?model=test/side:Q4_K_M&sidecar=mtp
+GET /models
+DELETE /models?model=test/side:Q4_K_M&sidecar=mtp
+# a sidecars value of the wrong type falls back to the default list
+POST /models {"model":"test/empty","sidecars":3}
+POST /models/load {"model":"test/side:Q4_K_M"}
+!waitfor /models "id":"test/side:Q4_K_M"[^{]*\{"value":"loaded"
+DELETE /models?model=test/side:Q4_K_M&sidecar=dflash
+POST /models {"model":"test/side:Q4_K_M"}
+POST /models/unload {"model":"test/side:Q4_K_M"}
+!waitfor /models "id":"test/side:Q4_K_M"[^{]*\{"value":"unloaded"
+!tree $CWD/cache/models--test--side
+DELETE /models?model=test/side:Q4_K_M
+!tree $CWD/cache/models--test--side
+# a sidecar another tag loads stays with it
+POST /models {"model":"test/shared:Q4_K_M"}
+!waitfor /models "id":"test/shared:Q4_K_M"(?:(?!"id":).)*"value":"unloaded"
+POST /models {"model":"test/shared:Q8_0"}
+!waitfor /models "id":"test/shared:Q8_0"(?:(?!"id":).)*"value":"unloaded"
+DELETE /models?model=test/shared:Q4_K_M
+!tree $CWD/cache/models--test--shared
+GET /models
+# a preset or local model is not a download; a cached one downloads again
+!mocklog
+
+# --- v0.8.0: a download cancelled leaves its record and its partial file. A
+# restarted router lists it as incomplete, and a POST resumes it; a DELETE
+# drops its record and partial. The model and its projector download at once,
+# so their two threads' lines come in either order
+!droplog common_pull_file: download failed: Connection handling canceled
+!droplog common_download_file_single_online: download failed after 3 attempts
+!server -c 256 -np 1 -lv 4
+!fulllog
+POST /models {"model":"test/slowside"}
+!waitfor /models "id":"test/slowside"[^{]*\{"value":"downloading"
+GET /models
+# one tag asked twice, and the same file under another tag
+POST /models {"model":"test/slowside"}
+POST /models {"model":"test/slowside:Q4_K_M"}
+!mockwait GET /test/slowside/resolve
+!sleep 1
+POST /models/unload {"model":"test/slowside"}
+!sleep 1
+!tree $CWD/cache/models--test--slowside
+GET /models
+!mask "progress":\{[^}]*\}
+!server -c 256 -np 1 -lv 4
+!fulllog
+GET /models
+DELETE /models?model=test/slowside&sidecar=mmproj
+GET /models
+DELETE /models?model=test/slowside
+GET /models
+DELETE /models?model=test/slowside
+!tree $CWD/cache/models--test--slowside
 !mocklog
 
 # --- presets over cached models; one hides its cache entry

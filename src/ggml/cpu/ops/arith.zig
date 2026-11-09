@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.7.0 (`620d2225c`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.8.0 (`8642541b2`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # Accelerate is live here
@@ -33,12 +33,12 @@ const Length = c_ulong;
 extern fn vDSP_vadd(a: [*]const f32, ia: Stride, b: [*]const f32, ib: Stride, dst: [*]f32, id: Stride, n: Length) void;
 
 /// Ports `ggml_compute_forward_add_non_quantized`
-/// (ggml-cpu/binary-ops.cpp:140 @620d2225c), which `cpu/binary_ops.zig`
+/// (ggml-cpu/binary-ops.cpp:140 @8642541b2), which `cpu/binary_ops.zig`
 /// already provides. Declared rather than imported so the dispatcher below
 /// reads like the C's, which calls it across a translation-unit boundary too.
 extern fn ggml_compute_forward_add_non_quantized(params: *const ComputeParams, dst: *Tensor) void;
 
-/// Ports `ggml_compute_forward_add_q_f32` (ops.cpp:578 @620d2225c).
+/// Ports `ggml_compute_forward_add_q_f32` (ops.cpp:578 @8642541b2).
 fn addQF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -114,7 +114,7 @@ fn addQF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_add` (ops.cpp:654 @620d2225c).
+/// Ports `ggml_compute_forward_add` (ops.cpp:654 @8642541b2).
 pub export fn ggml_compute_forward_add(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -150,7 +150,7 @@ pub export fn ggml_compute_forward_add(params: *const ComputeParams, dst: *Tenso
     }
 }
 
-/// Ports `ggml_compute_forward_add_id_f32` (ops.cpp:704 @620d2225c).
+/// Ports `ggml_compute_forward_add_id_f32` (ops.cpp:704 @8642541b2).
 fn addIdF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -194,18 +194,23 @@ fn addIdF32(params: *const ComputeParams, dst: *Tensor) void {
         const idx_ptr: *const i32 = @ptrCast(@alignCast(s2 + @as(usize, @intCast(j1)) * l.nb20 + @as(usize, @intCast(j2)) * l.nb21));
         const j11: i64 = idx_ptr.*;
 
-        impl.assert(j11 >= 0 and j11 < l.ne11, "i11 >= 0 && i11 < ne11");
+        impl.assert(j11 == -1 or (j11 >= 0 and j11 < l.ne11), "i11 == -1 || (i11 >= 0 && i11 < ne11)");
 
-        vec.add_f32(
-            l.ne0,
-            @ptrCast(@alignCast(dd + @as(usize, @intCast(j3)) * l.nb3 + @as(usize, @intCast(j2)) * l.nb2 + @as(usize, @intCast(j1)) * l.nb1)),
-            @ptrCast(@alignCast(s0 + @as(usize, @intCast(j3)) * l.nb03 + @as(usize, @intCast(j2)) * l.nb02 + @as(usize, @intCast(j1)) * l.nb01)),
-            @ptrCast(@alignCast(s1 + @as(usize, @intCast(j11)) * l.nb11)),
-        );
+        const dst_row: [*]f32 = @ptrCast(@alignCast(dd + @as(usize, @intCast(j3)) * l.nb3 + @as(usize, @intCast(j2)) * l.nb2 + @as(usize, @intCast(j1)) * l.nb1));
+        const src0_row: [*]const f32 = @ptrCast(@alignCast(s0 + @as(usize, @intCast(j3)) * l.nb03 + @as(usize, @intCast(j2)) * l.nb02 + @as(usize, @intCast(j1)) * l.nb01));
+
+        if (j11 == -1) {
+            // The allocator may run this in place, which hands the C's
+            // `memcpy` one pointer twice and is `@memcpy`'s illegal aliasing.
+            if (dst_row != src0_row) @memcpy(dst_row[0..@intCast(l.ne0)], src0_row[0..@intCast(l.ne0)]);
+            continue;
+        }
+
+        vec.add_f32(l.ne0, dst_row, src0_row, @ptrCast(@alignCast(s1 + @as(usize, @intCast(j11)) * l.nb11)));
     }
 }
 
-/// Ports `ggml_compute_forward_add_id` (ops.cpp:755 @620d2225c).
+/// Ports `ggml_compute_forward_add_id` (ops.cpp:760 @8642541b2).
 pub export fn ggml_compute_forward_add_id(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -215,7 +220,7 @@ pub export fn ggml_compute_forward_add_id(params: *const ComputeParams, dst: *Te
     }
 }
 
-/// Ports `ggml_compute_forward_add1_f32` (ops.cpp:775 @620d2225c).
+/// Ports `ggml_compute_forward_add1_f32` (ops.cpp:780 @8642541b2).
 ///
 /// The `GGML_USE_ACCELERATE` arm: `vDSP_vadd` with a **zero stride** on the
 /// scalar operand, which is how it broadcasts `*src1->data` across the row.
@@ -265,7 +270,7 @@ fn add1F32(params: *const ComputeParams, dst: *Tensor) void {
 /// `ggml_compute_forward_add1_f16_f16`,
 /// `ggml_compute_forward_add1_bf16_f32` and
 /// `ggml_compute_forward_add1_bf16_bf16`
-/// (ops.cpp:825, 873, 986, 1034 @620d2225c).
+/// (ops.cpp:830, 878, 991, 1039 @8642541b2).
 ///
 /// The four differ only in the element type and in whether the scalar arrives
 /// as an `f32` or as that same narrow type, so they are one function over two
@@ -318,7 +323,7 @@ fn add1Narrow(comptime T: type, comptime scalar_is_f32: bool, params: *const Com
     }
 }
 
-/// Ports `ggml_compute_forward_add1_q_f32` (ops.cpp:921 @620d2225c).
+/// Ports `ggml_compute_forward_add1_q_f32` (ops.cpp:926 @8642541b2).
 fn add1QF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -371,7 +376,7 @@ fn add1QF32(params: *const ComputeParams, dst: *Tensor) void {
 
         const src0_row = s0 + (@as(usize, @intCast(j1)) * l.nb01 + @as(usize, @intCast(j2)) * l.nb02 + @as(usize, @intCast(j3)) * l.nb03);
         // The C writes `i3*nb0` in this one expression where every sibling
-        // writes `i3*nb3` -- see `dst_row` (ops.cpp:973 @620d2225c).
+        // writes `i3*nb3` -- see `dst_row` (ops.cpp:978 @8642541b2).
         // Reproduced verbatim: this is the reference's behaviour, and
         // correcting it here would make the port disagree with the thing it
         // is measured against.
@@ -386,7 +391,7 @@ fn add1QF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_add1` (ops.cpp:1082 @620d2225c).
+/// Ports `ggml_compute_forward_add1` (ops.cpp:1087 @8642541b2).
 pub export fn ggml_compute_forward_add1(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -442,7 +447,7 @@ pub export fn ggml_compute_forward_add1(params: *const ComputeParams, dst: *Tens
     }
 }
 
-/// Ports `ggml_compute_forward_acc_f32` (ops.cpp:1156 @620d2225c).
+/// Ports `ggml_compute_forward_acc_f32` (ops.cpp:1161 @8642541b2).
 fn accF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -528,7 +533,7 @@ fn accF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_acc` (ops.cpp:1236 @620d2225c).
+/// Ports `ggml_compute_forward_acc` (ops.cpp:1241 @8642541b2).
 pub export fn ggml_compute_forward_acc(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 

@@ -1,0 +1,3 @@
+{#- v0.8.0: a level the template refuses is not honored. -#}
+{%- if reasoning_effort is defined and reasoning_effort not in ['low', 'high'] -%}{{ raise_exception('bad effort') }}{%- endif -%}
+<{{ reasoning_effort }}>{%- for m in messages -%}<{{ m.role }}>{{ m.content }}{%- endfor -%}

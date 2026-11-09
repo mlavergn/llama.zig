@@ -2471,6 +2471,146 @@ changed.
 
 ---
 
+### Pickup for the v0.8.0 sync
+
+Upstream `v0.8.0` (`8642541b2`). As at v0.7.0, the pickups **started
+before the sync commit**: the Mac's working tree went over as a commit
+object (`006a2a7`, from a scratch index, never on a branch) in a bundle,
+with zmake's `74fd21c`, zigjinja's `c3f8469` and upstream's `v0.7.0..v0.8.0`
+beside it, onto a local branch `sync-v0.8.0-wip` on the GB10; fixes go
+back as whole files. The GB10's 16 carried v0.7.0 files, byte-equal to
+`675d18a`, are in its stash (`pre-v0.8.0`), and its `master` is
+fast-forwarded to `675d18a`. Its Zig is 0.17.1 (the Mac's is 0.17.0+1).
+
+**Run 2026-11-07/09.** DESKTOP-BR7J5S9 clear; the GB10 clear apart from
+what upstream does not reproduce against itself there (below). The Mac's
+later work -- the tokenize change, the `models.zig` fix, the harness fixes
+below -- went over as a second commit object, `0f36bbc`, the same way.
+
+**GB10 (`spark-dbff`, `~/src/mlavergn/llama.zig`)**
+
+1. **CUDA** -- clear. Both builds (the port's blind keys compiled first
+   time), `gen-fattn-config` and `gen-mmq-config` unchanged,
+   `cuda-ops-diff` 19,192/19,192 (6,781 unsupported, 0 claimed beyond the
+   reference; TOP_K_MASK 28, TOPK_MOE 672 with 384 experts and groups 4–32,
+   DSV4_HC_POST 9, ROPE_SET_ROWS 69, the RMS_NORM fusions 293, SSM_CONV 180,
+   MUL_MAT_VEC_FUSION 1,374), `cuda-backend-diff` four environments,
+   `cuda-node-diff` per node and fused on a short and a 64+-token prompt and
+   at `GGML_CUDA_GRAPH_CHUNK_SIZE` 1, 64 and 0, `cuda-parity-cli`. **Not
+   shown by any total**: whether the batch-17/150 fusion cases took the
+   fused MMQ kernel (`shouldFuseMulMatQ` falls back silently). The legacy
+   pool path stays unreached (the GB10 has VMM).
+2. **Vulkan** -- clear on all four arms: `vk-repro`, `vk-ops-diff` 21,618
+   cases and `vk-parity-cli` 6/6 on each, `vk-node-diff`, `vk-backend-diff`
+   (28 environments), `vk-push-layout`. The pickup's first follow-up ran
+   `scripts/vk-repro` for the three other arms directly, against a
+   reference built without Vulkan; `make vk-repro` is the entry point.
+   Driver R580: the 256x128 conv3d tile needs R615, so it is unreachable
+   there.
+3. **Linux arm64 CPU set** -- clear: `ops-diff` 1,588, `repack-diff` 141,
+   `node-diff`, `parity-port-cpu` 6/6, `host-arms-diff` 18; `libcxx-diff`,
+   `regex-diff`, `unicode-diff`, `vocab-diff` (103 files), `loader-diff`,
+   `quant-diff`, `gemma4-assistant-diff`. `sampler-diff` is a macOS gate
+   (Metal, `xcrun`), wrongly on the run list.
+4. **Models** -- `arch-model-diff` 200 pass, 2 `REF-ABORT` (PLM,
+   `rwkv6qwen2`, since v0.3.0), 1 open (`t5-dense`, below); `mtp-diff`,
+   `moe-slru-diff`, `context-diff` and the MoE-cache and host-expert runs
+   pass. `glm5-next-moe` and `glm5-next-topk8-moe` (`proxy`, `n_rs_seq 4`)
+   failed first on **the harness**: `context-diff` hashed the snapshot
+   slots `GATED_DELTA_NET` leaves unwritten (`writtenBytes`, `NOTES.md`).
+5. **libmtmd** -- `mtmd-gates` passes apart from the two `qwen3tts` CPU
+   node passes (open since v0.6.0). Its first failure was **the harness**:
+   on a CUDA build the mtmd gates import the port's `llama` module, whose
+   link carries `libstdc++.so`, and libstdc++'s personality routine aborts
+   on the reference's throws; the image and audio gates build
+   `-Dcuda=false` now.
+6. **Chat, tools and server** -- `json-diff`, `schema-diff`, `peg-diff`,
+   `jinja-diff`, `chat-parse-diff`, `chat-msg-diff`, `cnv-diff` 36,
+   `spec-diff` 62, `http-diff` 424, `server-task-diff` 7,436 records, every
+   tool's `tools-diff`, every `server-diff` file but `parallel` (below);
+   `fit-diff` 66/68 (below). The first run's tools and server did not
+   build -- the GB10's tree predated the `models.zig` fix -- and passed on
+   `0f36bbc`. Three `server-diff` lines differed upstream against upstream
+   and were fixed in the harness (`router`'s live free memory, `embd`'s
+   idle line, `chat`'s logger interleave: `NOTES.md`).
+7. **The 26 CUDA and Vulkan injections** the blind ports owe: **23
+   caught, 2 inert, 1 unreachable here**, over three rounds in a detached
+   worktree, each gate clean first. The first caught 15; of the 11 left,
+   two had not built (an unused local -- the injection's fault), one ran
+   against the wrong gate (`ADD` for flash attention), and the rest showed
+   **two holes in the op oracles**: `cuda-ops-diff`'s and `vk-ops-diff`'s
+   extras compared the whole `-o` with `strcmp`, so any list or regex ran
+   none of them (`harness/op_filter.h` now splits it as test-backend-ops
+   does), and four shapes were missing -- one-column `MUL_MAT` where MMVQ's
+   `vdr` doubles the GB10's warps, `RMS_NORM` + `VIEW` + `SET_ROWS` past
+   128 columns over many rows, a swapped multiply over q2_K, and the
+   q8_1 matrix cases run on the `none` arm, the only one on NVIDIA with
+   those shaders. Inert: `n4 <= 1024` made `<` (the other arm does the same
+   work at 1024) and the CUDA graph's chunk end (only the capture count
+   changes). Unreachable: `CONV_3D`'s 256x128 tile, which upstream takes on
+   NVIDIA's driver only from R615; the GB10's is 580.173 (`NOTES.md`).
+
+**Open on the GB10, recorded and not masked:**
+
+- `arch-model-diff`'s `t5-dense` `cpu`, `q8_0 cache, attn rot off`, where
+  the "cpu" model still offloads ops to CUDA0. One node, the second decode's
+  `kq-1` (`MUL_MAT` over `cache_k_l1`, `[512,314,2,1]`), hashes differently
+  run to run -- the reference against itself 1 of 3 pairs, the port the
+  same -- while all 2,424 other nodes, everything downstream of it, every
+  output row and every log line agree, ref and port alike; CPU-only it is
+  stable. So bytes nothing reads, but **whose is unproven**: `context-diff`
+  runs both libllamas over the port's CUDA host layer, and a harness over
+  upstream's (`zig-out/cuda-upstream`) does not link -- upstream's nvcc
+  objects need libstdc++'s `std::__cxx11::string`, `condition_variable` and
+  `call_once`, and libstdc++ on the line brings a personality routine that
+  aborts the reference's caught throws (`llama_get_logits_ith` on a row not
+  output). **Next**: give `harness/node_dump.c` an encode step and the
+  case's context parameters, and run this case through `cuda-node-diff`,
+  which already links both CUDA layers from C.
+- `mtmd-diff`'s `qwen3tts` and `qwen3tts_shared` CPU node passes: upstream
+  never initialises `out_code_cache`, and the reference does not reproduce
+  against itself (2 of 2 runs here). Skip those rows or record them as
+  nondeterministic on Linux -- still Marc's decision.
+- `server-diff parallel`: slot ids under concurrent requests, upstream
+  against upstream (CUDA batches by timing), as since v0.5.0.
+- `fit-diff`'s two real-device cases differ in free memory read live
+  (66/68; 65/68 at v0.7.0). A mask must spare the fake-GPU cases, whose
+  exact free arithmetic is the point of the gate.
+- `CONV_3D`'s coopmat2 256x128 tile is unreachable on the GB10's driver
+  (580.173; upstream wants R615): when the driver moves past it, rerun
+  `vk-ops-diff -o CONV_3D` with `conv3dSelectShape` replaced by
+  `convSelectShape` -- the 256-output-channel extra was written for it.
+
+**The link.** `zigupdater`'s `tty` and `push` moved to `ziglink` on
+2026-11-08 at 01:21, mid-run; the GB10's jobs ran under `nohup` and were
+unaffected. Paired again on 2026-11-09, with `ziglink`'s default data
+directory (`~/.config/link`).
+
+**DESKTOP-BR7J5S9 (Windows x86_64)** -- clear: `x86-quants-diff` 28
+kernels, `x86-repack-diff` 129, `x86-ops-diff` 1,676 lines,
+`x86-node-diff` 2,862 nodes at 1 and 4 threads and fused,
+`win-host-diffs` (`host-arms-diff`, `libcxx-diff`, `regex-diff`,
+`unicode-diff`); `llama-cli.exe` and the twelve tools build.
+
+**JWHLPTOP** -- excluded; v0.8.0 adds the 16-lane `vGeluQuick` to the
+AVX-512 items it carries.
+
+**Gaps found, no machine needed**
+
+- `server-diff` has no read timeout on the realtime socket: an injected
+  fault that wedges a server hangs the gate (three did).
+- Not gated: the realtime `on_tool_call` and `function_call_arguments`
+  events (no fixture writes a call), an in-flight `response.cancel`'s
+  status, `common_measure_memory`, `llama_model_deepseek41`'s MTP throw,
+  TOP_K_MASK's barrier on Metal (a race the M5 Max never loses).
+- One injection escape stands unexplained: DSV4's mirror refill
+  (`dsv4_state_read_k_cache`'s tensor copy).
+- `make validate` does not build `llama-server`: a lint fix in
+  `tools/server/models.zig` that did not compile passed it. Add
+  `zig build tools` (or the server step) to `make test`.
+
+---
+
 ## Risk register
 
 | Risk | Impact | Mitigation |

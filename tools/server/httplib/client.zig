@@ -5,8 +5,8 @@
 //! # Provenance
 //!
 //! Ports parts of `llama.cpp/vendor/cpp-httplib/httplib.cpp` and
-//! `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib 0.61.0, vendored at
-//! llama.cpp v0.7.0, `620d2225c`): `ClientImpl` -- `send`, `send_`,
+//! `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib 0.62.0, vendored at
+//! llama.cpp v0.8.0, `8642541b2`): `ClientImpl` -- `send`, `send_`,
 //! `handle_request`, `process_request`, `write_request`, the redirect path
 //! -- and the `detail` functions under it: `create_client_socket`,
 //! `wait_until_socket_is_ready`, `parse_url`, `parse_port`,
@@ -18,22 +18,20 @@
 //!
 //! # What is not here
 //!
-//! What the proxy never sets is left at its default and its arm not
-//! ported: HTTP proxies and `no_proxy`, basic/bearer authentication,
-//! digest authentication (SSL-only), the address map, interface binding,
+//! What no caller sets is left at its default and its arm not ported:
+//! `no_proxy`, bearer authentication, digest authentication (SSL-only), the address map, interface binding,
 //! compression, content providers, upload and download progress, the
 //! logger, and keep-alive (`keep_alive_` stays false, so every request
 //! closes its connection). SSL is not built by the reference: an `https`
 //! redirect fails with `SSLConnection`, as there. Only one thread ever
-//! drives a client, so the request mutex and the in-flight bookkeeping
-//! are not ported.
+//! drives a client, so the request mutex is not ported; another may `stop`
+//! it, through the socket mutex and the in-flight count.
 
 const std = @import("std");
 const builtin = @import("builtin");
 const detail = @import("detail.zig");
 const socket = @import("socket.zig");
 const message = @import("message.zig");
-const regex = @import("llama").regex;
 
 const Headers = detail.Headers;
 
@@ -53,22 +51,24 @@ const O_NONBLOCK: c_int = if (is_darwin) 0x0004 else 0o4000;
 const EINPROGRESS: c_int = if (is_darwin) 36 else 115;
 const SO_ERROR: c_int = if (is_darwin) 0x1007 else 4;
 
-/// Ports `CPPHTTPLIB_VERSION` (httplib.h:11 @620d2225c).
-pub const cpphttplib_version = "0.61.0";
-/// Ports `CPPHTTPLIB_CONNECTION_TIMEOUT_SECOND` (httplib.h:37 @620d2225c).
+/// Ports `CPPHTTPLIB_VERSION` (httplib.h:11 @8642541b2).
+pub const cpphttplib_version = "0.62.0";
+/// Ports `CPPHTTPLIB_CONNECTION_TIMEOUT_SECOND` (httplib.h:45 @8642541b2).
 const connection_timeout_second: i64 = 300;
-/// Ports `CPPHTTPLIB_CLIENT_READ_TIMEOUT_SECOND` (httplib.h:61 @620d2225c).
+/// Ports `CPPHTTPLIB_CLIENT_READ_TIMEOUT_SECOND` (httplib.h:69 @8642541b2).
 const client_read_timeout_second: i64 = 300;
-/// Ports `CPPHTTPLIB_CLIENT_WRITE_TIMEOUT_SECOND` (httplib.h:69 @620d2225c).
+/// Ports `CPPHTTPLIB_CLIENT_WRITE_TIMEOUT_SECOND` (httplib.h:77 @8642541b2).
 const client_write_timeout_second: i64 = 5;
-/// Ports `CPPHTTPLIB_EXPECT_100_THRESHOLD` (httplib.h:81 @620d2225c).
+/// Ports `CPPHTTPLIB_EXPECT_100_THRESHOLD` (httplib.h:89 @8642541b2).
 const expect_100_threshold: usize = 1024;
-/// Ports `CPPHTTPLIB_EXPECT_100_TIMEOUT_MSECOND` (httplib.h:85 @620d2225c).
+/// Ports `CPPHTTPLIB_EXPECT_100_TIMEOUT_MSECOND` (httplib.h:93 @8642541b2).
 const expect_100_timeout_msecond: i64 = 1000;
-/// Ports `CPPHTTPLIB_REDIRECT_MAX_COUNT` (httplib.h:121 @620d2225c).
+/// Ports `CPPHTTPLIB_REDIRECT_MAX_COUNT` (httplib.h:129 @8642541b2).
 const redirect_max_count: usize = 20;
+/// Ports `CPPHTTPLIB_INTERIM_RESPONSE_MAX_COUNT` (httplib.h:134 @8642541b2).
+const interim_response_max_count: usize = 100;
 
-/// Ports `Error` (httplib.h:1906 @620d2225c), the members a client reaches.
+/// Ports `Error` (httplib.h:1950 @8642541b2), the members a client reaches.
 pub const Error = enum {
     success,
     unknown,
@@ -83,8 +83,9 @@ pub const Error = enum {
     connection_timeout,
     invalid_headers,
     unsupported_content_encoding,
+    exceed_max_payload_size,
 
-    /// Ports `to_string` (httplib.cpp:6537 @620d2225c).
+    /// Ports `to_string` (httplib.cpp:6718 @8642541b2).
     pub fn toString(self: Error) []const u8 {
         return switch (self) {
             .success => "Success (no error)",
@@ -100,11 +101,12 @@ pub const Error = enum {
             .connection_timeout => "Connection timed out",
             .invalid_headers => "Invalid headers",
             .unsupported_content_encoding => "Unsupported Content-Encoding",
+            .exceed_max_payload_size => "Exceeded maximum payload size",
         };
     }
 };
 
-/// Ports `Response` (httplib.h:1831 @620d2225c), a client's: what the server
+/// Ports `Response` (httplib.h:1875 @8642541b2), a client's: what the server
 /// answered. Every string lives in `a`.
 pub const Response = struct {
     a: std.mem.Allocator,
@@ -140,7 +142,7 @@ pub const ContentReceiver = struct {
     func: *const fn (ctx: ?*anyopaque, data: []const u8) bool,
 };
 
-/// Ports `Request` (httplib.h:1756 @620d2225c), a client's. Strings live in
+/// Ports `Request` (httplib.h:1799 @8642541b2), a client's. Strings live in
 /// `a`; a copy (`clone`) shares the handlers.
 pub const Request = struct {
     a: std.mem.Allocator,
@@ -178,14 +180,14 @@ pub const Result = struct {
     err: Error,
 };
 
-/// Ports `parse_port` (httplib.h:845 @620d2225c): over
+/// Ports `parse_port` (httplib.h:882 @8642541b2): over
 /// `parse_int_in_range`, so the whole string must be the number.
-fn parsePort(s: []const u8, port: *c_int) bool {
+pub fn parsePort(s: []const u8, port: *c_int) bool {
     return detail.parseIntInRange(s, 1, 65535, port);
 }
 
-/// Ports `UrlComponents` (httplib.h:853 @620d2225c).
-const UrlComponents = struct {
+/// Ports `UrlComponents` (httplib.h:890 @8642541b2).
+pub const UrlComponents = struct {
     scheme: []const u8 = "",
     host: []const u8 = "",
     port: []const u8 = "",
@@ -202,9 +204,9 @@ fn findFirstOf(s: []const u8, set: []const u8, pos: usize) ?usize {
     return null;
 }
 
-/// Ports `parse_url` (httplib.h:861 @620d2225c): the components a redirect's
+/// Ports `parse_url` (httplib.h:898 @8642541b2): the components a redirect's
 /// `Location` names. Slices of `url`.
-fn parseUrl(url: []const u8, uc: *UrlComponents) bool {
+pub fn parseUrl(url: []const u8, uc: *UrlComponents) bool {
     uc.* = .{};
     var pos: usize = 0;
 
@@ -223,6 +225,10 @@ fn parseUrl(url: []const u8, uc: *UrlComponents) bool {
     const has_authority_prefix = pos > 0;
     const has_authority = has_authority_prefix or (url.len != 0 and url[0] != '/' and url[0] != '?' and url[0] != '#');
     if (has_authority) {
+        // userinfo is not supported, and a backslash that some parsers take for
+        // '/' would leave them seeing another host than this one.
+        if ((findFirstOf(url, "@\\", pos) orelse std.math.maxInt(usize)) < (findFirstOf(url, "/?#", pos) orelse std.math.maxInt(usize))) return false;
+
         if (pos < url.len and url[pos] == '[') {
             const close = std.mem.findScalarPos(u8, url, pos, ']') orelse return false;
             uc.host = url[pos + 1 .. close];
@@ -277,7 +283,7 @@ fn firstOfOrLen(s: []const u8, set: []const u8, pos: usize) usize {
     return findFirstOf(s, set, pos) orelse s.len;
 }
 
-/// Ports `resolve_relative_location` (httplib.h:952 @620d2225c): a
+/// Ports `resolve_relative_location` (httplib.h:995 @8642541b2): a
 /// relative-path or query-only `Location` resolved against the path of the
 /// request being redirected (RFC 3986 section 5.2). An absolute URI and a
 /// reference starting with '/' come back unchanged.
@@ -330,7 +336,7 @@ fn resolveRelativeLocation(a: std.mem.Allocator, location: []const u8, base: []c
     return path.items;
 }
 
-/// Ports `encode_path` (httplib.cpp:1141 @620d2225c): over the C string, so the
+/// Ports `encode_path` (httplib.cpp:1202 @8642541b2): over the C string, so the
 /// first NUL ends it.
 fn encodePath(a: std.mem.Allocator, s: []const u8) Oom![]u8 {
     var result: std.ArrayList(u8) = .empty;
@@ -356,7 +362,7 @@ fn encodePath(a: std.mem.Allocator, s: []const u8) Oom![]u8 {
     return result.items;
 }
 
-/// Ports `normalize_query_string` (httplib.cpp:4367 @620d2225c): each pair decoded
+/// Ports `normalize_query_string` (httplib.cpp:4493 @8642541b2): each pair decoded
 /// and re-encoded, an empty key dropped.
 fn normalizeQueryString(a: std.mem.Allocator, query: []const u8) Oom![]u8 {
     const Ctx = struct {
@@ -380,9 +386,19 @@ fn normalizeQueryString(a: std.mem.Allocator, query: []const u8) Oom![]u8 {
     return ctx.result.items;
 }
 
-/// Ports `encode_request_target` (httplib.cpp:4393 @620d2225c): the path encoded,
-/// the query normalized.
-fn encodeRequestTarget(a: std.mem.Allocator, target: []const u8, path_encode: bool) Oom![]u8 {
+/// Ports `query_of` (httplib.cpp:4517 @8642541b2): the query of a client's
+/// path: what follows '?', up to the fragment.
+fn queryOf(path: []const u8) []const u8 {
+    const fragment_pos = std.mem.findScalar(u8, path, '#') orelse std.math.maxInt(usize);
+    const query_pos = std.mem.findScalar(u8, path, '?') orelse std.math.maxInt(usize);
+    if (query_pos < fragment_pos) return path[query_pos + 1 .. @min(fragment_pos, path.len)];
+    return "";
+}
+
+/// Ports `encode_request_target` (httplib.cpp:4528 @8642541b2): the path encoded,
+/// the query normalized, the fragment left with the client (RFC 9110 §7.1).
+fn encodeRequestTarget(a: std.mem.Allocator, uri: []const u8, path_encode: bool) Oom![]u8 {
+    const target = uri[0 .. std.mem.findScalar(u8, uri, '#') orelse uri.len];
     const query_pos = std.mem.findScalar(u8, target, '?');
     const path_part = target[0 .. query_pos orelse target.len];
     const query_part = if (query_pos) |q| target[q + 1 ..] else "";
@@ -405,53 +421,73 @@ fn encodeRequestTarget(a: std.mem.Allocator, target: []const u8, path_encode: bo
     return result.items;
 }
 
-/// Ports `prepare_host_string` (httplib.cpp:7781 @620d2225c): an IPv6 address
+/// Ports `prepare_host_string` (httplib.cpp:8093 @8642541b2): an IPv6 address
 /// bracketed, unless it already is.
-fn prepareHostString(a: std.mem.Allocator, host: []const u8) Oom![]const u8 {
+pub fn prepareHostString(a: std.mem.Allocator, host: []const u8) Oom![]const u8 {
     if (std.mem.findScalar(u8, host, ':') == null or (host.len != 0 and host[0] == '[')) return host;
     return std.mem.concat(a, u8, &.{ "[", host, "]" });
 }
 
-/// Ports `make_host_and_port_string` (httplib.cpp:7793 @620d2225c): the port
+/// Ports `make_host_and_port_string` (httplib.cpp:8105 @8642541b2): the port
 /// appended unless it is the scheme's default.
-fn makeHostAndPortString(a: std.mem.Allocator, host: []const u8, port: c_int, is_ssl: bool) Oom![]const u8 {
+pub fn makeHostAndPortString(a: std.mem.Allocator, host: []const u8, port: c_int, is_ssl: bool) Oom![]const u8 {
     const result = try prepareHostString(a, host);
     if ((!is_ssl and port == 80) or (is_ssl and port == 443)) return result;
     return std.fmt.allocPrint(a, "{s}:{d}", .{ result, port });
 }
 
-/// Ports `parse_status_line` (httplib.cpp:3547 @620d2225c): `regex_match` against
-/// `(HTTP/1\.[01]) (\d{3})(?: (.*?))?\r\n`.
-fn parseStatusLine(a: std.mem.Allocator, line: []const u8, version: *[]const u8, status: *c_int, reason: *[]const u8) Oom!bool {
-    var re = regex.Regex.compile("(HTTP/1\\.[01]) (\\d{3})(?: (.*?))?\r\n") catch |err| switch (err) {
-        error.Range, error.Collate, error.Ctype, error.Escape, error.Backref, error.Brack, error.Paren, error.Brace, error.BadBrace, error.BadRepeat, error.Complexity, error.Parse => unreachable,
+/// Ports `parse_status_line` (httplib.cpp:3641 @8642541b2): by hand, as
+/// `std::regex_match` recursed once per character of the reason phrase. `line`
+/// is read as the C reads a `const char *`: past its end sits a NUL.
+pub fn parseStatusLine(a: std.mem.Allocator, line: []const u8, version: *[]const u8, status: *c_int, reason: *[]const u8) Oom!bool {
+    const At = struct {
+        line: []const u8,
+        fn at(self: @This(), i: usize) u8 {
+            return if (i < self.line.len) self.line[i] else 0;
+        }
     };
-    defer re.deinit();
-    var m = regex.Match.init();
-    defer m.deinit();
-    if (!re.match(line, &m)) return false;
-    version.* = try a.dupe(u8, line[m.position(1)..][0..m.length(1)]);
-    status.* = std.fmt.parseInt(c_int, line[m.position(2)..][0..m.length(2)], 10) catch |err| switch (err) {
-        error.Overflow, error.InvalidCharacter => unreachable,
-    }; // three digits
-    reason.* = if (m.matched(3)) try a.dupe(u8, line[m.position(3)..][0..m.length(3)]) else "";
+    const l: At = .{ .line = line };
+    if (!std.mem.startsWith(u8, line, "HTTP/1.") or (l.at(7) != '0' and l.at(7) != '1') or l.at(8) != ' ' or
+        !detail.isAsciiDigit(l.at(9)) or !detail.isAsciiDigit(l.at(10)) or !detail.isAsciiDigit(l.at(11)))
+    {
+        return false;
+    }
+
+    var p: usize = 12;
+    var reason_begin = p;
+    if (l.at(p) == ' ') {
+        p += 1;
+        reason_begin = p;
+        while (l.at(p) != 0 and l.at(p) != '\r' and l.at(p) != '\n') p += 1;
+    }
+    const reason_end = p;
+
+    if (l.at(p) != '\r') return false;
+    p += 1;
+    if (l.at(p) != '\n') return false;
+    p += 1;
+    if (l.at(p) != 0) return false;
+
+    version.* = try a.dupe(u8, line[0..8]);
+    status.* = @as(c_int, line[9] - '0') * 100 + @as(c_int, line[10] - '0') * 10 + @as(c_int, line[11] - '0');
+    reason.* = try a.dupe(u8, line[reason_begin..reason_end]);
     return true;
 }
 
-/// Ports `has_conflicting_content_length` (httplib.cpp:3793 @620d2225c): both a
+/// Ports `has_conflicting_content_length` (httplib.cpp:3907 @8642541b2): both a
 /// `Transfer-Encoding` and a non-zero `Content-Length`.
 fn hasConflictingContentLength(headers: *const Headers) bool {
     var invalid = false;
     return detail.hasHeader(headers, "Transfer-Encoding") and detail.getHeaderValueU64(headers, "Content-Length", 0, &invalid) > 0;
 }
 
-/// Ports `set_nonblocking` (httplib.cpp:2528 @620d2225c).
+/// Ports `set_nonblocking` (httplib.cpp:2652 @8642541b2).
 fn setNonblocking(sock: Socket, nonblocking: bool) void {
     const flags = fcntl(sock, F_GETFL, @as(c_int, 0));
     _ = fcntl(sock, F_SETFL, if (nonblocking) flags | O_NONBLOCK else flags & ~O_NONBLOCK);
 }
 
-/// Ports `wait_until_socket_is_ready` (httplib.cpp:1810 @620d2225c): a non-blocking
+/// Ports `wait_until_socket_is_ready` (httplib.cpp:1930 @8642541b2): a non-blocking
 /// connect's outcome, within the connection timeout.
 fn waitUntilSocketIsReady(sock: Socket, sec: i64, usec: i64) Error {
     var pfd = [_]std.posix.pollfd{.{ .fd = sock, .events = k.POLLIN | k.POLLOUT, .revents = 0 }};
@@ -472,7 +508,13 @@ fn waitUntilSocketIsReady(sock: Socket, sec: i64, usec: i64) Error {
     return .connection;
 }
 
-/// Ports `ClientImpl` (httplib.h:2689 @620d2225c): one host and port, the
+/// Ports `is_redirect` (httplib.cpp:11306 @8642541b2): a 3xx without a
+/// Location, such as a 304, is a final response.
+fn isRedirect(res: *const Response) bool {
+    return 300 < res.status and res.status < 400 and res.getHeaderValue("Location").len != 0;
+}
+
+/// Ports `ClientImpl` (httplib.h:2744 @8642541b2): one host and port, the
 /// settings the proxy sets, and the socket of the request in flight.
 pub const ClientImpl = struct {
     a: std.mem.Allocator,
@@ -499,9 +541,20 @@ pub const ClientImpl = struct {
     basic_auth_password: []const u8 = "",
     default_headers: Headers = .{},
 
-    sock: Socket = socket.invalid_socket,
+    proxy_host: []const u8 = "",
+    proxy_port: c_int = -1,
+    proxy_basic_auth_username: []const u8 = "",
+    proxy_basic_auth_password: []const u8 = "",
 
-    /// Ports `ClientImpl`'s constructor `ClientImpl(host, port)` (httplib.cpp:10249 @620d2225c).
+    sock: Socket = socket.invalid_socket,
+    /// `socket_mutex_`, `socket_requests_in_flight_` and
+    /// `socket_should_be_closed_when_request_is_done_`: what `stop` reads
+    /// from another thread.
+    socket_mutex: std.c.pthread_mutex_t = .{},
+    socket_requests_in_flight: usize = 0,
+    socket_should_be_closed_when_request_is_done: bool = false,
+
+    /// Ports `ClientImpl`'s constructor `ClientImpl(host, port)` (httplib.cpp:10612 @8642541b2).
     /// A host naming Linux's abstract socket namespace (a leading NUL,
     /// `escape_abstract_namespace_unix_domain`) is not supported: the proxy
     /// only connects over TCP.
@@ -509,45 +562,101 @@ pub const ClientImpl = struct {
         return .{ .a = a, .host = host, .port = port };
     }
 
-    /// Ports `ClientImpl`'s destructor (httplib.cpp:10255 @620d2225c): the socket shut down and
+    /// Ports `ClientImpl`'s destructor (httplib.cpp:10618 @8642541b2): the socket shut down and
     /// closed.
     pub fn deinit(self: *ClientImpl) void {
         if (self.sock != socket.invalid_socket) _ = socket.shutdownSocket(self.sock);
         self.closeSocket();
     }
 
-    /// Ports `set_connection_timeout` (httplib.cpp:12726 @620d2225c).
+    /// Ports `set_connection_timeout` (httplib.cpp:13089 @8642541b2).
     pub fn setConnectionTimeout(self: *ClientImpl, sec: i64, usec: i64) void {
         self.connection_timeout_sec = sec;
         self.connection_timeout_usec = usec;
     }
 
-    /// Ports `set_read_timeout` (httplib.cpp:12731 @620d2225c).
+    /// Ports `set_read_timeout` (httplib.cpp:13094 @8642541b2).
     pub fn setReadTimeout(self: *ClientImpl, sec: i64, usec: i64) void {
         self.read_timeout_sec = sec;
         self.read_timeout_usec = usec;
     }
 
-    /// Ports `set_write_timeout` (httplib.cpp:12736 @620d2225c).
+    /// Ports `set_write_timeout` (httplib.cpp:13099 @8642541b2).
     pub fn setWriteTimeout(self: *ClientImpl, sec: i64, usec: i64) void {
         self.write_timeout_sec = sec;
         self.write_timeout_usec = usec;
     }
 
-    /// Ports `set_follow_location` (httplib.cpp:12757 @620d2225c).
+    /// Ports `set_follow_location` (httplib.cpp:13120 @8642541b2).
     pub fn setFollowLocation(self: *ClientImpl, on: bool) void {
         self.follow_location = on;
     }
 
-    /// Ports `set_basic_auth` (httplib.cpp:12745 @620d2225c).
+    /// Ports `set_basic_auth` (httplib.cpp:13108 @8642541b2).
     pub fn setBasicAuth(self: *ClientImpl, username: []const u8, password: []const u8) void {
         self.basic_auth_username = username;
         self.basic_auth_password = password;
     }
 
-    /// Ports `set_default_headers` (httplib.cpp:12766 @620d2225c).
+    /// Ports `set_default_headers` (httplib.cpp:13129 @8642541b2).
     pub fn setDefaultHeaders(self: *ClientImpl, headers: Headers) void {
         self.default_headers = headers;
+    }
+
+    /// Ports `set_proxy` (httplib.cpp:13163 @8642541b2).
+    pub fn setProxy(self: *ClientImpl, host: []const u8, port: c_int) void {
+        self.proxy_host = host;
+        self.proxy_port = port;
+    }
+
+    /// Ports `set_proxy_basic_auth` (httplib.cpp:13170 @8642541b2).
+    pub fn setProxyBasicAuth(self: *ClientImpl, username: []const u8, password: []const u8) void {
+        self.proxy_basic_auth_username = username;
+        self.proxy_basic_auth_password = password;
+    }
+
+    /// Ports `is_proxy_enabled_for_host` (httplib.cpp:10637 @8642541b2): no
+    /// `no_proxy` list is ever set, so any proxy applies.
+    fn isProxyEnabledForHost(self: *const ClientImpl) bool {
+        return self.proxy_host.len != 0 and self.proxy_port != -1;
+    }
+
+    /// Ports `proxy_target_prefix` (httplib.cpp:11324 @8642541b2): a plain
+    /// HTTP proxy reads the target in absolute-form (RFC 9112 3.2.2).
+    fn proxyTargetPrefix(self: *const ClientImpl, a: std.mem.Allocator) Oom![]const u8 {
+        if (!self.isProxyEnabledForHost()) return "";
+        return std.mem.concat(a, u8, &.{ "http://", try makeHostAndPortString(a, self.host, self.port, false) });
+    }
+
+    /// Ports `add_credential_headers` (httplib.cpp:11658 @8642541b2), with
+    /// `add_authorization_header` (httplib.cpp:7130 @8642541b2): each
+    /// credential goes only to its own hop, unless the request already
+    /// carries the header. `make_basic_authentication_header` (httplib.cpp:7111
+    /// @8642541b2) writes it.
+    fn addCredentialHeaders(self: *const ClientImpl, req: *Request) Oom!void {
+        const Add = struct {
+            fn basic(r: *Request, name: []const u8, username: []const u8, password: []const u8) Oom!void {
+                if (r.hasHeader(name)) return;
+                if (password.len == 0 and username.len == 0) return;
+                const cred = try std.mem.concat(r.a, u8, &.{ username, ":", password });
+                const enc = std.base64.standard.Encoder;
+                const b64 = try r.a.alloc(u8, enc.calcSize(cred.len));
+                _ = enc.encode(b64, cred);
+                _ = try r.headers.emplace(r.a, name, try std.mem.concat(r.a, u8, &.{ "Basic ", b64 }));
+            }
+        };
+        // A CONNECT request is read by the proxy; everything sent through the tunnel
+        // it opens is read by the origin.
+        if (!std.mem.eql(u8, req.method, "CONNECT")) {
+            try Add.basic(req, "Authorization", self.basic_auth_username, self.basic_auth_password);
+        }
+
+        // Proxy-Authorization is only sent when the proxy reads this message —
+        // otherwise NO_PROXY-matched requests, and requests inside a TLS tunnel,
+        // would leak proxy credentials to the destination server.
+        if (self.isProxyEnabledForHost()) {
+            try Add.basic(req, "Proxy-Authorization", self.proxy_basic_auth_username, self.proxy_basic_auth_password);
+        }
     }
 
     fn closeSocket(self: *ClientImpl) void {
@@ -556,17 +665,32 @@ pub const ClientImpl = struct {
         self.sock = socket.invalid_socket;
     }
 
-    /// Ports `disconnect` (httplib.cpp:10409 @620d2225c).
+    /// Ports `disconnect` (httplib.cpp:10726 @8642541b2).
     fn disconnect(self: *ClientImpl) void {
         if (self.sock != socket.invalid_socket) _ = socket.shutdownSocket(self.sock);
         self.closeSocket();
     }
 
-    /// Ports `ClientImpl`'s `create_client_socket` (httplib.cpp:10336 @620d2225c) over
-    /// `detail`'s `create_client_socket` (httplib.cpp:2646 @620d2225c): resolved,
+    /// Ports `stop` (httplib.cpp:13058 @8642541b2), a member of `ClientImpl`:
+    /// with a request in flight the only thread-safe thing to do is to shut
+    /// the socket down, so that its thread discovers it cannot read or write
+    /// any more and errors out, and flag it closed for when it is done.
+    pub fn stop(self: *ClientImpl) void {
+        _ = std.c.pthread_mutex_lock(&self.socket_mutex);
+        defer _ = std.c.pthread_mutex_unlock(&self.socket_mutex);
+        if (self.socket_requests_in_flight > 0) {
+            if (self.sock != socket.invalid_socket) _ = socket.shutdownSocket(self.sock);
+            self.socket_should_be_closed_when_request_is_done = true;
+            return;
+        }
+        self.disconnect();
+    }
+
+    /// Ports `ClientImpl`'s `create_client_socket` (httplib.cpp:10653 @8642541b2) over
+    /// `detail`'s `create_client_socket` (httplib.cpp:2770 @8642541b2): resolved,
     /// connected without blocking past the connection timeout, then given
     /// the read and write timeouts.
-    fn createClientSocket(self: *ClientImpl, err: *Error) Oom!Socket {
+    pub fn createClientSocket(self: *ClientImpl, err: *Error) Oom!Socket {
         const Ctx = struct {
             cli: *ClientImpl,
             err: *Error,
@@ -594,8 +718,9 @@ pub const ClientImpl = struct {
             }
         };
         var ctx: Ctx = .{ .cli = self, .err = err };
-        const hz = try self.a.dupeSentinel(u8, self.host, 0);
-        const sock = socket.createSocket(hz, self.port, self.address_family, 0, self.tcp_nodelay, self.ipv6_v6only, null, .{ .ctx = &ctx, .func = Ctx.bindOrConnect });
+        const proxied = self.isProxyEnabledForHost();
+        const hz = try self.a.dupeSentinel(u8, if (proxied) self.proxy_host else self.host, 0);
+        const sock = socket.createSocket(hz, if (proxied) self.proxy_port else self.port, self.address_family, 0, self.tcp_nodelay, self.ipv6_v6only, null, .{ .ctx = &ctx, .func = Ctx.bindOrConnect });
         if (sock != socket.invalid_socket) {
             err.* = .success;
         } else if (err.* == .success) {
@@ -604,8 +729,11 @@ pub const ClientImpl = struct {
         return sock;
     }
 
-    /// Ports `read_response_line` (httplib.cpp:10415 @620d2225c): the status line,
-    /// skipping `100 Continue` when asked.
+    /// Ports `read_response_line` (httplib.cpp:10732 @8642541b2): the status line,
+    /// skipping interim (1xx) responses along with their header fields, except
+    /// a 100 Continue the caller handles itself for Expect: 100-continue. 101
+    /// ends HTTP on the connection, so it is final. A server sending them
+    /// without end would hold the client, so there may be only so many.
     fn readResponseLine(self: *ClientImpl, strm: *socket.SocketStream, res: *Response, skip_100_continue: bool) Oom!bool {
         _ = self;
         var buf: [2048]u8 = undefined;
@@ -617,35 +745,54 @@ pub const ClientImpl = struct {
             return false; // req.method == "CONNECT" never
         }
 
-        // Ignore '100 Continue' (only when not using Expect: 100-continue explicitly)
-        while (skip_100_continue and res.status == 100) {
-            if (!try lr.getline()) return false; // CRLF
+        var interim_count: usize = 0;
+        while (100 <= res.status and res.status < 200 and res.status != 101 and (skip_100_continue or res.status != 100)) {
+            interim_count += 1;
+            if (interim_count > interim_response_max_count) return false;
+            var interim_headers: Headers = .{};
+            if (!try message.readHeaders(res.a, strm, &interim_headers)) return false;
             if (!try lr.getline()) return false; // next response line
             if (!try parseStatusLine(res.a, lr.cstr(), &res.version, &res.status, &res.reason)) return false;
         }
         return true;
     }
 
-    /// Ports `ClientImpl`'s `send` (httplib.cpp:10443 @620d2225c), the overload taking a
-    /// response and an error: one request, redirects followed.
+    /// Ports `ClientImpl`'s `send` (httplib.cpp:10770 @8642541b2), the overload taking a
+    /// response and an error: one request, redirects followed. No error logger
+    /// is ever set, so a failure is not reported from here.
     pub fn sendInto(self: *ClientImpl, req: *Request, res: *Response, err: *Error) Oom!bool {
         return self.sendImpl(req, res, err);
     }
 
-    /// Ports `ClientImpl`'s `send_` (httplib.cpp:10455 @620d2225c): connects unless
+    /// Ports `ClientImpl`'s `send_` (httplib.cpp:10791 @8642541b2): connects unless
     /// the open socket is still alive, runs the request, and closes the
     /// connection after it (no keep-alive here).
     fn sendImpl(self: *ClientImpl, req: *Request, res: *Response, err: *Error) Oom!bool {
-        var is_alive = false;
-        if (self.sock != socket.invalid_socket) {
-            is_alive = socket.isSocketAlive(self.sock);
-            // Peer seems gone — non-graceful shutdown to avoid SIGPIPE.
-            if (!is_alive) self.disconnect();
-        }
-        if (!is_alive) {
-            const sock = try self.createClientSocket(err);
-            if (sock == socket.invalid_socket) return false;
-            self.sock = sock;
+        {
+            _ = std.c.pthread_mutex_lock(&self.socket_mutex);
+            defer _ = std.c.pthread_mutex_unlock(&self.socket_mutex);
+
+            // Set this to false immediately - if it ever gets set to true by the end
+            // of the request, we know another thread instructed us to close the
+            // socket.
+            self.socket_should_be_closed_when_request_is_done = false;
+
+            var is_alive = false;
+            if (self.sock != socket.invalid_socket) {
+                is_alive = socket.isSocketAlive(self.sock);
+                // Peer seems gone — non-graceful shutdown to avoid SIGPIPE.
+                if (!is_alive) self.disconnect();
+            }
+            if (!is_alive) {
+                const sock = try self.createClientSocket(err);
+                if (sock == socket.invalid_socket) return false;
+                self.sock = sock;
+            }
+
+            // Mark the current socket as being in use so that it cannot be closed by
+            // anyone else while this request is ongoing, even though we will be
+            // releasing the mutex.
+            self.socket_requests_in_flight += 1;
         }
 
         for (self.default_headers.entries.items) |h| {
@@ -654,9 +801,15 @@ pub const ClientImpl = struct {
 
         var ret = false;
         const close_connection = !self.keep_alive;
-        defer if (close_connection or !ret) self.disconnect();
+        defer {
+            // Briefly lock mutex in order to mark that a request is no longer ongoing
+            _ = std.c.pthread_mutex_lock(&self.socket_mutex);
+            self.socket_requests_in_flight -= 1;
+            if (self.socket_should_be_closed_when_request_is_done or close_connection or !ret) self.disconnect();
+            _ = std.c.pthread_mutex_unlock(&self.socket_mutex);
+        }
 
-        // `process_socket`, then `process_client_socket` (httplib.cpp:1981 @620d2225c)
+        // `process_socket`, then `process_client_socket` (httplib.cpp:2103 @8642541b2)
         var strm: socket.SocketStream = .{
             .sock = self.sock,
             .read_timeout_sec = self.read_timeout_sec,
@@ -670,8 +823,8 @@ pub const ClientImpl = struct {
         return ret;
     }
 
-    /// Ports `ClientImpl`'s `send` (httplib.cpp:10546 @620d2225c), the overload taking a
-    /// request, over `send_` (httplib.cpp:10551 @620d2225c): a copy of the request
+    /// Ports `ClientImpl`'s `send` (httplib.cpp:10884 @8642541b2), the overload taking a
+    /// request, over `send_` (httplib.cpp:10889 @8642541b2): a copy of the request
     /// sent; the response only when it succeeded.
     pub fn send(self: *ClientImpl, req_in: *const Request) Oom!Result {
         var req = try req_in.clone();
@@ -682,7 +835,7 @@ pub const ClientImpl = struct {
         return .{ .res = if (ret) res else null, .err = err };
     }
 
-    /// Ports `prepare_default_headers` (httplib.cpp:10563 @620d2225c): `Host` first,
+    /// Ports `prepare_default_headers` (httplib.cpp:10905 @8642541b2): `Host` first,
     /// `Accept`, and -- with no content receiver -- the encoding and agent;
     /// the body's type and length.
     fn prepareDefaultHeaders(self: *ClientImpl, r: *Request, ct: []const u8) Oom!void {
@@ -709,8 +862,9 @@ pub const ClientImpl = struct {
         }
     }
 
-    /// Ports `handle_request` (httplib.cpp:10984 @620d2225c): the request processed,
-    /// the connection dropped if the server closes it, and a 3xx followed.
+    /// Ports `handle_request` (httplib.cpp:11329 @8642541b2): the request processed,
+    /// the connection dropped if the server closes it or the request asked for
+    /// it, and a redirect followed.
     fn handleRequest(self: *ClientImpl, strm: *socket.SocketStream, req: *Request, res: *Response, close_connection: bool, err: *Error) Oom!bool {
         if (req.path.len == 0) {
             err.* = .connection;
@@ -719,23 +873,40 @@ pub const ClientImpl = struct {
 
         const req_save = try req.clone();
 
-        var ret = try self.processRequest(strm, req, res, close_connection, err);
+        const prefix = try self.proxyTargetPrefix(req.a);
+        var ret: bool = undefined;
+        if (prefix.len != 0) {
+            var req2 = try req.clone();
+            req2.path = try std.mem.concat(req.a, u8, &.{ prefix, req.path });
+            ret = try self.processRequest(strm, &req2, res, close_connection, err);
+            req.* = req2;
+            req.path = req_save.path;
+        } else {
+            ret = try self.processRequest(strm, req, res, close_connection, err);
+        }
         if (!ret) return false;
 
-        if (detail.hasHeaderToken(&res.headers, "Connection", "close") or
-            (std.mem.eql(u8, res.version, "HTTP/1.0") and !std.mem.eql(u8, res.reason, "Connection established")))
         {
-            self.disconnect();
+            _ = std.c.pthread_mutex_lock(&self.socket_mutex);
+            defer _ = std.c.pthread_mutex_unlock(&self.socket_mutex);
+            // Also when the request asked for it (e.g. a body that was never sent),
+            // so that a redirect or an auth retry below does not reuse the socket.
+            if (self.socket_should_be_closed_when_request_is_done or
+                detail.hasHeaderToken(&res.headers, "Connection", "close") or
+                (std.mem.eql(u8, res.version, "HTTP/1.0") and !std.mem.eql(u8, res.reason, "Connection established")))
+            {
+                self.disconnect();
+            }
         }
 
-        if (300 < res.status and res.status < 400 and self.follow_location) {
+        if (self.follow_location and isRedirect(res)) {
             req.* = req_save;
-            ret = try self.redirect(req, res, err);
+            return self.redirect(req, res, err);
         }
         return ret;
     }
 
-    /// Ports `ClientImpl`'s `redirect` (httplib.cpp:11070 @620d2225c): a same-host
+    /// Ports `ClientImpl`'s `redirect` (httplib.cpp:11421 @8642541b2): a same-host
     /// `Location` through this client, another host through a new one; a
     /// relative one resolved against the request's path first. Since 0.60.0
     /// the path is kept as the `Location` spelled it, not percent-decoded,
@@ -784,8 +955,8 @@ pub const ClientImpl = struct {
         return self.createRedirectClient(next_scheme, next_host, next_port, req, res, path, location, err);
     }
 
-    /// Ports `create_redirect_client` (httplib.cpp:11123 @620d2225c), with
-    /// `setup_redirect_client` (httplib.cpp:11195 @620d2225c): the credentials and
+    /// Ports `create_redirect_client` (httplib.cpp:11473 @8642541b2), with
+    /// `setup_redirect_client` (httplib.cpp:11565 @8642541b2): the credentials and
     /// `Host` left behind; `https` is an SSL error in this build.
     fn createRedirectClient(self: *ClientImpl, scheme: []const u8, host: []const u8, port: c_int, req: *Request, res: *Response, path: []const u8, location: []const u8, err: *Error) Oom!bool {
         // Remove headers that should not be carried over to new host
@@ -801,9 +972,10 @@ pub const ClientImpl = struct {
 
         var redirect_client = ClientImpl.init(self.a, host, port);
         defer redirect_client.deinit();
-        redirect_client.setConnectionTimeout(self.connection_timeout_sec, 0);
+        redirect_client.setConnectionTimeout(self.connection_timeout_sec, self.connection_timeout_usec);
         redirect_client.setReadTimeout(self.read_timeout_sec, self.read_timeout_usec);
         redirect_client.setWriteTimeout(self.write_timeout_sec, self.write_timeout_usec);
+        redirect_client.payload_max_length = self.payload_max_length;
         redirect_client.keep_alive = self.keep_alive;
         redirect_client.setFollowLocation(true); // Enable redirects to handle multi-step redirects
         redirect_client.path_encode = self.path_encode;
@@ -811,10 +983,25 @@ pub const ClientImpl = struct {
         redirect_client.address_family = self.address_family;
         redirect_client.tcp_nodelay = self.tcp_nodelay;
         redirect_client.ipv6_v6only = self.ipv6_v6only;
+        if (self.proxy_host.len != 0 and self.proxy_port != -1) {
+            redirect_client.setProxy(self.proxy_host, self.proxy_port);
+            if (self.proxy_basic_auth_username.len != 0 or self.proxy_basic_auth_password.len != 0) {
+                redirect_client.setProxyBasicAuth(self.proxy_basic_auth_username, self.proxy_basic_auth_password);
+            }
+        }
         return redirectWith(&redirect_client, req, res, path, location, err);
     }
 
-    /// Ports `write_request` (httplib.cpp:11272 @620d2225c): the head -- a
+    /// Ports `make_request_target` (httplib.cpp:11650 @8642541b2), a member of
+    /// `ClientImpl`: what goes on the request line for `req`: its path, encoded
+    /// and without the fragment, with `req.params` as the query when the path
+    /// has none. No caller passes `req.params`, so the C's
+    /// `append_query_params` arm is out of reach.
+    fn makeRequestTarget(self: *const ClientImpl, req: *const Request) Oom![]u8 {
+        return encodeRequestTarget(req.a, req.path, self.path_encode);
+    }
+
+    /// Ports `write_request` (httplib.cpp:11679 @8642541b2): the head -- a
     /// `Connection: close`, the default headers, a zero length for an empty
     /// write -- and, unless waiting on `100 Continue`, the body.
     /// `rejected_locally` says the request line or a header was refused
@@ -835,26 +1022,19 @@ pub const ClientImpl = struct {
             }
         }
 
-        // `make_basic_authentication_header` (httplib.cpp:6923 @620d2225c)
-        if (!std.mem.eql(u8, req.method, "CONNECT") and !req.hasHeader("Authorization")) {
-            if (self.basic_auth_password.len != 0 or self.basic_auth_username.len != 0) {
-                const cred = try std.mem.concat(req.a, u8, &.{ self.basic_auth_username, ":", self.basic_auth_password });
-                const enc = std.base64.standard.Encoder;
-                const b64 = try req.a.alloc(u8, enc.calcSize(cred.len));
-                _ = enc.encode(b64, cred);
-                _ = try req.headers.emplace(req.a, "Authorization", try std.mem.concat(req.a, u8, &.{ "Basic ", b64 }));
-            }
-        }
+        try self.addCredentialHeaders(req);
 
         // Request line and headers
         {
             var bstrm: socket.BufferStream = .{ .a = req.a };
-            const query_pos = std.mem.findScalar(u8, req.path, '?');
-            const query_part = if (query_pos) |q| req.path[q + 1 ..] else "";
-            const path_with_query = try encodeRequestTarget(req.a, req.path, self.path_encode);
+            const path_with_query = try self.makeRequestTarget(req);
+
+            // The query already came in through `req.path`; still populate
+            // `req.params` for handlers/users who read them.
+            const query_part = queryOf(req.path);
             if (query_part.len != 0) try detail.parseQueryText(req.a, query_part, &req.params);
 
-            // `write_request_line` (httplib.cpp:3919 @620d2225c): the method
+            // `write_request_line` (httplib.cpp:4033 @8642541b2): the method
             // must be a token, the target a request-target
             if (!detail.isToken(req.method) or !detail.isRequestTarget(path_with_query)) {
                 err.* = .write;
@@ -863,7 +1043,7 @@ pub const ClientImpl = struct {
             }
             _ = bstrm.write(try std.mem.concat(req.a, u8, &.{ req.method, " ", path_with_query, " HTTP/1.1\r\n" }));
 
-            // `check_and_write_headers` (httplib.cpp:7996 @620d2225c)
+            // `check_and_write_headers` (httplib.cpp:8323 @8642541b2)
             for (req.headers.entries.items) |h| {
                 if (!detail.isFieldValid(h.key, h.value)) {
                     err.* = .invalid_headers;
@@ -887,7 +1067,7 @@ pub const ClientImpl = struct {
         return self.writeRequestBody(strm, req, err);
     }
 
-    /// Ports `write_request_body` (httplib.cpp:11441 @620d2225c).
+    /// Ports `write_request_body` (httplib.cpp:11803 @8642541b2).
     fn writeRequestBody(self: *ClientImpl, strm: *socket.SocketStream, req: *Request, err: *Error) Oom!bool {
         _ = self;
         if (req.body.len == 0) return true; // no content provider here
@@ -921,7 +1101,7 @@ pub const ClientImpl = struct {
         }
     };
 
-    /// Ports `process_request` (httplib.cpp:11629 @620d2225c): the request written
+    /// Ports `process_request` (httplib.cpp:11992 @8642541b2): the request written
     /// (with `Expect: 100-continue` past the threshold), the status line and
     /// headers read, the response handler told, the body read into the
     /// content receiver.
@@ -985,19 +1165,32 @@ pub const ClientImpl = struct {
                     err.* = .read;
                     return false;
                 }
+            } else {
+                // A final response came first, so the body this request declared was
+                // never sent, and the server may still be waiting for it. The
+                // connection cannot carry another request.
+                _ = std.c.pthread_mutex_lock(&self.socket_mutex);
+                defer _ = std.c.pthread_mutex_unlock(&self.socket_mutex);
+                self.socket_should_be_closed_when_request_is_done = true;
             }
-            // If not 100 Continue, server returned an error; proceed with that response
         }
 
         // Body
         if (res.status != 204 and !std.mem.eql(u8, req.method, "HEAD") and !std.mem.eql(u8, req.method, "CONNECT")) {
             // Reject ambiguous framing (RFC 9112 §6.3).
-            if (res.status != 304 and hasConflictingContentLength(&res.headers)) {
-                err.* = .read;
-                return false;
+            if (res.status != 304) {
+                if (hasConflictingContentLength(&res.headers)) {
+                    err.* = .read;
+                    return false;
+                }
+                if (message.hasFaultyTransferEncoding(res)) {
+                    _ = std.c.pthread_mutex_lock(&self.socket_mutex);
+                    defer _ = std.c.pthread_mutex_unlock(&self.socket_mutex);
+                    self.socket_should_be_closed_when_request_is_done = true;
+                }
             }
 
-            const is_redirect = 300 < res.status and res.status < 400 and res.status != 304 and self.follow_location;
+            const is_redirect = self.follow_location and isRedirect(res) and res.status != 304;
 
             if (req.response_handler) |rh| {
                 if (!is_redirect) {
@@ -1015,7 +1208,11 @@ pub const ClientImpl = struct {
                 const max_length = if (req.content_receiver != null) std.math.maxInt(usize) else self.payload_max_length;
                 if (!try message.readContent(strm, res, max_length, &content_status, &out, self.decompress)) {
                     if (err.* != .canceled) {
+                        // Tell the caller apart from a plain read failure when the body was
+                        // over the payload limit or could not be decoded because of its
+                        // Content-Encoding.
                         err.* = switch (content_status) {
+                            413 => .exceed_max_payload_size,
                             415 => .unsupported_content_encoding,
                             500 => .compression,
                             else => .read,
@@ -1032,7 +1229,7 @@ pub const ClientImpl = struct {
 /// `Error`, under the name the downloader uses.
 pub const ErrorCode = Error;
 
-/// Ports `to_string` (httplib.cpp:6537 @620d2225c), as a free function.
+/// Ports `to_string` (httplib.cpp:6718 @8642541b2), as a free function.
 pub fn errorToString(e: Error) []const u8 {
     return e.toString();
 }
@@ -1040,7 +1237,7 @@ pub fn errorToString(e: Error) []const u8 {
 /// `Headers`.
 pub const HeadersMap = Headers;
 
-/// Ports `Client` (httplib.h:3103 @620d2225c) for a plain-HTTP host: the
+/// Ports `Client` (httplib.h:3182 @8642541b2) for a plain-HTTP host: the
 /// verbs over a `ClientImpl`. A failure to allocate is reported as
 /// `Error.unknown`, where the C++ throws `std::bad_alloc`.
 pub const Client = struct {
@@ -1063,6 +1260,14 @@ pub const Client = struct {
         self.impl.setFollowLocation(on);
     }
 
+    pub fn setProxy(self: *Client, host: []const u8, port: c_int) void {
+        self.impl.setProxy(host, port);
+    }
+
+    pub fn setProxyBasicAuth(self: *Client, username: []const u8, password: []const u8) void {
+        self.impl.setProxyBasicAuth(username, password);
+    }
+
     pub fn setDefaultHeaders(self: *Client, headers: Headers) void {
         self.impl.setDefaultHeaders(headers);
     }
@@ -1083,19 +1288,19 @@ pub const Client = struct {
         return self.impl.send(req) catch .{ .res = null, .err = .unknown };
     }
 
-    /// Ports `ClientImpl`'s `Get` (httplib.cpp:11918 @620d2225c), with headers.
+    /// Ports `ClientImpl`'s `Get` (httplib.cpp:12281 @8642541b2), with headers.
     pub fn get(self: *Client, a: std.mem.Allocator, path: []const u8, headers: *const Headers) Result {
         const req: Request = .{ .a = a, .method = "GET", .path = path, .headers = headers.clone(a) catch return .{ .res = null, .err = .unknown } };
         return self.run(&req);
     }
 
-    /// Ports `ClientImpl`'s `Head` (httplib.cpp:12003 @620d2225c).
+    /// Ports `ClientImpl`'s `Head` (httplib.cpp:12366 @8642541b2).
     pub fn head(self: *Client, a: std.mem.Allocator, path: []const u8) Result {
         const req: Request = .{ .a = a, .method = "HEAD", .path = path };
         return self.run(&req);
     }
 
-    /// Ports `ClientImpl`'s `Get` (httplib.cpp:11954 @620d2225c), with a response handler
+    /// Ports `ClientImpl`'s `Get` (httplib.cpp:12317 @8642541b2), with a response handler
     /// and a content receiver.
     pub fn getStream(
         self: *Client,
@@ -1131,23 +1336,23 @@ pub const Client = struct {
         return self.run(&req);
     }
 
-    /// Ports `ClientImpl`'s `Post` (httplib.cpp:12032 @620d2225c), a body and its
+    /// Ports `ClientImpl`'s `Post` (httplib.cpp:12395 @8642541b2), a body and its
     /// type, through `send_with_content_provider_and_receiver`
-    /// (httplib.cpp:11583 @620d2225c).
+    /// (httplib.cpp:11942 @8642541b2).
     pub fn post(self: *Client, a: std.mem.Allocator, path: []const u8, body: []const u8, content_type: []const u8) Result {
         var req: Request = .{ .a = a, .method = "POST", .path = path, .body = body };
         if (content_type.len != 0) req.setHeader("Content-Type", content_type) catch return .{ .res = null, .err = .unknown };
         return self.run(&req);
     }
 
-    /// Ports `ClientImpl`'s `Delete` (httplib.cpp:12658 @620d2225c), with no body.
+    /// Ports `ClientImpl`'s `Delete` (httplib.cpp:13021 @8642541b2), with no body.
     pub fn delete(self: *Client, a: std.mem.Allocator, path: []const u8) Result {
         const req: Request = .{ .a = a, .method = "DELETE", .path = path };
         return self.run(&req);
     }
 };
 
-/// Ports `detail`'s `redirect` (httplib.cpp:4284 @620d2225c): the request again at
+/// Ports `detail`'s `redirect` (httplib.cpp:4410 @8642541b2): the request again at
 /// `path`, through `cli`; a 303 turns anything but `GET`/`HEAD` into a
 /// bare `GET`. The content provider and length 0.60.0 also clears there
 /// have no counterpart: a request here carries its body in `body`.
@@ -1191,9 +1396,33 @@ test "encode_request_target and parse_url" {
     try std.testing.expectEqualStrings("81", uc.port);
     try std.testing.expectEqualStrings("/p", uc.path);
     try std.testing.expectEqualStrings("?q", uc.query);
+    try std.testing.expect(!parseUrl("http://u@h/p", &uc));
+    try std.testing.expect(!parseUrl("http://h\\evil/p", &uc));
+    try std.testing.expectEqualStrings("/a?x=1", try encodeRequestTarget(a, "/a?x=1#frag", true));
+    try std.testing.expectEqualStrings("x=1", queryOf("/a?x=1#frag"));
+    try std.testing.expectEqualStrings("", queryOf("/a#?x"));
 }
 
-test "resolve_relative_location and parse_port answer as cpp-httplib 0.61.0" {
+test "parse_status_line reads what the regex read and no more" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var version: []const u8 = "";
+    var reason: []const u8 = "";
+    var status: c_int = 0;
+    try std.testing.expect(try parseStatusLine(a, "HTTP/1.1 200 OK\r\n", &version, &status, &reason));
+    try std.testing.expectEqual(@as(c_int, 200), status);
+    try std.testing.expectEqualStrings("HTTP/1.1", version);
+    try std.testing.expectEqualStrings("OK", reason);
+    try std.testing.expect(try parseStatusLine(a, "HTTP/1.0 404\r\n", &version, &status, &reason));
+    try std.testing.expectEqualStrings("", reason);
+    try std.testing.expect(!try parseStatusLine(a, "HTTP/1.1 200 OK\n", &version, &status, &reason));
+    try std.testing.expect(!try parseStatusLine(a, "HTTP/1.2 200 OK\r\n", &version, &status, &reason));
+    try std.testing.expect(!try parseStatusLine(a, "HTTP/1.1 20 OK\r\n", &version, &status, &reason));
+    try std.testing.expect(!try parseStatusLine(a, "HTTP/1.1 200 OK\r\nX", &version, &status, &reason));
+}
+
+test "resolve_relative_location and parse_port answer as cpp-httplib 0.62.0" {
     // expected values printed by `detail::resolve_relative_location` and
     // `detail::parse_port` from llama.cpp/vendor/cpp-httplib/httplib.h
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

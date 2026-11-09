@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.7.0
-//! (`620d2225c`).
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.8.0
+//! (`8642541b2`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -13,6 +13,7 @@ const m = @import("module.zig");
 
 const c = impl.c;
 const common = m.common;
+const vk = common.vk;
 const allocator = common.allocator;
 const BackendCtx = m.context.BackendCtx;
 const Pipeline = m.pipeline.Pipeline;
@@ -27,7 +28,7 @@ fn isF16(t: *const Tensor) usize {
     return @intFromBool(t.type == c.GGML_TYPE_F16);
 }
 
-/// Ports `ggml_vk_concat_unit_size` (ggml-vulkan.cpp:297 @620d2225c): the
+/// Ports `ggml_vk_concat_unit_size` (ggml-vulkan.cpp:297 @8642541b2): the
 /// widest copy unit, for a quantized type the widest that divides a block.
 pub fn concatUnitSize(ty: c.ggml_type) u32 {
     const type_size: u32 = @intCast(c.ggml_type_size(ty));
@@ -38,7 +39,7 @@ pub fn concatUnitSize(ty: c.ggml_type) u32 {
     return 1;
 }
 
-/// Ports `ggml_vk_concat_supported` (ggml-vulkan.cpp:316 @620d2225c).
+/// Ports `ggml_vk_concat_supported` (ggml-vulkan.cpp:316 @8642541b2).
 pub fn concatSupported(src0: *const Tensor, src1: *const Tensor, dst: *const Tensor) bool {
     if (src0.type != src1.type or src0.type != dst.type) return false;
     if (!c.ggml_is_quantized(src0.type)) {
@@ -49,14 +50,14 @@ pub fn concatSupported(src0: *const Tensor, src1: *const Tensor, dst: *const Ten
     return c.ggml_is_contiguous_rows(src0) and c.ggml_is_contiguous_rows(src1) and c.ggml_is_contiguous_rows(dst);
 }
 
-/// Ports `ggml_vk_dim01_contiguous` (ggml-vulkan.cpp:6068 @620d2225c).
+/// Ports `ggml_vk_dim01_contiguous` (ggml-vulkan.cpp:6126 @8642541b2).
 pub fn dim01Contiguous(t: *const Tensor) bool {
     return t.nb[0] == c.ggml_type_size(t.type) and
         t.nb[1] == (t.nb[0] * @as(usize, @intCast(t.ne[0]))) / @as(usize, @intCast(c.ggml_blck_size(t.type))) and
         (t.ne[3] == 1 or t.nb[3] == t.nb[2] * @as(usize, @intCast(t.ne[2])));
 }
 
-/// Ports `ggml_vk_get_cpy_pipeline` (ggml-vulkan.cpp:6080 @620d2225c): a
+/// Ports `ggml_vk_get_cpy_pipeline` (ggml-vulkan.cpp:6138 @8642541b2): a
 /// copy from `src`'s type to `to`, the contiguous variant when both sides
 /// are, the transposing ones when a swap puts the innermost dimension
 /// elsewhere.
@@ -113,7 +114,7 @@ pub fn getCpyPipeline(ctx: *BackendCtx, src: *const Tensor, dst: ?*const Tensor,
     impl.abort("fatal error");
 }
 
-/// Ports `ggml_vk_conv_select_shape` (ggml-vulkan.cpp:8642 @620d2225c):
+/// Ports `ggml_vk_conv_select_shape` (ggml-vulkan.cpp:8704 @8642541b2):
 /// the largest tile that still gives every shader core two tiles.
 pub fn convSelectShape(ctx: *const BackendCtx, K: u32, NPQ: u32) ConvShape {
     const nTiles = struct {
@@ -137,6 +138,41 @@ pub fn convSelectShape(ctx: *const BackendCtx, K: u32, NPQ: u32) ConvShape {
     return .@"64x32";
 }
 
+/// Ports `ggml_vk_conv3d_select_shape` (ggml-vulkan.cpp:8736 @8642541b2):
+/// the 256x128 coopmat2 tile, which reuses each loaded input across 256
+/// output channels instead of 128, when `K` fills whole channel tiles and
+/// there are at least as many workgroups as GPU cores; otherwise
+/// `convSelectShape`'s answer.
+pub fn conv3dSelectShape(ctx: *const BackendCtx, K: u32, NPQ: u32) ConvShape {
+    const block = m.backend.conv_block_sizes[@backingInt(ConvShape.@"256x128")];
+    const dev = ctx.device;
+    const shader_core_count = dev.shader_core_count;
+    // Slowdowns were observed on DGX Spark with drivers older than R615.
+    const driver_supported = dev.driver_id != vk.VK_DRIVER_ID_NVIDIA_PROPRIETARY or
+        (dev.properties.driverVersion >> 22) >= 615;
+    if (dev.coopmat2 and shader_core_count > 0 and K % block.K == 0 and driver_supported) {
+        const n_tiles = @as(u64, K / block.K) * (std.math.divCeil(u64, NPQ, block.NPQ) catch unreachable);
+        // Use the largest cm2 padding and include the dummy Csh[8].
+        const pad: u32 = 8;
+        const csh_elems: u32 = 8;
+        const shmem: u32 = (block.K * (block.CRS + pad) + block.CRS * (block.NPQ + pad) + csh_elems) * @sizeOf(u16);
+        // Reuse each loaded input across 256 output channels instead of 128.
+        // Require full channel tiles and at least as many workgroups as GPU cores.
+        if (n_tiles >= shader_core_count and shmem <= dev.properties.limits.maxComputeSharedMemorySize) return .@"256x128";
+    }
+    return convSelectShape(ctx, K, NPQ);
+}
+
+/// Ports `ggml_vk_rms_norm_pipeline` (ggml-vulkan.cpp:8756 @8642541b2): the
+/// 128, 256 or 512 block size, by row length.
+///
+/// Return: the pipeline, borrowed from the device.
+pub fn rmsNormPipeline(pipelines: *const [3]?*Pipeline, ncols: i64) ?*Pipeline {
+    if (pipelines[0] != null and ncols <= 128) return pipelines[0];
+    if (pipelines[1] != null and ncols <= 256) return pipelines[1];
+    return pipelines[2];
+}
+
 /// A dynamic pipeline: found in `map` by `key`, or made and recorded there,
 /// under the compile mutex.
 fn dynamicPipeline(ctx: *BackendCtx, map: anytype, key: anytype) *Pipeline {
@@ -152,7 +188,7 @@ fn opI32(t: *const Tensor, i: usize) u32 {
     return @bitCast(t.op_params[i]);
 }
 
-/// Ports `ggml_vk_op_get_pipeline` (ggml-vulkan.cpp:8674 @620d2225c).
+/// Ports `ggml_vk_op_get_pipeline` (ggml-vulkan.cpp:8766 @8642541b2).
 ///
 /// Return: the pipeline, or null where the op has none for these types.
 pub fn getPipeline(ctx: *BackendCtx, src0_: ?*const Tensor, src1_: ?*const Tensor, src2_: ?*const Tensor, dst: *const Tensor, op: c.enum_ggml_op) ?*Pipeline {
@@ -306,7 +342,7 @@ pub fn getPipeline(ctx: *BackendCtx, src0_: ?*const Tensor, src1_: ?*const Tenso
             if (src0_.?.type == F32 and dst.type == F32) {
                 const fused = ctx.fused_rms_norm_mode == .mul;
                 if (ctx.do_add_rms_partials) return if (fused) dev.pipeline_rms_norm_mul_partials_f32 else dev.pipeline_rms_norm_partials_f32;
-                return if (fused) dev.pipeline_rms_norm_mul_f32 else dev.pipeline_rms_norm_f32;
+                return rmsNormPipeline(if (fused) &dev.pipeline_rms_norm_mul_f32 else &dev.pipeline_rms_norm_f32, src0_.?.ne[0]);
             }
             return null;
         },
@@ -605,7 +641,7 @@ pub fn getPipeline(ctx: *BackendCtx, src0_: ?*const Tensor, src1_: ?*const Tenso
                 const IC = opI32(dst, 9);
                 const N = opI32(dst, 10);
                 const NPQ: u32 = N *% @as(u32, @truncate(@as(u64, @bitCast(dst.ne[2] *% dst.ne[1] *% dst.ne[0]))));
-                const shape = convSelectShape(ctx, OC, NPQ);
+                const shape = conv3dSelectShape(ctx, OC, NPQ);
 
                 const KW: u32 = @truncate(@as(u64, @bitCast(src0.ne[0])));
                 const KH: u32 = @truncate(@as(u64, @bitCast(src0.ne[1])));
@@ -647,4 +683,57 @@ pub fn getPipeline(ctx: *BackendCtx, src0_: ?*const Tensor, src1_: ?*const Tenso
 
 test {
     std.testing.refAllDecls(@This());
+}
+
+test "rmsNormPipeline picks the block by row length, and skips a slot with no pipeline" {
+    var slots: [3]Pipeline = undefined;
+    const p: [3]?*Pipeline = .{ &slots[0], &slots[1], &slots[2] };
+    try std.testing.expectEqual(p[0], rmsNormPipeline(&p, 1));
+    try std.testing.expectEqual(p[0], rmsNormPipeline(&p, 128));
+    try std.testing.expectEqual(p[1], rmsNormPipeline(&p, 129));
+    try std.testing.expectEqual(p[1], rmsNormPipeline(&p, 256));
+    try std.testing.expectEqual(p[2], rmsNormPipeline(&p, 257));
+    try std.testing.expectEqual(p[2], rmsNormPipeline(&p, 1024));
+
+    const none: [3]?*Pipeline = .{ null, null, &slots[2] };
+    try std.testing.expectEqual(none[2], rmsNormPipeline(&none, 64));
+}
+
+test "conv3dSelectShape takes 256x128 only on coopmat2, past R615 on NVIDIA, with a workgroup per core" {
+    // Only these fields are read on either path.
+    var device: m.device.Device = undefined;
+    device.coopmat2 = true;
+    device.coopmat_support = false;
+    device.coopmat_support_16x16x16_f16acc = false;
+    device.shader_core_count = 48;
+    device.driver_id = vk.VK_DRIVER_ID_NVIDIA_PROPRIETARY;
+    device.properties.driverVersion = 615 << 22;
+    // The shared memory the tile needs: (256 * 24 + 16 * 136 + 8) * 2.
+    device.properties.limits.maxComputeSharedMemorySize = 16656;
+    var ctx: BackendCtx = undefined;
+    ctx.device = &device;
+
+    // 48 tiles of 128 is the least that gives each of the 48 cores one.
+    try std.testing.expectEqual(ConvShape.@"256x128", conv3dSelectShape(&ctx, 256, 48 * 128));
+    try std.testing.expectEqual(ConvShape.@"256x128", conv3dSelectShape(&ctx, 256, 47 * 128 + 1));
+    try std.testing.expect(conv3dSelectShape(&ctx, 256, 47 * 128) != .@"256x128");
+    // Two channel tiles count double; a partial channel tile never qualifies.
+    try std.testing.expectEqual(ConvShape.@"256x128", conv3dSelectShape(&ctx, 512, 24 * 128));
+    try std.testing.expect(conv3dSelectShape(&ctx, 384, 96 * 128) != .@"256x128");
+
+    device.properties.limits.maxComputeSharedMemorySize = 16655;
+    try std.testing.expect(conv3dSelectShape(&ctx, 256, 48 * 128) != .@"256x128");
+    device.properties.limits.maxComputeSharedMemorySize = 16656;
+
+    device.properties.driverVersion = (615 << 22) - 1;
+    try std.testing.expect(conv3dSelectShape(&ctx, 256, 48 * 128) != .@"256x128");
+    // The driver test is NVIDIA's alone.
+    device.driver_id = vk.VK_DRIVER_ID_MESA_NVK;
+    try std.testing.expectEqual(ConvShape.@"256x128", conv3dSelectShape(&ctx, 256, 48 * 128));
+
+    device.shader_core_count = 0;
+    try std.testing.expect(conv3dSelectShape(&ctx, 256, 48 * 128) != .@"256x128");
+    device.shader_core_count = 48;
+    device.coopmat2 = false;
+    try std.testing.expect(conv3dSelectShape(&ctx, 256, 48 * 128) != .@"256x128");
 }

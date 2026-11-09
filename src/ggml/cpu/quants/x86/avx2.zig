@@ -4,7 +4,7 @@
 //!
 //! **Not a port of a file.** Each function here reproduces one Intel
 //! intrinsic that `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` or
-//! `arch/x86/repack.cpp` (v0.7.0, `620d2225c`) calls, and is named after it
+//! `arch/x86/repack.cpp` (v0.8.0, `8642541b2`) calls, and is named after it
 //! with the leading underscore dropped: `_mm256_maddubs_epi16` is
 //! `mm256_maddubs_epi16`. The semantics are Intel's.
 //!
@@ -439,7 +439,7 @@ pub inline fn mm256_castsi256_si128(a: m256i) m128i {
     return .{ a[0], a[1] };
 }
 
-/// `MM256_SET_M128I` (arch/x86/quants.c:26 @620d2225c) and
+/// `MM256_SET_M128I` (arch/x86/quants.c:26 @8642541b2) and
 /// `_mm256_set_m128i`: the first operand high, the second low.
 pub inline fn mm256_set_m128i(hi: m128i, lo: m128i) m256i {
     return .{ lo[0], lo[1], hi[0], hi[1] };

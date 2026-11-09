@@ -1072,6 +1072,20 @@ pub fn StringMap(comptime V: type) type {
             try self.keys.ensureTotalCapacityPrecise(self.allocator, self.keys.items.len + key_bytes);
         }
 
+        /// Ports `unordered_map::reserve`, `__hash_table::__reserve_unique`:
+        /// `__rehash` to `ceil(float(n) / max_load_factor)` buckets. Unlike
+        /// `reserveStorage` this moves the iteration order: a table reserved
+        /// ahead takes one bucket count, and a power of two stays one, where
+        /// growing by insertion only ever passes through primes.
+        ///
+        /// Parameters:
+        /// - `n`: the number of entries to make room for.
+        ///
+        /// Return: nothing, or `OutOfMemory`.
+        pub fn reserve(self: *Self, n: usize) error{OutOfMemory}!void {
+            try self.rehash(@intFromFloat(@ceil(@as(f32, @floatFromInt(n)) / self.max_load_factor)));
+        }
+
         /// Return: nothing.
         pub fn deinit(self: *Self) void {
             self.nodes.deinit(self.allocator);
@@ -1176,7 +1190,7 @@ pub fn StringMap(comptime V: type) type {
             var n = n_in;
             if (n == 1) {
                 n = 2;
-            } else if ((n & (n - 1)) != 0) {
+            } else if ((n & (n -% 1)) != 0) {
                 n = nextPrime(n);
             }
             const bc = self.buckets.len;
@@ -1553,7 +1567,7 @@ pub fn I32Map(comptime V: type) type {
             var n = n_in;
             if (n == 1) {
                 n = 2;
-            } else if ((n & (n - 1)) != 0) {
+            } else if ((n & (n -% 1)) != 0) {
                 n = nextPrime(n);
             }
             const bc = self.buckets.len;
@@ -1705,6 +1719,21 @@ test "u32 set iterates in libc++'s order" {
         for (cs.out) |v| try std.testing.expectEqual(v, it.next().?);
         try std.testing.expectEqual(@as(?u32, null), it.next());
     }
+}
+
+test "reserve keeps a power of two and rounds anything else up to a prime" {
+    var a = try StringMap(i32).init(std.testing.allocator);
+    defer a.deinit();
+    try a.reserve(1024);
+    try std.testing.expectEqual(@as(usize, 1024), a.bucketCount());
+    var b = try StringMap(i32).init(std.testing.allocator);
+    defer b.deinit();
+    try b.reserve(1000);
+    try std.testing.expectEqual(@as(usize, 1009), b.bucketCount());
+    var c = try StringMap(i32).init(std.testing.allocator);
+    defer c.deinit();
+    try c.reserve(0);
+    try std.testing.expectEqual(@as(usize, 0), c.bucketCount());
 }
 
 test "a string map filled after reserveStorage iterates as one filled without" {

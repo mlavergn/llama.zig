@@ -38,8 +38,11 @@
  */
 
 #include "ggml.h"
+#include "ggml-alloc.h"
+#include "ggml-backend.h"
 #include "ggml-cpu.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -90,13 +93,68 @@ static float lcg_next(void) {
  * index is a read out of bounds, not a wrong answer. `bound` is the number of
  * rows the consuming op will index into; 0 means "any non-negative int is
  * fine", which is the case for RoPE positions. */
+/* Leaves a case wants filled by a rule, picked by the tensor's name:
+ *
+ *   wild:<n>  I32, spanning [-2, n + 2): both sides of a range the op skips
+ *             out of, which a fill inside the bound never reaches.
+ *   skip:<n>  I32, as `bound` would fill it over [0, n), but with -1 in about
+ *             a third of the slots and in all of row 1, an expert id meaning
+ *             "no expert".
+ *   score     F32 with -inf and NaN mixed in, the two a pick is dead on.
+ */
+static int fill_named(struct ggml_tensor * t) {
+    const int64_t n = ggml_nelements(t);
+    int bound = 0;
+
+    if (t->type == GGML_TYPE_I32 && sscanf(t->name, "wild:%d", &bound) == 1) {
+        int32_t * d = (int32_t *) t->data;
+        for (int64_t i = 0; i < n; i++) d[i] = (int32_t) (((uint64_t) i * 7919u) % (uint64_t) (bound + 4)) - 2;
+        return 1;
+    }
+    if (t->type == GGML_TYPE_I32 && sscanf(t->name, "skip:%d", &bound) == 1) {
+        int32_t * d = (int32_t *) t->data;
+        for (int64_t i = 0; i < n; i++) {
+            const int skip = ((uint64_t) i * 2654435761u >> 9) % 3 == 0 || i / t->ne[0] == 1;
+            d[i] = skip ? -1 : (int32_t) (((uint64_t) i * 7919u) % (uint64_t) bound);
+        }
+        return 1;
+    }
+    if (t->type == GGML_TYPE_F32 && strcmp(t->name, "score") == 0) {
+        float * d = (float *) t->data;
+        for (int64_t i = 0; i < n; i++) {
+            d[i] = lcg_next();
+            if (i % 5 == 3) d[i] = -INFINITY;
+            if (i % 7 == 2) d[i] = NAN;
+        }
+        return 1;
+    }
+    return 0;
+}
+
 static void fill_leaf(struct ggml_tensor * t, int64_t bound) {
     const int64_t n = ggml_nelements(t);
+
+    if (fill_named(t)) return;
 
     switch (t->type) {
         case GGML_TYPE_F32: {
             float * d = (float *) t->data;
             for (int64_t i = 0; i < n; i++) d[i] = lcg_next();
+            break;
+        }
+        case GGML_TYPE_F64: {
+            double * d = (double *) t->data;
+            for (int64_t i = 0; i < n; i++) d[i] = lcg_next();
+            break;
+        }
+        case GGML_TYPE_I8: {
+            int8_t * d = (int8_t *) t->data;
+            for (int64_t i = 0; i < n; i++) d[i] = (int8_t) (lcg_next() * 127.0f);
+            break;
+        }
+        case GGML_TYPE_I16: {
+            int16_t * d = (int16_t *) t->data;
+            for (int64_t i = 0; i < n; i++) d[i] = (int16_t) (lcg_next() * 32767.0f);
             break;
         }
         case GGML_TYPE_F16: {
@@ -205,6 +263,12 @@ static void run_amp(const char * label, struct ggml_tensor * node, int64_t bound
     struct ggml_cgraph * gf = ggml_new_graph(ctx);
     ggml_build_forward_expand(gf, node);
 
+    /* A sentinel under the result, so an element a kernel never writes shows
+     * as the sentinel and not as whatever the context's memory held -- which
+     * is usually zero, and zero is what MUL_MAT_ID must write to a skipped
+     * slot. A view's data is its source's, which the fill below owns. */
+    if (node->view_src == NULL) memset(node->data, 0xA5, ggml_nbytes(node));
+
     lcg_state = 1;
     seen_n = 0;
     for (int i = 0; i < ggml_graph_n_nodes(gf); i++) {
@@ -295,6 +359,250 @@ static void custom_fn(struct ggml_tensor * dst, int ith, int nth, void * ud) {
     const int64_t n = ggml_nelements(dst);
     const struct ggml_tensor * a = dst->src[0];
     for (int64_t i = ith; i < n; i += nth) ((float *) dst->data)[i] = ((const float *) a->data)[i] + *(const float *) ud;
+}
+
+/* A tensor named for `fill_named`. */
+static struct ggml_tensor * named(struct ggml_tensor * t, const char * fmt, int bound) {
+    return ggml_format_name(t, fmt, bound);
+}
+
+/* v0.8.0's TOP_K_MASK. Every optional source present and absent, over both
+ * mask types, a mask that broadcasts and one that does not; then the same
+ * with every source a strided view, so each stride the kernel reads is one
+ * the contiguous cases would not notice it had swapped. */
+static void top_k_mask_cases(void) {
+    enum { n_kv = 70, n_top = 6, ne1 = 4, ne2 = 3, ne3 = 2, n_pick = 11, n_blk = 5, n_extra = 3 };
+
+    static const enum ggml_type types[] = { GGML_TYPE_F32, GGML_TYPE_F16 };
+    static const int64_t bcast[][3] = { { ne1, ne2, ne3 }, { 2, 1, 2 }, { 1, 3, 1 } };
+
+    for (size_t ti = 0; ti < sizeof types / sizeof types[0]; ti++) {
+        for (size_t bi = 0; bi < sizeof bcast / sizeof bcast[0]; bi++) {
+            for (int bits = 0; bits < 8; bits++) {
+                const int has_score = bits & 1, has_blocks = bits & 2, has_extra = bits & 4;
+                const int picks = has_score || has_blocks ? n_pick : n_kv;
+                char label[96];
+                snprintf(label, sizeof label, "top_k_mask %s m=[%lld,%lld,%lld] score=%d blocks=%d extra=%d",
+                         ggml_type_name(types[ti]), (long long) bcast[bi][0], (long long) bcast[bi][1],
+                         (long long) bcast[bi][2], !!has_score, !!has_blocks, !!has_extra);
+                struct ggml_tensor * mask = ggml_new_tensor_4d(ctx, types[ti], n_kv, bcast[bi][0], bcast[bi][1], bcast[bi][2]);
+                struct ggml_tensor * top  = named(ggml_new_tensor_4d(ctx, GGML_TYPE_I32, n_top, ne1, ne2, ne3), "wild:%d", picks);
+                struct ggml_tensor * sc   = has_score  ? named(ggml_new_tensor_4d(ctx, GGML_TYPE_F32, n_pick, ne1, ne2, ne3), "score", 0) : NULL;
+                struct ggml_tensor * bl   = has_blocks ? named(ggml_new_tensor_2d(ctx, GGML_TYPE_I32, n_blk, n_pick), "wild:%d", n_kv) : NULL;
+                struct ggml_tensor * ex   = has_extra  ? named(ggml_new_tensor_4d(ctx, GGML_TYPE_I32, n_extra, ne1, ne2, ne3), "wild:%d", n_kv) : NULL;
+                run_amp(label, ggml_top_k_mask(ctx, mask, top, sc, bl, ex), 0, 1.0f);
+            }
+        }
+
+        /* Every operand strided: a mask row inside a wider one, and the rest
+         * transposed, so nb[0] is not the element size. */
+        struct ggml_tensor * wide = ggml_new_tensor_4d(ctx, types[ti], n_kv + 9, 2, 1, 2);
+        struct ggml_tensor * mask = ggml_view_4d(ctx, wide, n_kv, 2, 1, 2, wide->nb[1], wide->nb[2], wide->nb[3], 3*wide->nb[0]);
+        struct ggml_tensor * top  = ggml_permute(ctx, named(ggml_new_tensor_4d(ctx, GGML_TYPE_I32, ne1, n_top, ne2, ne3), "wild:%d", n_pick), 1, 0, 2, 3);
+        struct ggml_tensor * sc   = ggml_permute(ctx, named(ggml_new_tensor_4d(ctx, GGML_TYPE_F32, ne1, n_pick, ne2, ne3), "score", 0), 1, 0, 2, 3);
+        struct ggml_tensor * bl   = ggml_transpose(ctx, named(ggml_new_tensor_2d(ctx, GGML_TYPE_I32, n_pick, n_blk), "wild:%d", n_kv));
+        struct ggml_tensor * ex   = ggml_permute(ctx, named(ggml_new_tensor_4d(ctx, GGML_TYPE_I32, ne1, n_extra, ne2, ne3), "wild:%d", n_kv), 1, 0, 2, 3);
+        char label[96];
+        snprintf(label, sizeof label, "top_k_mask %s, every source strided", ggml_type_name(types[ti]));
+        run_amp(label, ggml_top_k_mask(ctx, mask, top, sc, bl, ex), 0, 1.0f);
+    }
+}
+
+/* v0.8.0: an id of -1 skips the slot. `ggml-cpu.c` zeroes the row of the
+ * result, `repack.cpp` does too on its own path, and ADD_ID copies `a`.
+ *
+ * The repack half needs a weight in a real CPU_REPACK buffer: `run_amp`'s
+ * tensors never are, and `repack-diff` calls kernels, not `forward_mul_mat_id`.
+ * A type this CPU has no repack for says so and is skipped, on both sides. */
+static void skipped_slot_cases(void) {
+    static const enum ggml_type types[] = {
+        GGML_TYPE_F32, GGML_TYPE_F16, GGML_TYPE_Q4_0, GGML_TYPE_Q8_0, GGML_TYPE_Q4_K, GGML_TYPE_Q6_K, GGML_TYPE_IQ4_NL,
+    };
+    static const int nb11[] = { 1, 3 };
+    for (size_t ti = 0; ti < sizeof types / sizeof types[0]; ti++) {
+        for (size_t k = 0; k < sizeof nb11 / sizeof nb11[0]; k++) {
+            char label[96];
+            snprintf(label, sizeof label, "mul_mat_id skip %s b=[%d, 9]", ggml_type_name(types[ti]), nb11[k]);
+            run_amp(label, ggml_mul_mat_id(ctx, ggml_new_tensor_3d(ctx, types[ti], 256, 16, 4),
+                                                ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 256, nb11[k], 9),
+                                                named(ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 3, 9), "skip:%d", 4)), 0, 1.0f);
+        }
+    }
+
+    /* The long name is the gate: row -1 of `b` is the end of its own
+     * `ggml_tensor`, and with an empty name that is zeros, so a kernel that
+     * indexes with the -1 adds nothing and passes. */
+    run_amp("add_id skip", ggml_add_id(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 13, 4, 5),
+                                            named(ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 13, 6), "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", 0),
+                                            named(ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 4, 5), "skip:%d", 6)), 0, 1.0f);
+
+    ggml_backend_t backend = ggml_backend_cpu_init();
+    ggml_backend_cpu_set_n_threads(backend, n_threads);
+    ggml_backend_dev_t dev = ggml_backend_get_device(backend);
+    ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(dev);
+    ggml_backend_buffer_type_t * (*get_extra)(ggml_backend_dev_t) =
+        (ggml_backend_buffer_type_t * (*)(ggml_backend_dev_t)) ggml_backend_reg_get_proc_address(reg, "ggml_backend_dev_get_extra_bufts");
+    ggml_backend_buffer_type_t repack = NULL;
+    for (ggml_backend_buffer_type_t * b = get_extra ? get_extra(dev) : NULL; b && *b; b++) {
+        if (strcmp(ggml_backend_buft_name(*b), "CPU_REPACK") == 0) repack = *b;
+    }
+    if (repack == NULL) {
+        puts("mul_mat_id skip repack: no CPU_REPACK buffer type");
+        ggml_backend_free(backend);
+        return;
+    }
+
+    static const enum ggml_type rtypes[] = { GGML_TYPE_Q4_0, GGML_TYPE_Q8_0, GGML_TYPE_Q4_K, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_IQ4_NL };
+    for (size_t ti = 0; ti < sizeof rtypes / sizeof rtypes[0]; ti++) {
+        const int64_t k = 512, n = 16, n_as = 4, n_used = 3, n_tok = 9;
+
+        struct ggml_init_params wp = { 16u * 1024u * 1024u, NULL, true };
+        struct ggml_context * wctx = ggml_init(wp);
+        struct ggml_context * ictx = ggml_init(wp);
+        struct ggml_tensor * as = ggml_new_tensor_3d(wctx, rtypes[ti], k, n, n_as);
+        struct ggml_tensor * b  = ggml_new_tensor_3d(ictx, GGML_TYPE_F32, k, 1, n_tok);
+        struct ggml_tensor * ids = ggml_new_tensor_2d(ictx, GGML_TYPE_I32, n_used, n_tok);
+        struct ggml_tensor * out = ggml_mul_mat_id(ictx, as, b, ids);
+
+        ggml_backend_buffer_t wbuf = ggml_backend_alloc_ctx_tensors_from_buft(wctx, repack);
+        ggml_backend_buffer_t ibuf = ggml_backend_alloc_ctx_tensors_from_buft(ictx, ggml_backend_cpu_buffer_type());
+
+        /* `set_tensor` reads `extra` unchecked, and a type this CPU has no
+         * repack for has none: `supports_op` keeps such a weight out of the
+         * buffer in a real load. */
+        if (as->extra == NULL) {
+            printf("mul_mat_id skip repack %-8s not selected on this target\n", ggml_type_name(rtypes[ti]));
+            ggml_backend_buffer_free(wbuf);
+            ggml_backend_buffer_free(ibuf);
+            ggml_free(wctx);
+            ggml_free(ictx);
+            continue;
+        }
+
+        /* The quantized bytes go through a scratch tensor, for `fill_leaf`'s
+         * shared-bytes replay; then the buffer's set_tensor repacks them. */
+        struct ggml_tensor * qs = ggml_new_tensor_3d(ctx, rtypes[ti], k, n, n_as);
+        fill_amp = 1.0f;
+        lcg_state = 1;
+        fill_leaf(qs, 0);
+        ggml_backend_tensor_set(as, qs->data, 0, ggml_nbytes(as));
+
+        struct ggml_tensor * bs = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, k, 1, n_tok);
+        fill_leaf(bs, 0);
+        ggml_backend_tensor_set(b, bs->data, 0, ggml_nbytes(b));
+
+        struct ggml_tensor * is = named(ggml_new_tensor_2d(ctx, GGML_TYPE_I32, n_used, n_tok), "skip:%d", (int) n_as);
+        fill_leaf(is, 0);
+        ggml_backend_tensor_set(ids, is->data, 0, ggml_nbytes(ids));
+
+        memset(out->data, 0xA5, ggml_nbytes(out));
+
+        struct ggml_cgraph * gf = ggml_new_graph(ictx);
+        ggml_build_forward_expand(gf, out);
+        const enum ggml_status st = ggml_backend_graph_compute(backend, gf);
+        printf("mul_mat_id skip repack %-8s status=%d hash=%016llx\n", ggml_type_name(rtypes[ti]),
+               (int) st, (unsigned long long) fnv1a(out->data, ggml_nbytes(out)));
+
+        ggml_backend_buffer_free(wbuf);
+        ggml_backend_buffer_free(ibuf);
+        ggml_free(wctx);
+        ggml_free(ictx);
+    }
+    ggml_backend_free(backend);
+}
+
+/* v0.8.0's concat, one body for every type: a tile of rows at a time, memcpy
+ * for a source with contiguous rows and element by element for a strided
+ * one at each width. More than GGML_CONCAT_TILE (32) rows, so a tile ends on
+ * the tile size, on the end of a thread's share, and for dim 1 on the end of
+ * src0. */
+static void concat_cases(void) {
+    static const enum ggml_type types[] = {
+        GGML_TYPE_I8, GGML_TYPE_I16, GGML_TYPE_F16, GGML_TYPE_BF16, GGML_TYPE_F32, GGML_TYPE_I32, GGML_TYPE_I64, GGML_TYPE_F64,
+    };
+    for (size_t ti = 0; ti < sizeof types / sizeof types[0]; ti++) {
+        const enum ggml_type t = types[ti];
+        const char * tn = ggml_type_name(t);
+        char label[96];
+        for (int dim = 0; dim < 4; dim++) {
+            int64_t a[4] = { 9, 40, 3, 2 }, b[4] = { 9, 40, 3, 2 };
+            b[dim] = dim == 0 ? 7 : dim == 1 ? 51 : 2;
+            snprintf(label, sizeof label, "concat %s dim %d", tn, dim);
+            run_amp(label, ggml_concat(ctx, ggml_new_tensor(ctx, t, 4, a), ggml_new_tensor(ctx, t, 4, b), dim), 0, 1.0f);
+
+            /* src0 strided, src1 strided, and both: a transposed view of the
+             * tensor with its first two dimensions swapped. */
+            for (int which = 1; which < 4; which++) {
+                int64_t at[4] = { a[1], a[0], a[2], a[3] }, bt[4] = { b[1], b[0], b[2], b[3] };
+                struct ggml_tensor * s0 = which & 1 ? ggml_permute(ctx, ggml_new_tensor(ctx, t, 4, at), 1, 0, 2, 3) : ggml_new_tensor(ctx, t, 4, a);
+                struct ggml_tensor * s1 = which & 2 ? ggml_permute(ctx, ggml_new_tensor(ctx, t, 4, bt), 1, 0, 2, 3) : ggml_new_tensor(ctx, t, 4, b);
+                snprintf(label, sizeof label, "concat %s dim %d strided %d", tn, dim, which);
+                run_amp(label, ggml_concat(ctx, s0, s1, dim), 0, 1.0f);
+            }
+        }
+    }
+
+    static const enum ggml_type qtypes[] = { GGML_TYPE_Q4_0, GGML_TYPE_Q8_0, GGML_TYPE_Q4_K };
+    for (size_t ti = 0; ti < sizeof qtypes / sizeof qtypes[0]; ti++) {
+        const enum ggml_type t = qtypes[ti];
+        const int64_t w = ggml_blck_size(t);
+        char label[96];
+        for (int dim = 0; dim < 4; dim++) {
+            int64_t a[4] = { 2*w, 40, 3, 2 }, b[4] = { 2*w, 40, 3, 2 };
+            b[dim] = dim == 0 ? w : dim == 1 ? 51 : 2;
+            snprintf(label, sizeof label, "concat %s dim %d", ggml_type_name(t), dim);
+            run_amp(label, ggml_concat(ctx, ggml_new_tensor(ctx, t, 4, a), ggml_new_tensor(ctx, t, 4, b), dim), 0, 1.0f);
+        }
+    }
+}
+
+/* v0.8.0: SCALE needs only contiguous rows, so a view with gaps between its
+ * rows reaches the kernel, with src0's strides unlike dst's; in place, dst's
+ * are src0's. A view that keeps i2 and i3 apart, and a permutation. */
+static void scale_view_cases(void) {
+    static const enum ggml_type types[] = { GGML_TYPE_F32, GGML_TYPE_BF16 };
+    for (size_t ti = 0; ti < sizeof types / sizeof types[0]; ti++) {
+        const enum ggml_type t = types[ti];
+        const char * tn = ggml_type_name(t);
+        char label[96];
+        struct ggml_tensor * big = ggml_new_tensor_4d(ctx, t, 19, 7, 3, 3);
+        #define V() ggml_view_4d(ctx, big, 13, 5, 2, 2, big->nb[1], big->nb[2], big->nb[3], big->nb[1] + 4*big->nb[0])
+        #define P() ggml_permute(ctx, ggml_new_tensor_4d(ctx, t, 13, 3, 5, 2), 0, 2, 1, 3)
+        #define C(what, expr) snprintf(label, sizeof label, "scale %s %s", tn, what); run_amp(label, (expr), 0, 1.0f)
+        C("view",              ggml_scale(ctx, V(), 2.5f));
+        C("view bias",         ggml_scale_bias(ctx, V(), 2.5f, -1.25f));
+        C("view inplace",      ggml_scale_inplace(ctx, V(), 2.5f));
+        C("view bias inplace", ggml_scale_bias_inplace(ctx, V(), 2.5f, -1.25f));
+        C("permuted",          ggml_scale(ctx, P(), 0.37f));
+        C("permuted bias",     ggml_scale_bias(ctx, P(), 0.37f, 0.11f));
+        C("one column",        ggml_scale(ctx, ggml_transpose(ctx, ggml_new_tensor_2d(ctx, t, 6, 1)), 2.5f));
+        #undef C
+        #undef P
+        #undef V
+    }
+}
+
+/* v0.8.0: `GGML_CPU_FP32_TO_FP16` is the hardware on NEON, where it had been
+ * the software routine, so the bits move on a NaN. Every f32 whose low half
+ * sits on a rounding boundary, through the row converter, whose tail is the
+ * macro; and the two tables `ggml_cpu_init` fills through it. */
+extern ggml_fp16_t ggml_table_gelu_f16[1 << 16];
+extern ggml_fp16_t ggml_table_gelu_quick_f16[1 << 16];
+
+static void narrowing_cases(void) {
+    static const uint32_t lows[] = { 0x0000, 0x0001, 0x0fff, 0x1000, 0x1001, 0x1fff, 0x2000, 0x2001, 0xffff };
+    static float       x[1 << 16];
+    static ggml_fp16_t y[1 << 16];
+    for (size_t li = 0; li < sizeof lows / sizeof lows[0]; li++) {
+        for (uint32_t hi = 0; hi < 1u << 16; hi++) {
+            const uint32_t u = hi << 16 | lows[li];
+            memcpy(&x[hi], &u, sizeof u);
+        }
+        ggml_cpu_fp32_to_fp16(x, y, 1 << 16);
+        printf("fp32_to_fp16 low=%04x hash=%016llx\n", lows[li], (unsigned long long) fnv1a(y, sizeof y));
+    }
+    printf("table gelu hash=%016llx\n", (unsigned long long) fnv1a(ggml_table_gelu_f16, sizeof ggml_table_gelu_f16));
+    printf("table gelu_quick hash=%016llx\n", (unsigned long long) fnv1a(ggml_table_gelu_quick_f16, sizeof ggml_table_gelu_quick_f16));
 }
 
 int main(int argc, char ** argv) {
@@ -425,6 +733,10 @@ int main(int argc, char ** argv) {
 
     puts("=== reductions ===");
     R(ggml_sum(ctx, a3));
+    /* v0.8.0: SUM on rows that are not contiguous */
+    R(ggml_sum(ctx, ggml_transpose(ctx, a2)));
+    RW(ggml_sum(ctx, ggml_permute(ctx, a4, 1, 2, 0, 3)));
+    RW(ggml_sum(ctx, ggml_view_3d(ctx, a4, 5, 3, 2, a4->nb[1], a4->nb[2], 3*a4->nb[0])));
     R(ggml_sum_rows(ctx, a3));
     R(ggml_mean(ctx, a3));
     R(ggml_argmax(ctx, a2));
@@ -665,6 +977,36 @@ int main(int argc, char ** argv) {
     R(ggml_concat(ctx, a4, ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 16, 16, 8, 1), 3));
     R(ggml_concat(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F16, 8, 4), ggml_new_tensor_2d(ctx, GGML_TYPE_F16, 8, 3), 1));
     R(ggml_concat(ctx, ggml_transpose(ctx, a2), ggml_transpose(ctx, b2), 0));   /* non-contiguous */
+    concat_cases();
+
+    puts("=== sparse attention mask ===");
+    top_k_mask_cases();
+
+    puts("=== an id of -1 ===");
+    skipped_slot_cases();
+
+    puts("=== scale on strided rows ===");
+    scale_view_cases();
+
+    puts("=== f32 to f16 ===");
+    narrowing_cases();
+
+    puts("=== quick gelu, f32 ===");
+    {
+        /* v0.8.0 computes it in f32 where a table lost precision: a vector
+         * body and a scalar tail that round differently, so a width with a
+         * remainder; and past the amplitude where exp overflows, where
+         * `ggml_v_expf` leaves its fast path. */
+        struct ggml_tensor * x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 13, 5);
+        struct ggml_tensor * g = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 13, 5);
+        struct ggml_tensor * xg = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 26, 5);
+        static const float amps[] = { 1.0f, 30.0f, 120.0f };
+        for (size_t i = 0; i < sizeof amps / sizeof amps[0]; i++) {
+            run_amp("gelu_quick 13", ggml_gelu_quick(ctx, x), 0, amps[i]);
+            run_amp("geglu_quick 13", ggml_geglu_quick(ctx, xg), 0, amps[i]);
+            run_amp("geglu_quick_split 13", ggml_geglu_quick_split(ctx, x, g), 0, amps[i]);
+        }
+    }
 
     puts("=== accumulate and indexed add ===");
     R(ggml_acc(ctx, a2, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 4, 2), a2->nb[1], a2->nb[2], a2->nb[3], a2->nb[1] + 2*sizeof(float)));

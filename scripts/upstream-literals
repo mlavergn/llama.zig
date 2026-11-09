@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+# Find the "<file>", <LINE> literals that do not point at their own assert.
+#
+# Those literals are the C's __LINE__, and gates compare abort messages.
+# upstream-relines misses whole classes of them (a file-name constant, a
+# helper it does not list, a file whose cited line changed), so this checks the
+# result instead of the mechanism: the message the call carries must appear in
+# upstream's text, ending at that line, as the checkout has it. A message upstream has
+# nowhere is the port's own ("out of memory") and is skipped; a call with no
+# message (`assertEmbdOrToken(src, N)`) is checked by the macro on its line.
+#
+# An earlier version asked whether the line had carried an assert at A. That
+# moved a literal that merely shared a number with another assert, and could
+# not place one already stale at A: match on the message.
+#
+# Usage: scripts/upstream-literals [--write]
+# Prints each mismatch with the nearest line carrying that message, and a
+# report is a thing to read, not a verdict: it has false positives, so this is
+# not a gate and --write is for unique, read matches only. A literal is right
+# and still reported when the last string is an argument (`__func__` spelled
+# out: `remap_imatrix`), when a multi-line abort's arguments run past its
+# format string (`laguna`), and for a throw, which has no line at all
+# (`deepseek41`). Exits 1 while any is reported.
+import re, subprocess, sys, os, collections
+
+WRITE = '--write' in sys.argv
+files = subprocess.check_output(
+    "git ls-files 'src/*.zig' 'cli/*.zig' 'tools/*.zig'; "
+    "git ls-files -o --exclude-standard 'src/*.zig' 'cli/*.zig' 'tools/*.zig'",
+    shell=True, text=True).split()
+index = collections.defaultdict(list)
+for d, _, fs in os.walk('llama.cpp'):
+    if '/.git' in d or '/tests' in d:
+        continue
+    for f in fs:
+        if f.endswith(('.cpp', '.c', '.h', '.hpp', '.cu', '.cuh', '.m')):
+            index[f].append(os.path.join(d, f))
+
+call = re.compile(r'((?:assert|abort|Assert|Abort)\w*\(\s*(?:[^"\n]*?,\s*)?)'
+                  r'("[\w./-]+\.(?:cpp|c|h|hpp|cu|cuh)"|\w+)(,\s*)(\d+)(\s*[,)])')
+const = re.compile(r'const\s+(\w+)\s*(?::[^=]+)?=\s*"([\w./-]+\.(?:cpp|c|h|hpp|cu|cuh))"')
+strlit = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
+macro = re.compile(r'ASSERT|GGML_ABORT|abort\(|throw')
+cache = {}
+
+
+def norm(x):
+    return re.sub(r'\W+', '', x)
+
+
+def lines(p):
+    if p not in cache:
+        cache[p] = open(p, errors='replace').read().split('\n')
+    return cache[p]
+
+
+def ends_at(t, i, msg):
+    """Whether `msg` ends on 1-based line `i`: clang expands a macro's __LINE__
+    to the end of the expansion, so a multi-line GGML_ASSERT reports its last line."""
+    return 0 < i <= len(t) and msg[-16:] in norm(t[i - 1]) and msg in norm(''.join(t[max(0, i - 6):i]))
+
+
+def call_rest(s, i):
+    """The rest of the call from `i`: to its closing parenthesis, not the next statement's."""
+    depth, j, q = 1, i, False
+    while j < len(s) and depth:
+        ch = s[j]
+        if q:
+            if ch == '\\':
+                j += 1
+            elif ch == '"':
+                q = False
+        elif ch == '"':
+            q = True
+        elif ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+        j += 1
+    return s[i:j]
+
+
+n = bad = fixed = 0
+rows = []
+for z in files:
+    s = open(z, errors='replace').read()
+    consts = dict(const.findall(s))
+    edits = []
+    for m in call.finditer(s):
+        name = m.group(2)
+        f = name.strip('"') if name.startswith('"') else consts.get(name)
+        if not f:
+            continue
+        l = int(m.group(4))
+        if l <= 0:
+            continue
+        c = index.get(os.path.basename(f), [])
+        if '/' in f:
+            c = [x for x in c if x.endswith('/' + f)]
+        if not c:
+            continue
+        rest = call_rest(s, m.end(4))
+        msgs = strlit.findall(rest)
+        msg = norm(msgs[-1]) if msgs else ''
+        n += 1
+        if not msg:
+            if not any(0 < l <= len(lines(p)) and macro.search(lines(p)[l - 1]) for p in c):
+                bad += 1
+                rows.append(f'{z}:{s.count(chr(10), 0, m.start()) + 1}: {f}:{l}: no assert on that line')
+            continue
+        if any(ends_at(lines(p), l, msg) for p in c):
+            continue
+        hits = [i for p in c for i in range(1, len(lines(p)) + 1) if ends_at(lines(p), i, msg)]
+        if not hits:
+            continue  # the port's own message
+        best = min(hits, key=lambda i: abs(i - l))
+        bad += 1
+        note = '' if len(hits) == 1 else f' (several: {len(hits)})'
+        rows.append(f'{z}:{s.count(chr(10), 0, m.start()) + 1}: {f}:{l} -> {best}{note}: {msgs[-1][:60]}')
+        if len(hits) == 1:
+            edits.append((m.start(4), m.end(4), str(best)))
+    if WRITE and edits:
+        for a, b, v in sorted(edits, reverse=True):
+            s = s[:a] + v + s[b:]
+            fixed += 1
+        open(z, 'w').write(s)
+print(f'{n} literals checked, {bad} mismatched' + (f', {fixed} rewritten' if WRITE else ''))
+if rows:
+    print('\n'.join(rows))
+sys.exit(1 if bad and not (WRITE and fixed == bad) else 0)

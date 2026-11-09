@@ -20,7 +20,7 @@ set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
 
-LIB=zig-out/lib/libggml.a
+LIB="${METAL_DIFF_LIB:-zig-out/lib/libggml.a}"
 [ -f "$LIB" ] || { echo "missing $LIB -- run 'zig build reference --release=fast'" >&2; exit 2; }
 
 tmp="$(mktemp -d)"

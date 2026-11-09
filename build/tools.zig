@@ -71,42 +71,45 @@ const common_sources = [_][]const u8{
     "common/chat-peg-parser.cpp",          "common/chat.cpp",
     "common/common.cpp",                   "common/console.cpp",
     "common/debug.cpp",                    "common/download.cpp",
-    "common/fit.cpp",                      "common/hf-cache.cpp",
-    "common/imatrix-loader.cpp",           "common/json-schema-to-grammar.cpp",
-    "common/json-schema.cpp",              "common/json.cpp",
-    "common/llguidance.cpp",               "common/log.cpp",
-    "common/ngram-cache.cpp",              "common/ngram-map.cpp",
-    "common/ngram-mod.cpp",                "common/peg-parser.cpp",
-    "common/preset.cpp",                   "common/reasoning-budget.cpp",
-    "common/sampling.cpp",                 "common/speculative.cpp",
-    "common/subproc.cpp",                  "common/trie.cpp",
-    "common/unicode.cpp",                  "common/jinja/lexer.cpp",
-    "common/jinja/parser.cpp",             "common/jinja/runtime.cpp",
-    "common/jinja/value.cpp",              "common/jinja/string.cpp",
-    "common/jinja/caps.cpp",
+    "common/fit.cpp",                      "common/file-lock.cpp",
+    "common/hf-cache.cpp",                 "common/imatrix-loader.cpp",
+    "common/json-schema-to-grammar.cpp",   "common/json-schema.cpp",
+    "common/json.cpp",                     "common/llguidance.cpp",
+    "common/log.cpp",                      "common/ngram-cache.cpp",
+    "common/ngram-map.cpp",                "common/ngram-mod.cpp",
+    "common/peg-parser.cpp",               "common/preset.cpp",
+    "common/reasoning-budget.cpp",         "common/sampling.cpp",
+    "common/speculative.cpp",              "common/subproc.cpp",
+    "common/trie.cpp",                     "common/unicode.cpp",
+    "common/jinja/lexer.cpp",              "common/jinja/parser.cpp",
+    "common/jinja/runtime.cpp",            "common/jinja/value.cpp",
+    "common/jinja/string.cpp",             "common/jinja/caps.cpp",
     // common/parsers/sources.cmake's LLAMA_CHAT_PARSERS_SOURCES
-                  "common/parsers/parsers.cpp",
-    "common/parsers/cohere2moe.cpp",       "common/parsers/deepseek.cpp",
-    "common/parsers/functionary-v3-2.cpp", "common/parsers/gemma4.cpp",
-    "common/parsers/gigachat-v3.cpp",      "common/parsers/gpt-oss.cpp",
+    "common/parsers/parsers.cpp",          "common/parsers/cohere2moe.cpp",
+    "common/parsers/deepseek.cpp",         "common/parsers/functionary-v3-2.cpp",
+    "common/parsers/gemma4.cpp",           "common/parsers/gigachat-v3.cpp",
+    "common/parsers/gpt-oss.cpp",          "common/parsers/harmony-xml.cpp",
     "common/parsers/k2-horizon.cpp",       "common/parsers/kimi-k2.cpp",
     "common/parsers/kimi-k3.cpp",          "common/parsers/ling3.cpp",
     "common/parsers/lfm2.cpp",             "common/parsers/llm-jp-harmony.cpp",
     "common/parsers/minicpm5.cpp",         "common/parsers/minimax-m3.cpp",
     "common/parsers/ministral3.cpp",       "common/parsers/muse-glimmer.cpp",
-    "common/parsers/qwen3-coder.cpp",      "common/parsers/translate-gemma.cpp",
+    "common/parsers/muse-spark.cpp",       "common/parsers/qwen3-coder.cpp",
+    "common/parsers/translate-gemma.cpp",
 };
 
 /// `llama.cpp.zmake`'s `server_context_sources`, `server_impl_sources` and
 /// the executable's `main.cpp`: upstream's `llama-server`.
 const server_sources = [_][]const u8{
-    "tools/server/server-chat.cpp",    "tools/server/server-task.cpp",
-    "tools/server/server-queue.cpp",   "tools/server/server-common.cpp",
-    "tools/server/server-context.cpp", "tools/server/server-stream.cpp",
-    "tools/server/server-tools.cpp",   "tools/server/server-mcp.cpp",
-    "tools/server/server-schema.cpp",  "tools/server/server-decision.cpp",
-    "tools/server/server.cpp",         "tools/server/server-http.cpp",
-    "tools/server/server-models.cpp",  "tools/server/main.cpp",
+    "tools/server/server-chat.cpp",     "tools/server/server-task.cpp",
+    "tools/server/server-queue.cpp",    "tools/server/server-common.cpp",
+    "tools/server/server-context.cpp",  "tools/server/server-realtime.cpp",
+    "tools/server/server-stream.cpp",   "tools/server/server-tools.cpp",
+    "tools/server/server-mcp.cpp",      "tools/server/server-schema.cpp",
+    "tools/server/server-decision.cpp", "tools/server/server.cpp",
+    "tools/server/server-connect.cpp",  "tools/server/server-http.cpp",
+    "tools/server/server-models.cpp",   "tools/server/server-models-sched.cpp",
+    "tools/server/main.cpp",
 };
 
 /// `llama.cpp.zmake`'s `httplib_defines`.
@@ -263,6 +266,11 @@ pub fn add(b: *std.Build, opts: Options) !void {
         llamacpp.addLibgcc(b, mod);
         const exe = b.addExecutable(.{ .name = "llama-server", .root_module = mod });
         tools_step.dependOn(&b.addInstallArtifact(exe, .{}).step);
+        // The router, the downloader and --connect, which no other step's
+        // test root reaches: `tools/server/main.zig`'s test block names them.
+        const host_test = b.addTest(.{ .root_module = mod });
+        const host_test_step = b.step("test-server-host", "Run the unit tests of the router, the downloader and --connect (tools/server/models*.zig, download.zig, connect.zig)");
+        host_test_step.dependOn(&b.addRunArtifact(host_test).step);
     }
 
     const ref_step = b.step("tools-ref", "Build upstream's tools over libllama-ref, the tool gates' references");

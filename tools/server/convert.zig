@@ -4,12 +4,13 @@
 //!
 //! # Provenance
 //!
-//! Ports `server_chat_convert_responses_to_chatcmpl`,
+//! Ports `server_chat_convert_responses_tools`,
+//! `server_chat_convert_responses_to_chatcmpl`,
 //! `normalize_anthropic_billing_header`,
-//! `server_chat_convert_anthropic_to_oai` and
-//! `convert_transcriptions_to_chatcmpl` from
+//! `server_chat_convert_anthropic_to_oai`,
+//! `convert_transcriptions_to_chatcmpl` and `server_chat_get_asr_prompt` from
 //! `llama.cpp/tools/server/server-chat.cpp` and
-//! `llama.cpp/tools/server/server-chat.h` (llama.cpp v0.7.0, `620d2225c`);
+//! `llama.cpp/tools/server/server-chat.h` (llama.cpp v0.8.0, `8642541b2`);
 //! the file's fourth function, `server_chat_msg_diff_to_json_oaicompat`, is
 //! `result.zig`'s. Each declaration names what it ports and the line it
 //! began at.
@@ -71,8 +72,42 @@ fn arrayOf(a: Allocator, v: Value) Error!Value {
 // -----------------------------------------------------------------------------
 // the Responses API
 
-/// Ports `server_chat_convert_responses_to_chatcmpl` (server-chat.cpp:6
-/// @620d2225c): an OpenAI Responses request as a `/chat/completions` one --
+/// Ports `server_chat_convert_responses_tools` (server-chat.cpp:6
+/// @8642541b2): OpenAI Responses API tools as Chat Completions API tools,
+/// non-function tools skipped.
+///
+/// Return: owned by `a`.
+pub fn responsesTools(a: Allocator, tools_in: *const Value) Error!Value {
+    if (!tools_in.isArray()) {
+        return throw(error.InvalidArgument, "'tools' must be an array of objects", .{});
+    }
+    var chatcmpl_tools = Value.emptyArray();
+    for (tools_in.array.items) |*resp_tool_in| {
+        var resp_tool = try resp_tool_in.clone(a);
+        var chatcmpl_tool: Value = .null;
+
+        const ty = jsonValue(&resp_tool, "type", []const u8, "");
+        if (!std.mem.eql(u8, ty, "function")) {
+            // Non-function Responses tools have no Chat Completions equivalent.
+            const z = common.dupZ(ty);
+            defer common.freeZ(z);
+            common.srv(.wrn, "server_chat_convert_responses_tools", "unsupported Responses tool type '%s' skipped\n", .{z});
+            continue;
+        }
+        try resp_tool.erase(a, "type");
+        try chatcmpl_tool.set(a, "type", try Value.initString(a, "function"));
+
+        if (!resp_tool.contains("strict")) {
+            try resp_tool.set(a, "strict", .{ .boolean = true });
+        }
+        try chatcmpl_tool.set(a, "function", resp_tool);
+        try chatcmpl_tools.pushBack(a, chatcmpl_tool);
+    }
+    return chatcmpl_tools;
+}
+
+/// Ports `server_chat_convert_responses_to_chatcmpl` (server-chat.cpp:32
+/// @8642541b2): an OpenAI Responses request as a `/chat/completions` one --
 /// `instructions` a system message, each input item a message (an output
 /// item, a function call or a reasoning item following an assistant
 /// message merged into it), function tools unwrapped, `max_output_tokens`
@@ -83,7 +118,6 @@ fn arrayOf(a: Allocator, v: Value) Error!Value {
 ///
 /// Return: the body; `error.InvalidArgument` for a request it cannot read.
 pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Value {
-    const func = "server_chat_convert_responses_to_chatcmpl";
     if (!response_body.contains("input")) {
         return throw(error.InvalidArgument, "'input' is required", .{});
     }
@@ -338,32 +372,7 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
     try chatcmpl_body.set(a, "messages", chatcmpl_messages);
 
     if (response_body.contains("tools")) {
-        const resp_tools = try response_body.at("tools");
-        if (!resp_tools.isArray()) {
-            return throw(error.InvalidArgument, "'tools' must be an array of objects", .{});
-        }
-        var chatcmpl_tools = Value.emptyArray();
-        for (resp_tools.array.items) |*resp_tool_in| {
-            var resp_tool = try resp_tool_in.clone(a);
-            var chatcmpl_tool: Value = .null;
-
-            const ty = jsonValue(&resp_tool, "type", []const u8, "");
-            if (!std.mem.eql(u8, ty, "function")) {
-                // Non-function Responses tools have no Chat Completions equivalent.
-                const z = common.dupZ(ty);
-                defer common.freeZ(z);
-                common.srv(.wrn, func, "unsupported Responses tool type '%s' skipped\n", .{z});
-                continue;
-            }
-            try resp_tool.erase(a, "type");
-            try chatcmpl_tool.set(a, "type", try Value.initString(a, "function"));
-
-            if (!resp_tool.contains("strict")) {
-                try resp_tool.set(a, "strict", .{ .boolean = true });
-            }
-            try chatcmpl_tool.set(a, "function", resp_tool);
-            try chatcmpl_tools.pushBack(a, chatcmpl_tool);
-        }
+        const chatcmpl_tools = try responsesTools(a, try response_body.at("tools"));
         try chatcmpl_body.erase(a, "tools");
         if (!chatcmpl_tools.empty()) {
             try chatcmpl_body.set(a, "tools", chatcmpl_tools);
@@ -390,8 +399,8 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
 // -----------------------------------------------------------------------------
 // the Anthropic Messages API
 
-/// Ports `normalize_anthropic_billing_header` (server-chat.cpp:326
-/// @620d2225c): the five-character `cch=` stamp of an
+/// Ports `normalize_anthropic_billing_header` (server-chat.cpp:331
+/// @8642541b2): the five-character `cch=` stamp of an
 /// `x-anthropic-billing-header:` system prompt overwritten with `f`s, so it
 /// does not break prefix caching. Any other prompt is left alone.
 ///
@@ -441,8 +450,8 @@ fn imageUrlOf(a: Allocator, source: *const Value) Error!?Value {
     return null;
 }
 
-/// Ports `server_chat_convert_anthropic_to_oai` (server-chat.cpp:348
-/// @620d2225c): an Anthropic Messages request as a `/chat/completions`
+/// Ports `server_chat_convert_anthropic_to_oai` (server-chat.cpp:353
+/// @8642541b2): an Anthropic Messages request as a `/chat/completions`
 /// one -- the system prompt a message, content blocks as parts, thinking
 /// blocks as reasoning, `tool_use` blocks as tool calls and `tool_result`
 /// blocks as tool messages after their turn; tools, `tool_choice`,
@@ -552,7 +561,7 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
                         // Single-pass: build both text and content_parts, decide format at the end
                         var result_text: std.ArrayList(u8) = .empty;
                         var content_parts = Value.emptyArray();
-                        var has_images = false;
+                        var keep_parts = false; // images or tool references
 
                         for (result_content.array.items) |*cb| {
                             const c_type = jsonValue(cb, "type", []const u8, "");
@@ -564,15 +573,22 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
                                     .{ "text", text },
                                 }));
                             } else if (std.mem.eql(u8, c_type, "image")) {
-                                has_images = true;
+                                keep_parts = true;
                                 const source = try jsonValueJson(a, cb, "source", Value.emptyObject());
                                 if (try imageUrlOf(a, &source)) |part| {
                                     try content_parts.pushBack(a, part);
                                 }
+                            } else if (std.mem.eql(u8, c_type, "tool_reference")) {
+                                // tool search result naming a deferred tool
+                                keep_parts = true;
+                                try content_parts.pushBack(a, try object(a, .{
+                                    .{ "type", "tool_reference" },
+                                    .{ "name", jsonValue(cb, "tool_name", []const u8, "") },
+                                }));
                             }
                         }
 
-                        if (!has_images) {
+                        if (!keep_parts) {
                             // Text-only: collapse to a plain string for maximum compatibility
                             try tool_results.pushBack(a, try object(a, .{
                                 .{ "role", "tool" },
@@ -580,7 +596,7 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
                                 .{ "content", result_text.items },
                             }));
                         } else {
-                            // Mixed or image-only: use array content parts (OpenAI multimodal tool format)
+                            // images or tool references: keep array content parts
                             try tool_results.pushBack(a, try object(a, .{
                                 .{ "role", "tool" },
                                 .{ "tool_call_id", tool_use_id },
@@ -636,6 +652,9 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
                         .{ "parameters", parameters },
                     }) },
                 }));
+                if (tool.contains("defer_loading")) {
+                    try (try oai_tools.back()).set(a, "defer_loading", try (try tool.at("defer_loading")).clone(a));
+                }
             }
             try oai_body.set(a, "tools", oai_tools);
         }
@@ -667,7 +686,7 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
     }
 
     // Pass through common params
-    for ([_][]const u8{ "temperature", "top_p", "top_k", "stream", "chat_template_kwargs" }) |key| {
+    for ([_][]const u8{ "temperature", "top_p", "top_k", "stream", "chat_template_kwargs", "id_slot" }) |key| {
         if (body.contains(key)) {
             try oai_body.set(a, key, try (try body.at(key)).clone(a));
         }
@@ -692,6 +711,13 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
         }
     }
 
+    // llama.cpp params (e.g. seed, min_p) go under extra_params and are merged into the converted body
+    if (body.contains("extra_params") and (try body.at("extra_params")).isObject()) {
+        for ((try body.at("extra_params")).object.members.items) |*member| {
+            try oai_body.set(a, member.key, try member.value.clone(a));
+        }
+    }
+
     return oai_body;
 }
 
@@ -699,6 +725,7 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
 // the transcriptions API
 
 extern fn strtoul(s: [*:0]const u8, end: *[*:0]const u8, base: c_int) c_ulong;
+extern fn strtoll(s: [*:0]const u8, end: *[*:0]const u8, base: c_int) c_longlong;
 extern fn strtof(s: [*:0]const u8, end: *[*:0]const u8) f32;
 
 /// The C library's `errno`, as `std::stoul` and `std::stof` read it.
@@ -727,6 +754,22 @@ pub fn stoul(s: []const u8) Error!c_ulong {
     return r;
 }
 
+/// Ports libc++'s `std::stoll` (`as_integer` over `strtoll`, base 10) on
+/// `c_str()`, as `stoul` does.
+pub fn stoll(s: []const u8) Error!c_longlong {
+    const z = common.dupZ(s);
+    defer common.freeZ(z);
+    var end: [*:0]const u8 = z;
+    const saved = errnoPtr().*;
+    errnoPtr().* = 0;
+    const r = strtoll(z, &end, 10);
+    const e = errnoPtr().*;
+    errnoPtr().* = saved;
+    if (e == erange) return throw(error.RuntimeError, "stoll: out of range", .{});
+    if (end == z) return throw(error.InvalidArgument, "stoll: no conversion", .{});
+    return r;
+}
+
 /// Ports libc++'s `std::stof` (`as_float` over `strtof`) on `c_str()`, as
 /// `stoul` does.
 pub fn stof(s: []const u8) Error!f32 {
@@ -743,8 +786,8 @@ pub fn stof(s: []const u8) Error!f32 {
     return r;
 }
 
-/// Ports `convert_transcriptions_to_chatcmpl` (server-chat.cpp:651
-/// @620d2225c): a transcription request -- its form fields as JSON, its
+/// Ports `convert_transcriptions_to_chatcmpl` (server-chat.cpp:673
+/// @8642541b2): a transcription request -- its form fields as JSON, its
 /// uploaded `file` -- as a `/chat/completions` body: the template's ASR
 /// preset as the system and user messages, the prompt ending in the media
 /// marker, and the form's string fields typed.
@@ -782,11 +825,11 @@ pub fn transcriptionsToChatcmpl(
     if (!std.mem.eql(u8, response_format, "json")) {
         return throw(error.InvalidArgument, "Only 'json' response_format is supported for transcription", .{});
     }
-    const preset = chat.templates.getAsrPrompt(tmpls);
+    const preset = try chat.templates.getAsrPrompt(a, tmpls, language);
     if (prompt.items.len == 0) {
         try prompt.appendSlice(a, preset.user);
     }
-    if (language.len != 0) {
+    if (language.len != 0 and !preset.has_language) {
         // string_format's %s stops at a NUL
         const lang = language[0 .. std.mem.indexOfScalar(u8, language, 0) orelse language.len];
         try prompt.print(a, " (language: {s})", .{lang});
@@ -817,6 +860,44 @@ pub fn transcriptionsToChatcmpl(
     }
 
     return chatcmpl_body;
+}
+
+// -----------------------------------------------------------------------------
+// the "asr" chat template
+
+/// Ports `server_chat_get_asr_prompt` (server-chat.cpp:730 @8642541b2):
+/// prompt of the "asr" chat template, live ASR models (e.g. LFM3-Audio live
+/// ASR) transcribe with it; empty if the model has no such template,
+/// `error.RuntimeError` on a template error.
+///
+/// Return: owned by `gpa`.
+pub fn getAsrPrompt(gpa: Allocator, model: ?*const common.c.llama_model) Error![]common.Token {
+    const c = common.c;
+    const src = c.llama_model_chat_template(model, "asr");
+    if (src == null) {
+        return gpa.alloc(common.Token, 0);
+    }
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const vocab = c.llama_model_get_vocab(model);
+    const bos = c.llama_vocab_bos(vocab);
+    const bos_text: []const u8 = if (bos == common.token_null) "" else try tools.common.tokenToPiece(a, vocab, bos, true);
+    var tmpl = try chat.template.Template.init(a, std.mem.span(src), bos_text, "");
+    defer tmpl.deinit();
+
+    var inp = Value.emptyObject();
+    try inp.set(a, "bos_token", try Value.initString(a, tmpl.bosToken()));
+    try inp.set(a, "messages", Value.emptyArray());
+    try inp.set(a, "add_generation_prompt", .{ .boolean = true });
+
+    var r: chat.template.Render = undefined;
+    r.init(a, false);
+    defer r.deinit();
+    try r.bindJson(&inp, false);
+    const prompt = try r.run(&tmpl, a);
+    return gpa.dupe(common.Token, try common.tokenize(a, vocab, prompt, false, true));
 }
 
 // -----------------------------------------------------------------------------

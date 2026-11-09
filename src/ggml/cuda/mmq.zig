@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/mmq.cu` and the host half of
-//! `llama.cpp/ggml/src/ggml-cuda/mmq.cuh` at v0.7.0 (`620d2225c`). The
+//! `llama.cpp/ggml/src/ggml-cuda/mmq.cuh` at v0.8.0 (`8642541b2`). The
 //! configuration tables of `mmq-config-{pascal,ampere,blackwell}.cuh` are
 //! generated into `mmq_config_table.zig`. The kernels, `mul_mat_q` and
 //! `mul_mat_q_stream_k_fixup`, stay CUDA, one instantiation set per type in
@@ -41,31 +41,31 @@ const cu = common.cu;
 const Tensor = c.ggml_tensor;
 const q = common.q;
 
-/// Ports `MMQ_DP4A_MAX_BATCH_SIZE` (mmq.cuh:8 @620d2225c).
+/// Ports `MMQ_DP4A_MAX_BATCH_SIZE` (mmq.cuh:9 @8642541b2).
 const dp4a_max_batch_size = 64;
 
-/// Ports `MMQ_TILE_NE_K` (mmq.cuh:115 @620d2225c).
+/// Ports `MMQ_TILE_NE_K` (mmq.cuh:118 @8642541b2).
 const tile_ne_k = 32;
 
-/// Ports `QK8_1_MMQ` (mmq.cuh:24 @620d2225c).
+/// Ports `QK8_1_MMQ` (mmq.cuh:27 @8642541b2).
 pub const qk8_1_mmq = 4 * c.QK8_1;
 
-/// Ports `QK_FP4_MMQ` (mmq.cuh:25 @620d2225c).
+/// Ports `QK_FP4_MMQ` (mmq.cuh:28 @8642541b2).
 pub const qk_fp4_mmq = 2 * qk8_1_mmq;
 
-/// `sizeof(block_q8_1)`: two halves and `QK8_1` bytes (ggml-common.h:269 @620d2225c).
+/// `sizeof(block_q8_1)`: two halves and `QK8_1` bytes (ggml-common.h:269 @8642541b2).
 pub const sizeof_block_q8_1 = 2 * 2 + c.QK8_1;
 
-/// The size of `block_q8_1_mmq` (mmq.cuh:56 @620d2225c): `QK8_1_MMQ + 4*sizeof(half2)`.
+/// The size of `block_q8_1_mmq` (mmq.cuh:59 @8642541b2): `QK8_1_MMQ + 4*sizeof(half2)`.
 pub const sizeof_block_q8_1_mmq = qk8_1_mmq + 4 * 4;
 
-/// The size of `block_fp4_mmq` (mmq.cuh:58 @620d2225c), equal to `block_q8_1_mmq`'s.
+/// The size of `block_fp4_mmq` (mmq.cuh:61 @8642541b2), equal to `block_q8_1_mmq`'s.
 pub const sizeof_block_fp4_mmq = sizeof_block_q8_1_mmq;
 
-/// Ports `mmq_q8_1_ds_layout` (mmq.cuh:18 @620d2225c).
+/// Ports `mmq_q8_1_ds_layout` (mmq.cuh:21 @8642541b2).
 pub const Q8_1DsLayout = enum(c_int) { d4 = 0, ds4 = 1, d2s6 = 2 };
 
-/// Ports `mmq_get_q8_1_ds_layout` (mmq.cuh:60 @620d2225c).
+/// Ports `mmq_get_q8_1_ds_layout` (mmq.cuh:63 @8642541b2).
 pub fn getQ8_1DsLayout(type_x: c.enum_ggml_type) Q8_1DsLayout {
     return switch (type_x) {
         c.GGML_TYPE_Q1_0, c.GGML_TYPE_Q2_0 => .d4,
@@ -85,10 +85,10 @@ pub fn getQ8_1DsLayout(type_x: c.enum_ggml_type) Q8_1DsLayout {
     };
 }
 
-/// Ports `ggml_cuda_mmq_sram_layout` (mmq.cuh:121 @620d2225c).
+/// Ports `ggml_cuda_mmq_sram_layout` (mmq.cuh:124 @8642541b2).
 pub const SramLayout = enum { q8_0, q8_1, q2_k, q3_k, q6_k, fp4, nvfp4 };
 
-/// Ports `ggml_cuda_mmq_get_sram_stride` (mmq.cuh:131 @620d2225c): the
+/// Ports `ggml_cuda_mmq_get_sram_stride` (mmq.cuh:134 @8642541b2): the
 /// padded SRAM tile length, in 32-bit elements.
 fn getSramStride(layout: SramLayout) c_int {
     return switch (layout) {
@@ -102,7 +102,7 @@ fn getSramStride(layout: SramLayout) c_int {
     };
 }
 
-/// Ports `ggml_cuda_mmq_config` (mmq.cuh:164 @620d2225c).
+/// Ports `ggml_cuda_mmq_config` (mmq.cuh:167 @8642541b2).
 pub const Config = struct {
     type: c.enum_ggml_type,
     nthreads: c_int,
@@ -114,7 +114,7 @@ pub const Config = struct {
     stream_k: bool,
     fallback: bool,
 
-    /// Ports `ggml_cuda_mmq_config`'s `use_mma_data_layout` (mmq.cuh:188 @620d2225c).
+    /// Ports `ggml_cuda_mmq_config`'s `use_mma_data_layout` (mmq.cuh:191 @8642541b2).
     fn useMmaDataLayout(self: Config, x: c_int) bool {
         _ = self;
         return common.turingMmaAvailable(x);
@@ -129,7 +129,7 @@ fn lookup(t: *const table.Table, ty: c.enum_ggml_type, J: c_int, fallback: bool)
     return lookup(t.fallthrough.?, ty, J, fallback);
 }
 
-/// Ports the host `ggml_cuda_mmq_get_config` (mmq.cuh:229 @620d2225c),
+/// Ports the host `ggml_cuda_mmq_get_config` (mmq.cuh:232 @8642541b2),
 /// NVIDIA arms. The AMD arms -- GCN, CDNA, RDNA2/3/3.5/4 -- are taken only
 /// for an AMD compute capability, which a CUDA device never has. Since
 /// v0.7.0 `prec_src1` has no default: every caller passes it (#30168).
@@ -146,18 +146,18 @@ pub fn getConfig(ty: c.enum_ggml_type, J: c_int, fallback: bool, x: c_int, prec_
     return lookup(&table.pascal_older, ty, J, fallback);
 }
 
-/// Ports `ggml_cuda_mmq_needs_fallback` (mmq.cuh:371 @620d2225c), new at
+/// Ports `ggml_cuda_mmq_needs_fallback` (mmq.cuh:374 @8642541b2), new at
 /// v0.7.0, which replaced `ggml_cuda_mmq_get_J_max`: whether the rows of
 /// `x` need the bounds-checked kernels.
-fn needsFallback(nrows_x: i64) bool {
+pub fn needsFallback(nrows_x: i64) bool {
     return @rem(nrows_x, 128) != 0;
 }
 
-/// Ports `tile_x_sizes` (mmq.cuh:102 @620d2225c).
+/// Ports `tile_x_sizes` (mmq.cuh:105 @8642541b2).
 const TileXSizes = struct { qs: c_int, dm: c_int, sc: c_int };
 
-/// Ports `mmq_get_dp4a_tile_x_sizes` (mmq.cuh:390 @620d2225c) with the
-/// `MMQ_DP4A_TXS_*` macros, from `MMQ_DP4A_TXS_Q4_0` (mmq.cuh:379 @620d2225c).
+/// Ports `mmq_get_dp4a_tile_x_sizes` (mmq.cuh:393 @8642541b2) with the
+/// `MMQ_DP4A_TXS_*` macros, from `MMQ_DP4A_TXS_Q4_0` (mmq.cuh:382 @8642541b2).
 fn getDp4aTileXSizes(ty: c.enum_ggml_type, I: c_int) TileXSizes {
     const K = tile_ne_k;
     const q4_0: TileXSizes = .{ .qs = I * K + I, .dm = @divTrunc(I * K, q.QI4_0) + @divTrunc(I, q.QI4_0), .sc = 0 };
@@ -191,7 +191,7 @@ fn getDp4aTileXSizes(ty: c.enum_ggml_type, I: c_int) TileXSizes {
     };
 }
 
-/// Ports `ggml_cuda_mmq_get_nbytes_shared_x` (mmq.cuh:419 @620d2225c).
+/// Ports `ggml_cuda_mmq_get_nbytes_shared_x` (mmq.cuh:422 @8642541b2).
 fn getNbytesSharedX(config: Config, x: c_int) c_int {
     if (config.useMmaDataLayout(x)) {
         return config.I * getSramStride(config.sram_layout) * 4;
@@ -200,7 +200,7 @@ fn getNbytesSharedX(config: Config, x: c_int) c_int {
     return (txs.qs + txs.dm + txs.sc) * 4;
 }
 
-/// Ports `mmq_get_nbytes_shared` (mmq.cuh:1388 @620d2225c).
+/// Ports `mmq_get_nbytes_shared` (mmq.cuh:1440 @8642541b2).
 fn getNbytesShared(config: Config, x: c_int) usize {
     const nbs_ids: usize = @as(usize, @intCast(config.J)) * @sizeOf(c_int);
     const nbs_x: usize = @intCast(getNbytesSharedX(config, x));
@@ -208,7 +208,13 @@ fn getNbytesShared(config: Config, x: c_int) usize {
     return nbs_ids + nbs_x + impl.pad(nbs_y, @as(usize, @intCast(config.nthreads)) * @sizeOf(c_int));
 }
 
-/// Ports `mmq_args` (mmq.cuh:1378 @620d2225c).
+/// Ports `ggml_cuda_mmq_fusion_supported` (mmq.cuh:433 @8642541b2), new at
+/// v0.8.0: the weight types with a fused gate/up/GLU path.
+pub fn fusionSupported(ty: c.enum_ggml_type) bool {
+    return ty == c.GGML_TYPE_Q4_K or ty == c.GGML_TYPE_Q5_K or ty == c.GGML_TYPE_Q6_K or ty == c.GGML_TYPE_Q8_0 or ty == c.GGML_TYPE_IQ4_XS;
+}
+
+/// Ports `mmq_args` (mmq.cuh:1429 @8642541b2).
 pub const Args = struct {
     x: ?*const anyopaque,
     type_x: c.enum_ggml_type,
@@ -238,6 +244,8 @@ pub const Args = struct {
     /// optimal performance. Since v0.7.0 `ggml_cuda_mul_mat_q` chooses it,
     /// to size `src1`'s padding, where `mul_mat_q_switch_J` had.
     J_best: c_int,
+    /// `gate != null` selects the fused gate/up/GLU path.
+    fusion: common.MmFusionArgsDevice = .{},
 };
 
 /// The `.cu` stem of a type's template instances.
@@ -269,8 +277,8 @@ fn instanceTu(comptime ty: c.enum_ggml_type) []const u8 {
     };
 }
 
-fn mulMatQKernel(comptime ty: c.enum_ggml_type, comptime J: comptime_int, comptime fallback: bool, comptime prec_src1: c.enum_ggml_prec) kernels.Kernel {
-    return kernels.get(instanceTu(ty), kernels.tmpl("mul_mat_q", &.{ kernels.ggmlType(ty), kernels.int(J), kernels.boolean(fallback), kernels.ggmlPrec(prec_src1) }));
+fn mulMatQKernel(comptime ty: c.enum_ggml_type, comptime J: comptime_int, comptime fallback: bool, comptime prec_src1: c.enum_ggml_prec, comptime has_fusion: bool) kernels.Kernel {
+    return kernels.get(instanceTu(ty), kernels.tmpl("mul_mat_q", &.{ kernels.ggmlType(ty), kernels.int(J), kernels.boolean(fallback), kernels.ggmlPrec(prec_src1), kernels.boolean(has_fusion) }));
 }
 
 fn fixupKernel(comptime ty: c.enum_ggml_type, comptime J: comptime_int, comptime fallback: bool, comptime prec_src1: c.enum_ggml_prec) kernels.Kernel {
@@ -285,8 +293,12 @@ fn u32Of(x: i64) u32 {
     return @truncate(@as(u64, @bitCast(x)));
 }
 
-/// Ports `launch_mul_mat_q` (mmq.cuh:1396 @620d2225c).
-fn launchMulMatQ(comptime ty: c.enum_ggml_type, comptime J: comptime_int, comptime fallback: bool, comptime prec_src1: c.enum_ggml_prec, ctx: *common.Context, args: *const Args, stream: cu.cudaStream_t) void {
+/// Ports `launch_mul_mat_q` (mmq.cuh:1448 @8642541b2). With `has_fusion`
+/// the kernel always tiles: it needs the whole K range of a tile in one
+/// block, and writes the GLU of `I/2` up rows and `I/2` gate rows per tile.
+/// Since v0.8.0 column tiles are innermost, grid x, so that the concurrently
+/// running blocks share the same tile of `x` and read it from L2.
+fn launchMulMatQ(comptime ty: c.enum_ggml_type, comptime J: comptime_int, comptime fallback: bool, comptime prec_src1: c.enum_ggml_prec, comptime has_fusion: bool, ctx: *common.Context, args: *const Args, stream: cu.cudaStream_t) void {
     const id = common.getDevice();
     const dev = common.info().devices[@intCast(id)];
     const x = dev.cc;
@@ -300,13 +312,17 @@ fn launchMulMatQ(comptime ty: c.enum_ggml_type, comptime J: comptime_int, compti
 
     const block_dims: kernels.Dim3 = .{ .x = @intCast(warp_size), .y = @intCast(nwarps), .z = 1 };
 
-    kernels.setSharedMemoryLimit(comptime mulMatQKernel(ty, J, false, prec_src1), @intCast(nbytes_shared));
-    kernels.setSharedMemoryLimit(comptime mulMatQKernel(ty, J, true, prec_src1), @intCast(nbytes_shared));
+    kernels.setSharedMemoryLimit(comptime mulMatQKernel(ty, J, false, prec_src1, has_fusion), @intCast(nbytes_shared));
+    if (!has_fusion) {
+        kernels.setSharedMemoryLimit(comptime mulMatQKernel(ty, J, true, prec_src1, false), @intCast(nbytes_shared));
+    }
 
-    const nty: c_int = i32Of(@divTrunc(args.nrows_x + config.I - 1, config.I));
+    const I_dst: c_int = if (has_fusion) @divTrunc(config.I, 2) else config.I; // Rows of dst per tile, see mul_mat_q.
+    const nty: c_int = i32Of(@divTrunc(args.nrows_x + I_dst - 1, I_dst));
     const ntx: c_int = i32Of(@divTrunc(args.ncols_max + config.J - 1, config.J));
     const ntzw: c_int = i32Of(args.nchannels_y * args.nsamples_y);
-    const block_nums_xy_tiling: kernels.Dim3 = .{ .x = @bitCast(nty), .y = @bitCast(ntx), .z = @bitCast(ntzw) };
+    // Column tiles innermost so that the concurrently running blocks share the same tile of x and read it from L2.
+    const block_nums_xy_tiling: kernels.Dim3 = .{ .x = @bitCast(ntx), .y = @bitCast(nty), .z = @bitCast(ntzw) };
 
     impl.assert(@rem(args.nchannels_y, args.nchannels_x) == 0, "args.nchannels_y % args.nchannels_x == 0");
     impl.assert(@rem(args.nsamples_y, args.nsamples_x) == 0, "args.nsamples_y  % args.nsamples_x  == 0");
@@ -320,17 +336,19 @@ fn launchMulMatQ(comptime ty: c.enum_ggml_type, comptime J: comptime_int, compti
     const channel_ratio_fd = common.initFastdivValues(@intCast(channel_ratio));
     const sample_ratio_fd = common.initFastdivValues(@intCast(sample_ratio));
 
-    const k = comptime mulMatQKernel(ty, J, fallback, prec_src1);
+    const k = comptime mulMatQKernel(ty, J, fallback, prec_src1, has_fusion);
     const shmem: usize = @intCast(nbytes_shared);
 
-    if (!config.stream_k) {
+    if (has_fusion or !config.stream_k) {
+        impl.assert(nty <= 65535, "nty <= 65535"); // gridDim.y limit
         kernels.launch(k, .{ .grid = block_nums_xy_tiling, .block = block_dims, .shmem = shmem, .stream = stream }, .{
-            args.x,                       args.y,                         args.ids_dst,                  args.expert_bounds,
-            args.dst,                     @as(?*f32, null),               args.y_scale,                  blocks_per_ne00_fd,
-            i32Of(args.nrows_x),          i32Of(args.ncols_dst),          i32Of(args.stride_row_x),      i32Of(args.ncols_y),
-            i32Of(args.nrows_dst),        channel_ratio_fd,               nchannels_y_fd,                i32Of(args.stride_channel_x),
-            i32Of(args.stride_channel_y), i32Of(args.stride_channel_dst), sample_ratio_fd,               nsamples_y_fd,
-            i32Of(args.stride_sample_x),  i32Of(args.stride_sample_y),    i32Of(args.stride_sample_dst), ntx_fd,
+            args.x,                         args.fusion.gate,              args.y,                       args.ids_dst,
+            args.expert_bounds,             args.dst,                      @as(?*f32, null),             args.y_scale,
+            args.fusion.glu_op,             args.fusion.glu_limit,         blocks_per_ne00_fd,           i32Of(args.nrows_x),
+            i32Of(args.ncols_dst),          i32Of(args.stride_row_x),      i32Of(args.ncols_y),          i32Of(args.nrows_dst),
+            channel_ratio_fd,               nchannels_y_fd,                i32Of(args.stride_channel_x), i32Of(args.stride_channel_y),
+            i32Of(args.stride_channel_dst), sample_ratio_fd,               nsamples_y_fd,                i32Of(args.stride_sample_x),
+            i32Of(args.stride_sample_y),    i32Of(args.stride_sample_dst), ntx_fd,
         });
         return;
     }
@@ -340,13 +358,16 @@ fn launchMulMatQ(comptime ty: c.enum_ggml_type, comptime J: comptime_int, compti
     const ntiles_dst: c_int = ntx *% nty *% ntzw;
     const tiles_nwaves: c_int = @divTrunc(ntiles_dst + nsm - 1, nsm);
     const tiles_efficiency_percent: c_int = @divTrunc(100 * ntiles_dst, nsm * tiles_nwaves);
-    const block_nums_stream_k: kernels.Dim3 = .{
-        .x = @bitCast(if (common.cc.isNvidia(x) and tiles_efficiency_percent >= 90) ntiles_dst else nsm),
-    };
 
     // Assert that variable kbc will not overflow.
     // `int * unsigned int` is an unsigned product, wrapping.
     impl.assert(@as(u32, @bitCast(ntiles_dst)) *% blocks_per_ne00_fd.z < (1 << 30), "ntiles_dst * blocks_per_ne00_fd.z < (1 << 30)");
+
+    // Maximum number of CUDA blocks that can do useful work.
+    const nwork: c_int = i32Of(@as(i64, ntiles_dst) *% @divTrunc(args.ncols_x + config.K_vram - 1, config.K_vram));
+    const block_nums_stream_k: kernels.Dim3 = .{
+        .x = @bitCast(if (common.cc.isNvidia(x) and tiles_efficiency_percent >= 90) ntiles_dst else @min(nsm, nwork)),
+    };
 
     const fixup_needed = @as(u32, @bitCast(ntiles_dst)) % block_nums_stream_k.x != 0;
 
@@ -362,12 +383,13 @@ fn launchMulMatQ(comptime ty: c.enum_ggml_type, comptime J: comptime_int, compti
 
     const tmp_ptr: ?*f32 = if (tmp_fixup.ptr) |p| &p[0] else null;
     kernels.launch(k, .{ .grid = block_nums_stream_k, .block = block_dims, .shmem = shmem, .stream = stream }, .{
-        args.x,                       args.y,                         args.ids_dst,                  args.expert_bounds,
-        args.dst,                     tmp_ptr,                        args.y_scale,                  blocks_per_ne00_fd,
-        i32Of(args.nrows_x),          i32Of(args.ncols_dst),          i32Of(args.stride_row_x),      i32Of(args.ncols_y),
-        i32Of(args.nrows_dst),        channel_ratio_fd,               nchannels_y_fd,                i32Of(args.stride_channel_x),
-        i32Of(args.stride_channel_y), i32Of(args.stride_channel_dst), sample_ratio_fd,               nsamples_y_fd,
-        i32Of(args.stride_sample_x),  i32Of(args.stride_sample_y),    i32Of(args.stride_sample_dst), ntx_fd,
+        args.x,                         args.fusion.gate,              args.y,                       args.ids_dst,
+        args.expert_bounds,             args.dst,                      tmp_ptr,                      args.y_scale,
+        args.fusion.glu_op,             args.fusion.glu_limit,         blocks_per_ne00_fd,           i32Of(args.nrows_x),
+        i32Of(args.ncols_dst),          i32Of(args.stride_row_x),      i32Of(args.ncols_y),          i32Of(args.nrows_dst),
+        channel_ratio_fd,               nchannels_y_fd,                i32Of(args.stride_channel_x), i32Of(args.stride_channel_y),
+        i32Of(args.stride_channel_dst), sample_ratio_fd,               nsamples_y_fd,                i32Of(args.stride_sample_x),
+        i32Of(args.stride_sample_y),    i32Of(args.stride_sample_dst), ntx_fd,
     });
 
     if (!fixup_needed) return;
@@ -381,11 +403,11 @@ fn launchMulMatQ(comptime ty: c.enum_ggml_type, comptime J: comptime_int, compti
     });
 }
 
-/// Ports `mul_mat_q_switch_J` (mmq.cuh:1478 @620d2225c): the dispatch on
+/// Ports `mul_mat_q_switch_J` (mmq.cuh:1537 @8642541b2): the dispatch on
 /// `args.J_best`, which the caller chose.
-fn mulMatQSwitchJ(comptime ty: c.enum_ggml_type, comptime fallback: bool, comptime prec_src1: c.enum_ggml_prec, ctx: *common.Context, args: *const Args, stream: cu.cudaStream_t) void {
+fn mulMatQSwitchJ(comptime ty: c.enum_ggml_type, comptime fallback: bool, comptime prec_src1: c.enum_ggml_prec, comptime has_fusion: bool, ctx: *common.Context, args: *const Args, stream: cu.cudaStream_t) void {
     switch (args.J_best) {
-        inline 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128 => |j| launchMulMatQ(ty, j, fallback, prec_src1, ctx, args, stream),
+        inline 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128 => |j| launchMulMatQ(ty, j, fallback, prec_src1, has_fusion, ctx, args, stream),
         else => {
             impl.logError("J_best=%d\n", .{args.J_best});
             impl.abort("fatal error");
@@ -393,17 +415,31 @@ fn mulMatQSwitchJ(comptime ty: c.enum_ggml_type, comptime fallback: bool, compti
     }
 }
 
-/// Ports `mul_mat_q_case` (mmq.cuh:1535 @620d2225c). The `GGML_PREC_Q4`
+/// Ports `mul_mat_q_switch_fusion` (mmq.cuh:1594 @8642541b2), new at v0.8.0:
+/// a fused kernel exists only without the fallback and for the types
+/// `fusionSupported` names.
+fn mulMatQSwitchFusion(comptime ty: c.enum_ggml_type, comptime fallback: bool, comptime prec_src1: c.enum_ggml_prec, ctx: *common.Context, args: *const Args, stream: cu.cudaStream_t) void {
+    if (comptime !fallback and fusionSupported(ty)) {
+        if (args.fusion.gate != null) {
+            mulMatQSwitchJ(ty, fallback, prec_src1, true, ctx, args, stream);
+            return;
+        }
+    }
+    impl.assert(args.fusion.gate == null, "!args.fusion.gate");
+    mulMatQSwitchJ(ty, fallback, prec_src1, false, ctx, args, stream);
+}
+
+/// Ports `mul_mat_q_case` (mmq.cuh:1606 @8642541b2). The `GGML_PREC_Q4`
 /// instantiation exists for MXFP4 and NVFP4 only (`DECL_MMQ_CASE_W4A4`).
 fn mulMatQCase(comptime ty: c.enum_ggml_type, comptime prec_src1: c.enum_ggml_prec, ctx: *common.Context, args: *const Args, stream: cu.cudaStream_t) void {
     if (needsFallback(args.nrows_x)) {
-        mulMatQSwitchJ(ty, true, prec_src1, ctx, args, stream);
+        mulMatQSwitchFusion(ty, true, prec_src1, ctx, args, stream);
     } else {
-        mulMatQSwitchJ(ty, false, prec_src1, ctx, args, stream);
+        mulMatQSwitchFusion(ty, false, prec_src1, ctx, args, stream);
     }
 }
 
-/// Ports `ggml_cuda_mul_mat_q_switch_type` (mmq.cu:8 @620d2225c). v0.7.0
+/// Ports `ggml_cuda_mul_mat_q_switch_type` (mmq.cu:8 @8642541b2). v0.7.0
 /// spells `GGML_PREC_Q8` at every case, which the port always did.
 fn mulMatQSwitchType(ctx: *common.Context, args: *const Args, stream: cu.cudaStream_t, prec_src1: c.enum_ggml_prec) void {
     switch (args.type_x) {
@@ -450,7 +486,7 @@ const PrecEnv = struct {
     const once = common.Once(run);
 };
 
-/// Ports `ggml_cuda_mmq_get_prec_env` (mmq.cu:94 @620d2225c), new at
+/// Ports `ggml_cuda_mmq_get_prec_env` (mmq.cu:94 @8642541b2), new at
 /// v0.6.0: `GGML_CUDA_MMQ_PREC` overrides the `src1` precision the graph
 /// asks for; "auto" (or anything unknown, with a warning) keeps it.
 fn getPrecEnv() c.enum_ggml_prec {
@@ -471,7 +507,7 @@ fn getPrecEnv() c.enum_ggml_prec {
     return c.GGML_PREC_UNDEFINED;
 }
 
-/// Ports `ggml_cuda_mmq_get_prec_src1` (mmq.cu:117 @620d2225c), new at
+/// Ports `ggml_cuda_mmq_get_prec_src1` (mmq.cu:117 @8642541b2), new at
 /// v0.6.0: `src1` is quantized to Q8_1 unless the FP4 types can use 4-bit
 /// activations, in which case they default to the native W4A4 instructions
 /// on Blackwell.
@@ -493,15 +529,47 @@ fn getPrecSrc1(src0: *const Tensor, dst: *const Tensor, x: c_int) c.enum_ggml_pr
     return c.GGML_PREC_Q4;
 }
 
-/// Ports `ggml_cuda_mul_mat_q` (mmq.cu:134 @620d2225c). Since v0.7.0 (#29953)
+/// Ports `ggml_cuda_mmq_get_J_best` (mmq.cu:135 @8642541b2), new at v0.8.0:
+/// the tile width in ne11 (dense) / ne12 (MoE) direction with the fewest
+/// tiles that fits into shared memory, 0 if there is none.
+fn getJBest(ty: c.enum_ggml_type, ncols: i64, fallback: bool, x: c_int, smpbo: usize, prec_src1: c.enum_ggml_prec, nthreads_best: ?*c_int) c_int {
+    var J_best: c_int = 0;
+    var ntiles_J_best: c_int = std.math.maxInt(c_int);
+
+    var J: c_int = 8;
+    while (J <= 128 and ntiles_J_best > 1) : (J += 8) {
+        const config = getConfig(ty, J, fallback, x, prec_src1);
+        if (config.type == c.GGML_TYPE_COUNT) continue;
+        if (getNbytesShared(config, x) > smpbo) continue;
+
+        const ntiles_x: c_int = i32Of(@divTrunc(ncols + config.J - 1, config.J));
+        if (ntiles_x < ntiles_J_best) {
+            J_best = J;
+            if (nthreads_best) |p| p.* = config.nthreads;
+            ntiles_J_best = ntiles_x;
+        }
+    }
+    return J_best;
+}
+
+/// Ports `ggml_cuda_mul_mat_q` (mmq.cu:164 @8642541b2). Since v0.7.0 (#29953)
 /// it chooses the tile width `J_best` itself, as `mul_mat_q_switch_J` had,
 /// and pads `src1`'s quantized copy and `ids_dst` by what one tile of that
 /// width can read past the end, where it had padded by the widest tile any
-/// configuration allowed.
-pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, ids: ?*const Tensor, dst: *Tensor) void {
+/// configuration allowed. With `fusion` (v0.8.0, gate/up/GLU) `src0` is the
+/// up weight and `dst` the GLU output.
+pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, ids: ?*const Tensor, dst: *Tensor, fusion: ?*const common.MmFusionArgsHost) void {
     impl.assert(src1.type == c.GGML_TYPE_F32, "        src1->type == GGML_TYPE_F32");
     impl.assert(dst.type == c.GGML_TYPE_F32, "        dst->type  == GGML_TYPE_F32");
     impl.assert(ids == null or ids.?.type == c.GGML_TYPE_I32, "!ids || ids->type  == GGML_TYPE_I32");
+
+    // Fused gate/up/GLU: src0 is the up weight, dst the GLU output.
+    const gate: ?*const Tensor = if (fusion) |f| f.gate else null;
+    if (fusion) |f| {
+        // TODO MoE support
+        impl.assert(gate != null and ids == null and f.x_bias == null and f.gate_bias == null and f.x_scale == null and f.gate_scale == null, "gate && !ids && !fusion->x_bias && !fusion->gate_bias && !fusion->x_scale && !fusion->gate_scale");
+        impl.assert(gate.?.type == src0.type and c.ggml_are_same_shape(gate.?, src0) and c.ggml_are_same_stride(gate.?, src0), "gate->type == src0->type && ggml_are_same_shape(gate, src0) && ggml_are_same_stride(gate, src0)");
+    }
 
     const ne00 = src0.ne[0];
     const ne01 = src0.ne[1];
@@ -536,14 +604,17 @@ pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, i
     const src1_d: ?*const f32 = @ptrCast(@alignCast(src1.data));
     const dst_d: ?*f32 = @ptrCast(@alignCast(dst.data));
 
-    // If src0 is a temporary compute buffer, clear any potential padding.
-    if (c.ggml_backend_buffer_get_usage(src0.buffer) == c.GGML_BACKEND_BUFFER_USAGE_COMPUTE) {
-        const size_data = c.ggml_nbytes(src0);
-        const size_alloc = c.ggml_backend_buffer_get_alloc_size(src0.buffer, src0);
-        if (size_alloc > size_data) {
-            impl.assert(c.ggml_is_contiguously_allocated(src0), "ggml_is_contiguously_allocated(src0)");
-            impl.assert(src0.view_src == null, "!src0->view_src");
-            common.cudaCheck(cu.cudaMemsetAsync(@as([*]u8, @ptrCast(src0.data.?)) + size_data, 0, size_alloc - size_data, stream), "cudaMemsetAsync((char *) src0->data + size_data, 0, size_alloc - size_data, stream)", @src());
+    // If src0 (or the fused gate weight) is a temporary compute buffer, clear any potential padding.
+    for ([_]?*const Tensor{ src0, gate }) |t_opt| {
+        const t = t_opt orelse continue;
+        if (c.ggml_backend_buffer_get_usage(t.buffer) == c.GGML_BACKEND_BUFFER_USAGE_COMPUTE) {
+            const size_data = c.ggml_nbytes(t);
+            const size_alloc = c.ggml_backend_buffer_get_alloc_size(t.buffer, t);
+            if (size_alloc > size_data) {
+                impl.assert(c.ggml_is_contiguously_allocated(t), "ggml_is_contiguously_allocated(t)");
+                impl.assert(t.view_src == null, "!t->view_src");
+                common.cudaCheck(cu.cudaMemsetAsync(@as([*]u8, @ptrCast(t.data.?)) + size_data, 0, size_alloc - size_data, stream), "cudaMemsetAsync((char *) t->data + size_data, 0, size_alloc - size_data, stream)", @src());
+            }
         }
     }
 
@@ -558,7 +629,9 @@ pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, i
 
     const fallback = needsFallback(ne01);
 
-    const prec_src1 = getPrecSrc1(src0, dst, x);
+    // With fusion dst is the GLU output, not a MUL_MAT; the fused types always quantize src1 to Q8_1.
+    // TODO support for Q4 precision if both tensors allow it
+    const prec_src1: c.enum_ggml_prec = if (gate != null) c.GGML_PREC_Q8 else getPrecSrc1(src0, dst, x);
 
     const use_native_fp4 = prec_src1 == c.GGML_PREC_Q4;
     const y_block_size: i64 = if (use_native_fp4) sizeof_block_fp4_mmq else sizeof_block_q8_1_mmq;
@@ -578,21 +651,7 @@ pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, i
             // which a CUDA device never takes.
         }
 
-        var ntiles_J_best: c_int = std.math.maxInt(c_int);
-
-        var J: c_int = 8;
-        while (J <= 128 and ntiles_J_best > 1) : (J += 8) {
-            const config = getConfig(src0.type, J, fallback, x, prec_src1);
-            if (config.type == c.GGML_TYPE_COUNT) continue;
-            if (getNbytesShared(config, x) > smpbo) continue;
-
-            const ntiles_x: c_int = i32Of(@divTrunc(ncols_opt + config.J - 1, config.J));
-            if (ntiles_x < ntiles_J_best) {
-                J_best = J;
-                nthreads_best = config.nthreads;
-                ntiles_J_best = ntiles_x;
-            }
-        }
+        J_best = getJBest(src0.type, ncols_opt, fallback, x, smpbo, prec_src1, &nthreads_best);
     }
     impl.assert(J_best > 0, "J_best > 0");
 
@@ -632,6 +691,13 @@ pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, i
             @divTrunc(ne11 * ne10_padded * sizeof_block_q8_1, c.QK8_1 * @sizeOf(c_int));
         const s13 = ne12 * s12;
 
+        var fusion_device: common.MmFusionArgsDevice = .{};
+        if (gate) |g| {
+            fusion_device.gate = g.data;
+            fusion_device.glu_op = fusion.?.glu_op;
+            fusion_device.glu_limit = fusion.?.glu_limit;
+        }
+
         const args: Args = .{
             .x = src0_d,
             .type_x = src0.type,
@@ -658,6 +724,7 @@ pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, i
             .stride_sample_dst = s3,
             .ncols_max = ne1,
             .J_best = J_best,
+            .fusion = fusion_device,
         };
         mulMatQSwitchType(ctx, &args, stream, prec_src1);
         return;
@@ -771,7 +838,7 @@ fn firstOf(comptime T: type, p: ?[*]T) ?*T {
     return if (p) |x| &x[0] else null;
 }
 
-/// Ports `ggml_cuda_should_use_mmq` (mmq.cu:355 @620d2225c), NVIDIA arms.
+/// Ports `ggml_cuda_should_use_mmq` (mmq.cu:386 @8642541b2), NVIDIA arms.
 /// v0.6.0's `cc == GGML_CUDA_CC_PH1` refusal is a Moore Threads arm, which
 /// no CUDA device's compute capability reaches.
 pub fn shouldUseMmq(ty: c.enum_ggml_type, x: c_int, ne11: i64, n_experts: i64) bool {
@@ -826,4 +893,25 @@ pub fn shouldUseMmq(ty: c.enum_ggml_type, x: c_int, ne11: i64, n_experts: i64) b
 
     // The AMD and Moore Threads arms are not reachable on a CUDA device.
     return ne11 < dp4a_max_batch_size;
+}
+
+/// Ports `ggml_cuda_mmq_fusion_is_efficient` (mmq.cu:520 @8642541b2), new at
+/// v0.8.0: the fused kernel needs one block per tile, with no stream-k
+/// split, so it is only worth taking if the tiling is efficient.
+pub fn fusionIsEfficient(ty: c.enum_ggml_type, nrows_x: i64, ncols: i64, nchannels: i64, device: c_int) bool {
+    const dev = common.info().devices[@intCast(device)];
+    const x = dev.cc;
+    const nsm: i64 = dev.nsm;
+    const smpbo = dev.smpbo;
+
+    // Same tile width as ggml_cuda_mul_mat_q; the fused kernel has no fallback, quantizes src1 to Q8_1 and writes I/2 output rows per tile.
+    const fallback = false;
+    const J_best = getJBest(ty, ncols, fallback, x, smpbo, c.GGML_PREC_Q8, null);
+    if (J_best == 0) return false;
+    const nrows_tile: i64 = @divTrunc(getConfig(ty, J_best, fallback, x, c.GGML_PREC_Q8).I, 2);
+    const ntiles = @divTrunc(ncols + J_best - 1, J_best) * @divTrunc(nrows_x + nrows_tile - 1, nrows_tile) * nchannels;
+    // Same condition as launch_mul_mat_q uses to run the stream-k kernel with one block per tile.
+    const tiles_nwaves = @divTrunc(ntiles + nsm - 1, nsm);
+    const tiles_efficiency_percent = @divTrunc(100 * ntiles, nsm * tiles_nwaves);
+    return tiles_efficiency_percent >= 90;
 }

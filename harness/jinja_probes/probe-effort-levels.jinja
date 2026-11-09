@@ -1,0 +1,5 @@
+{#- v0.8.0: reasoning_effort_levels: `medium` and `high` share a render and `xhigh` is the template's fallback, so low, high and max stand. -#}
+{%- if reasoning_effort is defined and reasoning_effort -%}
+{%- if reasoning_effort in ['low'] -%}<effort low>{%- elif reasoning_effort in ['medium', 'high'] -%}<effort mid>{%- elif reasoning_effort == 'max' -%}<effort max>{%- else -%}<effort default>{%- endif -%}
+{%- endif -%}
+{%- for m in messages -%}<{{ m.role }}>{{ m.content }}{%- endfor -%}

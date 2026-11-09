@@ -1,25 +1,31 @@
 //! Mistral 3: Llama's decoder blocks, with Llama 4's optional attention
-//! temperature tuning and YaRN parameters read from the file.
+//! temperature tuning and YaRN parameters read from the file, and Voxtral
+//! Realtime's optional adaptive RMS norm before the feed-forward, conditioned
+//! on the output delay.
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/mistral3.cpp` at v0.7.0 (`620d2225c`):
+//! Ported from `llama.cpp/src/models/mistral3.cpp` at v0.8.0 (`8642541b2`):
 //! `llama_model_mistral3`'s `load_arch_hparams`, `load_arch_tensors` and
-//! `build_arch_graph`, and its `graph`.
+//! `build_arch_graph`, its `input_t_cond`, and its `graph`.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
 const graph = @import("../graph.zig");
+const batch = @import("../batch.zig");
 
 const c = impl.c;
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
+const Ubatch = batch.Ubatch;
+const allocator = impl.allocator;
 
-/// Ports `llama_model_mistral3`'s `load_arch_hparams` (models/mistral3.cpp:3 @620d2225c).
+/// Ports `llama_model_mistral3`'s `load_arch_hparams` (models/mistral3.cpp:3 @8642541b2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -30,6 +36,8 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (try meta.getKey(f32, .rope_scaling_yarn_beta_fast, false, exc)) |v| hp.yarn_beta_fast = v;
     if (try meta.getKey(f32, .rope_scaling_yarn_beta_slow, false, exc)) |v| hp.yarn_beta_slow = v;
     if (try meta.getKey(f32, .rope_scaling_yarn_log_mul, false, exc)) |v| hp.rope_yarn_log_mul = v;
+
+    if (try meta.getKey(u32, .realtime_delay_tokens, false, exc)) |v| hp.n_tokens_delay = v;
 
     hp.f_attn_temp_offset = 0.0;
 
@@ -49,8 +57,8 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_mistral3`'s `load_arch_tensors` (models/mistral3.cpp:29 @620d2225c).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+/// Ports `llama_model_mistral3`'s `load_arch_tensors` (models/mistral3.cpp:31 @8642541b2).
+pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
     const nr = loader.tensor_not_required;
@@ -80,6 +88,15 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
         layer.wo_b = try self.createTensor(.{ .tensor = .attn_out, .suffix = "bias", .bid = i }, &.{l.n_embd}, nr, exc);
 
         layer.ffn_norm = try self.createTensor(.{ .tensor = .ffn_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, 0, exc);
+
+        // The optional adaptive RMS norm (Voxtral Realtime); the hidden size
+        // is taken from the tensor itself.
+        const ada_name = (loader.Tn{ .tensor = .ffn_norm_ada_down, .suffix = "weight", .bid = i }).str();
+        if (ml.getTensorMeta(ada_name.slice())) |meta| {
+            const n_ada: i64 = meta.ne[1];
+            layer.ffn_norm_ada_down = try self.createTensor(.{ .tensor = .ffn_norm_ada_down, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_ada }, 0, exc);
+            layer.ffn_norm_ada_up = try self.createTensor(.{ .tensor = .ffn_norm_ada_up, .suffix = "weight", .bid = i }, &.{ n_ada, l.n_embd }, 0, exc);
+        }
 
         const rope_dup: u32 = if (i != 0) dup else 0;
         if (hp.rope_scaling_type_train == c.LLAMA_ROPE_SCALING_TYPE_LONGROPE) {
@@ -114,16 +131,82 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_mistral3`'s `build_arch_graph` (models/mistral3.cpp:89
-/// @620d2225c) and the constructor of its `graph` (models/mistral3.cpp:93
-/// @620d2225c).
+/// Ports `llama_model_mistral3`'s `input_t_cond` (models/mistral3.cpp:99
+/// @8642541b2): the sinusoidal embedding of the output delay, constant for
+/// the whole session.
+const InputTCond = struct {
+    /// F32 `[n_embd]`.
+    t_cond: ?*Tensor = null,
+    data: []f32,
+
+    /// `input_t_cond`'s constructor (models/mistral3.cpp:101 @8642541b2).
+    fn create(n_delay: u32, n_embd: i64) *InputTCond {
+        const self = allocator.create(InputTCond) catch oom();
+        const data = allocator.alloc(f32, @intCast(n_embd)) catch oom();
+        @memset(data, 0.0);
+        const half: i64 = @divTrunc(n_embd, 2);
+        const log_10000 = log(10000.0);
+        var i: i64 = 0;
+        while (i < half) : (i += 1) {
+            const freq: f64 = impl.exp(-log_10000 * @as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(half))) * @as(f64, @floatFromInt(n_delay));
+            const sc = sinCos(freq);
+            data[@intCast(i)] = @floatCast(sc.cos);
+            data[@intCast(half + i)] = @floatCast(sc.sin);
+        }
+        self.* = .{ .data = data };
+        return self;
+    }
+
+    pub fn deinit(self: *InputTCond) void {
+        allocator.free(self.data);
+    }
+
+    /// `input_t_cond`'s `set_input` (models/mistral3.cpp:110 @8642541b2).
+    pub fn setInput(self: *InputTCond, _: ?*const Ubatch) void {
+        c.ggml_backend_tensor_set(self.t_cond, self.data.ptr, 0, c.ggml_nbytes(self.t_cond));
+    }
+
+    /// `input_t_cond`'s `can_reuse` (models/mistral3.cpp:116 @8642541b2):
+    /// the input does not depend on the batch.
+    pub fn canReuse(_: *InputTCond, _: *const graph.Params) bool {
+        return true;
+    }
+};
+
+fn oom() noreturn {
+    impl.abort("models/mistral3.cpp", 0, "out of memory");
+}
+
+extern fn log(x: f64) f64;
+extern fn sin(x: f64) f64;
+extern fn cos(x: f64) f64;
+
+/// Mirrors the `__double2` that `__sincos_stret` returns (math.h).
+const Double2 = extern struct { sin: f64, cos: f64 };
+
+extern fn __sincos_stret(x: f64) Double2;
+
+/// `sin(x)` and `cos(x)` as clang emits them when both appear, as
+/// `cpu/ops/common.zig`'s `sinCos` does for `f32`: the reference
+/// `mistral3.o` imports `___sincos_stret` on Darwin and neither `_sin` nor
+/// `_cos`; elsewhere `-fmath-errno` keeps the pair two calls.
+fn sinCos(x: f64) Double2 {
+    if (comptime builtin.os.tag.isDarwin()) {
+        return __sincos_stret(x);
+    }
+    return .{ .sin = sin(x), .cos = cos(x) };
+}
+
+/// Ports `llama_model_mistral3`'s `build_arch_graph` (models/mistral3.cpp:126
+/// @8642541b2) and the constructor of its `graph` (models/mistral3.cpp:130
+/// @8642541b2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/mistral3.cpp", 96, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/mistral3.cpp", 97, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/mistral3.cpp", 133, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/mistral3.cpp", 134, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -137,6 +220,17 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
     }
 
     const inp_attn = b.buildAttnInpKv();
+
+    // (Optional) the time conditioning of the adaptive RMS norm.
+    var t_cond: ?*Tensor = null;
+    if (model.layers[0].ffn_norm_ada_down != null) {
+        const inp = InputTCond.create(hp.n_tokens_delay, b.n_embd);
+        t_cond = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_F32, b.n_embd);
+        c.ggml_set_input(t_cond);
+        b.cb(t_cond.?, "inp_t_cond", -1);
+        inp.t_cond = t_cond;
+        _ = b.res.addInput(InputTCond, inp);
+    }
 
     const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)) else hp.f_attention_scale;
 
@@ -189,6 +283,14 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
             // The feed-forward network, not a mixture of experts.
             cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
             b.cb(cur, "ffn_norm", il);
+
+            if (t_cond) |tc| {
+                // The adaptive RMS norm: scale the normalized input by
+                // (1 + mlp(t_cond)).
+                const ada = b.buildFfn(tc, layer.ffn_norm_ada_down, null, null, null, null, null, layer.ffn_norm_ada_up, null, null, null, .gelu_erf, .seq, il);
+                cur = c.ggml_add(ctx, cur, c.ggml_mul(ctx, cur, ada));
+                b.cb(cur, "ffn_norm_ada", il);
+            }
 
             cur = b.buildFfn(cur, layer.ffn_up, layer.ffn_up_b, layer.ffn_up_s, layer.ffn_gate, layer.ffn_gate_b, layer.ffn_gate_s, layer.ffn_down, layer.ffn_down_b, layer.ffn_down_s, null, .silu, .par, il);
             b.cb(cur, "ffn_out", il);

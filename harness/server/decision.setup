@@ -18,6 +18,17 @@
 #   DECPPLX DECVLLM2 DECD3 DECD1 DECD1OMNI              v0.7.0's, also Qwen3
 #   DECUNKNOWN DECNOTMPL DECBADTEMP                 the failing ones
 #   DECNOMASK DECBADBIAS DECBADBIAS2                v0.7.0's failing ones
+#   DECGRANITE DECH2O DECLFM3D1 DECLFM3OMNI              v0.8.0's, also Qwen3
+#   DECH2OQ               a link to DECH2O named -full.gguf: labels and classes
+#                         are read past the point a vocab-only load stops
+#                         (llama-model.cpp:1393), so server-task-diff loads
+#                         such a file whole. Qwen3's vocabulary, because the
+#                         h2o records are not ASCII and a character one has no
+#                         byte tokens: libllama throws, and a throw cannot
+#                         cross the port's C ABI
+#   DECOCR                openbmb-minicpm-ocr-jev over the mmproj fixtures'
+#                         text-qwen3, with a classifier of two rows
+#   DECNOLABELS DECBADLABEL DECDUPLABEL DECBADOCR        v0.8.0's failing ones, likewise
 #   DECD1MM DECPPLXMM     lfm2-d1 and pplx-decider over the mmproj fixtures'
 #                         text-qwen3 (for $MM/gemma3.gguf)
 #   DECOMNIMM             lfm2-d1-omni over text-qwen2vl (for the vision and
@@ -112,6 +123,13 @@ def v_f32(x):
 def v_bool(x):
     return struct.pack("<IB", T_BOOL, 1 if x else 0)
 
+def v_strs(xs):
+    out = struct.pack("<IIQ", T_ARR, T_STR, len(xs))
+    for x in xs:
+        b = x.encode()
+        out += struct.pack("<Q", len(b)) + b
+    return out
+
 def write(src, dst, extra, drop=()):
     """src with the `extra` keys set (replacing any of the same name) and `drop` removed"""
     with open(src, "rb") as f:
@@ -134,6 +152,50 @@ def write(src, dst, extra, drop=()):
                     break
                 g.write(chunk)
         os.replace(tmp, dst)
+
+def write_classes(src, dst, extra, n_classes):
+    """`write`, with cls.output.weight grown to n_classes rows (each a copy of
+    its first) and every later tensor's offset moved to match"""
+    tmp = dst + ".base"
+    write(src, tmp, extra)
+    with open(tmp, "rb") as f:
+        kvs, tinfo, n_tensors, alignment, data = read_header(f)
+        f.seek(0)
+        whole = f.read()
+    pos, infos = 0, []
+    for _ in range(n_tensors):
+        n, = struct.unpack_from("<Q", tinfo, pos); pos += 8
+        name = tinfo[pos:pos + n]; pos += n
+        nd, = struct.unpack_from("<I", tinfo, pos); pos += 4
+        dims = list(struct.unpack_from(f"<{nd}Q", tinfo, pos)); pos += 8 * nd
+        ty, off = struct.unpack_from("<IQ", tinfo, pos); pos += 12
+        infos.append([name, dims, ty, off])
+    order = sorted(range(n_tensors), key=lambda i: infos[i][3])
+    ends = [infos[order[k + 1]][3] if k + 1 < n_tensors else len(whole) - data for k in range(n_tensors)]
+    blobs, new_off, cur = {}, {}, 0
+    for k, i in enumerate(order):
+        name, dims, ty, off = infos[i]
+        blob = whole[data + off:data + ends[k]]
+        if name == b"cls.output.weight":
+            assert ty == 0 and dims[1:] in ([], [1]), (ty, dims)  # F32, one row
+            row = blob[:dims[0] * 4]
+            blob = row * n_classes
+            dims[:] = [dims[0], n_classes]
+        blob += b"\0" * ((-len(blob)) % alignment)
+        blobs[i], new_off[i] = blob, cur
+        cur += len(blob)
+    out_info = bytearray()
+    for i, (name, dims, ty, _) in enumerate(infos):
+        out_info += struct.pack("<Q", len(name)) + name + struct.pack("<I", len(dims))
+        out_info += struct.pack(f"<{len(dims)}Q", *dims) + struct.pack("<IQ", ty, new_off[i])
+    hdr = bytearray(whole[:24 + sum(8 + len(k.encode()) + len(v) for k, v in kvs)])
+    hdr += out_info
+    hdr += b"\0" * ((-len(hdr)) % alignment)
+    with open(dst, "wb") as g:
+        g.write(hdr)
+        for i in order:
+            g.write(blobs[i])
+    os.remove(tmp)
 
 # --- the templates -----------------------------------------------------------
 
@@ -306,6 +368,42 @@ def d1omni_template(mask):
         + "{{ sep }}<|reserved_10|>{% endfor %}{{ sep }}<|reserved_11|>"
     )
 
+def granite_template():
+    # conversion/granite.py: GraniteSwitchModel._systemone_template
+    description = jsj("o.description")
+    option = (
+        "{% if type != 'noul' %}{{ o.label }}: {% if o.description %}" + description + "{% endif %}"
+        "{% elif o.key == 'true' %}A: {% if o.description %}" + description + "{% else %}The statement is true.{% endif %}"
+        "{% else %}B: {% if o.description %}" + description + "{% else %}The statement is false.{% endif %}{% endif %}"
+    )
+    return (
+        "<|start_of_role|>user<|end_of_role|>State:\n" + jsj("state") + "<|end_of_text|>\n"
+        "<|start_of_role|>user<|end_of_role|><|decision|> DECISION\nQuestion:\n" + jsj("instructions")
+        + "{% if type == 'score' %} Rate along the ordered levels below (lowest first).{% endif %}"
+        "{{ '\n\nOptions:\n' }}"
+        "{% for o in options %}" + option + "{{ '\n' }}{% endfor %}"
+        "{{ '\nReply with exactly one option label.<|end_of_text|>\n<|start_of_role|>assistant<|end_of_role|>' }}"
+    )
+
+def h2o_template():
+    # conversion/h2o_lightning.py: H2OLightningModel._systemone_template, its prompt from serve_config.json
+    nl = "{{ '\\n' }}"
+    description = (
+        "{% if type == 'noul' %}"
+        "{% if o.description %}{{ o.description }}{% elif o.key == 'true' %}the statement holds{% else %}it does not{% endif %}"
+        "{% elif o.description is none %}{{ o.key }}{% else %}{{ o.description }}{% endif %}"
+    )
+    user = (
+        "{% set user %}record: {{ state }}" + nl
+        + "question: {{ instructions if instructions else 'Pick the best option.' }}" + nl
+        + "options:{% for o in options %}" + nl + "{{ o.label | trim }}) {{ o.key }}: " + description + "{% endfor %}{% endset %}"
+    )
+    return (
+        "<|im_start|>system" + nl + "Decide.<|im_end|>" + nl
+        + "<|im_start|>user" + nl + "{% for image in images %}{{ image }}{% endfor %}" + user + "{{ user | trim }}<|im_end|>" + nl
+        + "<|im_start|>assistant" + nl + "<think>{{ '\\n\\n' }}</think>{{ '\\n\\n' }}Answer:"
+    )
+
 def score_bias(arch, offsets):
     # gguf_writer.add_decision_score_bias: "<arch>.decision.score_bias.<n>.<i>"
     return {f"{arch}.decision.score_bias.{len(offsets)}.{i}": v_f32(x) for i, x in enumerate(offsets)}
@@ -407,6 +505,23 @@ working = {
         "qwen3.decision.temperature.choice.3_5": v_f32(0.7),
         "qwen3.decision.temperature.noul": v_f32(2.0),
     }),
+    # v0.8.0: granite-switch, lev's labels with noul true first
+    "GRANITE": decision("qwen3", "granite-switch", granite_template()),
+    # h2o-lightning: label texts of its own, read after an answer prefill,
+    # and a temperature for requests with media
+    "H2O": decision("qwen3", "h2o-lightning", h2o_template(), {
+        "qwen3.decision.labels": v_strs([" A", " B", " C", " D", " E", " F"]),
+        "qwen3.decision.temperature.choice": v_f32(0.8),
+        "qwen3.decision.temperature.image": v_f32(1.7),
+    }),
+    # lfm3-d1: lfm2-d1 non-causal, one prompt per batch
+    "LFM3D1": decision("qwen3", "lfm3-d1", D1 + "<think></think>", {
+        "qwen3.attention.causal": v_bool(False),
+        "qwen3.decision.temperature.noul": v_f32(0.9),
+    }),
+    "LFM3OMNI": decision("qwen3", "lfm3-d1-omni", D1 + "<think></think>", {
+        "qwen3.attention.causal": v_bool(False),
+    }),
 }
 
 h = hashlib.sha256(open(script, "rb").read())
@@ -447,6 +562,25 @@ CODEC_PAD = tok_id(TQ2VL, "<|codec_pad|>")
 media = {
     "D1MM": (TQ3, decision("qwen3", "lfm2-d1", D1, {"qwen3.context_length": v_u32(4096)})),
     "PPLXMM": (TQ3, decision("qwen3", "pplx-decider", PPLX, {"qwen3.context_length": v_u32(4096)})),
+    # v0.8.0: a character vocabulary, each label one character; an image
+    # temperature; the mmproj is what lets lfm3-d1-omni hear a spoken question
+    "H2OMM": (TQ3, decision("qwen3", "h2o-lightning", h2o_template(), {
+        "qwen3.context_length": v_u32(4096),
+        "qwen3.decision.labels": v_strs(["A", "B", "C", "D"]),
+        "qwen3.decision.temperature.image": v_f32(1.7),
+    })),
+    "LFM3MM": (TQ3, decision("qwen3", "lfm3-d1", D1 + "<think></think>", {
+        "qwen3.context_length": v_u32(4096),
+        "qwen3.attention.causal": v_bool(False),
+        "qwen3.decision.temperature.image": v_f32(0.6),
+    })),
+    "LFM3OMNIMM": (TQ3, decision("qwen3", "lfm3-d1-omni", D1 + "<think></think>", {
+        "qwen3.context_length": v_u32(4096),
+        "qwen3.attention.causal": v_bool(False),
+    })),
+    # a "rerank" chat template over a character vocabulary, for rerank.cases
+    "RERANKMM": (TQ3, {"tokenizer.chat_template.rerank": v_str("<q>{query}</q><d>{document}</d><e>{query}"),
+                       "qwen3.context_length": v_u32(4096)}),
     "OMNIMM": (TQ2VL, decision("qwen2vl", "lfm2-d1-omni", d1omni_template("<|codec_pad|>"), {
         "qwen2vl.context_length": v_u32(4096),
         "tokenizer.ggml.mask_token_id": v_u32(CODEC_PAD),
@@ -457,6 +591,34 @@ for name, (src, kv) in media.items():
     p = os.path.join(out, f"dec-{name.lower()}.gguf")
     write(src, p, kv)
     env[f"DEC{name}"] = p
+
+# v0.8.0: loaded whole by server-task-diff, see the header
+full = {
+    "BADOCR": decision("qwen3", "openbmb-minicpm-ocr-jev", "{{ state }}"),
+    "NOLABELS": decision("qwen3", "h2o-lightning", h2o_template()),
+    "BADLABEL": decision("qwen3", "h2o-lightning", h2o_template(), {"qwen3.decision.labels": v_strs(["two tokens at least"])}),
+    "DUPLABEL": decision("qwen3", "h2o-lightning", h2o_template(), {"qwen3.decision.labels": v_strs(["a", "a"])}),
+}
+for name, kv in full.items():
+    p = os.path.join(out, f"dec-{name.lower()}-full.gguf")
+    write(TQ3, p, kv)
+    env[f"DEC{name}"] = p
+
+link = os.path.join(out, "dec-h2oq-full.gguf")
+if not os.path.lexists(link):
+    os.symlink(env["DECH2O"], link)
+env["DECH2OQ"] = link
+
+# two classes need a classifier of two rows, the fixture's has one; LAST
+# pooling is what the converter writes (conversion/qwen.py)
+p = os.path.join(out, "dec-ocr-full.gguf")
+write_classes(TQ3, p, decision("qwen3", "openbmb-minicpm-ocr-jev", "{{ state }}{% for i in images %}{{ i }}{% endfor %}", {
+    "qwen3.context_length": v_u32(4096),
+    "qwen3.classifier.output_labels": v_strs(["inconsistent", "consistent"]),
+    "qwen3.embedding_length_out": v_u32(2),
+    "qwen3.pooling_type": v_u32(3),
+}), 2)
+env["DECOCR"] = p
 
 with open(os.path.join(out, "setup.env"), "a") as e:
     for k, v in env.items():

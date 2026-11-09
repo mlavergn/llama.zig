@@ -13,6 +13,11 @@ GET /props
 !fulllog
 POST /completion {"prompt": "The capital of France is", "n_predict": 16, "temperature": 0}
 POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 16, "temperature": 0, "n_probs": 2}
+# v0.8.0: probabilities of accepted draft tokens, from each one's own batch row;
+# post_sampling_probs stays empty with speculative decoding
+POST /completion {"prompt": "1 2 3 4 5 1 2 3 4 5 1 2 3", "n_predict": 12, "temperature": 0, "n_probs": 3}
+POST /completion {"prompt": "1 2 3 4 5 1 2 3 4 5 1 2 3", "n_predict": 8, "temperature": 0, "n_probs": 2, "post_sampling_probs": true}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Count to five."}], "max_tokens": 12, "temperature": 0, "logprobs": true, "top_logprobs": 2}
 POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 16, "temperature": 0, "stop": [" 9"]}
 POST /completion {"prompt": "Once upon a time", "n_predict": 24, "temperature": 1.0, "seed": 11}
 

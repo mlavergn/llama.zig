@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.7.0
-//! (`620d2225c`).
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.8.0
+//! (`8642541b2`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -54,7 +54,7 @@ fn yStagedDst(src1: *const Tensor, f16_type: c.ggml_type, row_stride: u32, ne11:
     return t;
 }
 
-/// Ports `ggml_vk_mul_mat_id_q_f16` (ggml-vulkan.cpp:7352 @620d2225c). The
+/// Ports `ggml_vk_mul_mat_id_q_f16` (ggml-vulkan.cpp:7410 @8642541b2). The
 /// `count_experts` prepass writes a row map -- a tile count, each tile's
 /// expert and start, then `bn` packed row ids per tile -- and the matmul
 /// runs one workgroup row per tile, so an expert used by many tokens is
@@ -80,7 +80,7 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
     const ne20: u64 = @intCast(dst.ne[0]);
     const ne21: u64 = @intCast(dst.ne[1]);
     const n_as = ne02;
-    const prec: c.ggml_prec = @intCast(dst.op_params[0]);
+    const prec: c.ggml_prec = c.ggml_prec_get_acc(dst);
 
     var qx = mm.Source.pinned(ctx, src0);
     var qy = mm.Source.pinned(ctx, src1);
@@ -107,7 +107,7 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
     }
 
     const can_quantize_y = dev.integer_dot_product and src1.type == c.GGML_TYPE_F32 and
-        c.ggml_is_contiguous(src1) and (ne11 *% ne10) % 4 == 0;
+        c.ggml_is_contiguous(src1) and (ne11 *% ne10) % 4 == 0 and mm.src1PrecAllowsQ8(dst);
     // Intel coopmat1 matrix cores prefer f16 activations for quantized weights
     const prefer_f16_b = dev.coopmat_support and !dev.coopmat2 and
         dev.vendor_id == m.common.vendor_id.intel and
@@ -248,6 +248,7 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
     const expert_count_buf = sub(ctx.prealloc_split_k, 0, expert_data_size);
     if (ctx.prealloc_split_k_need_sync) m.context.syncBuffers(ctx, subctx);
     {
+        // this also zeroes the dst rows of the skipped slots (negative ids)
         const its = typeSizeOf(ids.type);
         var pc: push.CountExperts = .{
             .ne00 = @truncate(nei0),
@@ -260,9 +261,12 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
             .ne00L = 0,
             .row_tile_size = bn,
             .row_ids_offset = @truncate(row_ids_offset),
+            .ne0_dst = @truncate(ne01),
+            .stride_dst = @truncate(dst.nb[1] / @sizeOf(f32)),
+            .batch_stride_dst = @truncate(dst.nb[2] / @sizeOf(f32)),
         };
         ops.initPushconstFastdiv(&pc);
-        m.context.dispatch(ctx, subctx, count_experts, &.{ d_ids, expert_count_buf }, &pc, .{ 1, 1, 1 });
+        m.context.dispatch(ctx, subctx, count_experts, &.{ d_ids, expert_count_buf, sub(d_D, d_buf_offset, d_sz) }, &pc, .{ 1, 1, 1 });
     }
 
     if (x_non_contig) {
@@ -354,7 +358,7 @@ pub fn mulMatIdQF16(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src
     ctx.prealloc_split_k_need_sync = true;
 }
 
-/// Ports `ggml_vk_mul_mat_vec_id_q_f16` (ggml-vulkan.cpp:7701 @620d2225c):
+/// Ports `ggml_vk_mul_mat_vec_id_q_f16` (ggml-vulkan.cpp:7763 @8642541b2):
 /// one matrix-vector dispatch per token row, the expert read from `ids`,
 /// with a fused ADD_ID bias or MUL scale and a second scale.
 pub fn mulMatVecIdQF16(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.CGraph, node_idx: c_int) void {
@@ -385,7 +389,7 @@ pub fn mulMatVecIdQF16(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.C
 
     const f16_f32_kernel = src1.type == c.GGML_TYPE_F32;
     var quantize_y = dev.integer_dot_product and src1.type == c.GGML_TYPE_F32 and c.ggml_is_contiguous(src1) and !y_non_contig and (ne11 *% ne10) % 4 == 0 and
-        mm.shouldUseMmvq(dev, @truncate(ne01), @truncate(ne12), @truncate(ne10), src0.type);
+        mm.src1PrecAllowsQ8(dst) and mm.shouldUseMmvq(dev, @truncate(ne01), @truncate(ne12), @truncate(ne10), src0.type);
 
     const to_fp16_vk_0: ?*Pipeline = if (x_non_contig) m.op_pipeline.getCpyPipeline(ctx, src0, null, src0.type) else null;
     const to_fp16_vk_1 = if (y_non_contig) m.op_pipeline.getCpyPipeline(ctx, src1, null, src1.type) else mm.getToFp16(ctx, src1.type);
@@ -534,7 +538,7 @@ pub fn mulMatVecIdQF16(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.C
     if (y_non_contig or quantize_y) ctx.prealloc_y_need_sync = true;
 }
 
-/// Ports `ggml_vk_mul_mat_id` (ggml-vulkan.cpp:7948 @620d2225c).
+/// Ports `ggml_vk_mul_mat_id` (ggml-vulkan.cpp:8010 @8642541b2).
 pub fn mulMatId(ctx: *BackendCtx, subctx: *Context, cgraph: *const impl.CGraph, node_idx: c_int) void {
     const dst = at(cgraph, node_idx);
     if (ops.useMulMatVecId(cgraph, node_idx)) {

@@ -6,16 +6,16 @@
 //!
 //! Ports `Server` from `llama.cpp/vendor/cpp-httplib/httplib.cpp` and its
 //! declaration in `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib
-//! 0.61.0, vendored at v0.7.0, `620d2225c`), as far as
+//! 0.62.0, vendored at v0.8.0, `8642541b2`), as far as
 //! `llama.cpp/tools/server/server-http.cpp` reaches it. Each declaration
 //! names what it ports and the line it began at.
 //!
 //! # What is not here
 //!
 //! `server-http.cpp` registers plain handlers for GET, POST and DELETE and
-//! nothing else, so the content-reader handlers, `Put`, `Patch`, `Options`,
-//! `CustomRoute` and `WebSocket` routes are empty lists in the C and absent
-//! here; the routing code that consults them still runs, finds nothing and
+//! `WebSocket` routes and nothing else, so the content-reader handlers,
+//! `Put`, `Patch`, `Options` and `CustomRoute` are empty lists in the C and
+//! absent here; the routing code that consults them still runs, finds nothing and
 //! falls through as the C's does. It sets no logger, error logger,
 //! pre-request, post-routing, `Expect: 100-continue` or start handler, so
 //! `output_log` and `output_error_log` do nothing and are not called. It
@@ -42,6 +42,7 @@ const message = @import("message.zig");
 const thread_pool = @import("thread_pool.zig");
 const llama_regex = @import("llama").regex;
 const Regex = llama_regex.Regex;
+const ws_mod = @import("ws.zig");
 
 const Headers = detail.Headers;
 const Request = message.Request;
@@ -58,7 +59,7 @@ pub const Handler = struct {
     func: *const fn (ctx: ?*anyopaque, req: *const Request, res: *Response) anyerror!void,
 };
 
-/// `HandlerResponse` (httplib.h:2191 @620d2225c).
+/// `HandlerResponse` (httplib.h:2245 @8642541b2).
 pub const HandlerResponse = enum { handled, unhandled };
 
 /// `HandlerWithResponse`: the pre-routing and error handlers.
@@ -80,14 +81,14 @@ pub const TaskQueueFactory = struct {
     func: *const fn (ctx: ?*anyopaque, a: std.mem.Allocator) anyerror!TaskQueue,
 };
 
-/// Ports `PathParamsMatcher` (httplib.h:2095 @620d2225c): a pattern's
+/// Ports `PathParamsMatcher` (httplib.h:2149 @8642541b2): a pattern's
 /// literal fragments, and the names of the `:param` segments between them.
 const PathParamsMatcher = struct {
     pattern: []const u8,
     static_fragments: std.ArrayList([]const u8) = .empty,
     param_names: std.ArrayList([]const u8) = .empty,
 
-    /// Ports `PathParamsMatcher` (httplib.cpp:7674 @620d2225c), the
+    /// Ports `PathParamsMatcher` (httplib.cpp:7986 @8642541b2), the
     /// constructor. A repeated name throws `std::invalid_argument` in the
     /// C; this returns `error.InvalidArgument`.
     fn init(a: std.mem.Allocator, pattern: []const u8) !PathParamsMatcher {
@@ -109,7 +110,7 @@ const PathParamsMatcher = struct {
         return self;
     }
 
-    /// Ports `match` (httplib.cpp:7723 @620d2225c), a member of
+    /// Ports `match` (httplib.cpp:8035 @8642541b2), a member of
     /// `PathParamsMatcher`: fills `path_params` as it goes, so a failed
     /// match can leave some behind, as the C's does.
     fn match(self: *const PathParamsMatcher, req: *Request) error{OutOfMemory}!bool {
@@ -132,16 +133,16 @@ const PathParamsMatcher = struct {
     }
 };
 
-/// Ports `RegexMatcher` (httplib.h:2124 @620d2225c): the whole path
+/// Ports `RegexMatcher` (httplib.h:2178 @8642541b2): the whole path
 /// against a `std::regex` of the pattern.
 const RegexMatcher = struct {
     pattern: []const u8,
     regex: Regex,
 
-    /// `CPPHTTPLIB_REGEX_ROUTE_PATH_MAX_LENGTH` (httplib.h:160 @620d2225c).
+    /// `CPPHTTPLIB_REGEX_ROUTE_PATH_MAX_LENGTH` (httplib.h:176 @8642541b2).
     const path_max_length = 256;
 
-    /// Ports `match` (httplib.cpp:7770 @620d2225c), a member of
+    /// Ports `match` (httplib.cpp:8082 @8642541b2), a member of
     /// `RegexMatcher`: an overlong path is a non-match rather than a risk of
     /// overflowing the stack in `std::regex_match`. The C keeps the
     /// sub-matches in `request.matches`, which no handler of the server's
@@ -188,7 +189,18 @@ const Matcher = union(enum) {
 /// One route: its matcher and its handler.
 const Route = struct { matcher: Matcher, handler: Handler };
 
-/// Ports `Server` (httplib.h:2184 @620d2225c).
+/// `WebSocketHandler` (httplib.h:2260 @8642541b2): runs for the life of the
+/// connection.
+pub const WebSocketHandler = struct {
+    ctx: ?*anyopaque,
+    func: *const fn (ctx: ?*anyopaque, req: *const Request, ws: *ws_mod.WebSocket) void,
+};
+
+/// Ports `WebSocketHandlerEntry` (httplib.h:2561 @8642541b2), with no
+/// subprotocol selector.
+const WebSocketRoute = struct { matcher: Matcher, handler: WebSocketHandler };
+
+/// Ports `Server` (httplib.h:2238 @8642541b2).
 pub const Server = struct {
     allocator: std.mem.Allocator,
     new_task_queue: ?TaskQueueFactory = null,
@@ -211,6 +223,7 @@ pub const Server = struct {
     get_handlers: std.ArrayList(Route) = .empty,
     post_handlers: std.ArrayList(Route) = .empty,
     delete_handlers: std.ArrayList(Route) = .empty,
+    websocket_handlers: std.ArrayList(WebSocketRoute) = .empty,
 
     error_handler: ?HandlerWithResponse = null,
     exception_handler: ?ExceptionHandler = null,
@@ -222,7 +235,7 @@ pub const Server = struct {
     socket_options: socket.SocketOptions = .{ .func = socket.defaultSocketOptions },
     default_headers: Headers = .{},
 
-    /// Ports `Server` (httplib.cpp:8308 @620d2225c), the constructor:
+    /// Ports `Server` (httplib.cpp:8662 @8642541b2), the constructor:
     /// ignores `SIGPIPE`, as the C does.
     ///
     /// Parameters:
@@ -244,6 +257,8 @@ pub const Server = struct {
             for (list.items) |*r| r.matcher.deinit(a);
             list.deinit(a);
         }
+        for (self.websocket_handlers.items) |*r| r.matcher.deinit(a);
+        self.websocket_handlers.deinit(a);
         for (self.default_headers.entries.items) |e| {
             a.free(e.key);
             a.free(e.value);
@@ -252,37 +267,45 @@ pub const Server = struct {
         a.destroy(self);
     }
 
-    /// Ports `make_matcher` (httplib.cpp:8321 @620d2225c), a member of
+    /// Ports `make_matcher` (httplib.cpp:8675 @8642541b2), a member of
     /// `Server`, with `add_handler`: `/:` or no regex metacharacter makes a
     /// `PathParamsMatcher`, anything else a `RegexMatcher`, whose
     /// `std::regex_error` on a malformed pattern is `error.RegexError`.
-    fn addHandler(self: *Server, list: *std.ArrayList(Route), pattern: []const u8, handler: Handler) !void {
+    fn makeMatcher(self: *Server, pattern: []const u8) !Matcher {
         const a = self.allocator;
         const owned = try a.dupe(u8, pattern);
         errdefer a.free(owned);
-        const matcher: Matcher = if (std.mem.find(u8, pattern, "/:") == null and std.mem.findAny(u8, pattern, ".^$|()[]{}*+?\\") != null)
+        return if (std.mem.find(u8, pattern, "/:") == null and std.mem.findAny(u8, pattern, ".^$|()[]{}*+?\\") != null)
             .{ .regex = .{ .pattern = owned, .regex = Regex.compile(owned) catch return error.RegexError } }
         else
             .{ .params = try PathParamsMatcher.init(a, owned) };
-        try list.append(a, .{ .matcher = matcher, .handler = handler });
     }
 
-    /// Ports `Get` (httplib.cpp:8339 @620d2225c), a member of `Server`.
+    fn addHandler(self: *Server, list: *std.ArrayList(Route), pattern: []const u8, handler: Handler) !void {
+        try list.append(self.allocator, .{ .matcher = try self.makeMatcher(pattern), .handler = handler });
+    }
+
+    /// Ports `WebSocket` (httplib.cpp:8792 @8642541b2), a member of `Server`.
+    pub fn webSocket(self: *Server, pattern: []const u8, handler: WebSocketHandler) !void {
+        try self.websocket_handlers.append(self.allocator, .{ .matcher = try self.makeMatcher(pattern), .handler = handler });
+    }
+
+    /// Ports `Get` (httplib.cpp:8693 @8642541b2), a member of `Server`.
     pub fn get(self: *Server, pattern: []const u8, handler: Handler) !void {
         try self.addHandler(&self.get_handlers, pattern, handler);
     }
 
-    /// Ports `Post` (httplib.cpp:8343 @620d2225c), a member of `Server`.
+    /// Ports `Post` (httplib.cpp:8697 @8642541b2), a member of `Server`.
     pub fn post(self: *Server, pattern: []const u8, handler: Handler) !void {
         try self.addHandler(&self.post_handlers, pattern, handler);
     }
 
-    /// Ports `Delete` (httplib.cpp:8373 @620d2225c), a member of `Server`.
+    /// Ports `Delete` (httplib.cpp:8727 @8642541b2), a member of `Server`.
     pub fn delete(self: *Server, pattern: []const u8, handler: Handler) !void {
         try self.addHandler(&self.delete_handlers, pattern, handler);
     }
 
-    /// Ports `set_error_handler_core` (httplib.cpp:8515 @620d2225c), a
+    /// Ports `set_error_handler_core` (httplib.cpp:8872 @8642541b2), a
     /// member of `Server`: a handler without an answer, which counts as
     /// `Handled` whatever it does.
     pub fn setErrorHandler(self: *Server, handler: Handler) error{OutOfMemory}!void {
@@ -299,37 +322,37 @@ pub const Server = struct {
         self.error_handler = .{ .ctx = w, .func = Wrap.call };
     }
 
-    /// Ports `set_exception_handler` (httplib.cpp:8524 @620d2225c), a member
+    /// Ports `set_exception_handler` (httplib.cpp:8881 @8642541b2), a member
     /// of `Server`.
     pub fn setExceptionHandler(self: *Server, handler: ExceptionHandler) void {
         self.exception_handler = handler;
     }
 
-    /// Ports `set_pre_routing_handler` (httplib.cpp:8529 @620d2225c), a
+    /// Ports `set_pre_routing_handler` (httplib.cpp:8886 @8642541b2), a
     /// member of `Server`.
     pub fn setPreRoutingHandler(self: *Server, handler: HandlerWithResponse) void {
         self.pre_routing_handler = handler;
     }
 
-    /// Ports `set_address_family` (httplib.cpp:8570 @620d2225c), a member of
+    /// Ports `set_address_family` (httplib.cpp:8927 @8642541b2), a member of
     /// `Server`.
     pub fn setAddressFamily(self: *Server, family: c_int) void {
         self.address_family = family;
     }
 
-    /// Ports `set_ipv6_v6only` (httplib.cpp:8580 @620d2225c), a member of
+    /// Ports `set_ipv6_v6only` (httplib.cpp:8937 @8642541b2), a member of
     /// `Server`: `IPV6_V6ONLY` on an IPv6 listening socket.
     pub fn setIpv6V6only(self: *Server, on: bool) void {
         self.ipv6_v6only = on;
     }
 
-    /// Ports `set_socket_options` (httplib.cpp:8585 @620d2225c), a member of
+    /// Ports `set_socket_options` (httplib.cpp:8942 @8642541b2), a member of
     /// `Server`.
     pub fn setSocketOptions(self: *Server, socket_options: socket.SocketOptions) void {
         self.socket_options = socket_options;
     }
 
-    /// Ports `set_default_headers` (httplib.cpp:8590 @620d2225c), a member
+    /// Ports `set_default_headers` (httplib.cpp:8947 @8642541b2), a member
     /// of `Server`: every response starts with these. The strings are
     /// copied.
     pub fn setDefaultHeaders(self: *Server, headers: []const Headers.Entry) error{OutOfMemory}!void {
@@ -337,21 +360,21 @@ pub const Server = struct {
         for (headers) |h| _ = try self.default_headers.emplace(a, try a.dupe(u8, h.key), try a.dupe(u8, h.value));
     }
 
-    /// Ports `set_read_timeout` (httplib.cpp:8626 @620d2225c), a member of
+    /// Ports `set_read_timeout` (httplib.cpp:8983 @8642541b2), a member of
     /// `Server`.
     pub fn setReadTimeout(self: *Server, sec: i64, usec: i64) void {
         self.read_timeout_sec = sec;
         self.read_timeout_usec = usec;
     }
 
-    /// Ports `set_write_timeout` (httplib.cpp:8632 @620d2225c), a member of
+    /// Ports `set_write_timeout` (httplib.cpp:8989 @8642541b2), a member of
     /// `Server`.
     pub fn setWriteTimeout(self: *Server, sec: i64, usec: i64) void {
         self.write_timeout_sec = sec;
         self.write_timeout_usec = usec;
     }
 
-    /// Ports `bind_to_port` (httplib.cpp:8683 @620d2225c), a member of
+    /// Ports `bind_to_port` (httplib.cpp:9040 @8642541b2), a member of
     /// `Server`.
     pub fn bindToPort(self: *Server, host: [:0]const u8, port: c_int) bool {
         const ret = self.bindInternal(host, port, 0);
@@ -359,7 +382,7 @@ pub const Server = struct {
         return ret >= 0;
     }
 
-    /// Ports `bind_to_any_port` (httplib.cpp:8689 @620d2225c), a member of
+    /// Ports `bind_to_any_port` (httplib.cpp:9046 @8642541b2), a member of
     /// `Server`.
     ///
     /// Return: the port bound, or -1.
@@ -369,19 +392,19 @@ pub const Server = struct {
         return ret;
     }
 
-    /// Ports `listen_after_bind` (httplib.cpp:8695 @620d2225c), a member of
+    /// Ports `listen_after_bind` (httplib.cpp:9052 @8642541b2), a member of
     /// `Server`: the accept loop, until `stop`.
     pub fn listenAfterBind(self: *Server) bool {
         return self.listenInternal();
     }
 
-    /// Ports `wait_until_ready` (httplib.cpp:8704 @620d2225c), a member of
+    /// Ports `wait_until_ready` (httplib.cpp:9061 @8642541b2), a member of
     /// `Server`: polls every millisecond.
     pub fn waitUntilReady(self: *const Server) void {
         while (!self.is_running.load(.seq_cst) and !self.is_decommissioned.load(.seq_cst)) socket.sleepUs(1000);
     }
 
-    /// Ports `stop` (httplib.cpp:8710 @620d2225c), a member of `Server`:
+    /// Ports `stop` (httplib.cpp:9067 @8642541b2), a member of `Server`:
     /// closes the listening socket, which ends the accept loop.
     pub fn stop(self: *Server) void {
         const sock = self.svr_sock.swap(socket.invalid_socket, .seq_cst);
@@ -392,7 +415,7 @@ pub const Server = struct {
         self.is_decommissioned.store(false, .seq_cst);
     }
 
-    /// Ports `create_server_socket` (httplib.cpp:9292 @620d2225c), a member
+    /// Ports `create_server_socket` (httplib.cpp:9654 @8642541b2), a member
     /// of `Server`.
     fn createServerSocket(self: *Server, host: [:0]const u8, port: c_int, socket_flags: c_int) Socket {
         const S = struct {
@@ -404,7 +427,7 @@ pub const Server = struct {
         return socket.createSocket(host, port, self.address_family, socket_flags, self.tcp_nodelay, self.ipv6_v6only, self.socket_options, .{ .ctx = null, .func = S.bindListen });
     }
 
-    /// Ports `bind_internal` (httplib.cpp:9311 @620d2225c), a member of
+    /// Ports `bind_internal` (httplib.cpp:9673 @8642541b2), a member of
     /// `Server`.
     fn bindInternal(self: *Server, host: [:0]const u8, port: c_int, socket_flags: c_int) c_int {
         if (self.is_decommissioned.load(.seq_cst)) return -1;
@@ -416,7 +439,7 @@ pub const Server = struct {
         return port;
     }
 
-    /// Ports `listen_internal` (httplib.cpp:9341 @620d2225c), a member of
+    /// Ports `listen_internal` (httplib.cpp:9703 @8642541b2), a member of
     /// `Server`: accepts until the listening socket closes, handing each
     /// connection to the task queue with the read and write timeouts and
     /// `TCP_NODELAY` set.
@@ -483,9 +506,9 @@ pub const Server = struct {
         _ = self.processAndCloseSocket(@intCast(arg));
     }
 
-    /// Ports `process_and_close_socket` (httplib.cpp:10189 @620d2225c), a
-    /// member of `Server`, with `serve_guarded` (httplib.h:2350
-    /// @620d2225c): an error escaping a request ends the connection, as an
+    /// Ports `process_and_close_socket` (httplib.cpp:10552 @8642541b2), a
+    /// member of `Server`, with `serve_guarded` (httplib.h:2404
+    /// @8642541b2): an error escaping a request ends the connection, as an
     /// exception escaping one does.
     fn processAndCloseSocket(self: *Server, sock: Socket) bool {
         var addrs = std.heap.ArenaAllocator.init(self.allocator);
@@ -505,12 +528,13 @@ pub const Server = struct {
         return ret;
     }
 
-    /// Ports `process_server_socket` (httplib.cpp:1962 @620d2225c) and
-    /// `process_server_socket_core` (httplib.cpp:1937 @620d2225c): up to
+    /// Ports `process_server_socket` (httplib.cpp:2084 @8642541b2) and
+    /// `process_server_socket_core` (httplib.cpp:2060 @8642541b2): up to
     /// `keep_alive_max_count` requests on one `SocketStream`, while the peer
-    /// keeps sending; the last is answered with `Connection: close`. A
-    /// pipelined request already in the stream's buffer is served without
-    /// waiting for the socket, whose bytes it no longer holds.
+    /// keeps sending; the last is answered with `Connection: close`. A count
+    /// of 0 sets no limit. A pipelined request already in the stream's buffer
+    /// is served without waiting for the socket, whose bytes it no longer
+    /// holds.
     fn processServerSocket(self: *Server, sock: Socket, remote_addr: []const u8, remote_port: c_int, local_addr: []const u8, local_port: c_int) !bool {
         // One stream per connection: its read buffer can already hold the start of
         // the next, pipelined request.
@@ -522,24 +546,23 @@ pub const Server = struct {
             .write_timeout_usec = self.write_timeout_usec,
         };
         var ret = false;
-        var count = self.keep_alive_max_count;
-        while (count > 0) {
+        var served: usize = 0;
+        while (self.keep_alive_max_count == 0 or served < self.keep_alive_max_count) : (served += 1) {
             var socket_readable = false;
             if (!strm.isReadable()) {
                 if (!socket.keepAlive(&self.svr_sock, sock, self.keep_alive_timeout_sec)) break;
                 socket_readable = true;
             }
-            const close_connection = count == 1;
+            const close_connection = served + 1 == self.keep_alive_max_count;
             var connection_closed = false;
             if (socket_readable) strm.readable_hint = true;
             ret = try self.processRequest(&strm, remote_addr, remote_port, local_addr, local_port, close_connection, &connection_closed);
             if (!ret or connection_closed) break;
-            count -= 1;
         }
         return ret;
     }
 
-    /// Ports `builtin_methods` (httplib.cpp:8387 @620d2225c), a member of
+    /// Ports `builtin_methods` (httplib.cpp:8741 @8642541b2), a member of
     /// `Server`.
     fn isBuiltinMethod(m: []const u8) bool {
         inline for (.{ "GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH", "PRI" }) |b| {
@@ -548,44 +571,37 @@ pub const Server = struct {
         return false;
     }
 
-    /// Ports `parse_request_line` (httplib.cpp:8724 @620d2225c), a member of
-    /// `Server`: three space-separated parts ending in CRLF, a built-in
-    /// method, HTTP/1.0 or 1.1, a target of visible characters, the
-    /// fragment dropped, the path decoded and the query parsed.
+    /// Ports `parse_request_line` (httplib.cpp:9081 @8642541b2), a member of
+    /// `Server`: exactly one SP between three non-empty parts ending in
+    /// CRLF, a built-in method, HTTP/1.0 or 1.1, a target of visible
+    /// characters with no fragment, the path decoded and the query parsed.
     fn parseRequestLine(s: []const u8, req: *Request) !bool {
         const a = req.a;
         if (s.len < 2 or s[s.len - 2] != '\r' or s[s.len - 1] != '\n') return false;
         const line = s[0 .. s.len - 2];
-        const Ctx = struct {
-            req: *Request,
-            count: usize = 0,
-            pub fn call(self: *@This(), part: []const u8) error{}!void {
-                switch (self.count) {
-                    0 => self.req.method = part,
-                    1 => self.req.target = part,
-                    2 => self.req.version = part,
-                    else => {},
-                }
-                self.count += 1;
-            }
-        };
-        var ctx: Ctx = .{ .req = req };
-        detail.split(line, ' ', std.math.maxInt(usize), &ctx) catch |err| switch (err) {};
-        if (ctx.count != 3) return false;
-        req.method = try a.dupe(u8, req.method);
-        req.target = try a.dupe(u8, req.target);
-        req.version = try a.dupe(u8, req.version);
+        // RFC 9112 §3: exactly one SP between the method, the target and the
+        // version. Taking other whitespace as a separator too lets recipients
+        // that parse more strictly see a different request.
+        if (std.mem.count(u8, line, " ") != 2) return false;
+        const sp1 = std.mem.findScalar(u8, line, ' ').?;
+        const sp2 = std.mem.findScalarPos(u8, line, sp1 + 1, ' ').?;
+        if (sp1 == 0 or sp2 == sp1 + 1 or sp2 + 1 == line.len) return false;
+        req.method = try a.dupe(u8, line[0..sp1]);
+        req.target = try a.dupe(u8, line[sp1 + 1 .. sp2]);
+        req.version = try a.dupe(u8, line[sp2 + 1 ..]);
         if (!isBuiltinMethod(req.method)) return false;
         if (!std.mem.eql(u8, req.version, "HTTP/1.1") and !std.mem.eql(u8, req.version, "HTTP/1.0")) return false;
-        if (!detail.isRequestTarget(req.target)) return false;
-        if (std.mem.findScalar(u8, req.target, '#')) |i| req.target = req.target[0..i];
+        // A request-target has no fragment (RFC 9112 §3.2), and one stripped here
+        // would leave this server routing a different path than a cache or a
+        // filter in front of it sees.
+        if (!detail.isRequestTarget(req.target) or std.mem.findScalar(u8, req.target, '#') != null) return false;
         const d = detail.divide(req.target, '?');
         req.path = try detail.decodePathComponent(a, d.lhs);
         try detail.parseQueryText(a, d.rhs, &req.params);
         return true;
     }
 
-    /// Ports `process_request` (httplib.cpp:9811 @620d2225c), a member of
+    /// Ports `process_request` (httplib.cpp:10152 @8642541b2), a member of
     /// `Server`: one request off `strm` and its response back. `100
     /// Continue` is owed here and sent only when the body is read
     /// (`read_content_core`). A response that says `Connection: close`
@@ -600,6 +616,11 @@ pub const Server = struct {
 
         var buf: [2048]u8 = undefined;
         var line_reader = socket.LineReader.init(a, strm, &buf);
+
+        // The read timeout bounds the request line and headers as a whole, so a
+        // client sending them a byte at a time cannot hold the worker any longer.
+        strm.setMaxTimeout(self.read_timeout_sec * 1000 + @divTrunc(self.read_timeout_usec, 1000));
+
         if (!try line_reader.getline()) return false;
 
         // RFC 9112 2.2: ignore an empty line received before the request-line. Some
@@ -630,6 +651,8 @@ pub const Server = struct {
             res.status = StatusCode.bad_request_400;
             return self.writeResponse(strm, close_connection, &req, &res);
         }
+        strm.setMaxTimeout(0);
+
         // a Content-Length that is not a valid decimal length ("42, 42", "+42",
         // empty) would otherwise be read as "no body"
         var is_invalid_content_length = false;
@@ -642,9 +665,16 @@ pub const Server = struct {
             res.status = StatusCode.bad_request_400;
             return self.writeResponse(strm, close_connection, &req, &res);
         }
-        // RFC 9112 3.2: more than one Host field line or an invalid Host value
-        // is rejected, so that every recipient sees the same authority (0.60.0)
-        if (req.headers.count("Host") > 1 or !detail.isHost(req.getHeaderValue("Host"))) {
+        // RFC 9112 §6.1: a Transfer-Encoding alongside a Content-Length, or in an
+        // HTTP/1.0 request, is honoured, but the connection closes after the
+        // response.
+        if (message.hasFaultyTransferEncoding(&req)) connection_closed.* = true;
+
+        // RFC 9112 §3.2: Reject more than one Host field line, an invalid Host
+        // value, or none in HTTP/1.1, so that every recipient of the request sees
+        // the same authority.
+        const host_count = req.headers.count("Host");
+        if (host_count > 1 or (host_count == 0 and std.mem.eql(u8, req.version, "HTTP/1.1")) or !detail.isHost(req.getHeaderValue("Host"))) {
             connection_closed.* = true;
             res.status = StatusCode.bad_request_400;
             return self.writeResponse(strm, close_connection, &req, &res);
@@ -690,18 +720,54 @@ pub const Server = struct {
 
         req.sock = strm.sock;
 
-        if (detail.isWebsocketUpgrade(req.method, &req.headers)) {
+        // The response says so when this connection closes after it.
+        const close_after_response = close_connection or connection_closed.*;
+
+        // An upgrade request has been through pre-routing before it reaches routing()
+        const is_upgrade = detail.isWebsocketUpgrade(req.method, &req.headers);
+        if (is_upgrade) {
             if (self.pre_routing_handler) |h| {
                 if (try h.func(h.ctx, &req, &res) == .handled) {
                     if (res.status == -1) res.status = StatusCode.ok_200;
-                    return self.writeResponseCore(strm, close_connection, &req, &res, true);
+                    return self.writeResponseCore(strm, close_after_response, &req, &res, true);
                 }
             }
-            // no WebSocket handler is registered: on to routing and its 404
+            // Find matching WebSocket handler
+            for (self.websocket_handlers.items) |*entry| {
+                if (try entry.matcher.match(&req)) {
+                    req.matched_route = entry.matcher.pattern();
+
+                    // Compute accept key
+                    var accept_buf: [28]u8 = undefined;
+                    const accept_key = ws_mod.websocketAcceptKey(req.getHeaderValue("Sec-WebSocket-Key"), &accept_buf);
+
+                    // Send 101 Switching Protocols
+                    const handshake_response = try std.mem.concat(a, u8, &.{
+                        "HTTP/1.1 101 Switching Protocols\r\n",
+                        "Upgrade: websocket\r\n",
+                        "Connection: Upgrade\r\n",
+                        "Sec-WebSocket-Accept: ",
+                        accept_key,
+                        "\r\n\r\n",
+                    });
+                    if (strm.write(handshake_response) < 0) return false;
+
+                    connection_closed.* = true;
+
+                    // Use WebSocket-specific read timeout instead of HTTP timeout
+                    strm.setReadTimeout(ws_mod.server_read_timeout_second, 0);
+                    var ws: ws_mod.WebSocket = undefined;
+                    ws.init(self.allocator, strm, true);
+                    defer ws.deinit();
+                    entry.handler.func(entry.handler.ctx, &req, &ws);
+                    return true;
+                }
+            }
+            // No WebSocket route: route it as a plain HTTP request
         }
 
         var routed = false;
-        if (self.routing(&req, &res, strm)) |r| {
+        if (self.routing(&req, &res, strm, is_upgrade)) |r| {
             routed = r;
         } else |err| {
             if (self.exception_handler) |h| {
@@ -715,20 +781,24 @@ pub const Server = struct {
         var ret = false;
         if (routed) {
             if (res.status == -1) res.status = if (req.ranges.items.len == 0) StatusCode.ok_200 else StatusCode.partial_content_206;
+
+            // Before the Range checks below, so they see the body's own length.
+            res.preferAssignedBody();
+
             if (try message.rangeError(&req, &res)) {
-                res.body.clearRetainingCapacity();
-                res.content_length = 0;
-                res.content_provider = null;
+                res.clearContent();
                 res.status = StatusCode.range_not_satisfiable_416;
-                ret = try self.writeResponse(strm, close_connection, &req, &res);
+                ret = try self.writeResponse(strm, close_after_response, &req, &res);
             } else {
-                ret = try self.writeResponseCore(strm, close_connection, &req, &res, true);
+                ret = try self.writeResponseCore(strm, close_after_response, &req, &res, true);
             }
         } else {
             if (res.status == -1) res.status = StatusCode.not_found_404;
-            ret = try self.writeResponse(strm, close_connection, &req, &res);
+            ret = try self.writeResponse(strm, close_after_response, &req, &res);
         }
 
+        // A body read in part cannot be drained from where it stopped, so the
+        // connection closes.
         if (!req.body_consumed and message.hasFramedBody(&req) and
             !detail.hasHeaderToken(&res.headers, "Connection", "close"))
         {
@@ -738,16 +808,19 @@ pub const Server = struct {
                 }
             };
             var dummy_status: c_int = 0;
-            if (!try message.readContent(strm, &req, self.payload_max_length, &dummy_status, Discard{}, false)) connection_closed.* = true;
+            if (req.body_read_started or !try message.readContent(strm, &req, self.payload_max_length, &dummy_status, Discard{}, false)) connection_closed.* = true;
         }
         return ret;
     }
 
-    /// Ports `routing` (httplib.cpp:9435 @620d2225c), a member of `Server`:
-    /// the pre-routing handler, then the route table for the method.
-    fn routing(self: *Server, req: *Request, res: *Response, strm: *SocketStream) !bool {
-        if (self.pre_routing_handler) |h| {
-            if (try h.func(h.ctx, req, res) == .handled) return true;
+    /// Ports `routing` (httplib.cpp:9797 @8642541b2), a member of `Server`:
+    /// the pre-routing handler, unless the request has been through it, then
+    /// the route table for the method.
+    fn routing(self: *Server, req: *Request, res: *Response, strm: *SocketStream, skip_pre_routing: bool) !bool {
+        if (!skip_pre_routing) {
+            if (self.pre_routing_handler) |h| {
+                if (try h.func(h.ctx, req, res) == .handled) return true;
+            }
         }
         // no mount point, so no file is served; no content-reader route is
         // registered, so expect_content's branch dispatches nothing
@@ -762,7 +835,7 @@ pub const Server = struct {
         return false;
     }
 
-    /// Ports `dispatch_request` (httplib.cpp:9548 @620d2225c), a member of
+    /// Ports `dispatch_request` (httplib.cpp:9909 @8642541b2), a member of
     /// `Server`: the first route that matches, its body read only then.
     fn dispatchRequest(self: *Server, req: *Request, res: *Response, handlers: []const Route, strm: *SocketStream) !bool {
         for (handlers) |*x| {
@@ -776,7 +849,7 @@ pub const Server = struct {
         return false;
     }
 
-    /// Ports `read_content` (httplib.cpp:8947 @620d2225c), a member of
+    /// Ports `read_content` (httplib.cpp:9304 @8642541b2), a member of
     /// `Server`: the body into `req.body` -- or, for `multipart/form-data`,
     /// into `req.form` -- and a form-urlencoded body's pairs into
     /// `req.params`.
@@ -827,7 +900,7 @@ pub const Server = struct {
         var sink: Sink = .{ .server = self, .req = req };
         if (try self.readContentCore(strm, req, res, &sink)) {
             const content_type = req.getHeaderValue("Content-Type");
-            if (std.mem.eql(u8, try detail.extractMediaType(req.a, content_type, null), "application/x-www-form-urlencoded")) {
+            if (detail.caseIgnoreEqual(try detail.extractMediaType(req.a, content_type, null), "application/x-www-form-urlencoded")) {
                 if (req.body.items.len > detail.form_url_encoded_payload_max_length) {
                     res.status = StatusCode.payload_too_large_413;
                     return false;
@@ -839,7 +912,7 @@ pub const Server = struct {
         return false;
     }
 
-    /// Ports `read_content_core` (httplib.cpp:9031 @620d2225c), a member of
+    /// Ports `read_content_core` (httplib.cpp:9390 @8642541b2), a member of
     /// `Server`: a body framed by chunks or `Content-Length`, after the owed
     /// `100 Continue`; with neither, none -- unless the connection will not
     /// persist and bytes are already waiting, which are then read to the end
@@ -874,12 +947,19 @@ pub const Server = struct {
             return true;
         }
 
+        // A second read would start where the first one stopped, or in the next
+        // request.
+        if (req.body_read_started) return false;
+
         // The client is waiting for this before it sends the body.
         if (req.expect_100_continue_pending) {
             req.expect_100_continue_pending = false;
             _ = message.writeResponseLine(strm, StatusCode.continue_100);
             _ = strm.write("\r\n");
         }
+
+        // Set before reading, since a receiver may also stop by throwing.
+        req.body_read_started = true;
 
         if (!try message.readContent(strm, req, self.payload_max_length, &res.status, out, true)) return false;
         req.body_consumed = true;
@@ -890,16 +970,18 @@ pub const Server = struct {
         return true;
     }
 
-    /// Ports `write_response` (httplib.cpp:8783 @620d2225c), a member of
+    /// Ports `write_response` (httplib.cpp:9136 @8642541b2), a member of
     /// `Server`: a response whose ranges, if any, do not apply.
     fn writeResponse(self: *Server, strm: *SocketStream, close_connection: bool, req: *Request, res: *Response) !bool {
         req.ranges.clearRetainingCapacity();
         return self.writeResponseCore(strm, close_connection, req, res, false);
     }
 
-    /// Ports `apply_ranges` (httplib.cpp:9650 @620d2225c), a member of
-    /// `Server`: a 206's range or ranges cut from the body, and the framing
-    /// headers. No content coding is compiled in, so none is applied.
+    /// Ports `apply_ranges` (httplib.cpp:10007 @8642541b2), a member of
+    /// `Server`: a 206's range or ranges cut from the body. No content coding
+    /// is compiled in, so none is applied, and nothing here is a known-length
+    /// provider a range can reach (`range_error` drops the ranges of a
+    /// streamed body), so that arm of the C is not live.
     fn applyRanges(req: *const Request, res: *Response) !void {
         const a = res.a;
         var content_type: []const u8 = "";
@@ -912,9 +994,7 @@ pub const Server = struct {
             boundary = try message.makeMultipartDataBoundary(a);
             try res.setHeader("Content-Type", try std.mem.concat(a, u8, &.{ "multipart/byteranges; boundary=", boundary }));
         }
-        if (res.body.items.len == 0) {
-            if (res.content_provider != null and res.is_chunked_content_provider) try res.setHeader("Transfer-Encoding", "chunked");
-        } else {
+        if (res.body.items.len != 0) {
             if (req.ranges.items.len == 0 or res.status != StatusCode.partial_content_206) {
                 // the whole body
             } else if (req.ranges.items.len == 1) {
@@ -929,11 +1009,10 @@ pub const Server = struct {
                 try res.body.appendSlice(a, data);
             }
             res.content_length = res.body.items.len;
-            try res.setHeader("Content-Length", try std.fmt.allocPrint(a, "{d}", .{res.content_length}));
         }
     }
 
-    /// Ports `write_response_core` (httplib.cpp:8798 @620d2225c), a member
+    /// Ports `write_response_core` (httplib.cpp:9151 @8642541b2), a member
     /// of `Server`: the error handler for a status from 400, the ranges, the
     /// connection and framing headers, the head and a body under
     /// `CPPHTTPLIB_SEND_BUFSIZ` in one write, a larger one in a second, then
@@ -949,24 +1028,33 @@ pub const Server = struct {
                 if (try h.func(h.ctx, req, res) == .handled) need_apply_ranges = true;
             }
         }
+
+        if (!message.bodyAllowedForStatus(res.status)) res.clearContent();
+        res.preferAssignedBody();
+
         if (need_apply_ranges) try applyRanges(req, res);
 
         if (close_connection or detail.hasHeaderToken(&req.headers, "Connection", "close") or
             400 <= res.status or // Don't leave connections open after errors
             // The client withholds the body until `100 Continue`, which was never
             // sent, so whether and when the body follows is unknown.
-            (req.expect_100_continue_pending and message.hasFramedBody(req)))
+            (req.expect_100_continue_pending and message.hasFramedBody(req)) or
+            // The body was left partway, e.g. by a content receiver that returned
+            // false, so the rest of it cannot be told from the next request.
+            (req.body_read_started and !req.body_consumed))
         {
             try res.setHeader("Connection", "close");
         } else {
-            try res.setHeader("Keep-Alive", try std.fmt.allocPrint(a, "timeout={d}, max={d}", .{ self.keep_alive_timeout_sec, self.keep_alive_max_count }));
+            try res.setHeader("Keep-Alive", if (self.keep_alive_max_count > 0)
+                try std.fmt.allocPrint(a, "timeout={d}, max={d}", .{ self.keep_alive_timeout_sec, self.keep_alive_max_count })
+            else
+                try std.fmt.allocPrint(a, "timeout={d}", .{self.keep_alive_timeout_sec}));
         }
         if ((res.body.items.len != 0 or res.content_length > 0 or res.content_provider != null) and !res.hasHeader("Content-Type")) {
             try res.setHeader("Content-Type", "text/plain");
         }
-        if (res.body.items.len == 0 and res.content_length == 0 and res.content_provider == null and !res.hasHeader("Content-Length")) {
-            try res.setHeader("Content-Length", "0");
-        }
+        try message.setFramingHeaders(req, res);
+
         const is_head = std.mem.eql(u8, req.method, "HEAD");
         if (is_head and !res.hasHeader("Accept-Ranges")) try res.setHeader("Accept-Ranges", "bytes");
 
@@ -975,7 +1063,7 @@ pub const Server = struct {
         if (try message.writeHeaders(a, &bstrm, &res.headers) <= 0) return false;
         // Combine a small body with the headers so the whole response leaves in a
         // single write. A large body is written on its own instead.
-        const send_body = !is_head;
+        const send_body = !is_head and message.bodyAllowedForStatus(res.status);
         var body_is_separate = false;
         if (send_body and res.body.items.len != 0 and res.content_provider == null) {
             if (res.body.items.len < detail.send_bufsiz) {
@@ -993,8 +1081,8 @@ pub const Server = struct {
         var ret = true;
         if (send_body) {
             if (res.content_provider) |provider| {
-                // Ports `write_content_with_provider` (httplib.cpp:8897
-                // @620d2225c). Every provider here is chunked; it has a
+                // Ports `write_content_with_provider` (httplib.cpp:9262
+                // @8642541b2). Every provider here is chunked; it has a
                 // length only when the error handler gave the response a
                 // body, which no 206 has, so the ranged arms stay out
                 const ok = if (res.content_length > 0)

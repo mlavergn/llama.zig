@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/build-info.cpp.in` (v0.7.0, `620d2225c`) as
+//! Ports `llama.cpp/common/build-info.cpp.in` (v0.8.0, `8642541b2`) as
 //! `llama.cpp.zmake` fills it in -- build number, commit and compiler from
 //! `build/tools.zig`, the same values the reference tools are built with, so
 //! `--version` reads the same from both sides of a gate.
@@ -11,16 +11,16 @@ const std = @import("std");
 const options = @import("build_info");
 const io = @import("io.zig");
 
-/// Ports `llama_build_number` (build-info.cpp.in:11 @620d2225c).
+/// Ports `llama_build_number` (build-info.cpp.in:11 @8642541b2).
 pub const build_number: c_int = options.build_number;
-/// Ports `llama_commit` (build-info.cpp.in:15 @620d2225c).
+/// Ports `llama_commit` (build-info.cpp.in:15 @8642541b2).
 pub const commit: [:0]const u8 = options.commit ++ "";
-/// Ports `llama_compiler` (build-info.cpp.in:19 @620d2225c).
+/// Ports `llama_compiler` (build-info.cpp.in:19 @8642541b2).
 pub const compiler: [:0]const u8 = options.compiler ++ "";
-/// Ports `llama_build_target` (build-info.cpp.in:23 @620d2225c).
+/// Ports `llama_build_target` (build-info.cpp.in:23 @8642541b2).
 pub const build_target: [:0]const u8 = options.build_target ++ "";
 
-/// Ports `llama_print_build_info` (build-info.cpp.in:32 @620d2225c): two lines
+/// Ports `llama_print_build_info` (build-info.cpp.in:32 @8642541b2): two lines
 /// on `stream`, which `build-info.h` defaults to `stderr` -- every caller
 /// ported passes `io.cStderr()`.
 pub fn print(version: [*:0]const u8, stream: *anyopaque) void {

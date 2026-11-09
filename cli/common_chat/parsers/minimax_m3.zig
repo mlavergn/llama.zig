@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/minimax-m3.cpp` (llama.cpp v0.7.0,
-//! `620d2225c`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/minimax-m3.cpp` (llama.cpp v0.8.0,
+//! `8642541b2`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -158,7 +158,7 @@ const Build = struct {
         const close_tag = try p.toolArgClose(try b.literal(close));
 
         // A string accepts anything, so a union with a string alternative is a string
-        if (schema.mayBeString()) {
+        if (schema.mayBeString() catch |e| return peg.errors.fromSchema(e)) {
             return b.acOne(try b.plus(try p.toolArgStringValue(try b.until(close)), close_tag), close);
         }
 
@@ -216,7 +216,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_minimax_m3` (parsers/minimax-m3.cpp:3 @620d2225c).
+/// Ports `common_chat_params_init_minimax_m3` (parsers/minimax-m3.cpp:3 @8642541b2).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

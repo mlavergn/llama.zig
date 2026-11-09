@@ -18,7 +18,7 @@
 //!   above-U+10FFFF rejections: every two-byte string, and the boundary
 //!   trails, reach each of them.
 //! - **The byte map**, both directions, over every byte and every one- and
-//!   two-byte string.
+//!   two-byte string, and `unicode_cpt_to_byte` over every code point.
 //! - **`unicode_regex_split`**, for every pre-tokenizer pattern set in
 //!   `llama-vocab.cpp` (extracted by the script, so the list cannot drift)
 //!   and a set of synthetic ones that reach the collapse and error paths,
@@ -48,6 +48,7 @@ extern fn ref_uni_cpt_from_utf8(s: [*]const u8, n: usize, offset: *usize, cpt: *
 extern fn ref_uni_flags_from_utf8(s: [*]const u8, n: usize) c_int;
 extern fn ref_uni_byte_to_utf8(b: u8, out: [*]u8) c_int;
 extern fn ref_uni_utf8_to_byte(s: [*]const u8, n: usize) c_int;
+extern fn ref_uni_cpt_to_byte(cpt: u32) c_int;
 extern fn ref_uni_regex_split(text: [*]const u8, text_len: usize, exprs: [*]const [*]const u8, expr_lens: [*]const usize, n_exprs: usize, byte_encode: c_int, out: *?[*]u8, out_len: *usize) c_long;
 extern fn ref_uni_free(p: ?[*]u8) void;
 
@@ -237,6 +238,13 @@ fn sweepDecode(r: std.Random) void {
 // -----------------------------------------------------------------------------
 // The byte map
 
+fn compareCptToByte(cpt: u32) void {
+    checks += 1;
+    const r = ref_uni_cpt_to_byte(cpt);
+    const z: c_int = if (unicode.cptToByte(cpt)) |b| b else |_| -1;
+    if (r != z) fail("cpt_to_byte U+{X:0>4}: ref {d} zig {d}", .{ cpt, r, z });
+}
+
 fn sweepByteMap() void {
     for (0..256) |b| {
         checks += 1;
@@ -245,6 +253,10 @@ fn sweepByteMap() void {
         const z = unicode.byteToUtf8(@intCast(b));
         if (!std.mem.eql(u8, rb[0..@intCast(rn)], z)) fail("byte_to_utf8 0x{X:0>2}: ref {x} zig {x}", .{ b, rb[0..@intCast(rn)], z });
     }
+    // Every code point and past the last one, the map's bound among them.
+    for (0..0x110100) |cpt| compareCptToByte(@intCast(cpt));
+    for ([_]u32{ 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF }) |cpt| compareCptToByte(cpt);
+
     var buf: [3]u8 = undefined;
     const lens = [_]usize{ 0, 1, 2 };
     for (lens) |len| {

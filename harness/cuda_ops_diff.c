@@ -78,6 +78,7 @@
 
 #include "ggml.h"
 #include "ggml-backend.h"
+#include "op_filter.h"
 #include "ggml-cuda.h"
 
 ggml_backend_t ref_ggml_backend_cuda_init(int device);
@@ -514,6 +515,32 @@ static struct ggml_tensor * build_mmid_q4_0_9(struct ggml_context * c, struct gg
 static struct ggml_tensor * build_mmid_q4_k_8(struct ggml_context * c, struct ggml_tensor ** t) { return build_mmid(c, t, GGML_TYPE_Q4_K, 8); }
 static struct ggml_tensor * build_mmid_q4_k_9(struct ggml_context * c, struct ggml_tensor ** t) { return build_mmid(c, t, GGML_TYPE_Q4_K, 9); }
 
+/* MUL_MAT at one column (MMVQ) at the K where `get_vdr_mmvq`'s value
+ * decides `should_halve_iters` (mmvq.cu:1180 @8642541b2) and the doubled
+ * block has real work: on the GB10 (`MMVQ_PARAMETERS_GB10`, four warps)
+ * that doubles the warps per row, which splits the K sum differently. The
+ * other choice `vdr` feeds, `should_use_small_k`, only moves rows between
+ * blocks, and at K where the second four warps would read nothing the sum
+ * is the same, so a Q6_K `vdr` of 1 passed every upstream case and K =
+ * 1024, 2048 and 4096 too (v0.8.0). Each K here is the first, past four
+ * warps' reach, where the true `vdr` of 2 halves and 1 and 4 do not; the
+ * types are those the GB10 table promotes, the only ones `vdr` reaches. */
+static struct ggml_tensor * build_mmvq(struct ggml_context * ctx, struct ggml_tensor ** cmp, enum ggml_type type, int64_t k) {
+    struct ggml_tensor * a = ggml_new_tensor_2d(ctx, type, k, 64);
+    struct ggml_tensor * b = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, k, 1);
+    return *cmp = ggml_mul_mat(ctx, a, b);
+}
+#define MMVQ_K(name, type, k) static struct ggml_tensor * build_mmvq_##name##_##k(struct ggml_context * c, struct ggml_tensor ** t) { return build_mmvq(c, t, type, k); }
+MMVQ_K(q4_0, GGML_TYPE_Q4_0, 2080)
+MMVQ_K(q4_1, GGML_TYPE_Q4_1, 2080)
+MMVQ_K(q5_0, GGML_TYPE_Q5_0, 2080)
+MMVQ_K(q5_1, GGML_TYPE_Q5_1, 2080)
+MMVQ_K(q8_0, GGML_TYPE_Q8_0, 1056)
+MMVQ_K(q4_K, GGML_TYPE_Q4_K, 2304)
+MMVQ_K(q5_K, GGML_TYPE_Q5_K, 2304)
+MMVQ_K(q6_K, GGML_TYPE_Q6_K, 2304)
+MMVQ_K(iq4_nl, GGML_TYPE_IQ4_NL, 2080)
+
 /* LIGHTNING_INDEXER with four heads (v0.6.0) on both sides of the tile
  * kernel's eight-token threshold (`LIGHTNING_INDEXER_TILE_TOKENS`):
  * upstream's batches are 1 and 512, so neither the boundary nor a
@@ -634,7 +661,8 @@ static bool extra_case(const char * name, extra_build build) {
  * CONV_3D's cuBLAS and split-k arms. Since v0.7.0 the chunked
  * gated-delta-net kernel writing the snapshot cache, TOP_K's radix arm for
  * more rows than SMs at a width bitonic would otherwise take, and the F32
- * cuBLAS chunks. */
+ * cuBLAS chunks. Since v0.8.0 one-column MUL_MAT at the K where MMVQ's
+ * `vdr` chooses the kernel. */
 static int extra_cases(const char * filter) {
     static const struct { const char * op; const char * name; extra_build build; } cases[] = {
         { "MEAN", "MEAN(ne=[65536,1,1,1])", build_mean_65536 },
@@ -644,6 +672,15 @@ static int extra_cases(const char * filter) {
         { "GATED_DELTA_NET", "GATED_DELTA_NET+CPY(S=128,H=16,K=3,n_tokens=64,chunked kernel)", build_gdn_mma_cache },
         { "TOP_K", "TOP_K(ne=[600,64,1,1],k=16,more rows than SMs)", build_top_k_many_rows },
         { "MUL_MAT", "MUL_MAT(f16 x f32,m=8400001,n=32,k=16,prec=f32,cuBLAS chunks)", build_mul_mat_f32_chunks },
+        { "MUL_MAT", "MUL_MAT(q4_0,n=1,k=2080,mmvq)", build_mmvq_q4_0_2080 },
+        { "MUL_MAT", "MUL_MAT(q4_1,n=1,k=2080,mmvq)", build_mmvq_q4_1_2080 },
+        { "MUL_MAT", "MUL_MAT(q5_0,n=1,k=2080,mmvq)", build_mmvq_q5_0_2080 },
+        { "MUL_MAT", "MUL_MAT(q5_1,n=1,k=2080,mmvq)", build_mmvq_q5_1_2080 },
+        { "MUL_MAT", "MUL_MAT(q8_0,n=1,k=1056,mmvq)", build_mmvq_q8_0_1056 },
+        { "MUL_MAT", "MUL_MAT(q4_K,n=1,k=2304,mmvq)", build_mmvq_q4_K_2304 },
+        { "MUL_MAT", "MUL_MAT(q5_K,n=1,k=2304,mmvq)", build_mmvq_q5_K_2304 },
+        { "MUL_MAT", "MUL_MAT(q6_K,n=1,k=2304,mmvq)", build_mmvq_q6_K_2304 },
+        { "MUL_MAT", "MUL_MAT(iq4_nl,n=1,k=2080,mmvq)", build_mmvq_iq4_nl_2080 },
         { "MUL_MAT_ID", "MUL_MAT_ID(q4_0,n_tokens=8)", build_mmid_q4_0_8 },
         { "MUL_MAT_ID", "MUL_MAT_ID(q4_0,n_tokens=9)", build_mmid_q4_0_9 },
         { "MUL_MAT_ID", "MUL_MAT_ID(q4_K,n_tokens=8)", build_mmid_q4_k_8 },
@@ -658,7 +695,7 @@ static int extra_cases(const char * filter) {
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
-        if (filter == NULL || strcmp(filter, cases[i].op) == 0) {
+        if (op_filter_matches(filter, cases[i].op)) {
             failed += !extra_case(cases[i].name, cases[i].build);
         }
     }

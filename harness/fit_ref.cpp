@@ -13,11 +13,14 @@
 //
 // Used by harness/fit_diff.zig through scripts/fit-diff.
 
+#include "common.h"
 #include "fit.h"
 #include "log.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <string>
 #include <unistd.h>
 #include <vector>
 
@@ -30,6 +33,22 @@ bool tty_can_use_colors() {
 
 bool tty_enable_ansi() {
     return true;
+}
+
+// `common_measure_memory` reaches these; nothing here calls it. It takes a
+// `common_params`, which only the tools have: `tools/common/init.zig`'s
+// `measureMemory` is the router's, and `common_fit_measure` below is what it
+// is built from.
+llama_model_params common_model_params_to_llama(common_params &) {
+    std::abort();
+}
+
+llama_context_params common_context_params_to_llama(const common_params &) {
+    std::abort();
+}
+
+void common_fit_apply(common_params &, llama_model_params &, llama_context_params &) {
+    std::abort();
 }
 
 extern "C" {
@@ -98,6 +117,30 @@ int fit_ref_device_memory(
         devs[i] = d[i];
     }
     return (int) v.size();
+}
+
+// `common_fit_measure`, its rows as text into `out`. Returns 0, or -1 where it
+// throws, the `what()` in `out`.
+int fit_ref_measure(const char * path_model, const llama_model_params * mparams, const llama_context_params * cparams,
+                    char * out, size_t cap, int log_level) {
+    std::string s;
+    int rc = 0;
+    try {
+        uint32_t n_ctx_train = 0;
+        uint32_t n_ctx       = 0;
+        const auto rows = common_fit_measure(path_model, mparams, cparams, &n_ctx_train, &n_ctx, (ggml_log_level) log_level);
+        s += "measure " + std::to_string(n_ctx_train) + " " + std::to_string(n_ctx) + "\n";
+        for (const auto & r : rows) {
+            s += "  row " + std::to_string((int) r.kind) + " " + r.name + "|" + r.description + " " + std::to_string(r.total) + " " +
+                 std::to_string(r.free) + " " + std::to_string(r.model) + " " + std::to_string(r.context) + " " +
+                 std::to_string(r.compute) + "\n";
+        }
+    } catch (const std::exception & e) {
+        s = std::string("measure failed: ") + e.what() + "\n";
+        rc = -1;
+    }
+    snprintf(out, cap, "%s", s.c_str());
+    return rc;
 }
 
 // `common_fit_print`, its stdout captured into `path`. Returns 0, or -1 where

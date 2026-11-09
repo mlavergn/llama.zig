@@ -28,6 +28,7 @@ pub const models = @import("models/module.zig");
 pub const models_qwen35 = models.qwen35;
 pub const io = @import("io.zig");
 pub const memory = @import("memory.zig");
+pub const moe_cache = @import("moe_cache.zig");
 pub const cparams = @import("cparams.zig");
 pub const adapter = @import("adapter.zig");
 pub const kv_cells = @import("kv_cells.zig");

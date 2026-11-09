@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/ssm-conv.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/ssm-conv.cuh` at v0.7.0 (`620d2225c`). The
+//! `llama.cpp/ggml/src/ggml-cuda/ssm-conv.cuh` at v0.8.0 (`8642541b2`). The
 //! kernels, `ssm_conv_f32` and `ssm_conv_long_token_f32`, stay CUDA.
 //!
 //! The short-sequence kernel goes through `ggml_cuda_kernel_launch` (PDL);
@@ -30,7 +30,7 @@ fn dim(x: i64) u32 {
     return @truncate(@as(u64, @bitCast(x)));
 }
 
-/// Ports `ssm_conv_f32_cuda` (ssm-conv.cu:127 @620d2225c).
+/// Ports `ssm_conv_f32_cuda` (ssm-conv.cu:127 @8642541b2).
 fn ssmConvF32Cuda(
     comptime apply_silu: bool,
     src0: ?*const anyopaque,
@@ -99,13 +99,14 @@ fn ssmConvF32Cuda(
         3 => launchKernel(3, a),
         4 => launchKernel(4, a),
         5 => launchKernel(5, a),
+        7 => launchKernel(7, a),
         9 => launchKernel(9, a),
         15 => launchKernel(15, a),
-        else => impl.abort("Only support kernel sizes 3, 4, 5, 9, 15 right now."),
+        else => impl.abort("Only support kernel sizes 3, 4, 5, 7, 9, 15 right now."),
     }
 }
 
-/// Ports `ggml_cuda_op_ssm_conv` (ssm-conv.cu:160 @620d2225c).
+/// Ports `ggml_cuda_op_ssm_conv` (ssm-conv.cu:161 @8642541b2).
 ///
 /// Parameters:
 /// - `bias_add_node`: the fused `ADD` whose other operand is the bias, or

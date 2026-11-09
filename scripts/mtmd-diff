@@ -17,9 +17,11 @@ cd "$ROOT" || exit 2
 
 DEVS="${1:-both}"
 FILTER="${2:-}"
-MANIFEST=zig-out/mmproj-fixtures/manifest.txt
+# MTMD_ZOUT and MTMD_MANIFEST let a run use a private build and fixtures
+ZOUT="${MTMD_ZOUT:-zig-out}"
+MANIFEST="${MTMD_MANIFEST:-$ZOUT/mmproj-fixtures/manifest.txt}"
 
-for f in zig-out/lib/libmtmd-ref.a zig-out/lib/libllama-ref.a zig-out/lib/libggml.a "$MANIFEST"; do
+for f in "$ZOUT/lib/libmtmd-ref.a" "$ZOUT/lib/libllama-ref.a" "$ZOUT/lib/libggml.a" "$MANIFEST"; do
     [ -f "$f" ] || { echo "missing $f -- run 'zig build reference mtmd-ref --release=fast' and scripts/gen-mmproj-fixtures" >&2; exit 2; }
 done
 
@@ -52,7 +54,7 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/mtmd_diff" "$OPT" -lc \
     --dep llama_c -Mharness_root=src/llama/harness_root.zig \
     --dep llama=harness_root -Mmtmd_port=src/mtmd/harness_root.zig \
     -Mllama_c="$tmp/llama_c.zig" -Mmtmd_c="$tmp/mtmd_c.zig" \
-    zig-out/lib/libmtmd-ref.a zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
+    "$ZOUT/lib/libmtmd-ref.a" "$ZOUT/lib/libllama-ref.a" "$ZOUT/lib/libggml.a" -lc++ \
     "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -60 "$tmp/berr" >&2; exit 1; }
 

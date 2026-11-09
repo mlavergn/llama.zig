@@ -219,6 +219,12 @@ Then do the two mechanical moves, **before** hand-porting anything:
     shifts the moved literals again.
   - Pass `--keep <zig>:<file>:<N>` for any literal already set to B by hand,
     and `--skip <prefix>` for files another agent is editing.
+  - It misses literals behind a name: an `impl.assert(x, src, N, ...)` with
+    a `src` constant, and the server's `ggmlAssert` wrapper. After every
+    area is in, read **`scripts/upstream-literals`**, which checks every
+    assert and abort literal against B's text (44 wrong at v0.8.0). It is a
+    report, not a gate: fix what it names by hand, after reading each, since
+    acting on its output blind broke two correct literals.
 
 After the port, `port-links` (and, once they exist, `port-links --basis B`
 and `port-audit`) must be clean, apart from the deferrals listed in
@@ -246,11 +252,17 @@ agree. Then move every file header's "at vX (`sha`)" provenance line.
 3. `node-diff ARGS=--gpu`.
 4. Every other gate in `CLAUDE.md`'s list that runs on the Mac:
    - `graph-diff`, `backend-ops` (with `--diff`), `sched-diff`, `metal-diff`,
-     `tuning-diff`, `struct-layout` and `abi-check`;
+     `metal-ops-diff`, `tuning-diff`, `struct-layout` and `abi-check`;
    - `sampler-diff`, `libcxx-diff`, `regex-diff` and `unicode-diff`;
    - `vocab-diff`, `arch-diff`, `loader-diff` and `context-diff`;
-   - `arch-model-diff` and `gemma4-assistant-diff`;
-   - `jinja-diff`, `cnv-diff`, `fit-diff` and `tools-diff`;
+   - `arch-model-diff`, `mtp-diff`, `gemma4-assistant-diff` and
+     `moe-slru-diff`;
+   - `jinja-diff`, `cnv-diff`, `fit-diff` (and `FIT_DIFF_O=ReleaseSafe`)
+     and `tools-diff`, one tool at a time;
+   - `json-diff`, `schema-diff`, `peg-diff`, `chat-parse-diff`,
+     `chat-msg-diff` and `spec-diff`;
+   - `server-task-diff`, `http-diff` and `server-diff`, one case file at a
+     time (the Makefile's loop stops at the first failing file);
    - `blas-diff`, `blas-node-diff` and `mtmd-gates`;
    - `api-diff`, `adapter-diff`, `quant-diff`, `opt-diff` and
      `opt-llama-diff`;
@@ -309,8 +321,13 @@ which `scripts/win-run` retries.
     `cuda-backend-diff` and `cuda-parity-cli`;
   - `vk-toolchain` if the pin moved;
   - `vk-repro`, `vk-ops-diff`, `vk-node-diff`, `vk-backend-diff`,
-    `vk-push-layout` and `vk-parity-cli`, on all four arms;
-  - the Linux arm64 CPU set and `host-arms-diff`.
+    `vk-push-layout` and `vk-parity-cli`, on all four arms. `vk-node-diff`
+    and `vk-backend-diff` loop over the arms themselves; **`vk-repro`,
+    `vk-ops-diff` and `vk-parity-cli` take the arm from the environment**
+    (`GGML_VK_DISABLE_COOPMAT2=1`, then with `_COOPMAT=1`, then with
+    `_INTEGER_DOT_PRODUCT=1`), so run them once per arm;
+  - the Linux arm64 CPU set and `host-arms-diff`. `sampler-diff` is a
+    macOS gate (it links Metal and calls `xcrun`); leave it off the list.
 - **DESKTOP-BR7J5S9:** `make x86-gates` at `x86_64_v3`, plus
   `win-host-diffs`. `[The Agent could not open a terminal]` is usually the
   laptop's Application Control refusing that build of the program; run it

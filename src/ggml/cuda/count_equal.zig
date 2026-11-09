@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/count-equal.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/count-equal.cuh` at v0.7.0 (`620d2225c`).
+//! `llama.cpp/ggml/src/ggml-cuda/count-equal.cuh` at v0.8.0 (`8642541b2`).
 //! The kernel, `count_equal<int>`, stays CUDA.
 
 const std = @import("std");
@@ -15,7 +15,7 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_COUNT_EQUAL_CHUNK_SIZE` (count-equal.cuh:3 @620d2225c).
+/// Ports `CUDA_COUNT_EQUAL_CHUNK_SIZE` (count-equal.cuh:3 @8642541b2).
 const chunk_size = 128;
 
 /// `GGML_PAD(x, n)` on `int64_t`.
@@ -23,7 +23,7 @@ fn pad(x: i64, n: i64) i64 {
     return (x + n - 1) & ~(n - 1);
 }
 
-/// Ports `ggml_cuda_count_equal` (count-equal.cu:28 @620d2225c), which
+/// Ports `ggml_cuda_count_equal` (count-equal.cu:28 @8642541b2), which
 /// launches with `<<<>>>`.
 pub fn opCountEqual(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);

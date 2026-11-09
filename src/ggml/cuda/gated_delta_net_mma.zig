@@ -8,20 +8,18 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/gated-delta-net-mma.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/gated-delta-net-mma.cuh` at v0.7.0
-//! (`620d2225c`): the host side -- the argument struct, the per-device
+//! `llama.cpp/ggml/src/ggml-cuda/gated-delta-net-mma.cuh` at v0.8.0
+//! (`8642541b2`): the host side -- the argument struct, the per-device
 //! shared-memory opt-in, the path choice and the launch -- on the CUDA arms
 //! (`GGML_USE_HIP` and `GGML_USE_MUSA` compile out). The kernel stays CUDA.
 //!
 //! # The kernel's name
 //!
-//! `gdn_single` is a `static __global__` template inside an anonymous
-//! namespace, so its demangled key carries the namespace -- which
-//! `cu++filt` spells `<unnamed>`, not `(anonymous namespace)` as GNU
-//! `c++filt` does: `<unnamed>::gdn_single<(int)16, (int)128, (int)1>`.
-//! Measured on the GB10; the blind port guessed the GNU spelling and the
-//! table's compile error named the right one. The first such key in this
-//! layer.
+//! `gdn_single` is a `static __global__` template inside a namespace, so
+//! its demangled key carries the namespace. Through v0.7.0 that was an
+//! anonymous one, which `cu++filt` spells `<unnamed>`; since v0.8.0 it is
+//! named: `ggml_cuda_gated_delta_net_mma::gdn_single<(int)16, (int)128,
+//! (int)1>`. The first such key in this layer.
 //!
 //! # The shared-memory size
 //!
@@ -38,7 +36,7 @@ const kernels = @import("kernels.zig");
 
 const cu = common.cu;
 
-/// Ports `ggml_cuda_gdn_mma_args` (gated-delta-net-mma.cuh:7 @620d2225c).
+/// Ports `ggml_cuda_gdn_mma_args` (gated-delta-net-mma.cuh:7 @8642541b2).
 /// Passed to the kernel by value, so its size is checked against the
 /// kernel's parameter on the first launch (Decision 46).
 pub const Args = extern struct {
@@ -81,13 +79,13 @@ comptime {
     }
 }
 
-/// Ports `D` (gated-delta-net-mma.cu:8 @620d2225c): the head size.
+/// Ports `D` (gated-delta-net-mma.cu:8 @8642541b2): the head size.
 const D = 128;
 
 /// `nv_bfloat16`, for sizes only.
 const Bf16 = u16;
 
-/// Ports `matrix` (gated-delta-net-mma.cu:11 @620d2225c), `matrix<R, C>`, for
+/// Ports `matrix` (gated-delta-net-mma.cu:11 @8642541b2), `matrix<R, C>`, for
 /// its size: a high and a residual BF16 plane.
 fn Matrix(comptime R: comptime_int, comptime C: comptime_int) type {
     return extern struct {
@@ -96,7 +94,7 @@ fn Matrix(comptime R: comptime_int, comptime C: comptime_int) type {
     };
 }
 
-/// Ports `shared` (gated-delta-net-mma.cu:44 @620d2225c), `shared<C, V>`, for
+/// Ports `shared` (gated-delta-net-mma.cu:44 @8642541b2), `shared<C, V>`, for
 /// its size, which is the launch's dynamic shared memory.
 fn Shared(comptime C: comptime_int, comptime V: comptime_int) type {
     return extern struct {
@@ -123,10 +121,10 @@ comptime {
 }
 
 fn kernel(comptime C: comptime_int, comptime V: comptime_int, comptime BLOCKS: comptime_int) kernels.Kernel {
-    return kernels.get("gated-delta-net-mma", kernels.tmpl("<unnamed>::gdn_single", &.{ kernels.int(C), kernels.int(V), kernels.int(BLOCKS) }));
+    return kernels.get("gated-delta-net-mma", kernels.tmpl("ggml_cuda_gated_delta_net_mma::gdn_single", &.{ kernels.int(C), kernels.int(V), kernels.int(BLOCKS) }));
 }
 
-/// Ports `init` (gated-delta-net-mma.cu:366 @620d2225c), `init<C, V, BLOCKS>`:
+/// Ports `init` (gated-delta-net-mma.cu:366 @8642541b2), `init<C, V, BLOCKS>`:
 /// whether the device can give the kernel `sizeof(shared<C, V>)` bytes of
 /// shared memory, asked once per device. The C's `std::call_once` per
 /// device; a refusal is remembered as well as an acceptance.
@@ -165,10 +163,10 @@ fn Init(comptime C: comptime_int, comptime V: comptime_int, comptime BLOCKS: com
     };
 }
 
-/// Ports `gdn_path` (gated-delta-net-mma.cu:384 @620d2225c).
+/// Ports `gdn_path` (gated-delta-net-mma.cu:384 @8642541b2).
 const Path = enum { ar, slice32_one_block, slice32_two_blocks, slice64, whole_head };
 
-/// Ports `select_gdn_mma_path` (gated-delta-net-mma.cu:386 @620d2225c), the
+/// Ports `select_gdn_mma_path` (gated-delta-net-mma.cu:386 @8642541b2), the
 /// CUDA arm: only the architectures upstream benchmarked, a value-split
 /// schedule when whole heads would leave half the SMs idle.
 fn selectPath(device: c_int, a: *const Args) Path {
@@ -202,8 +200,8 @@ fn dim(x: i64) u32 {
     return @truncate(@as(u64, @bitCast(x)));
 }
 
-/// Ports `ggml_cuda_gdn_mma_launch` (gated-delta-net-mma.cu:421
-/// @620d2225c), which launches with `<<<>>>`.
+/// Ports `ggml_cuda_gdn_mma_launch` (gated-delta-net-mma.cu:422
+/// @8642541b2), which launches with `<<<>>>`.
 ///
 /// Return: whether the chunked kernel ran; false leaves the op to the
 /// recurrent kernel, with nothing launched.

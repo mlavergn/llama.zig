@@ -1,0 +1,5 @@
+{#- v0.8.0: select_or_reject. -#}
+{%- set items = [1, 2, 3, 4, 5] -%}
+{{ items | select('odd') | join(',') }}|{{ items | reject('odd') | join(',') }}|{{ [0, 1, '', 'a', none, false] | select | join(',') }}|{{ [0, 1, '', 'a'] | reject | list | length }}
+{%- set objs = [{'type': 'string', 'odd': 1}, {'enum': [1], 'odd': 2}, {'type': 'integer', 'odd': 4}] -%}
+|{% for p in objs | selectattr('type', 'defined') %}{{ p.type }} {% endfor %}|{{ objs | rejectattr('type', 'defined') | list | length }}|{% for p in objs | selectattr('odd', 'even') %}{{ p.odd }} {% endfor %}|{{ objs | selectattr('odd', 'equalto', 2) | list | length }}|{{ objs | selectattr('type') | list | length }}|{{ objs | rejectattr('type') | list | length }}|{{ items | select('equalto', 3) | join(',') }}|{{ items | select('gt', 3) | join(',') }}

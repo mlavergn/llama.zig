@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/granite-speech.cpp` at v0.7.0
-//! (`620d2225c`). Each declaration names what it ports and the line it
+//! Ports `llama.cpp/tools/mtmd/models/granite-speech.cpp` at v0.8.0
+//! (`8642541b2`). Each declaration names what it ports and the line it
 //! began at.
 
 const std = @import("std");
@@ -19,7 +19,7 @@ const nb = graph.nb;
 
 extern fn sqrtf(x: f32) f32;
 
-/// Ports `build` (granite-speech.cpp:5 @620d2225c), a member of
+/// Ports `build` (granite-speech.cpp:5 @8642541b2), a member of
 /// `clip_graph_granite_speech`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;

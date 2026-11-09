@@ -165,7 +165,8 @@ static common_chat_msg read_msg(const common_json & j) {
     m.role    = j.at("role").get<std::string>();
     m.content = j.at("content").get<std::string>();
     for (const auto & p : j.at("parts")) {
-        m.content_parts.push_back({ p.at((size_t) 0).get<std::string>(), p.at((size_t) 1).get<std::string>() });
+        m.content_parts.push_back({ p.at((size_t) 0).get<std::string>(), p.at((size_t) 1).get<std::string>(),
+                                    p.size() > 2 ? p.at((size_t) 2).get<std::string>() : std::string() });
     }
     for (const auto & tc : j.at("tool_calls")) {
         m.tool_calls.push_back({ tc.at((size_t) 0).get<std::string>(), tc.at((size_t) 1).get<std::string>(),
@@ -174,6 +175,9 @@ static common_chat_msg read_msg(const common_json & j) {
     m.reasoning_content = j.at("reasoning_content").get<std::string>();
     m.tool_name         = j.at("tool_name").get<std::string>();
     m.tool_call_id      = j.at("tool_call_id").get<std::string>();
+    if (j.contains("extra_json")) {
+        m.extra_json = j.at("extra_json").get<std::string>();
+    }
     return m;
 }
 
@@ -189,7 +193,7 @@ static common_chat_templates_inputs read_inputs(const common_json & j) {
     in.use_jinja              = j.at("use_jinja").get<bool>();
     for (const auto & t : j.at("tools")) {
         in.tools.push_back({ t.at((size_t) 0).get<std::string>(), t.at((size_t) 1).get<std::string>(),
-                             t.at((size_t) 2).get<std::string>() });
+                             t.at((size_t) 2).get<std::string>(), t.size() > 3 && t.at((size_t) 3).get<bool>() });
     }
     in.tool_choice         = (common_chat_tool_choice) j.at("tool_choice").get<int>();
     in.parallel_tool_calls = j.at("parallel").get<bool>();
@@ -371,15 +375,24 @@ static void run(state & st, size_t n, const common_json & r) {
             return;
         }
         const auto * t = st.tmpls[id].get();
-        for (const auto & [k, v] : common_chat_templates_get_caps(t)) {
-            line("caps " + k + "=" + (v ? "1" : "0"));
+        const common_json caps = common_chat_templates_get_caps(t);
+        for (const auto & [k, v] : caps.items()) {
+            if (v.is_boolean()) {
+                line("caps " + k + "=" + (v.get<bool>() ? "1" : "0"));
+            }
         }
+        kv("caps_json", caps.dump());
         kv("source", common_chat_templates_source(t));
         kv("tool_use_source", common_chat_templates_source(t, "tool_use"));
         flag("explicit", common_chat_templates_was_explicit(t));
-        auto asr = common_chat_get_asr_prompt(t);
-        kv("asr.system", asr.system);
-        kv("asr.user", asr.user);
+        for (const char * language : { "", "fr", "FR", "xx" }) {
+            auto asr = common_chat_get_asr_prompt(t, language);
+            kv("asr.system", asr.system);
+            kv("asr.user", asr.user);
+            flag("asr.has_language", asr.has_language);
+        }
+        guarded([&] { kv("tts", common_chat_get_tts_prompt(t, "Say this")); });
+        guarded([&] { kv("tts", common_chat_get_tts_prompt(t, "Say \"that\"", "fr", "alice")); });
         guarded([&] { flag("enable_thinking", common_chat_templates_support_enable_thinking(t)); });
         guarded([&] { kv("example", common_chat_format_example(t, true, {})); });
         flag("verify", common_chat_verify_template(src, true));

@@ -56,4 +56,17 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/adapter_diff" -Ofast -lc \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
 
-"$tmp/adapter_diff" "$tmp" "$model" "$@"
+status=0
+"$tmp/adapter_diff" "$tmp" "$model" "$@" || status=1
+# v0.8.0: a LoRA delta on a prism.hadamard folded weight reads the primal
+# input, and a latent lookup table is refused. The derived model is a fixture
+# so the run stays short; without fixtures this run is reported, not skipped.
+FIXTURE="${ARCH_FIXTURES:-zig-out/arch-fixtures}/qwen35-dense.gguf"
+if [ -f "$FIXTURE" ]; then
+    echo "== adapter_diff $FIXTURE --hadamard"
+    "$tmp/adapter_diff" "$tmp" "$FIXTURE" --hadamard "$@" || status=1
+else
+    echo "FAIL: no $FIXTURE -- run 'make arch-fixtures'" >&2
+    status=1
+fi
+exit $status

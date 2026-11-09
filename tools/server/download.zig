@@ -7,7 +7,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/download.cpp` and `llama.cpp/common/download.h`
-//! (v0.7.0, `620d2225c`) whole, with what they and router mode need from
+//! (v0.8.0, `8642541b2`) whole, with what they and router mode need from
 //! the rest of `common/`: `common_models_handler_init`, `_is_preset_repo`
 //! and `_apply` and their helpers from `common/arg.cpp`; the client helpers
 //! of `common/http.h` (`common_http_parse_url`, `common_http_client`,
@@ -42,6 +42,7 @@ const libcxx = llama.libcxx;
 const common = @import("common.zig");
 const hf_cache = @import("hf_cache.zig");
 const client = @import("httplib/client.zig");
+const file_lock = @import("file_lock.zig");
 
 const log = tc.log;
 const Params = tc.params.Params;
@@ -57,7 +58,7 @@ fn zs(a: Allocator, s: []const u8) Allocator.Error![*:0]const u8 {
     return (try a.dupeSentinel(u8, s, 0)).ptr;
 }
 
-/// Ports `llama_build_info` (build-info.cpp.in:27 @620d2225c): `b<number>-<commit>`.
+/// Ports `llama_build_info` (build-info.cpp.in:27 @8642541b2): `b<number>-<commit>`.
 pub fn buildInfo() []const u8 {
     return @import("result.zig").build_info;
 }
@@ -65,7 +66,7 @@ pub fn buildInfo() []const u8 {
 // -----------------------------------------------------------------------------
 // common/common.cpp
 
-/// Ports `common_get_model_endpoint` (common/common.cpp:1540 @620d2225c):
+/// Ports `common_get_model_endpoint` (common/common.cpp:1569 @8642541b2):
 /// `MODEL_ENDPOINT`, else `HF_ENDPOINT`, else the hub, ending in `/`.
 pub fn commonGetModelEndpoint(a: Allocator) Allocator.Error![]const u8 {
     var endpoint: []const u8 = getEnv("MODEL_ENDPOINT");
@@ -82,19 +83,19 @@ pub fn commonGetModelEndpoint(a: Allocator) Allocator.Error![]const u8 {
     return endpoint;
 }
 
-/// Ports `common_get_env` (common/common.cpp:947 @620d2225c).
+/// Ports `common_get_env` (common/common.cpp:958 @8642541b2).
 fn getEnv(name: [*:0]const u8) []const u8 {
     const v = std.c.getenv(name) orelse return "";
     return std.mem.span(v);
 }
 
-/// Ports `common_get_path_from_env` (common/common.cpp:964 @620d2225c),
+/// Ports `common_get_path_from_env` (common/common.cpp:975 @8642541b2),
 /// its POSIX arm: an unset variable gives an empty path.
 fn getPathFromEnv(name: [*:0]const u8) []const u8 {
     return getEnv(name);
 }
 
-/// Ports `get_home_directory` (common/common.cpp:976 @620d2225c): `HOME`,
+/// Ports `get_home_directory` (common/common.cpp:987 @8642541b2): `HOME`,
 /// else the password database's home.
 fn getHomeDirectory() Error![]const u8 {
     const home = getPathFromEnv("HOME");
@@ -109,7 +110,7 @@ fn getHomeDirectory() Error![]const u8 {
     return std.mem.span(dir.?);
 }
 
-/// Ports `fs_get_cache_directory` (common/common.cpp:989 @620d2225c), its
+/// Ports `fs_get_cache_directory` (common/common.cpp:1000 @8642541b2), its
 /// macOS and Linux arms: `LLAMA_CACHE` as it is, else the platform's cache
 /// directory with `llama.cpp` appended -- a path, with no trailing
 /// separator added.
@@ -129,12 +130,12 @@ pub fn fsGetCacheDirectory(a: Allocator) Error![]const u8 {
     return hf_cache.pathJoin(a, cache_directory, "llama.cpp");
 }
 
-/// Ports `fs_get_cache_file` (common/common.cpp:1026 @620d2225c): `filename`
+/// Ports `fs_get_cache_file` (common/common.cpp:1037 @8642541b2): `filename`
 /// in the cache directory, which is created.
 pub fn fsGetCacheFile(a: Allocator, filename: []const u8) Error![]const u8 {
-    common.ggmlAssert(std.mem.indexOfScalar(u8, filename, '/') == null, "common/common.cpp", 1027, "filename.find(DIRECTORY_SEPARATOR) == std::string::npos");
+    common.ggmlAssert(std.mem.indexOfScalar(u8, filename, '/') == null, "common/common.cpp", 1038, "filename.find(DIRECTORY_SEPARATOR) == std::string::npos");
     const cache_directory = try fsGetCacheDirectory(a);
-    // `common_create_directories` (common/common.h:928 @620d2225c): on Linux through
+    // `common_create_directories` (common/common.h:936 @8642541b2): on Linux through
     // `path / ""`, which makes no difference here
     if (hf_cache.createDirectories(a, cache_directory) != 0) {
         return throw(error.RuntimeError, "failed to create cache directory: {s}", .{cache_directory});
@@ -142,11 +143,14 @@ pub fn fsGetCacheFile(a: Allocator, filename: []const u8) Error![]const u8 {
     return hf_cache.pathJoin(a, cache_directory, filename);
 }
 
-/// Ports `fs_write_atomic` (common/common.cpp:919 @620d2225c): through a
-/// `.tmp` file renamed into place, the parent directories created first
-/// (their failure ignored).
+/// Ports `fs_write_atomic` (common/common.cpp:926 @8642541b2): through a
+/// temporary file renamed into place, the parent directories created first
+/// (their failure ignored). A random suffix gives every writer its own
+/// temporary file, across processes and containers.
 pub fn fsWriteAtomic(a: Allocator, path: []const u8, data: []const u8) Error!void {
-    const path_tmp = try std.mem.concat(a, u8, &.{ path, ".tmp" });
+    var id_bytes: [8]u8 = undefined;
+    @import("httplib/ws.zig").fillRandomBytes(&id_bytes);
+    const path_tmp = try std.fmt.allocPrint(a, "{s}.{d}.tmp", .{ path, std.mem.readInt(u64, &id_bytes, .little) });
 
     const parent = hf_cache.pathParent(path);
     if (parent.len != 0) {
@@ -169,7 +173,7 @@ pub fn fsWriteAtomic(a: Allocator, path: []const u8, data: []const u8) Error!voi
 // -----------------------------------------------------------------------------
 // common/http.h
 
-/// Ports `common_http_url` (http.h:15 @620d2225c).
+/// Ports `common_http_url` (http.h:17 @8642541b2).
 pub const HttpUrl = struct {
     scheme: []const u8 = "",
     user: []const u8 = "",
@@ -179,14 +183,14 @@ pub const HttpUrl = struct {
     path: []const u8 = "",
 };
 
-/// Ports `common_http_format_host` (http.h:25 @620d2225c): an IPv6 literal
+/// Ports `common_http_format_host` (http.h:27 @8642541b2): an IPv6 literal
 /// bracketed for a URL's authority.
 pub fn commonHttpFormatHost(a: Allocator, host: []const u8) Allocator.Error![]const u8 {
     if (std.mem.indexOfScalar(u8, host, ':') != null) return std.mem.concat(a, u8, &.{ "[", host, "]" });
     return host;
 }
 
-/// Ports `common_http_parse_url` (http.h:29 @620d2225c).
+/// Ports `common_http_parse_url` (http.h:31 @8642541b2).
 pub fn commonHttpParseUrl(a: Allocator, url: []const u8) Error!HttpUrl {
     var parts: HttpUrl = .{};
     const scheme_end = std.mem.indexOf(u8, url, "://") orelse {
@@ -249,9 +253,115 @@ pub fn commonHttpParseUrl(a: Allocator, url: []const u8) Error!HttpUrl {
     return parts;
 }
 
-/// Ports `common_http_client` (http.h:100 @620d2225c): a client for the
-/// URL's host, following redirects, with its credentials. `https` is
-/// refused: the reference builds without SSL.
+/// Ports `common_http_is_loopback` (http.h:105 @8642541b2): a loopback
+/// destination; a remote proxy can never reach the client machine's own
+/// loopback, so these hosts are always contacted directly, before `NO_PROXY`
+/// is consulted (similar to Go's net/http).
+fn commonHttpIsLoopback(a: Allocator, host: []const u8) Allocator.Error!bool {
+    const h = try asciiLower(a, host);
+
+    if (std.mem.eql(u8, h, "localhost") or std.mem.eql(u8, h, "::1") or std.mem.eql(u8, h, "0.0.0.0")) {
+        return true;
+    }
+
+    if (h.len > 10 and std.mem.eql(u8, h[h.len - 10 ..], ".localhost")) {
+        return true;
+    }
+
+    // IPv4 literal: exactly four all-digit octets with values 0-255, loopback is 127.0.0.0/8
+    var octets: [4]c_int = @splat(0);
+    var pos: usize = 0;
+    var n: usize = 0;
+    var complete = false;
+    while (n < 4 and pos <= h.len) {
+        const dot = std.mem.indexOfScalarPos(u8, h, pos, '.') orelse h.len;
+        if (dot == pos or dot - pos > 3) {
+            return false;
+        }
+        var val: c_int = 0;
+        for (h[pos..dot]) |ch| {
+            if (ch < '0' or ch > '9') {
+                return false;
+            }
+            val = val * 10 + (ch - '0');
+        }
+        if (val > 255) {
+            return false;
+        }
+        octets[n] = val;
+        n += 1;
+        if (dot == h.len) {
+            complete = n == 4;
+            break;
+        }
+        pos = dot + 1;
+    }
+
+    return complete and octets[0] == 127;
+}
+
+/// The `lower` lambda of `common_http_is_loopback` and
+/// `common_http_proxy_bypass`.
+fn asciiLower(a: Allocator, s: []const u8) Allocator.Error![]u8 {
+    const out = try a.dupe(u8, s);
+    for (out) |*ch| {
+        if (ch.* >= 'A' and ch.* <= 'Z') ch.* += 'a' - 'A';
+    }
+    return out;
+}
+
+/// Ports `common_http_proxy_bypass` (http.h:161 @8642541b2): a host against a
+/// `NO_PROXY` list: comma separated entries, `*` bypasses the proxy for every
+/// host, an entry matches the host itself or any of its subdomains, a
+/// leading dot is optional, ports are ignored.
+fn commonHttpProxyBypass(a: Allocator, no_proxy: []const u8, host: []const u8) Allocator.Error!bool {
+    const h = try asciiLower(a, host);
+
+    var pos: usize = 0;
+    while (pos < no_proxy.len) {
+        const end = std.mem.indexOfScalarPos(u8, no_proxy, pos, ',') orelse no_proxy.len;
+
+        var entry: []const u8 = try asciiLower(a, no_proxy[pos..end]);
+        pos = end + 1;
+
+        entry = std.mem.trim(u8, entry, " \t");
+        if (entry.len == 0) {
+            continue;
+        }
+
+        if (std.mem.eql(u8, entry, "*")) {
+            return true;
+        }
+
+        if (entry[0] == '.') {
+            entry = entry[1..];
+        }
+
+        if (entry.len == 0) {
+            continue;
+        }
+
+        if (std.mem.eql(u8, h, entry)) {
+            return true;
+        }
+
+        if (h.len > entry.len and h[h.len - entry.len - 1] == '.' and std.mem.endsWith(u8, h, entry)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/// The `getenv_s` lambda of `common_http_client`: the upper-case name first.
+fn getenvS(upper: [*:0]const u8, lower: [*:0]const u8) []const u8 {
+    const v = std.c.getenv(upper) orelse std.c.getenv(lower) orelse return "";
+    return std.mem.span(v);
+}
+
+/// Ports `common_http_client` (http.h:214 @8642541b2): a client for the
+/// URL's host, following redirects, with its credentials, through the proxy
+/// `HTTP_PROXY` names. `https` is refused: the reference builds without SSL.
 pub fn commonHttpClient(a: Allocator, url: []const u8) Error!HttpClient {
     const parts = try commonHttpParseUrl(a, url);
 
@@ -275,16 +385,34 @@ pub fn commonHttpClient(a: Allocator, url: []const u8) Error!HttpClient {
 
     cli.setFollowLocation(true);
 
+    // Honor HTTP_PROXY / HTTPS_PROXY environment variables (both lower- and upper-case).
+    const proxy_url = getenvS("HTTP_PROXY", "http_proxy");
+
+    if (proxy_url.len != 0 and !try commonHttpIsLoopback(a, parts.host) and
+        !try commonHttpProxyBypass(a, getenvS("NO_PROXY", "no_proxy"), parts.host))
+    {
+        if (commonHttpParseUrl(a, proxy_url)) |proxy| {
+            cli.setProxy(proxy.host, proxy.port);
+            if (proxy.user.len != 0) {
+                cli.setProxyBasicAuth(proxy.user, proxy.password);
+            }
+        } else |e| {
+            if (e == error.OutOfMemory) return error.OutOfMemory;
+            // fall back to a direct connection, the URL itself is not logged as it can carry credentials
+            log.wrn("%s: ignoring malformed proxy URL from the environment: %s\n", .{ @as([*:0]const u8, "common_http_client"), try zs(a, common.what(e)) });
+        }
+    }
+
     return cli;
 }
 
-/// Ports `common_http_show_masked_url` (http.h:129 @620d2225c): the URL
+/// Ports `common_http_show_masked_url` (http.h:270 @8642541b2): the URL
 /// without its credentials.
 pub fn commonHttpShowMaskedUrl(a: Allocator, parts: *const HttpUrl) Allocator.Error![]const u8 {
     return std.mem.concat(a, u8, &.{ parts.scheme, "://", if (parts.user.len == 0) "" else "****:****@", try commonHttpFormatHost(a, parts.host), parts.path });
 }
 
-/// Ports `common_http_get_free_port` (http.h:133 @620d2225c), its POSIX
+/// Ports `common_http_get_free_port` (http.h:274 @8642541b2), its POSIX
 /// arm: a port the kernel picks for a socket bound to any address.
 ///
 /// Return: the port, or -1.
@@ -313,7 +441,7 @@ pub fn commonHttpGetFreePort() c_int {
 // -----------------------------------------------------------------------------
 // download.h
 
-/// Ports `common_download_progress` (download.h:14 @620d2225c).
+/// Ports `common_download_progress` (download.h:14 @8642541b2).
 pub const Progress = struct {
     url: []const u8 = "",
     downloaded: usize = 0,
@@ -321,7 +449,7 @@ pub const Progress = struct {
     cached: bool = false,
 };
 
-/// Ports `common_download_callback` (download.h:21 @620d2225c): its four
+/// Ports `common_download_callback` (download.h:21 @8642541b2): its four
 /// virtual members.
 pub const Callback = struct {
     ctx: *anyopaque,
@@ -336,29 +464,29 @@ pub const Callback = struct {
 };
 
 /// Ports `common_header` and `common_header_list` (download.h:11, 12
-/// @620d2225c).
+/// @8642541b2).
 pub const HeaderList = []const struct { []const u8, []const u8 };
 
-/// Ports `common_remote_params` (download.h:30 @620d2225c).
+/// Ports `common_remote_params` (download.h:30 @8642541b2).
 pub const RemoteParams = struct {
     headers: HeaderList = &.{},
     timeout: c_long = 0, // in seconds, 0 means no timeout
     max_size: c_long = 0, // unlimited if 0
 };
 
-/// Ports `common_cached_model_info` (download.h:45 @620d2225c).
+/// Ports `common_cached_model_info` (download.h:45 @8642541b2).
 pub const CachedModelInfo = struct {
     repo: []const u8,
     tag: []const u8,
 
-    /// Ports `to_string` (download.h:48 @620d2225c), a member of
+    /// Ports `to_string` (download.h:48 @8642541b2), a member of
     /// `common_cached_model_info`.
     pub fn toString(self: CachedModelInfo, a: Allocator) Allocator.Error![]const u8 {
         return std.mem.concat(a, u8, &.{ self.repo, ":", self.tag });
     }
 };
 
-/// Ports `common_download_opts` (download.h:54 @620d2225c).
+/// Ports `common_download_opts` (download.h:54 @8642541b2).
 pub const Opts = struct {
     bearer_token: []const u8 = "",
     headers: HeaderList = &.{},
@@ -382,22 +510,32 @@ pub const OnDone = struct {
     }
 };
 
-/// Ports `common_download_task` (download.h:66 @620d2225c).
+/// Ports `common_download_task` (download.h:66 @8642541b2).
 pub const Task = struct {
     opts: Opts = .{},
     url: []const u8 = "",
     local_path: []const u8 = "",
     on_done: OnDone = .{},
     is_hf: bool = false,
+    lock_path: []const u8 = "",
+    alt_path: []const u8 = "", // HF snapshot path, also treated as cached (the blob may be moved there)
 
-    /// Ports the constructor taking an `hf_file` (download.h:74
-    /// @620d2225c).
-    pub fn fromHf(f: *const HfFile, opts: Opts, on_done: OnDone) Task {
-        return .{ .opts = opts, .url = f.url, .local_path = f.local_path, .on_done = on_done, .is_hf = true };
+    /// Ports the constructor taking an `hf_file` (download.h:76
+    /// @8642541b2).
+    pub fn fromHf(a: Allocator, f: *const HfFile, opts: Opts, on_done: OnDone) Error!Task {
+        return .{
+            .opts = opts,
+            .url = f.url,
+            .local_path = f.local_path,
+            .on_done = on_done,
+            .is_hf = true,
+            .lock_path = try hf_cache.getLockPath(a, f.repo_id, f.oid),
+            .alt_path = f.final_path,
+        };
     }
 };
 
-/// Ports `common_download_hf_plan` (download.h:111 @620d2225c).
+/// Ports `common_download_hf_plan` (download.h:125 @8642541b2).
 pub const HfPlan = struct {
     primary: HfFile = .{},
     model_files: []HfFile = &.{},
@@ -409,17 +547,42 @@ pub const HfPlan = struct {
     preset: HfFile = .{}, // if set, only this file is downloaded
 };
 
+/// Ports `common_download_sidecar` (download.h:139 @8642541b2): a sidecar
+/// kind a download can pull next to its model: mmproj, and the draft heads of
+/// `--spec-type draft-<name>`. `opt` and `file` name the fields of `Opts` and
+/// `HfPlan`, the C's pointers to members.
+pub const Sidecar = struct {
+    name: []const u8, // the kind, as the API names it
+    keyword: []const u8, // the part of a file name that marks a file of this kind
+    draft: bool, // a draft head, resolved at the tag even without a model
+    opt: []const u8, // the option that requests it
+    file: []const u8, // the plan file it resolves to
+};
+
+/// Ports `common_download_partial` (download.h:159 @8642541b2): a file a
+/// plan still has to download, at the path its partial takes while it is
+/// incomplete; `kind` is the sidecar it belongs to, empty for the model
+/// files.
+pub const Partial = struct {
+    kind: []const u8 = "",
+    path: []const u8 = "",
+};
+
 // -----------------------------------------------------------------------------
 // download.cpp
 
-/// Ports `write_etag` (download.cpp:42 @620d2225c).
+/// Ports `PARTIAL_SUFFIX` (download.cpp:44 @8642541b2): the suffix of the
+/// file a download writes until it completes.
+const partial_suffix = ".downloadInProgress";
+
+/// Ports `write_etag` (download.cpp:46 @8642541b2).
 fn writeEtag(a: Allocator, path: []const u8, etag: []const u8) Error!void {
     const etag_path = try std.mem.concat(a, u8, &.{ path, ".etag" });
     try fsWriteAtomic(a, etag_path, etag);
     log.dbg("%s: file etag saved: %s\n", .{ @as([*:0]const u8, "write_etag"), try zs(a, etag_path) });
 }
 
-/// Ports `read_etag` (download.cpp:48 @620d2225c): the first line of
+/// Ports `read_etag` (download.cpp:52 @8642541b2): the first line of
 /// `<path>.etag`, or nothing.
 fn readEtag(a: Allocator, path: []const u8) Allocator.Error![]const u8 {
     const etag_path = try std.mem.concat(a, u8, &.{ path, ".etag" });
@@ -433,12 +596,12 @@ fn readEtag(a: Allocator, path: []const u8) Allocator.Error![]const u8 {
     return etag;
 }
 
-/// Ports `is_http_status_ok` (download.cpp:63 @620d2225c).
+/// Ports `is_http_status_ok` (download.cpp:67 @8642541b2).
 fn isHttpStatusOk(status: c_int) bool {
     return status >= 200 and status < 400;
 }
 
-/// Ports `common_download_split_repo_tag` (download.cpp:67 @620d2225c):
+/// Ports `common_download_split_repo_tag` (download.cpp:71 @8642541b2):
 /// `user/model:tag` into the repository and the tag, which may be empty.
 pub fn splitRepoTag(a: Allocator, hf_repo_with_tag: []const u8) Error!struct { []const u8, []const u8 } {
     const parts = try tc.strings.split(a, hf_repo_with_tag, ':');
@@ -451,7 +614,20 @@ pub fn splitRepoTag(a: Allocator, hf_repo_with_tag: []const u8) Error!struct { [
     return .{ hf_repo, tag };
 }
 
-/// Ports `ProgressBar` (download.cpp:77 @620d2225c): one line per file
+/// Ports `url_get_filename` (download.cpp:82 @8642541b2): the file name from a
+/// URL, without the query string.
+fn urlGetFilename(url: []const u8) []const u8 {
+    var f = url;
+    if (std.mem.lastIndexOfScalar(u8, f, '/')) |pos| {
+        f = f[pos + 1 ..];
+    }
+    if (std.mem.indexOfScalar(u8, f, '?')) |pos| {
+        f = f[0..pos];
+    }
+    return f;
+}
+
+/// Ports `ProgressBar` (download.cpp:93 @8642541b2): one line per file
 /// being downloaded, redrawn in place, when stdout is a terminal.
 const ProgressBar = struct {
     var mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER;
@@ -483,14 +659,8 @@ const ProgressBar = struct {
     fn onStart(ctx: *anyopaque, p: *const Progress) void {
         const self: *ProgressBar = @ptrCast(@alignCast(ctx));
         const a = std.heap.c_allocator;
-        var f: []const u8 = p.url;
+        const f = urlGetFilename(p.url);
 
-        if (std.mem.lastIndexOfScalar(u8, f, '/')) |pos| {
-            f = f[pos + 1 ..];
-        }
-        if (std.mem.indexOfScalar(u8, f, '?')) |pos| {
-            f = f[0..pos];
-        }
         self.filename.clearRetainingCapacity();
         self.filename.appendSlice(a, f) catch return;
         var i: usize = 0;
@@ -564,6 +734,7 @@ const ProgressBar = struct {
 const PullState = struct {
     a: Allocator,
     fd: c_int,
+    fd_open: bool = true,
     path_tmp: []const u8,
     p: *Progress,
     callback: ?*const Callback,
@@ -575,6 +746,14 @@ const PullState = struct {
         const p = self.p;
         if (p.downloaded > 0 and response.status != 206) {
             log.wrn("%s: server did not respond with 206 Partial Content for a resume request. Status: %d\n", .{ func, response.status });
+            if (response.status == 416 or response.status == 200) {
+                // the kept partial cannot be resumed: 416 for a complete or stale one,
+                // 200 from a server that ignores the range; drop it, so the next
+                // attempt starts over instead of wedging on the same answer
+                _ = std.c.close(self.fd);
+                self.fd_open = false;
+                _ = cRemove(zs(self.a, self.path_tmp) catch return false);
+            }
             return false;
         }
         if (p.downloaded == 0 and response.status != 200) {
@@ -610,7 +789,7 @@ const PullState = struct {
         if (self.progress_step >= p.total / 1000 or p.downloaded == p.total) {
             if (self.callback) |cb| {
                 cb.on_update(cb.ctx, p);
-                if (cb.is_cancelled(cb.ctx)) {
+                if (cb.is_cancelled(cb.ctx) and (p.total == 0 or p.downloaded != p.total)) {
                     return false;
                 }
             }
@@ -643,7 +822,7 @@ fn cRename(o: [*:0]const u8, n: [*:0]const u8) c_int {
 }
 extern fn strtoull(s: [*:0]const u8, end: *?[*:0]const u8, base: c_int) c_ulonglong;
 
-/// Ports `common_pull_file` (download.cpp:165 @620d2225c): a GET appended
+/// Ports `common_pull_file` (download.cpp:175 @8642541b2): a GET appended
 /// to `path_tmp`, from `p.downloaded` with a `Range` when the server takes
 /// ranges.
 ///
@@ -657,8 +836,8 @@ fn commonPullFile(a: Allocator, cli: *HttpClient, resolve_path: []const u8, path
         log.err("%s: error opening local file for writing: %s\n", .{ func, z.ptr });
         return false;
     }
-    var fd_open = true;
-    defer if (fd_open) {
+    var state: PullState = .{ .a = a, .fd = fd, .path_tmp = path_tmp, .p = p, .callback = callback };
+    defer if (state.fd_open) {
         _ = std.c.close(fd);
     };
 
@@ -667,7 +846,6 @@ fn commonPullFile(a: Allocator, cli: *HttpClient, resolve_path: []const u8, path
         _ = try headers.emplace(a, "Range", try std.fmt.allocPrint(a, "bytes={d}-", .{p.downloaded}));
     }
 
-    var state: PullState = .{ .a = a, .fd = fd, .path_tmp = path_tmp, .p = p, .callback = callback };
     const res = cli.getStream(a, resolve_path, &headers, &state, PullState.onResponse, PullState.onData);
 
     if (res.res == null) {
@@ -675,7 +853,7 @@ fn commonPullFile(a: Allocator, cli: *HttpClient, resolve_path: []const u8, path
         return false;
     }
 
-    fd_open = false;
+    state.fd_open = false;
     if (std.c.close(fd) != 0) {
         log.err("%s: error closing file: %s\n", .{ func, z.ptr });
         return false;
@@ -684,21 +862,93 @@ fn commonPullFile(a: Allocator, cli: *HttpClient, resolve_path: []const u8, path
     return true;
 }
 
-/// Ports `common_download_file_single_online` (download.cpp:247
-/// @620d2225c): one file, revalidated against its `.etag` by a HEAD, then
-/// up to three attempts, each resuming what the last one left.
+/// What `common_download_file_single_online`'s lambdas capture.
+const OnlineState = struct {
+    a: Allocator,
+    url: []const u8,
+    opts: *const Opts,
+    path: []const u8,
+    alt_path: []const u8,
+    lock: *file_lock.FileLock,
+    p: *Progress,
+    waited: bool = false,
+
+    /// The `finish` lambda: the completion callback may itself take the same
+    /// lock (the HF cache finalizes blobs under it), so every exit goes
+    /// through here.
+    fn finish(self: *const OnlineState, status: c_int) c_int {
+        self.lock.close();
+        if (self.opts.callback) |cb| {
+            cb.on_done(cb.ctx, self.p, isHttpStatusOk(status));
+        }
+        return status;
+    }
+
+    /// The `cache_hit` lambda: `alt_path` is the HF snapshot, where the blob
+    /// may have been moved when symlinks are unavailable.
+    fn cacheHit(self: *const OnlineState) bool {
+        return hf_cache.exists(self.a, self.path) or
+            (self.alt_path.len != 0 and hf_cache.exists(self.a, self.alt_path));
+    }
+
+    /// The lambda `lock.acquire` polls.
+    fn keepWaiting(ctx: ?*anyopaque) bool {
+        const self: *OnlineState = @ptrCast(@alignCast(ctx.?));
+        if (!self.waited) {
+            const name = zs(self.a, urlGetFilename(self.url)) catch "";
+            log.inf("%s: file '%s' is being downloaded by another process, waiting...\n", .{ @as([*:0]const u8, "operator()"), name });
+            self.waited = true;
+        }
+        if (self.opts.callback) |cb| return !cb.is_cancelled(cb.ctx);
+        return true;
+    }
+};
+
+/// Ports `common_download_file_single_online` (download.cpp:264
+/// @8642541b2): one file, under a lock another process downloading it also
+/// takes, revalidated against its `.etag` by a HEAD, then up to three
+/// attempts, each resuming what the last one left.
+///
+/// Parameters:
+/// - `lock_path`: when empty, `<path>.lock`.
+/// - `alt_path`: an additional path treated as present in the cache.
 ///
 /// Return: the HEAD's status, 304 for a cached file, or -1.
-fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opts: *const Opts, skip_etag: bool) Error!c_int {
+fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opts: *const Opts, skip_etag: bool, lock_path: []const u8, alt_path: []const u8) Error!c_int {
     const func = "common_download_file_single_online";
     const max_attempts = 3;
     const retry_delay_seconds = 2;
 
-    const file_exists = hf_cache.exists(a, path);
+    const path_temporary = try std.mem.concat(a, u8, &.{ path, partial_suffix });
+    const path_lock = if (lock_path.len == 0) try std.mem.concat(a, u8, &.{ path, ".lock" }) else lock_path;
+
+    var p: Progress = .{};
+    p.url = url;
+
+    if (opts.callback) |cb| {
+        cb.on_start(cb.ctx, &p);
+    }
+
+    var lock = file_lock.FileLock.init(a, path_lock);
+    defer lock.deinit();
+    var st: OnlineState = .{ .a = a, .url = url, .opts = opts, .path = path, .alt_path = alt_path, .lock = &lock, .p = &p };
+
+    if (skip_etag and st.cacheHit()) {
+        log.dbg("%s: using cached file: %s\n", .{ func, try zs(a, path) });
+        return st.finish(304); // 304 Not Modified - fake cached response
+    }
+
+    // take the lock before touching the cache, so two processes cannot race on the same file
+    if (!try lock.acquire(.{ .ctx = &st, .func = OnlineState.keepWaiting })) {
+        return st.finish(-1);
+    }
+
+    // under the lock: another process may have finished while we waited
+    const file_exists = st.cacheHit();
 
     if (file_exists and skip_etag) {
         log.dbg("%s: using cached file: %s\n", .{ func, try zs(a, path) });
-        return 304; // 304 Not Modified - fake cached response
+        return st.finish(304); // 304 Not Modified - fake cached response
     }
 
     var cli = try commonHttpClient(a, url);
@@ -729,9 +979,9 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
         log.trc("%s: HEAD failed, status: %d\n", .{ func, if (head.res != null) head.res.?.status else @as(c_int, -1) });
         if (file_exists) {
             log.trc("%s: using cached file (HEAD failed): %s\n", .{ func, try zs(a, path) });
-            return 304; // 304 Not Modified - fake cached response
+            return st.finish(304); // 304 Not Modified - fake cached response
         }
-        return if (head.res != null) head.res.?.status else -1;
+        return st.finish(if (head.res != null) head.res.?.status else -1);
     }
     const hres = head.res.?;
 
@@ -740,8 +990,6 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
         etag = hres.getHeaderValue("ETag");
     }
 
-    var p: Progress = .{};
-    p.url = url;
     if (hres.hasHeader("Content-Length")) {
         if (stoull(a, hres.getHeaderValue("Content-Length"))) |v| {
             p.total = v;
@@ -758,16 +1006,16 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
     if (file_exists) {
         if (etag.len == 0) {
             log.dbg("%s: using cached file (no server etag): %s\n", .{ func, try zs(a, path) });
-            return 304; // 304 Not Modified - fake cached response
+            return st.finish(304); // 304 Not Modified - fake cached response
         }
         if (last_etag.len != 0 and std.mem.eql(u8, last_etag, etag)) {
             log.dbg("%s: using cached file (same etag): %s\n", .{ func, try zs(a, path) });
-            return 304; // 304 Not Modified - fake cached response
+            return st.finish(304); // 304 Not Modified - fake cached response
         }
         // pass this point, the file exists but is different from the server version, so we need to redownload it
         if (cRemove(try zs(a, path)) != 0) {
             log.err("%s: unable to delete file: %s\n", .{ func, try zs(a, path) });
-            return -1;
+            return st.finish(-1);
         }
     }
 
@@ -776,11 +1024,23 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
     }
 
     var success = false;
-    const path_temporary = try std.mem.concat(a, u8, &.{ path, ".downloadInProgress" });
     var delay: c_int = retry_delay_seconds;
 
+    if (!skip_etag and etag.len != 0) {
+        if (hf_cache.exists(a, path_temporary) and !std.mem.eql(u8, try readEtag(a, path_temporary), etag)) {
+            log.wrn("%s: partial file does not match the server etag, discarding it: %s\n", .{ func, try zs(a, path_temporary) });
+            if (cRemove(try zs(a, path_temporary)) != 0) {
+                log.err("%s: unable to delete file: %s\n", .{ func, try zs(a, path_temporary) });
+                return st.finish(-1);
+            }
+        }
+        try writeEtag(a, path_temporary, etag);
+    }
+
     if (opts.callback) |cb| {
-        cb.on_start(cb.ctx, &p);
+        // report the resume offset, so a resumed file does not start at 0
+        p.downloaded = if (supports_ranges and hf_cache.exists(a, path_temporary)) fileSize(a, path_temporary) else 0;
+        cb.on_update(cb.ctx, &p);
     }
 
     var i: c_int = 0;
@@ -816,26 +1076,19 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
             }
             if (etag.len != 0 and !skip_etag) {
                 try writeEtag(a, path, etag);
+                _ = cRemove(try zs(a, try std.mem.concat(a, u8, &.{ path_temporary, ".etag" })));
             }
             success = true;
             break;
         }
     }
 
-    if (opts.callback) |cb| {
-        cb.on_done(cb.ctx, &p, success);
-    }
-    if (opts.callback) |cb| if (cb.is_cancelled(cb.ctx) and hf_cache.exists(a, path_temporary)) {
-        if (cRemove(try zs(a, path_temporary)) != 0) {
-            log.err("%s: unable to delete temporary file: %s\n", .{ func, try zs(a, path_temporary) });
-        }
-    };
+    // a stopped download keeps path_temporary, so the next attempt resumes from it
     if (!success) {
         log.err("%s: download failed after %d attempts\n", .{ func, @as(c_int, max_attempts) });
-        return -1; // max attempts reached
     }
 
-    return hres.status;
+    return st.finish(if (success) hres.status else -1);
 }
 
 fn sleepSeconds(s: c_int) void {
@@ -867,7 +1120,7 @@ const ContentState = struct {
     }
 };
 
-/// Ports `common_remote_get_content` (download.cpp:398 @620d2225c): a GET's
+/// Ports `common_remote_get_content` (download.cpp:465 @8642541b2): a GET's
 /// status and body, cut off past `max_size`.
 pub fn remoteGetContent(a: Allocator, url: []const u8, params: *const RemoteParams) Error!struct { status: c_long, body: []u8 } {
     var cli = try commonHttpClient(a, url);
@@ -897,11 +1150,11 @@ pub fn remoteGetContent(a: Allocator, url: []const u8, params: *const RemotePara
     return .{ .status = res.res.?.status, .body = state.buf.items };
 }
 
-/// Ports `common_download_file_single` (download.cpp:432 @620d2225c): one
+/// Ports `common_download_file_single` (download.cpp:499 @8642541b2): one
 /// file, or the cached copy when offline.
 ///
 /// Return: an HTTP status, 304 for a cached file, or -1.
-pub fn downloadFileSingle(a: Allocator, url: []const u8, path: []const u8, opts: *const Opts, skip_etag: bool) Error!c_int {
+pub fn downloadFileSingle(a: Allocator, url: []const u8, path: []const u8, opts: *const Opts, skip_etag: bool, lock_path: []const u8, alt_path: []const u8) Error!c_int {
     const func = "common_download_file_single";
     if (!opts.offline) {
         var tty_cb_state: ProgressBar = .{};
@@ -911,7 +1164,7 @@ pub fn downloadFileSingle(a: Allocator, url: []const u8, path: []const u8, opts:
         if (online_opts.callback == null) {
             online_opts.callback = &tty_cb;
         }
-        return downloadFileSingleOnline(a, url, path, &online_opts, skip_etag);
+        return downloadFileSingleOnline(a, url, path, &online_opts, skip_etag, lock_path, alt_path);
     }
 
     if (!hf_cache.exists(a, path)) {
@@ -933,7 +1186,7 @@ pub fn downloadFileSingle(a: Allocator, url: []const u8, path: []const u8, opts:
     return 304; // Not Modified - fake cached response
 }
 
-/// Ports `gguf_split_info` (download.cpp:464 @620d2225c).
+/// Ports `gguf_split_info` (download.cpp:533 @8642541b2).
 const SplitInfo = struct {
     prefix: []const u8 = "", // tag included
     tag: []const u8 = "",
@@ -941,7 +1194,7 @@ const SplitInfo = struct {
     count: c_int = 0,
 };
 
-/// Ports `get_gguf_split_info` (download.cpp:471 @620d2225c): a `.gguf`
+/// Ports `get_gguf_split_info` (download.cpp:540 @8642541b2): a `.gguf`
 /// path's stem, split index and count, and its quant tag in upper case.
 fn getGgufSplitInfo(a: Allocator, path: []const u8) Error!SplitInfo {
     var re_split = regex.Regex.compileWith("^(.+)-([0-9]{5})-of-([0-9]{5})$", .{ .icase = true }) catch |err| switch (err) {
@@ -983,7 +1236,7 @@ fn stoiThrow(a: Allocator, s: []const u8) Error!c_int {
     return tc.arg.stoi(z) catch return throw(error.InvalidArgument, "{s}", .{tc.arg.what()});
 }
 
-/// Ports `extract_quant_bits` (download.cpp:502 @620d2225c): Q4_0 -> 4,
+/// Ports `extract_quant_bits` (download.cpp:571 @8642541b2): Q4_0 -> 4,
 /// F16 -> 16, NVFP4 -> 4, Q8_K_M -> 8, etc.
 fn extractQuantBits(a: Allocator, filename: []const u8) Error!c_int {
     const split = try getGgufSplitInfo(a, filename);
@@ -993,7 +1246,7 @@ fn extractQuantBits(a: Allocator, filename: []const u8) Error!c_int {
     return stoiThrow(a, split.tag[pos..]);
 }
 
-/// Ports `get_split_files` (download.cpp:513 @620d2225c): every shard of the
+/// Ports `get_split_files` (download.cpp:582 @8642541b2): every shard of the
 /// split `file` belongs to.
 fn getSplitFiles(a: Allocator, files: []const HfFile, file: *const HfFile) Error![]HfFile {
     const split = try getGgufSplitInfo(a, file.path);
@@ -1014,7 +1267,7 @@ fn getSplitFiles(a: Allocator, files: []const HfFile, file: *const HfFile) Error
     return result.items;
 }
 
-/// Ports `find_best_sibling` (download.cpp:534 @620d2225c): the best sibling
+/// Ports `find_best_sibling` (download.cpp:603 @8642541b2): the best sibling
 /// GGUF whose filename contains `keyword` (e.g. "mmproj" / "mtp"),
 /// preferring deeper shared directory prefix with the model, then exact
 /// `tag` match, then closest quantization to the tag when given, or to the
@@ -1078,32 +1331,74 @@ fn findBestSibling(a: Allocator, files: []const HfFile, model: []const u8, keywo
     return best;
 }
 
-/// Ports `find_best_mmproj` (download.cpp:597 @620d2225c).
-fn findBestMmproj(a: Allocator, files: []const HfFile, model: []const u8) Error!HfFile {
-    return findBestSibling(a, files, model, "mmproj", "");
+/// Ports `sidecars` (download.cpp:666 @8642541b2), with
+/// `common_download_sidecars` (download.cpp:674 @8642541b2): every sidecar
+/// kind, the single list the resolution, the listing and the removal follow.
+pub const sidecars = [_]Sidecar{
+    .{ .name = "mmproj", .keyword = "mmproj", .draft = false, .opt = "download_mmproj", .file = "mmproj" },
+    .{ .name = "mtp", .keyword = "mtp-", .draft = true, .opt = "download_mtp", .file = "mtp" },
+    .{ .name = "dflash", .keyword = "dflash-", .draft = true, .opt = "download_dflash", .file = "dflash" },
+    .{ .name = "eagle3", .keyword = "eagle3-", .draft = true, .opt = "download_eagle3", .file = "eagle3" },
+    .{ .name = "dspark", .keyword = "dspark-", .draft = true, .opt = "download_dspark", .file = "dspark" },
+};
+
+/// Ports `common_download_opts_add_sidecar` (download.cpp:678 @8642541b2):
+/// selects the sidecar `kind` in `opts`.
+///
+/// Return: false for an unknown kind.
+pub fn optsAddSidecar(opts: *Opts, kind: []const u8) bool {
+    inline for (sidecars) |sc| {
+        if (std.mem.eql(u8, kind, sc.name)) {
+            @field(opts, sc.opt) = true;
+            return true;
+        }
+    }
+    return false;
 }
 
-/// Ports `find_best_mtp` (download.cpp:602 @620d2225c).
-fn findBestMtp(a: Allocator, files: []const HfFile, model: []const u8, tag: []const u8) Error!HfFile {
-    return findBestSibling(a, files, model, "mtp-", tag);
+/// `opts.*s.opt = true` for every kind: what a removal's cached plan sets.
+fn optsAddAllSidecars(opts: *Opts) void {
+    inline for (sidecars) |sc| @field(opts, sc.opt) = true;
 }
 
-/// Ports `find_best_eagle3` (download.cpp:608 @620d2225c).
-fn findBestEagle3(a: Allocator, files: []const HfFile, model: []const u8, tag: []const u8) Error!HfFile {
-    return findBestSibling(a, files, model, "eagle3-", tag);
+/// Ports `common_download_plan_sidecars` (download.cpp:688 @8642541b2): the
+/// sidecar kinds `plan` resolves a file for.
+pub fn planSidecars(a: Allocator, plan: *const HfPlan) Allocator.Error![]const []const u8 {
+    var out: std.ArrayList([]const u8) = .empty;
+    inline for (sidecars) |sc| {
+        if (@field(plan, sc.file).path.len != 0) try out.append(a, sc.name);
+    }
+    return out.items;
 }
 
-/// Ports `find_best_dflash` (download.cpp:614 @620d2225c).
-fn findBestDflash(a: Allocator, files: []const HfFile, model: []const u8, tag: []const u8) Error!HfFile {
-    return findBestSibling(a, files, model, "dflash-", tag);
+/// Ports `common_download_plan_partials` (download.cpp:698 @8642541b2): the
+/// partials the download of `plan` writes, for the files not in the cache
+/// yet: a file in the cache resolves to its snapshot entry, a file still to
+/// download to its blob.
+pub fn planPartials(a: Allocator, plan: *const HfPlan) Allocator.Error![]Partial {
+    var out: std.ArrayList(Partial) = .empty;
+    const Add = struct {
+        fn f(ar: Allocator, list: *std.ArrayList(Partial), kind: []const u8, file: *const HfFile) Allocator.Error!void {
+            if (file.local_path.len != 0 and !std.mem.eql(u8, file.local_path, file.final_path)) {
+                try list.append(ar, .{ .kind = kind, .path = try std.mem.concat(ar, u8, &.{ file.local_path, partial_suffix }) });
+            }
+        }
+    };
+    for (plan.model_files) |*f| try Add.f(a, &out, "", f);
+    inline for (sidecars) |sc| try Add.f(a, &out, sc.name, &@field(plan, sc.file));
+    return out.items;
 }
 
-/// Ports `find_best_dspark` (download.cpp:620 @620d2225c).
-fn findBestDspark(a: Allocator, files: []const HfFile, model: []const u8, tag: []const u8) Error!HfFile {
-    return findBestSibling(a, files, model, "dspark-", tag);
+/// Ports `name_is_sidecar` (download.cpp:718 @8642541b2): true when `name`
+/// carries the keyword of a sidecar kind.
+fn nameIsSidecar(name: []const u8) bool {
+    inline for (sidecars) |sc| {
+        if (std.mem.indexOf(u8, name, sc.keyword) != null) return true;
+    }
+    return false;
 }
 
-/// Ports `gguf_filename_is_model` (download.cpp:626 @620d2225c): a `.gguf`
+/// Ports `gguf_filename_is_model` (download.cpp:727 @8642541b2): a `.gguf`
 /// that is not a projector, imatrix or draft sidecar.
 fn ggufFilenameIsModel(filepath: []const u8) bool {
     if (!std.mem.endsWith(u8, filepath, ".gguf")) {
@@ -1115,12 +1410,7 @@ fn ggufFilenameIsModel(filepath: []const u8) bool {
         filename = filename[pos + 1 ..];
     }
 
-    return std.mem.indexOf(u8, filename, "mmproj") == null and
-        std.mem.indexOf(u8, filename, "imatrix") == null and
-        std.mem.indexOf(u8, filename, "mtp-") == null and
-        std.mem.indexOf(u8, filename, "eagle3-") == null and
-        std.mem.indexOf(u8, filename, "dflash-") == null and
-        std.mem.indexOf(u8, filename, "dspark-") == null;
+    return std.mem.indexOf(u8, filename, "imatrix") == null and !nameIsSidecar(filename);
 }
 
 /// `std::regex_search(text, std::regex(pattern, std::regex::icase))`; a
@@ -1133,7 +1423,7 @@ fn icaseSearch(pattern: []const u8, text: []const u8) Error!bool {
     return re.search(text, &m);
 }
 
-/// Ports `find_best_model` (download.cpp:644 @620d2225c): the first model
+/// Ports `find_best_model` (download.cpp:740 @8642541b2): the first model
 /// file whose name carries the tag (by default Q4_K_M, then Q8_0), the
 /// first shard of a split; with no tag, any model file.
 fn findBestModel(a: Allocator, files: []const HfFile, tag: []const u8) Error!HfFile {
@@ -1176,7 +1466,7 @@ fn findBestModel(a: Allocator, files: []const HfFile, tag: []const u8) Error!HfF
     return .{};
 }
 
-/// Ports `list_available_gguf_files` (download.cpp:684 @620d2225c).
+/// Ports `list_available_gguf_files` (download.cpp:780 @8642541b2).
 fn listAvailableGgufFiles(a: Allocator, files: []const HfFile) Allocator.Error!void {
     log.inf("Available GGUF files:\n", .{});
     for (files) |f| {
@@ -1186,7 +1476,7 @@ fn listAvailableGgufFiles(a: Allocator, files: []const HfFile) Allocator.Error!v
     }
 }
 
-/// Ports `common_download_get_hf_plan` (download.cpp:693 @620d2225c): which
+/// Ports `common_download_get_hf_plan` (download.cpp:789 @8642541b2): which
 /// files of a repository to fetch -- its `preset.ini` alone, or the model
 /// (every shard) and the sidecars asked for.
 pub fn getHfPlan(a: Allocator, model: *const ModelParams, opts: *const Opts) Error!HfPlan {
@@ -1230,8 +1520,12 @@ pub fn getHfPlan(a: Allocator, model: *const ModelParams, opts: *const Opts) Err
         }
     } else {
         primary = try findBestModel(a, all, tag);
-        // a requested sidecar can resolve on its own, without a full model of the same tag
-        if (primary.path.len == 0 and !opts.download_mtp and !opts.download_dflash and !opts.download_eagle3 and !opts.download_dspark) {
+        // a requested draft can resolve on its own, without a full model of the same tag
+        var want_draft = false;
+        inline for (sidecars) |sc| {
+            if (sc.draft and @field(opts, sc.opt)) want_draft = true;
+        }
+        if (primary.path.len == 0 and !want_draft) {
             log.err("%s: no GGUF files found in repository %s\n", .{ func, try zs(a, repo) });
             try listAvailableGgufFiles(a, all);
             return plan;
@@ -1243,25 +1537,22 @@ pub fn getHfPlan(a: Allocator, model: *const ModelParams, opts: *const Opts) Err
         plan.model_files = try getSplitFiles(a, all, &primary);
     }
 
-    if (opts.download_mmproj and primary.path.len != 0) {
-        plan.mmproj = try findBestMmproj(a, all, primary.path);
-    }
-    if (opts.download_mtp) {
-        plan.mtp = try findBestMtp(a, all, primary.path, tag);
-    }
-    if (opts.download_dflash) {
-        plan.dflash = try findBestDflash(a, all, primary.path, tag);
-    }
-    if (opts.download_eagle3) {
-        plan.eagle3 = try findBestEagle3(a, all, primary.path, tag);
-    }
-    if (opts.download_dspark) {
-        plan.dspark = try findBestDspark(a, all, primary.path, tag);
+    // a draft resolves at the tag, the mmproj pairs with the model
+    inline for (sidecars) |sc| {
+        if (@field(opts, sc.opt)) {
+            if (sc.draft) {
+                @field(plan, sc.file) = try findBestSibling(a, all, primary.path, sc.keyword, tag);
+            } else if (primary.path.len != 0) {
+                @field(plan, sc.file) = try findBestSibling(a, all, primary.path, sc.keyword, "");
+            }
+        }
     }
 
-    if (primary.path.len == 0 and
-        plan.mtp.local_path.len == 0 and plan.dflash.local_path.len == 0 and plan.eagle3.local_path.len == 0 and plan.dspark.local_path.len == 0)
-    {
+    var has_draft = false;
+    inline for (sidecars) |sc| {
+        if (sc.draft and @field(plan, sc.file).local_path.len != 0) has_draft = true;
+    }
+    if (primary.path.len == 0 and !has_draft) {
         log.err("%s: no GGUF files found in repository %s\n", .{ func, try zs(a, repo) });
         try listAvailableGgufFiles(a, all);
     }
@@ -1280,7 +1571,7 @@ const TaskThread = struct {
         var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer arena.deinit();
         const t = self.task;
-        self.status = downloadFileSingle(arena.allocator(), t.url, t.local_path, &t.opts, t.is_hf) catch |e| {
+        self.status = downloadFileSingle(arena.allocator(), t.url, t.local_path, &t.opts, t.is_hf, t.lock_path, t.alt_path) catch |e| {
             self.err = e;
             self.what = std.heap.c_allocator.dupe(u8, common.what(e)) catch "";
             return;
@@ -1288,7 +1579,7 @@ const TaskThread = struct {
     }
 };
 
-/// Ports `common_download_run_tasks` (download.cpp:771 @620d2225c): every
+/// Ports `common_download_run_tasks` (download.cpp:868 @8642541b2): every
 /// task at once, then each result in order; the first failure throws.
 pub fn runTasks(a: Allocator, tasks: []const Task) Error!void {
     const jobs = try a.alloc(TaskThread, tasks.len);
@@ -1323,7 +1614,7 @@ pub fn runTasks(a: Allocator, tasks: []const Task) Error!void {
     if (failed) |e| return e;
 }
 
-/// Ports `common_download_get_all_parts` (download.cpp:791 @620d2225c):
+/// Ports `common_download_get_all_parts` (download.cpp:888 @8642541b2):
 /// every shard's URL of a split GGUF, or the URL alone.
 pub fn getAllParts(a: Allocator, url: []const u8) Error![]const []const u8 {
     const split = try getGgufSplitInfo(a, url);
@@ -1347,7 +1638,7 @@ pub fn getAllParts(a: Allocator, url: []const u8) Error![]const []const u8 {
 // Docker registry functions
 //
 
-/// Ports `common_docker_get_token` (download.cpp:810 @620d2225c).
+/// Ports `common_docker_get_token` (download.cpp:907 @8642541b2).
 fn dockerGetToken(a: Allocator, repo: []const u8) Error![]const u8 {
     const url = try std.mem.concat(a, u8, &.{ "https://auth.docker.io/token?service=registry.docker.io&scope=repository:", repo, ":pull" });
 
@@ -1367,7 +1658,7 @@ fn dockerGetToken(a: Allocator, repo: []const u8) Error![]const u8 {
     return (try response.index(a, "token")).get([]const u8);
 }
 
-/// Ports `common_docker_resolve_model` (download.cpp:830 @620d2225c): a
+/// Ports `common_docker_resolve_model` (download.cpp:927 @8642541b2): a
 /// Docker model's GGUF layer downloaded to the cache.
 ///
 /// Return: the local path.
@@ -1448,7 +1739,7 @@ fn dockerResolveImpl(a: Allocator, repo: []const u8, tag: []const u8) Error![]co
 
     const blob_url = try std.mem.concat(a, u8, &.{ url_prefix, "/blobs/", gguf_digest });
     const opts: Opts = .{ .bearer_token = token };
-    const http_status = try downloadFileSingle(a, blob_url, local_path, &opts, false);
+    const http_status = try downloadFileSingle(a, blob_url, local_path, &opts, false, "", "");
     if (!isHttpStatusOk(http_status)) {
         return throw(error.RuntimeError, "Failed to download Docker Model", .{});
     }
@@ -1457,7 +1748,7 @@ fn dockerResolveImpl(a: Allocator, repo: []const u8, tag: []const u8) Error![]co
     return local_path;
 }
 
-/// The `validate_oci_digest` (download.cpp:851 @620d2225c) lambda of
+/// The `validate_oci_digest` (download.cpp:948 @8642541b2) lambda of
 /// `common_docker_resolve_model`: `sha256:` and 64 hex digits, lower-cased.
 fn validateOciDigest(a: Allocator, digest: []const u8) Error![]const u8 {
     var re = regex.Regex.compile("^sha256:([a-fA-F0-9]{64})$") catch |err| switch (err) {
@@ -1475,7 +1766,13 @@ fn validateOciDigest(a: Allocator, digest: []const u8) Error![]const u8 {
     return normalized;
 }
 
-/// Ports `common_list_cached_models` (download.cpp:929 @620d2225c): each
+/// Ports `is_listed_model` (download.cpp:1027 @8642541b2): a cached file that
+/// lists a model under its tag: the first split of a model, not a sidecar.
+fn isListedModel(split: *const SplitInfo) bool {
+    return split.index == 1 and split.tag.len != 0 and !nameIsSidecar(split.prefix);
+}
+
+/// Ports `common_list_cached_models` (download.cpp:1031 @8642541b2): each
 /// cached repository and tag with a first shard that is a model.
 pub fn listCachedModels(a: Allocator) Error![]CachedModelInfo {
     var seen: std.StringHashMapUnmanaged(void) = .empty;
@@ -1485,13 +1782,7 @@ pub fn listCachedModels(a: Allocator) Error![]CachedModelInfo {
 
     for (files) |f| {
         const split = try getGgufSplitInfo(a, f.path);
-        if (split.index != 1 or split.tag.len == 0 or
-            std.mem.indexOf(u8, split.prefix, "mmproj") != null or
-            std.mem.indexOf(u8, split.prefix, "mtp-") != null or
-            std.mem.indexOf(u8, split.prefix, "eagle3-") != null or
-            std.mem.indexOf(u8, split.prefix, "dflash-") != null or
-            std.mem.indexOf(u8, split.prefix, "dspark-") != null)
-        {
+        if (!isListedModel(&split)) {
             continue;
         }
         const key = try std.mem.concat(a, u8, &.{ f.repo_id, ":", split.tag });
@@ -1504,7 +1795,7 @@ pub fn listCachedModels(a: Allocator) Error![]CachedModelInfo {
     return result.items;
 }
 
-/// Ports `common_download_resolve_path` (download.cpp:953 @620d2225c): the
+/// Ports `common_download_resolve_path` (download.cpp:1050 @8642541b2): the
 /// cached file a repository resolves to, without the network.
 pub fn resolvePath(a: Allocator, hf_repo_with_tag: []const u8, hf_file: []const u8) Error![]const u8 {
     const repo, const tag = try splitRepoTag(a, hf_repo_with_tag);
@@ -1526,13 +1817,48 @@ pub fn resolvePath(a: Allocator, hf_repo_with_tag: []const u8, hf_file: []const 
     return (try findBestModel(a, files, tag)).local_path;
 }
 
-/// Ports `common_download_remove` (download.cpp:973 @620d2225c): a cached
+/// Ports `files_in_use` (download.cpp:1072 @8642541b2): the files `-hf`
+/// loads from the cache, the model with every sidecar, for each cached tag of
+/// `repo_id` other than `tag`.
+fn filesInUse(a: Allocator, repo_id: []const u8, tag: []const u8) Error!std.StringHashMapUnmanaged(void) {
+    var opts: Opts = .{};
+    opts.offline = true;
+    optsAddAllSidecars(&opts);
+
+    var tags: std.StringHashMapUnmanaged(void) = .empty;
+    var used: std.StringHashMapUnmanaged(void) = .empty;
+
+    for (try hf_cache.getCachedFiles(a, repo_id)) |f| {
+        const split = try getGgufSplitInfo(a, f.path);
+        if (!isListedModel(&split) or std.mem.eql(u8, split.tag, tag) or (try tags.getOrPut(a, split.tag)).found_existing) {
+            continue;
+        }
+
+        var model: ModelParams = .{};
+        model.hf_repo = try std.mem.concat(a, u8, &.{ repo_id, ":", split.tag });
+
+        const plan = try getHfPlan(a, &model, &opts);
+
+        for (plan.model_files) |m| {
+            try used.put(a, m.local_path, {});
+        }
+        inline for (sidecars) |sc| {
+            const sf = &@field(plan, sc.file);
+            if (sf.local_path.len != 0) {
+                try used.put(a, sf.local_path, {});
+            }
+        }
+    }
+    return used;
+}
+
+/// Ports `common_download_remove` (download.cpp:1108 @8642541b2): a cached
 /// repository, or only its files of one tag and the blobs nothing else
-/// links to.
+/// links to, except the files another cached tag of the repository still
+/// loads.
 ///
 /// Return: whether anything was removed.
 pub fn remove(a: Allocator, hf_repo_with_tag: []const u8) Error!bool {
-    const func = "common_download_remove";
     const repo_id, const tag = try splitRepoTag(a, hf_repo_with_tag);
 
     if (tag.len == 0) {
@@ -1547,11 +1873,13 @@ pub fn remove(a: Allocator, hf_repo_with_tag: []const u8) Error!bool {
         return false;
     }
 
-    // collect snapshot entries whose tag matches
+    // collect snapshot entries whose tag matches, but a file another tag loads stays
+    const used = try filesInUse(a, repo_id, tag_upper);
+
     var to_remove: std.ArrayList([]const u8) = .empty;
     for (files) |f| {
         const split = try getGgufSplitInfo(a, f.path);
-        if (std.mem.eql(u8, split.tag, tag_upper)) {
+        if (std.mem.eql(u8, split.tag, tag_upper) and !used.contains(f.local_path)) {
             try to_remove.append(a, f.local_path);
         }
     }
@@ -1560,9 +1888,17 @@ pub fn remove(a: Allocator, hf_repo_with_tag: []const u8) Error!bool {
         return false;
     }
 
+    return removeSnapshotEntries(a, repo_id, to_remove.items);
+}
+
+/// Ports `remove_snapshot_entries` (download.cpp:1146 @8642541b2): snapshot
+/// entries of `repo_id`, then the blobs no remaining entry references.
+fn removeSnapshotEntries(a: Allocator, repo_id: []const u8, to_remove: []const []const u8) Error!bool {
+    const func = "remove_snapshot_entries";
+
     // resolve blob paths from symlinks before deleting snapshot entries
     var blobs_to_check: std.ArrayList([]const u8) = .empty;
-    for (to_remove.items) |p| {
+    for (to_remove) |p| {
         if (hf_cache.isSymlink(a, p)) {
             if (hf_cache.readSymlink(a, p)) |target| {
                 try blobs_to_check.append(a, try hf_cache.lexicallyNormal(a, try hf_cache.pathJoin(a, hf_cache.pathParent(p), target)));
@@ -1571,7 +1907,7 @@ pub fn remove(a: Allocator, hf_repo_with_tag: []const u8) Error!bool {
     }
 
     // remove snapshot entries
-    for (to_remove.items) |p| {
+    for (to_remove) |p| {
         const ec = hf_cache.removeFile(a, p);
         if (ec != 0) {
             log.wrn("%s: failed to remove %s: %s\n", .{ func, try zs(a, p), hf_cache.errMessage(ec) });
@@ -1606,21 +1942,51 @@ pub fn remove(a: Allocator, hf_repo_with_tag: []const u8) Error!bool {
     return true;
 }
 
+/// Ports `common_download_remove_sidecars` (download.cpp:1201 @8642541b2):
+/// the cached sidecar files `opts` selects for `user/model:tag`, as the
+/// cached plan resolves them, leaving the model files in place; a sidecar
+/// file another tag shares goes for every tag that resolves it.
+///
+/// Return: true if anything was removed.
+pub fn removeSidecars(a: Allocator, hf_repo_with_tag: []const u8, opts: *const Opts) Error!bool {
+    var model: ModelParams = .{};
+    model.hf_repo = hf_repo_with_tag;
+
+    var cached = opts.*;
+    cached.offline = true;
+
+    const plan = try getHfPlan(a, &model, &cached);
+
+    var to_remove: std.ArrayList([]const u8) = .empty;
+    inline for (sidecars) |sc| {
+        const f = &@field(plan, sc.file);
+        if (f.local_path.len != 0) {
+            try to_remove.append(a, f.local_path);
+        }
+    }
+    if (to_remove.items.len == 0) {
+        return false;
+    }
+
+    const repo_id, _ = try splitRepoTag(a, hf_repo_with_tag);
+    return removeSnapshotEntries(a, repo_id, to_remove.items);
+}
+
 // -----------------------------------------------------------------------------
 // common_models_handler (arg.cpp)
 
-/// Ports `mmproj_examples` (arg.cpp:60 @620d2225c): the programs that
+/// Ports `mmproj_examples` (arg.cpp:60 @8642541b2): the programs that
 /// download a model's projector.
 const mmproj_examples = [_]tc.params.Example{ .mtmd, .server, .cli, .tts };
 
-/// Ports `common_models_handler` (arg.h:140 @620d2225c).
+/// Ports `common_models_handler` (arg.h:140 @8642541b2).
 pub const ModelsHandler = struct {
     plan: HfPlan = .{},
     plan_spec: HfPlan = .{},
     opts: Opts = .{},
 };
 
-/// Ports `get_default_local_path` (arg.cpp:351 @620d2225c): a URL's last
+/// Ports `get_default_local_path` (arg.cpp:351 @8642541b2): a URL's last
 /// path element, in the cache.
 fn getDefaultLocalPath(a: Allocator, url: []const u8) Error![]const u8 {
     var f = (try tc.strings.split(a, url, '#')).items[0];
@@ -1629,7 +1995,7 @@ fn getDefaultLocalPath(a: Allocator, url: []const u8) Error![]const u8 {
     return fsGetCacheFile(a, sp[sp.len - 1]);
 }
 
-/// Ports `spec_types_is_default` (arg.cpp:357 @620d2225c).
+/// Ports `spec_types_is_default` (arg.cpp:357 @8642541b2).
 fn specTypesIsDefault(params: *const Params) bool {
     const t = params.speculative.types.items;
     return t.len == 1 and t[0] == .none;
@@ -1640,7 +2006,7 @@ fn hasSpecType(params: *const Params, t: SpeculativeType) bool {
     return false;
 }
 
-/// Ports `common_models_handler_init` (arg.cpp:361 @620d2225c): the
+/// Ports `common_models_handler_init` (arg.cpp:361 @8642541b2): the
 /// download options and, for a repository, its plan -- which reaches the
 /// hub, but downloads nothing.
 pub fn modelsHandlerInit(a: Allocator, params: *const Params, curr_ex: tc.params.Example) Error!ModelsHandler {
@@ -1693,12 +2059,12 @@ pub fn modelsHandlerInit(a: Allocator, params: *const Params, curr_ex: tc.params
     return .{ .plan = plan, .plan_spec = plan_spec, .opts = opts };
 }
 
-/// Ports `common_models_handler_is_preset_repo` (arg.cpp:422 @620d2225c).
+/// Ports `common_models_handler_is_preset_repo` (arg.cpp:422 @8642541b2).
 pub fn modelsHandlerIsPresetRepo(handler: *const ModelsHandler) bool {
     return handler.plan.preset.url.len != 0;
 }
 
-/// Ports `build_url_tasks` (arg.cpp:426 @620d2225c): one task per shard of
+/// Ports `build_url_tasks` (arg.cpp:426 @8642541b2): one task per shard of
 /// a URL, under `-m`'s directory when given, else the cache.
 fn buildUrlTasks(a: Allocator, model: *const ModelParams, opts: Opts) Error![]Task {
     const parts = try getAllParts(a, model.url);
@@ -1743,36 +2109,51 @@ const Done = struct {
     first_path: []const u8 = "",
     /// for `model_primary`: the model whose path it sets
     target: ?*ModelParams = null,
+    /// `callback`, which the `finalize` lambda captures.
+    callback: ?*const Callback = null,
+
+    /// The lambda `finalize` passes `finalize_file`: another process may
+    /// hold the cache lock during finalization, so the download callback
+    /// cancels that wait too.
+    fn keepWaiting(ctx: ?*anyopaque) bool {
+        const self: *Done = @ptrCast(@alignCast(ctx.?));
+        if (self.callback) |cb| return !cb.is_cancelled(cb.ctx);
+        return true;
+    }
+
+    /// The `finalize` lambda (arg.cpp:475 @8642541b2).
+    fn finalize(self: *Done) Error![]const u8 {
+        return hf_cache.finalizeFile(self.a, self.file.?, .{ .ctx = self, .func = keepWaiting });
+    }
 
     fn call(ctx: ?*anyopaque) anyerror!void {
         const self: *Done = @ptrCast(@alignCast(ctx.?));
-        const a = self.a;
         const params = self.params;
         switch (self.kind) {
             .model_path => params.model.path = self.first_path,
-            .finalize_only => _ = try hf_cache.finalizeFile(a, self.file.?),
-            .model_primary => self.target.?.path = try hf_cache.finalizeFile(a, self.file.?),
+            .finalize_only => _ = try self.finalize(),
+            .model_primary => self.target.?.path = try self.finalize(),
             .spec_sidecar => {
                 // only use the discovered sidecar when no draft path is set yet
                 if (params.speculative.draft.mparams.path.len == 0) {
-                    params.speculative.draft.mparams.path = try hf_cache.finalizeFile(a, self.file.?);
+                    params.speculative.draft.mparams.path = try self.finalize();
                 } else {
-                    _ = try hf_cache.finalizeFile(a, self.file.?);
+                    _ = try self.finalize();
                 }
             },
             .plan_sidecar => {
                 // only fall back to the discovered sidecar when no draft was explicitly provided
                 if (params.speculative.draft.mparams.empty()) {
-                    params.speculative.draft.mparams.path = try hf_cache.finalizeFile(a, self.file.?);
+                    params.speculative.draft.mparams.path = try self.finalize();
                 } else {
-                    _ = try hf_cache.finalizeFile(a, self.file.?);
+                    _ = try self.finalize();
                 }
             },
-            .mmproj => params.mmproj.path = try hf_cache.finalizeFile(a, self.file.?),
+            .mmproj => params.mmproj.path = try self.finalize(),
             .preset => {
                 // if HF repo is a preset repo, we simply run server in router mode with the preset.ini file
                 params.models_preset_hf = params.model.hf_repo; // only for showing a warning
-                params.models_preset = try hf_cache.finalizeFile(a, self.file.?);
+                params.models_preset = try self.finalize();
                 // clear the model so the server starts in router mode
                 params.model.path = "";
                 params.model.hf_repo = "";
@@ -1788,7 +2169,7 @@ fn makeOnDone(a: Allocator, d: Done) Allocator.Error!OnDone {
     return .{ .ctx = p, .func = Done.call };
 }
 
-/// Ports `common_models_handler_apply` (arg.cpp:464 @620d2225c): every file
+/// Ports `common_models_handler_apply` (arg.cpp:464 @8642541b2): every file
 /// the handler planned and the URLs `params` names, downloaded at once
 /// unless offline, then the paths set in `params`.
 ///
@@ -1883,7 +2264,7 @@ pub fn modelsHandlerApply(a: Allocator, handler: *ModelsHandler, params: *Params
         plan_spec.dspark.local_path.len != 0;
     for ([_]*HfFile{ &plan_spec.mtp, &plan_spec.dflash, &plan_spec.eagle3, &plan_spec.dspark }) |f| {
         if (f.local_path.len != 0 and !had_spec_url) {
-            try tasks.append(a, Task.fromHf(f, opts, try makeOnDone(a, .{ .a = a, .params = params, .file = f, .kind = .spec_sidecar })));
+            try tasks.append(a, try Task.fromHf(a, f, opts, try makeOnDone(a, .{ .a = a, .params = params, .file = f, .kind = .spec_sidecar, .callback = callback })));
         }
     }
 
@@ -1894,23 +2275,23 @@ pub fn modelsHandlerApply(a: Allocator, handler: *ModelsHandler, params: *Params
 
     // handle plan_spec (e.g. --spec-draft-hf)
     if (plan_spec.model_files.len != 0 and !had_spec_url and !spec_sidecar_found) {
-        try addTasks(a, &tasks, opts, params, plan_spec.model_files, &plan_spec.primary, &params.speculative.draft.mparams);
+        try addTasks(a, &tasks, opts, params, plan_spec.model_files, &plan_spec.primary, &params.speculative.draft.mparams, callback);
         had_spec_url = true;
     }
 
     if (plan.model_files.len != 0) {
-        try addTasks(a, &tasks, opts, params, plan.model_files, &plan.primary, &params.model);
+        try addTasks(a, &tasks, opts, params, plan.model_files, &plan.primary, &params.model, callback);
     }
     if (plan.mmproj.local_path.len != 0) {
-        try tasks.append(a, Task.fromHf(&plan.mmproj, opts, try makeOnDone(a, .{ .a = a, .params = params, .file = &plan.mmproj, .kind = .mmproj })));
+        try tasks.append(a, try Task.fromHf(a, &plan.mmproj, opts, try makeOnDone(a, .{ .a = a, .params = params, .file = &plan.mmproj, .kind = .mmproj, .callback = callback })));
     }
     for ([_]*HfFile{ &plan.mtp, &plan.dflash, &plan.eagle3, &plan.dspark }) |f| {
         if (f.local_path.len != 0 and !had_spec_url) {
-            try tasks.append(a, Task.fromHf(f, opts, try makeOnDone(a, .{ .a = a, .params = params, .file = f, .kind = .plan_sidecar })));
+            try tasks.append(a, try Task.fromHf(a, f, opts, try makeOnDone(a, .{ .a = a, .params = params, .file = f, .kind = .plan_sidecar, .callback = callback })));
         }
     }
     if (plan.preset.local_path.len != 0) {
-        try tasks.append(a, Task.fromHf(&plan.preset, opts, try makeOnDone(a, .{ .a = a, .params = params, .file = &plan.preset, .kind = .preset })));
+        try tasks.append(a, try Task.fromHf(a, &plan.preset, opts, try makeOnDone(a, .{ .a = a, .params = params, .file = &plan.preset, .kind = .preset, .callback = callback })));
     }
 
     // run all tasks in parallel
@@ -1952,16 +2333,17 @@ fn mapAny(e: anyerror) Error {
     };
 }
 
-/// The `add_tasks` (arg.cpp:521 @620d2225c) lambda of
+/// The `add_tasks` (arg.cpp:529 @8642541b2) lambda of
 /// `common_models_handler_apply`: every shard, the primary one setting
 /// `model`'s path.
-fn addTasks(a: Allocator, tasks: *std.ArrayList(Task), opts: Opts, params: *Params, model_files: []HfFile, primary: *const HfFile, model: *ModelParams) Error!void {
+fn addTasks(a: Allocator, tasks: *std.ArrayList(Task), opts: Opts, params: *Params, model_files: []HfFile, primary: *const HfFile, model: *ModelParams, callback: ?*const Callback) Error!void {
     for (model_files) |*model_file| {
         const is_primary = std.mem.eql(u8, model_file.path, primary.path);
-        try tasks.append(a, Task.fromHf(model_file, opts, try makeOnDone(a, .{
+        try tasks.append(a, try Task.fromHf(a, model_file, opts, try makeOnDone(a, .{
             .a = a,
             .params = params,
             .file = model_file,
+            .callback = callback,
             // the primary file is the first split (00001-of), use it as model path
             .kind = if (is_primary) .model_primary else .finalize_only,
             .target = model,
@@ -1994,6 +2376,14 @@ pub const HttpClient = struct {
 
     fn setBasicAuth(self: *HttpClient, user: []const u8, password: []const u8) void {
         self.cli.setBasicAuth(user, password);
+    }
+
+    fn setProxy(self: *HttpClient, host: []const u8, port: c_int) void {
+        self.cli.setProxy(host, port);
+    }
+
+    fn setProxyBasicAuth(self: *HttpClient, user: []const u8, password: []const u8) void {
+        self.cli.setProxyBasicAuth(user, password);
     }
 
     fn setFollowLocation(self: *HttpClient, on: bool) void {
@@ -2041,6 +2431,24 @@ pub const HttpClient = struct {
 
 test {
     std.testing.refAllDecls(@This());
+}
+
+test "the proxy's exceptions: loopback and NO_PROXY" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_][]const u8{ "localhost", "LOCALHOST", "::1", "0.0.0.0", "a.localhost", "127.0.0.1", "127.255.1.2" }) |h| {
+        try std.testing.expect(try commonHttpIsLoopback(a, h));
+    }
+    for ([_][]const u8{ "128.0.0.1", "127.0.0", "127.0.0.1.2", "127.0.0.256", "1270.0.0.1", "example.com", "" }) |h| {
+        try std.testing.expect(!try commonHttpIsLoopback(a, h));
+    }
+    try std.testing.expect(try commonHttpProxyBypass(a, "*", "x"));
+    try std.testing.expect(try commonHttpProxyBypass(a, " example.com ,other", "EXAMPLE.com"));
+    try std.testing.expect(try commonHttpProxyBypass(a, ".example.com", "a.example.com"));
+    try std.testing.expect(try commonHttpProxyBypass(a, "example.com", "a.example.com"));
+    try std.testing.expect(!try commonHttpProxyBypass(a, "example.com", "aexample.com"));
+    try std.testing.expect(!try commonHttpProxyBypass(a, ",.,", "x"));
 }
 
 test "split info" {

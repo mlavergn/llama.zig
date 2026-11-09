@@ -49,8 +49,8 @@ static bool is_vk(ggml_backend_t be) { return g_port ? ggml_backend_is_vk(be) : 
 int ref_ggml_backend_vk_get_device_count(void);
 void ref_ggml_backend_vk_get_device_description(int device, char * description, size_t description_size);
 void ref_ggml_backend_vk_get_device_memory(int device, size_t * free, size_t * total);
-extern struct conv_block_size ref_vk_conv_block_sizes[4];
-extern struct conv_block_size vk_conv_block_sizes[4];
+extern struct conv_block_size ref_vk_conv_block_sizes[5];
+extern struct conv_block_size vk_conv_block_sizes[5];
 
 static void log_cb(enum ggml_log_level level, const char * text, void * user_data) {
     (void) user_data;
@@ -644,7 +644,7 @@ int main(int argc, char ** argv) {
     ggml_free(ctx);
 
     const struct conv_block_size * cbs = port ? vk_conv_block_sizes : ref_vk_conv_block_sizes;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
         printf("vk_conv_block_sizes[%d] = %u %u %u\n", i, cbs[i].K, cbs[i].NPQ, cbs[i].CRS);
     }
     return 0;

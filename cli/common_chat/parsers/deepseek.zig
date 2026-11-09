@@ -1,11 +1,12 @@
-//! DeepSeek V3.2 and V4's DSML tool calls:
-//! `<｜DSML｜function_calls>` (V4: `tool_calls`) around
+//! DeepSeek V3.2, V4 and V4.1's DSML tool calls:
+//! `<｜DSML｜function_calls>` (V4: `tool_calls`; V4.1: `<｜DSML｜ calls>`, every
+//! tag name after a space) around
 //! `<｜DSML｜invoke name="f">` with `<｜DSML｜parameter name="k" string="true">v</｜DSML｜parameter>`.
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/deepseek.cpp` (llama.cpp v0.7.0,
-//! `620d2225c`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/deepseek.cpp` (llama.cpp v0.8.0,
+//! `8642541b2`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -16,6 +17,7 @@ const chat_peg = @import("../chat_peg.zig");
 const params_mod = @import("../params.zig");
 const template = @import("../template.zig");
 const util = @import("../util.zig");
+const log = @import("../log.zig");
 const parsers = @import("module.zig");
 
 const Allocator = std.mem.Allocator;
@@ -29,10 +31,6 @@ const GenerationParams = template.GenerationParams;
 const DSML = "｜DSML｜";
 const THINK_START = "<think>";
 const THINK_END = "</think>";
-const INVOKE_START = "<" ++ DSML ++ "invoke";
-const INVOKE_END = "</" ++ DSML ++ "invoke>";
-const PARAM_START = "<" ++ DSML ++ "parameter";
-const PARAM_END = "</" ++ DSML ++ "parameter>";
 const GEN_PROMPT = "<｜Assistant｜>";
 const TC_SEPARATOR = "\n\n";
 
@@ -45,7 +43,7 @@ fn role(m: *const Value) Error![]const u8 {
     return m.value("role", []const u8, "") catch |e| util.fromJson(e);
 }
 
-/// Ports `deepseek_v4_sort_tool_results` (parsers/deepseek.cpp:6 @620d2225c): each
+/// Ports `deepseek_v4_sort_tool_results` (parsers/deepseek.cpp:7 @8642541b2): each
 /// run of user and tool messages with its tool results put in the order of
 /// the preceding assistant message's tool calls, matched by id.
 ///
@@ -138,9 +136,15 @@ fn deepseekV4SortToolResults(a: Allocator, messages: *const Value) Error!Value {
 const Build = struct {
     a: Allocator,
     inputs: *const GenerationParams,
+    tools: *const Value,
     is_v4: bool,
+    is_v41: bool,
     fc_start: []const u8,
     fc_end: []const u8,
+    invoke_start: []const u8,
+    invoke_end: []const u8,
+    param_start: []const u8,
+    param_end: []const u8,
     has_response_format: bool,
     extract_reasoning: bool,
     require_tools: bool,
@@ -161,7 +165,7 @@ const Build = struct {
         // build tool call section first since we might need it in reasoning
         self.tool_choice = try b.choiceEmpty();
         if (self.has_tool_calls) {
-            parsers.foreachFunction(&self.inputs.tools, self, tool) catch |e| return util.toPeg(e);
+            parsers.foreachFunction(self.tools, self, tool) catch |e| return util.toPeg(e);
         }
         const tool_choice = self.tool_choice;
 
@@ -187,7 +191,10 @@ const Build = struct {
         }
 
         if (self.extract_reasoning and self.inputs.enable_thinking) {
-            reasoning = try b.optional(try b.plusLit(try b.litPlus(THINK_START, try p.reasoning(try b.until(THINK_END))), THINK_END));
+            // V4.1 renders a continuation without reasoning as "<｜Assistant｜></think>" even in thinking mode,
+            // so consume the bare THINK_END too or it leaks into the content
+            const block = try b.plusLit(try b.litPlus(THINK_START, try p.reasoning(try b.until(THINK_END))), THINK_END);
+            reasoning = try b.optional(if (self.is_v41) try b.orr(block, try b.literal(THINK_END)) else block);
             const sep_fc = try std.mem.concat(self.a, u8, &.{ TC_SEPARATOR, self.fc_start });
             const r = try b.litPlus(THINK_START, try p.reasoning(try b.untilOneOf(&.{ sep_fc, self.fc_start, THINK_END })));
             reasoning_with_tc = try b.plus(try b.plus(r, try b.space()), obligatory_tool_calls);
@@ -245,16 +252,16 @@ const Build = struct {
     fn buildParam(self: *Build, param_index: usize, prm: *const json.schema.Property, doc: *peg.SharedDoc) chat_peg.Error!ParserId {
         const p = self.cb;
         const b = &p.b;
-        const is_string = prm.schema.mayBeString();
+        const is_string = prm.schema.mayBeString() catch |e| return peg.errors.fromSchema(e);
 
-        const open_lit = try b.literal(PARAM_START ++ " name=\"");
+        const open_lit = try b.literal(try std.mem.concat(self.a, u8, &.{ self.param_start, " name=\"" }));
         const open_name = try b.plus(open_lit, try p.toolArgName(try b.literal(prm.name)));
         const open = try p.toolArgOpen(try b.plus(open_name, try b.literal(if (is_string) "\" string=\"true\">" else "\" string=\"false\">")));
         const value = if (is_string)
-            try p.toolArgStringValue(try b.until(PARAM_END))
+            try p.toolArgStringValue(try b.until(self.param_end))
         else
             try p.toolArgJsonValue(try b.schemaDoc(try b.json(), try parsers.argName(self.a, self.tool_index, param_index, "-schema"), doc, prm.schema, false));
-        const arg = try p.toolArg(try b.plus(try b.plus(open, value), try p.toolArgClose(try b.literal(PARAM_END))));
+        const arg = try p.toolArg(try b.plus(try b.plus(open, value), try p.toolArgClose(try b.literal(self.param_end))));
 
         return b.rule(try parsers.argName(self.a, self.tool_index, param_index, ""), arg, false);
     }
@@ -279,16 +286,16 @@ const Build = struct {
         }
 
         const invoke_body = args_seq;
-        const head = try b.plus(try b.literal(INVOKE_START ++ " name=\""), try p.toolName(try b.literal(self.name)));
+        const head = try b.plus(try b.literal(try std.mem.concat(self.a, u8, &.{ self.invoke_start, " name=\"" })), try p.toolName(try b.literal(self.name)));
         const open = try p.toolOpen(try b.plus(head, try b.literal("\">\n")));
-        const body = try b.plus(try b.plus(try b.plus(open, invoke_body), try b.space()), try p.toolClose(try b.literal(INVOKE_END)));
+        const body = try b.plus(try b.plus(try b.plus(open, invoke_body), try b.space()), try p.toolClose(try b.literal(self.invoke_end)));
         const func_parser = try p.tool(body);
 
         try b.orAssign(&self.tool_choice, try b.rule(try parsers.indexName(self.a, "tool-", self.tool_index, ""), func_parser, false));
     }
 };
 
-/// Ports `common_chat_params_init_deepseek_v3_2` (parsers/deepseek.cpp:69 @620d2225c).
+/// Ports `common_chat_params_init_deepseek_v3_2` (parsers/deepseek.cpp:70 @8642541b2).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
@@ -299,6 +306,8 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     // non-thinking generation prompt ends with a bare </think> instead of an empty
     // <think></think> pair.
     const is_v4 = !util.contains(tmpl.source(), "function_calls");
+    // V4.1: DSML tag names carry a leading space, e.g. <｜DSML｜ calls>
+    const is_v41 = is_v4 and util.contains(tmpl.source(), "｜DSML｜ calls>");
 
     var adjusted_storage: Value = .null;
     var adjusted_messages: ?*const Value = null;
@@ -307,7 +316,22 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         adjusted_messages = &adjusted_storage;
     }
 
-    const has_tools = parsers.hasTools(&inputs.tools);
+    // V4.1 can declare tools on a system message instead of top-level "tools": parse calls to those too.
+    var tools = try inputs.tools.clone(a);
+    if (is_v41 and !parsers.hasTools(&tools) and inputs.messages.isArray()) {
+        for (inputs.messages.array.items) |*msg| {
+            if (std.mem.eql(u8, try role(msg), "system") and msg.contains("tools")) {
+                const msg_tools = msg.at("tools") catch |e| return util.fromJson(e);
+                if (!msg_tools.isArray()) continue;
+                if (!tools.isArray()) tools = Value.emptyArray();
+                for (msg_tools.array.items) |*tool| {
+                    tools.pushBack(a, try tool.clone(a)) catch |e| return util.fromJson(e);
+                }
+            }
+        }
+    }
+
+    const has_tools = parsers.hasTools(&tools);
     const has_response_format = !inputs.json_schema.isNull() and inputs.json_schema.isObject();
     const extract_reasoning = inputs.reasoning_format != .none;
     const include_grammar = has_response_format or (has_tools and inputs.tool_choice != .none);
@@ -319,10 +343,33 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         try additional_storage.set(a, "response_format", try inputs.json_schema.clone(a));
         additional_context = &additional_storage;
     }
+    // V4.1 raises on anything but low/high/max or 1-100: map minimal -> low, xhigh -> max, medium -> default
+    if (is_v41 and inputs.extra_context.isObject() and inputs.extra_context.contains("reasoning_effort")) {
+        const effort_v = inputs.extra_context.at("reasoning_effort") catch |e| return util.fromJson(e);
+        if (effort_v.isString()) {
+            const effort = effort_v.string;
+            const is_minimal = std.mem.eql(u8, effort, "minimal");
+            const is_xhigh = std.mem.eql(u8, effort, "xhigh");
+            if (is_minimal or is_xhigh or std.mem.eql(u8, effort, "medium")) {
+                const mapped: ?[]const u8 = if (is_minimal) "low" else if (is_xhigh) "max" else null;
+                log.dbg("{s}: DeepSeek V4.1 reasoning_effort '{s}' -> {s}\n", .{ "common_chat_params_init_deepseek_v3_2", effort, mapped orelse "unset (template default)" });
+                if (additional_context == null) {
+                    additional_storage = Value.emptyObject();
+                    additional_context = &additional_storage;
+                }
+                try additional_storage.set(a, "reasoning_effort", if (mapped) |m| try Value.from(a, m) else .null);
+            }
+        }
+    }
 
-    const tc_block = if (is_v4) "tool_calls" else "function_calls";
-    const fc_start = try std.mem.concat(a, u8, &.{ "<", DSML, tc_block, ">" });
-    const fc_end = try std.mem.concat(a, u8, &.{ "</", DSML, tc_block, ">" });
+    const tag_sp = if (is_v41) " " else "";
+    const tc_block = if (is_v41) "calls" else if (is_v4) "tool_calls" else "function_calls";
+    const fc_start = try std.mem.concat(a, u8, &.{ "<", DSML, tag_sp, tc_block, ">" });
+    const fc_end = try std.mem.concat(a, u8, &.{ "</", DSML, tag_sp, tc_block, ">" });
+    const invoke_start = try std.mem.concat(a, u8, &.{ "<", DSML, tag_sp, "invoke" });
+    const invoke_end = try std.mem.concat(a, u8, &.{ "</", DSML, tag_sp, "invoke>" });
+    const param_start = try std.mem.concat(a, u8, &.{ "<", DSML, tag_sp, "parameter" });
+    const param_end = try std.mem.concat(a, u8, &.{ "</", DSML, tag_sp, "parameter>" });
 
     // lets the server find user turns in the prompt and place context checkpoints there
     try data.message_delimiters.add(a, .assistant, GEN_PROMPT);
@@ -360,9 +407,15 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     var build: Build = .{
         .a = a,
         .inputs = inputs,
+        .tools = &tools,
         .is_v4 = is_v4,
+        .is_v41 = is_v41,
         .fc_start = fc_start,
         .fc_end = fc_end,
+        .invoke_start = invoke_start,
+        .invoke_end = invoke_end,
+        .param_start = param_start,
+        .param_end = param_end,
         .has_response_format = has_response_format,
         .extract_reasoning = extract_reasoning,
         .require_tools = require_tools,

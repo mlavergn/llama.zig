@@ -6,7 +6,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/t5.cpp` at v0.7.0 (`620d2225c`):
+//! Ported from `llama.cpp/src/models/t5.cpp` at v0.8.0 (`8642541b2`):
 //! `llama_model_t5`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and both specialisations of its `graph<is_enc>`.
 //! `llama_model_t5encoder` (`t5encoder.zig`) reuses the encoder graph.
@@ -24,7 +24,7 @@ const Model = model_mod.Model;
 const Layer = model_mod.Layer;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_t5`'s `load_arch_hparams` (models/t5.cpp:3 @620d2225c).
+/// Ports `llama_model_t5`'s `load_arch_hparams` (models/t5.cpp:3 @8642541b2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -60,7 +60,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_t5`'s `load_arch_tensors` (models/t5.cpp:38 @620d2225c).
+/// Ports `llama_model_t5`'s `load_arch_tensors` (models/t5.cpp:38 @8642541b2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -130,7 +130,7 @@ fn resizeLayers(self: *Model, n: usize) void {
 }
 
 /// The encoder layers of `llama_model_t5`'s `load_arch_tensors`
-/// (models/t5.cpp:38 @620d2225c), which `llama_model_t5encoder`'s repeats
+/// (models/t5.cpp:38 @8642541b2), which `llama_model_t5encoder`'s repeats
 /// unchanged.
 pub fn loadEncoderLayers(self: *Model, l: Model.Locals, n_rel_attn_bkts: i64, exc: *Exception) Thrown!void {
     const nr = loader.tensor_not_required;
@@ -155,7 +155,7 @@ pub fn loadEncoderLayers(self: *Model, l: Model.Locals, n_rel_attn_bkts: i64, ex
 }
 
 /// Ports `llama_model_t5`'s `build_arch_graph` (models/t5.cpp:358
-/// @620d2225c): the encoder graph for an encode, the decoder graph
+/// @8642541b2): the encoder graph for an encode, the decoder graph
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     switch (params.gtype) {
@@ -166,7 +166,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports the constructor of `llama_model_t5`'s `graph` specialised for the
-/// decoder (models/t5.cpp:110 @620d2225c).
+/// decoder (models/t5.cpp:110 @8642541b2).
 fn buildDecoder(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -276,7 +276,7 @@ fn buildDecoder(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_t5`'s `graph` specialised for the
-/// encoder (models/t5.cpp:263 @620d2225c), which `llama_model_t5encoder`
+/// encoder (models/t5.cpp:263 @8642541b2), which `llama_model_t5encoder`
 /// also builds.
 pub fn buildEncoder(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;

@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/ling3.cpp` (llama.cpp v0.7.0,
-//! `620d2225c`), new at v0.5.0. The parser is built in the order clang
+//! Ports `llama.cpp/common/parsers/ling3.cpp` (llama.cpp v0.8.0,
+//! `8642541b2`), new at v0.5.0. The parser is built in the order clang
 //! evaluates the C++ expressions, left to right, since a parser's id is its
 //! position.
 
@@ -160,7 +160,7 @@ const Build = struct {
         const b = &p.b;
         const rule_name = try std.fmt.allocPrint(self.a, "ling3-arg-{d}-{d}", .{ self.tool_index, param_index });
 
-        const types = prm.schema.valueTypes();
+        const types = prm.schema.valueTypes() catch |e| return peg.errors.fromSchema(e);
 
         // string arguments are raw text up to the closing tag, other
         // types parse as JSON per their schema; each alternative
@@ -189,7 +189,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_ling3` (parsers/ling3.cpp:11 @620d2225c).
+/// Ports `common_chat_params_init_ling3` (parsers/ling3.cpp:11 @8642541b2).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

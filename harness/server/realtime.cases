@@ -1,0 +1,118 @@
+# /v1/realtime (v0.8.0): scripts/server-diff realtime. The websocket route of
+# server-context.cpp and the conversation of server-realtime.cpp: every event
+# is compared, ids masked. A session's slot is released after its socket closes
+# and every control is a task, so upstream differs from itself in task ids, in
+# the idle loop's lines and in where a release lands: those are masked, and each
+# session is given time to end before the next one connects.
+!mask-key id_task
+!mask task -?[0-9]+
+!droplog update_slots: all slots are idle
+!droplog skipping, is_processing = 1
+
+# a model with no audio stream: one error event, then the close
+!server -m $QWEN3 -c 2048 -np 1 -lv 4
+!fulllog
+WS /v1/realtime [{"$read": 2}]
+!sleep 2
+WS /v1/realtime?intent=transcription [{"$read": 2}]
+!sleep 2
+GET /v1/realtime
+
+# live transcription: Voxtral Realtime (audio stream, no chat). The two threads
+# of the session race, so each read's events are compared sorted
+!server -m $MM/text-mistral3-rt.gguf -mm $MM/voxtral_rt.gguf -c 4096 -np 1 --no-warmup --temp 0 --seed 42 -lv 4
+!fulllog
+WSL /v1/realtime [{"$until": "session.created"}, {"type": "session.update", "session": {}}, {"$until": "session.updated"}, {"type": "transcription_session.update"}, {"$until": "session.updated"}, {"type": "input_audio_buffer.clear"}, {"$until": "input_audio_buffer.cleared"}, {"$raw": "not json"}, {"$until": "error"}, {"type": "bogus"}, {"$until": "error"}, {"type": "input_audio_buffer.append", "audio": "!!!"}, {"$until": "error"}]
+!sleep 2
+WSL /v1/realtime [{"$until": "session.created"}, {"$pcm": [800, 220]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.input_audio_transcription.completed"}, {"$pcm": [400, 440]}, {"type": "input_audio_buffer.commit", "final": true}, {"$until": "conversation.item.input_audio_transcription.completed"}]
+!sleep 2
+GET /slots
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2}
+GET /v1/models
+
+# the client leaves with audio in the stream: when the slot lets go is the
+# race of a cancel and the end of the stream, so no log is compared
+!server -m $MM/text-mistral3-rt.gguf -mm $MM/voxtral_rt.gguf -c 4096 -np 1 --no-warmup --temp 0 --seed 42 -lv 4
+WSL /v1/realtime [{"$until": "session.created"}, {"$pcm": [600, 220]}]
+!sleep 2
+!sleep 2
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2}
+
+# a conversation, the model answering in text. An lfm3a with no gen-audio head
+# aborts upstream on a text decode of more than one token (the session turns
+# embeddings on and server_output_limits raises the limit only for gen_audio:
+# llama-context.cpp:2406; -b 1 aborts at startup), so --embedding raises it
+!server -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a.gguf -c 4096 -np 1 --no-warmup --temp 1 --seed 42 -lv 4 --embedding --pooling none
+!fulllog
+WS /v1/realtime [{"$until": "session.created"}, {"type": "response.create"}, {"$until": "error"}, {"type": "input_audio_buffer.commit"}, {"$until": "error"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "assistant"}}, {"$until": "error"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "image"}]}}, {"$until": "error"}, {"type": "conversation.item.create", "item": {"type": "function_call_output", "output": "x"}}, {"$until": "error"}, {"type": "session.update", "session": {"type": "other"}}, {"$until": "error"}, {"type": "session.update", "session": {"output_modalities": []}}, {"$until": "error"}, {"type": "session.update", "session": {"output_modalities": ["smell"]}}, {"$until": "error"}, {"type": "session.update", "session": {"tool_choice": 5}}, {"$until": "error"}, {"type": "session.update", "session": {"tool_choice": "maybe"}}, {"$until": "error"}, {"type": "session.update", "session": {"max_output_tokens": 0}}, {"$until": "error"}, {"type": "session.update", "session": {"tools": 3}}, {"$until": "error"}, {"type": "session.update", "session": {"audio": {"input": {"format": {"rate": 8000}}}}}, {"$until": "error"}, {"$until": "session.updated"}]
+!sleep 2
+WS /v1/realtime [{"$until": "session.created"}, {"type": "session.update", "session": {"instructions": "Be brief.", "max_output_tokens": 4, "output_modalities": ["text"]}}, {"$until": "session.updated"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Hello"}], "id": "mine"}}, {"$until": "conversation.item.done"}, {"type": "response.create"}, {"$until": "response.done"}, {"type": "session.update", "session": {"instructions": "too late"}}, {"$until": "error"}, {"$until": "session.updated"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Again"}]}}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"max_output_tokens": 2}}, {"$until": "response.done"}]
+!sleep 2
+WS /v1/realtime [{"$until": "session.created"}, {"$pcm": [500, 220]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"max_output_tokens": 3, "output_modalities": ["text"]}}, {"$until": "response.done"}, {"$pcm": [300, 440]}, {"type": "response.create", "response": {"max_output_tokens": 2, "output_modalities": ["text"]}}, {"$until": "response.done"}]
+!sleep 2
+WS /v1/realtime [{"$until": "session.created"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "x"}]}}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"max_output_tokens": "x"}}, {"$until": "error"}, {"type": "response.create", "response": {"tool_choice": 1}}, {"$until": "error"}]
+!sleep 2
+WS /v1/realtime [{"$until": "session.created"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "x"}]}}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"output_modalities": ["audio"]}}, {"$until": "error"}]
+!sleep 2
+WS /v1/realtime [{"$until": "session.created"}, {"type": "input_audio_buffer.append", "audio": ""}, {"type": "response.create"}, {"$until": "error"}, {"type": "input_audio_buffer.commit"}, {"$until": "error"}]
+!sleep 2
+
+# the gen-audio pipeline answers: text, audio, both
+!server -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -c 4096 -np 1 --no-warmup --temp 1 --seed 42 -lv 4
+!fulllog
+WS /v1/realtime [{"$until": "session.created"}, {"type": "response.create"}, {"$until": "error"}, {"type": "input_audio_buffer.commit"}, {"$until": "error"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "assistant"}}, {"$until": "error"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "image"}]}}, {"$until": "error"}, {"type": "conversation.item.create", "item": {"type": "function_call_output", "output": "x"}}, {"$until": "error"}, {"type": "session.update", "session": {"type": "other"}}, {"$until": "error"}, {"type": "session.update", "session": {"output_modalities": []}}, {"$until": "error"}, {"type": "session.update", "session": {"output_modalities": ["smell"]}}, {"$until": "error"}, {"type": "session.update", "session": {"tool_choice": 5}}, {"$until": "error"}, {"type": "session.update", "session": {"tool_choice": "maybe"}}, {"$until": "error"}, {"type": "session.update", "session": {"max_output_tokens": 0}}, {"$until": "error"}, {"type": "session.update", "session": {"tools": 3}}, {"$until": "error"}, {"type": "session.update", "session": {"audio": {"input": {"format": {"rate": 8000}}}}}, {"$until": "error"}, {"$until": "session.updated"}]
+!sleep 2
+WS /v1/realtime [{"$until": "session.created"}, {"type": "session.update", "session": {"instructions": "Be brief.", "max_output_tokens": 4, "output_modalities": ["text"]}}, {"$until": "session.updated"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Hello"}], "id": "mine"}}, {"$until": "conversation.item.done"}, {"type": "response.create"}, {"$until": "response.done"}, {"type": "session.update", "session": {"instructions": "too late"}}, {"$until": "error"}, {"$until": "session.updated"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Again"}]}}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"max_output_tokens": 2}}, {"$until": "response.done"}]
+!sleep 2
+WS /v1/realtime [{"$until": "session.created"}, {"$pcm": [500, 220]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"max_output_tokens": 3, "output_modalities": ["text"]}}, {"$until": "response.done"}, {"$pcm": [300, 440]}, {"type": "response.create", "response": {"max_output_tokens": 2, "output_modalities": ["text"]}}, {"$until": "response.done"}]
+!sleep 2
+WS /v1/realtime [{"$until": "session.created"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "One"}]}}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"max_output_tokens": 6, "output_modalities": ["text"]}}, {"$until": "response.done"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Two"}]}}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"max_output_tokens": 6, "output_modalities": ["text"]}}, {"$until": "response.done"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Three"}]}}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"max_output_tokens": 6, "output_modalities": ["text"]}}, {"$until": "response.done"}]
+!sleep 2
+WS /v1/realtime [{"$until": "session.created"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Hi"}]}}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"max_output_tokens": 4, "output_modalities": ["audio"]}}, {"$until": "response.done"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "More"}]}}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"max_output_tokens": 4, "output_modalities": ["text", "audio"]}}, {"$until": "response.done"}]
+!sleep 2
+WS /v1/realtime [{"$until": "session.created"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "x"}]}}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"max_output_tokens": "x"}}, {"$until": "error"}, {"type": "response.create", "response": {"tool_choice": 1}}, {"$until": "error"}]
+!sleep 2
+WS /v1/realtime [{"$until": "session.created"}, {"type": "session.update", "session": {"type": "transcription", "max_output_tokens": 3, "audio": {"input": {"transcription": {"language": "fr"}}}}}, {"$until": "session.updated"}, {"$pcm": [500, 220]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.input_audio_transcription.completed"}, {"$pcm": [300, 440]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.input_audio_transcription.completed"}, {"$pcm": [300, 330]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.input_audio_transcription.completed"}, {"type": "response.create"}, {"$until": "error"}, {"type": "conversation.item.create", "item": {}}, {"$until": "error"}]
+!sleep 2
+WS /v1/realtime [{"$until": "session.created"}, {"type": "session.update", "session": {"type": "transcription", "max_output_tokens": 3}}, {"$until": "session.updated"}, {"$pcm": [1500, 220]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.input_audio_transcription.completed"}, {"$pcm": [1500, 260]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.input_audio_transcription.completed"}, {"$pcm": [1500, 300]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.input_audio_transcription.completed"}, {"$pcm": [1500, 340]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.input_audio_transcription.completed"}, {"$pcm": [1500, 380]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.input_audio_transcription.completed"}, {"$pcm": [1500, 420]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.input_audio_transcription.completed"}, {"$pcm": [1500, 460]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.input_audio_transcription.completed"}, {"$pcm": [1500, 500]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.input_audio_transcription.completed"}, {"$pcm": [1500, 540]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.input_audio_transcription.completed"}, {"$pcm": [1500, 580]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.input_audio_transcription.completed"}, {"$pcm": [1500, 620]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.input_audio_transcription.completed"}, {"$pcm": [1500, 660]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.input_audio_transcription.completed"}, {"$pcm": [1500, 700]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.input_audio_transcription.completed"}, {"$pcm": [1500, 740]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.input_audio_transcription.completed"}]
+!sleep 2
+WS /v1/realtime [{"$until": "session.created"}, {"type": "session.update", "session": {"tools": [{"type": "function", "name": "get_time", "description": "time", "parameters": {"type": "object", "properties": {}}}, {"type": "web_search"}], "tool_choice": "required", "max_output_tokens": 400, "output_modalities": ["text"]}}, {"$until": "session.updated"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "time?"}]}}, {"$until": "conversation.item.done"}, {"type": "response.create"}, {"$until": "response.done"}, {"type": "conversation.item.create", "item": {"type": "function_call_output", "call_id": "c1", "output": "noon"}}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"tool_choice": "none"}}, {"$until": "response.done"}]
+!sleep 2
+WS /v1/realtime [{"$until": "session.created"}, {"type": "response.cancel"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "x"}]}}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"max_output_tokens": 2, "output_modalities": ["text"]}}, {"$until": "response.done"}]
+!sleep 2
+
+# a control token stays out of the text: the bias makes the model write one
+!server -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a.gguf -c 4096 -np 1 --no-warmup --temp 0 --seed 42 -lv 4 --embedding --pooling none --logit-bias 120+1000
+!fulllog
+WS /v1/realtime [{"$until": "session.created"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "x"}]}}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"max_output_tokens": 3, "output_modalities": ["text"]}}, {"$until": "response.done"}]
+!sleep 2
+
+# a template whose turns do not concatenate is refused at the start of the session
+!server -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a.gguf -c 4096 -np 1 --no-warmup --temp 0 --seed 42 -lv 4 --embedding --pooling none --chat-template-file $VOCAB/templates/Qwen-Qwen3-0.6B.jinja
+!fulllog
+WS /v1/realtime [{"$read": 2}]
+!sleep 2
+
+# tools need a template that calls them. The session's parser runs over the
+# reply; the fixture never writes a call and neither a tool_choice nor a
+# command-line grammar makes it, so on_tool_call is NOT reached here. Its
+# context is raised, the tool prompt in a character vocabulary is long
+!droplog validate_override
+!server -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a.gguf -c 4096 -np 1 --no-warmup --temp 0 --seed 42 -lv 4 --embedding --pooling none --override-kv qwen3.context_length=int:4096 --chat-template-file $VOCAB/templates/Qwen-Qwen2.5-7B-Instruct.jinja
+!fulllog
+WS /v1/realtime [{"$until": "session.created"}, {"type": "session.update", "session": {"tools": [{"type": "function", "name": "get_time", "description": "time", "parameters": {"type": "object", "properties": {}}}, {"type": "web_search"}], "tool_choice": "required", "max_output_tokens": 400, "output_modalities": ["text"]}}, {"$until": "session.updated"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "time?"}]}}, {"$until": "conversation.item.done"}, {"type": "response.create"}, {"$until": "response.done"}, {"type": "conversation.item.create", "item": {"type": "function_call_output", "call_id": "c1", "output": "noon"}}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"tool_choice": "none"}}, {"$until": "response.done"}]
+!sleep 2
+
+# a conversation past the context: decode() fails with EXCEED_CONTEXT_SIZE, and
+# send_error asserts on the prompt size a realtime task does not have
+# (server-context.cpp:2335). Upstream aborts; so must the port, the log shows it
+!server -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a.gguf -c 4096 -np 1 --no-warmup --temp 0 --seed 42 -lv 4 --embedding --pooling none --chat-template-file $VOCAB/templates/Qwen-Qwen2.5-7B-Instruct.jinja
+WS /v1/realtime [{"$until": "session.created"}, {"type": "session.update", "session": {"tools": [{"type": "function", "name": "get_time", "description": "time", "parameters": {"type": "object", "properties": {}}}, {"type": "web_search"}], "tool_choice": "required", "max_output_tokens": 400, "output_modalities": ["text"]}}, {"$until": "session.updated"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "time?"}]}}, {"$until": "conversation.item.done"}, {"type": "response.create"}, {"$until": "response.done"}, {"type": "conversation.item.create", "item": {"type": "function_call_output", "call_id": "c1", "output": "noon"}}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"tool_choice": "none"}}, {"$until": "response.done"}]
+!sleep 2
+
+# a cancel during a response: this model ends a reply in a few tokens, so whether
+# the cancel lands first is timing. Only that the session survives it is
+# compared, not its status, and no log
+!server -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -c 4096 -np 1 --no-warmup --temp 0 --seed 42 -lv 4
+WS /v1/realtime [{"$until": "session.created"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Go on and on"}]}}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"max_output_tokens": 256, "output_modalities": ["text"]}}, {"$first": "response.output_text.delta"}, {"type": "response.cancel"}, {"$last": "response.done"}]
+!sleep 2

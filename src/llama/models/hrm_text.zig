@@ -8,8 +8,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/hrm-text.cpp` at v0.7.0
-//! (`620d2225c`): `llama_model_hrm_text`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/hrm-text.cpp` at v0.8.0
+//! (`8642541b2`): `llama_model_hrm_text`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` with
 //! `build_stack`.
 
@@ -27,7 +27,7 @@ const Tensor = c.ggml_tensor;
 
 const src = "models/hrm-text.cpp";
 
-/// Ports `llama_model_hrm_text`'s `load_arch_hparams` (models/hrm-text.cpp:6 @620d2225c).
+/// Ports `llama_model_hrm_text`'s `load_arch_hparams` (models/hrm-text.cpp:6 @8642541b2).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -57,7 +57,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_hrm_text`'s `load_arch_tensors` (models/hrm-text.cpp:34 @620d2225c).
+/// Ports `llama_model_hrm_text`'s `load_arch_tensors` (models/hrm-text.cpp:34 @8642541b2).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -120,13 +120,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_hrm_text`'s `build_arch_graph` (models/hrm-text.cpp:88 @620d2225c).
+/// Ports `llama_model_hrm_text`'s `build_arch_graph` (models/hrm-text.cpp:88 @8642541b2).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports `llama_model_hrm_text::graph`'s `build_stack` (models/hrm-text.cpp:93
-/// @620d2225c): one stack invocation, `lps` pre-norm decoder layers in the
+/// @8642541b2): one stack invocation, `lps` pre-norm decoder layers in the
 /// cache slots from `slot_base`, then the parameterless final norm.
 fn buildStack(model: *const Model, b: *const graph.Builder, inp_attn: *graph.InpAttnKv, inp_pos: *Tensor, cur_: *Tensor, slot_base: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -198,7 +198,7 @@ fn buildStack(model: *const Model, b: *const graph.Builder, inp_attn: *graph.Inp
 }
 
 /// Ports the constructor of `llama_model_hrm_text`'s `graph`
-/// (models/hrm-text.cpp:168 @620d2225c).
+/// (models/hrm-text.cpp:168 @8642541b2).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = &model.hparams;

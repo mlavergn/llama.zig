@@ -5,7 +5,7 @@
 //!
 //! Ports `common_chat_input` from `llama.cpp/common/chat.h` and its members
 //! and `common_chat_input_tokenize` from `llama.cpp/common/chat.cpp`
-//! (llama.cpp v0.7.0, `620d2225c`). Each declaration names what it ports
+//! (llama.cpp v0.8.0, `8642541b2`). Each declaration names what it ports
 //! and the line it began at.
 //!
 //! # Ownership
@@ -29,7 +29,7 @@ const Error = exception.Error;
 /// `LLAMA_TOKEN_NULL`.
 pub const token_null: i32 = -1;
 
-/// Ports `common_chat_input` (chat.h:314 @620d2225c): `tokens` has one
+/// Ports `common_chat_input` (chat.h:320 @8642541b2): `tokens` has one
 /// entry per byte of `text`, the token that begins there or
 /// `token_null`.
 pub const Input = struct {
@@ -42,7 +42,7 @@ pub const Input = struct {
         return .{ .gpa = gpa };
     }
 
-    /// Ports `common_chat_input` (chat.h:321 @620d2225c), the constructor
+    /// Ports `common_chat_input` (chat.h:327 @8642541b2), the constructor
     /// from text: plain text, with no tokens.
     ///
     /// Return: owned by `gpa`; release with `deinit`.
@@ -71,17 +71,17 @@ pub const Input = struct {
         return out;
     }
 
-    /// Ports `size` (chat.h:323 @620d2225c).
+    /// Ports `size` (chat.h:329 @8642541b2).
     pub fn size(self: *const Input) usize {
         return self.text.items.len;
     }
 
-    /// Ports `empty` (chat.h:324 @620d2225c).
+    /// Ports `empty` (chat.h:330 @8642541b2).
     pub fn empty(self: *const Input) bool {
         return self.text.items.len == 0;
     }
 
-    /// Ports `append` (chat.cpp:1543 @620d2225c), the overload taking a
+    /// Ports `append` (chat.cpp:1725 @8642541b2), the overload taking a
     /// piece and its token: the token on the piece's first byte, null on
     /// the rest. An empty piece adds nothing, not even its token.
     pub fn append(self: *Input, piece: []const u8, token: i32) Error!void {
@@ -91,14 +91,14 @@ pub const Input = struct {
         try self.text.appendSlice(self.gpa, piece);
     }
 
-    /// Ports `append` (chat.cpp:1552 @620d2225c), the overload taking a
+    /// Ports `append` (chat.cpp:1734 @8642541b2), the overload taking a
     /// chunk.
     pub fn appendInput(self: *Input, chunk: *const Input) Error!void {
         try self.tokens.appendSlice(self.gpa, chunk.tokens.items);
         try self.text.appendSlice(self.gpa, chunk.text.items);
     }
 
-    /// Ports `truncate` (chat.cpp:1557 @620d2225c).
+    /// Ports `truncate` (chat.cpp:1739 @8642541b2).
     pub fn truncate(self: *Input, pos: usize) void {
         if (pos < self.text.items.len) {
             self.text.shrinkRetainingCapacity(pos);
@@ -106,7 +106,7 @@ pub const Input = struct {
         }
     }
 
-    /// Ports `substr` (chat.cpp:1564 @620d2225c): `std::string::substr`,
+    /// Ports `substr` (chat.cpp:1746 @8642541b2): `std::string::substr`,
     /// throwing `out_of_range` past the end, with the tokens beside it.
     ///
     /// Parameters:
@@ -122,7 +122,7 @@ pub const Input = struct {
         return out;
     }
 
-    /// Ports `prepend` (chat.cpp:1571 @620d2225c), the overload taking
+    /// Ports `prepend` (chat.cpp:1753 @8642541b2), the overload taking
     /// text: no tokens for it.
     pub fn prepend(self: *Input, prefix: []const u8) Error!void {
         try self.tokens.ensureUnusedCapacity(self.gpa, prefix.len);
@@ -133,7 +133,7 @@ pub const Input = struct {
         try self.text.insertSlice(self.gpa, 0, prefix);
     }
 
-    /// Ports `prepend` (chat.cpp:1576 @620d2225c), the overload taking a
+    /// Ports `prepend` (chat.cpp:1758 @8642541b2), the overload taking a
     /// chunk.
     pub fn prependInput(self: *Input, prefix: *const Input) Error!void {
         try self.tokens.insertSlice(self.gpa, 0, prefix.tokens.items);
@@ -154,7 +154,7 @@ fn vocabPtr(vocab: *const anyopaque) VocabPtr {
 
 const VocabPtr = @typeInfo(@TypeOf(@import("llama").api.vocab.llama_tokenize)).@"fn".param_types[0].?;
 
-/// Ports `common_tokenize` (common/common.cpp:1837 @620d2225c), the
+/// Ports `common_tokenize` (common/common.cpp:1866 @8642541b2), the
 /// overload taking a vocabulary, through libllama's port.
 ///
 /// Parameters:
@@ -162,7 +162,8 @@ const VocabPtr = @typeInfo(@TypeOf(@import("llama").api.vocab.llama_tokenize)).@
 ///   has.
 ///
 /// Return: owned by `gpa`. `error.RuntimeError` when the count overflows
-/// `int32_t`.
+/// `int32_t`, or when libllama throws (a vocabulary with no byte token for a
+/// byte of the text), with its `what()`.
 pub fn commonTokenize(gpa: Allocator, vocab: *const anyopaque, text: []const u8, add_special: bool, parse_special: bool) Error![]i32 {
     const api = @import("llama").api;
     const v = vocabPtr(vocab);
@@ -170,20 +171,25 @@ pub fn commonTokenize(gpa: Allocator, vocab: *const anyopaque, text: []const u8,
     var n_tokens: c_int = @intCast(text.len + 2 * @as(usize, @intFromBool(add_special)));
     var result = try gpa.alloc(i32, @intCast(n_tokens));
     errdefer gpa.free(result);
-    n_tokens = api.vocab.llama_tokenize(v, text.ptr, @intCast(text.len), result.ptr, @intCast(result.len), add_special, parse_special);
+    // libllama's throw reaches the caller as an exception, as upstream's
+    // does; `llama_tokenize` itself would terminate.
+    var exc: @import("llama").impl.Exception = .{};
+    n_tokens = api.vocab.tokenize(v, text, result, add_special, parse_special, &exc) catch
+        return exception.throw(error.RuntimeError, "{s}", .{exc.what()});
     if (n_tokens == std.math.minInt(i32)) {
         return exception.throw(error.RuntimeError, "Tokenization failed: input text too large, tokenization result exceeds int32_t limit", .{});
     }
     if (n_tokens < 0) {
         result = try gpa.realloc(result, @intCast(-n_tokens));
-        const check = api.vocab.llama_tokenize(v, text.ptr, @intCast(text.len), result.ptr, @intCast(result.len), add_special, parse_special);
+        const check = api.vocab.tokenize(v, text, result, add_special, parse_special, &exc) catch
+            return exception.throw(error.RuntimeError, "{s}", .{exc.what()});
         util.ggmlAssert(check == -n_tokens, "check == -n_tokens");
         return result;
     }
     return gpa.realloc(result, @intCast(n_tokens));
 }
 
-/// Ports `common_chat_input_tokenize` (chat.cpp:1581 @620d2225c): `text`
+/// Ports `common_chat_input_tokenize` (chat.cpp:1763 @8642541b2): `text`
 /// tokenized with special tokens parsed, each token's piece beside it. A
 /// leading space a tokenizer adds before the first special token is
 /// dropped with its token; if the pieces do not give `text` back, the text

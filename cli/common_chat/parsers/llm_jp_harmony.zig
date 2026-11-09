@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/llm-jp-harmony.cpp` (llama.cpp v0.7.0,
-//! `620d2225c`), new at v0.6.0. The parser is built in the order clang
+//! Ports `llama.cpp/common/parsers/llm-jp-harmony.cpp` (llama.cpp v0.8.0,
+//! `8642541b2`), new at v0.6.0. The parser is built in the order clang
 //! evaluates the C++ expressions, left to right, since a parser's id is its
 //! position.
 
@@ -162,7 +162,7 @@ fn adjustMessages(a: Allocator, messages: *const Value) Error!Value {
     return adjusted;
 }
 
-/// Ports `common_chat_params_init_llm_jp_harmony` (parsers/llm-jp-harmony.cpp:6 @620d2225c).
+/// Ports `common_chat_params_init_llm_jp_harmony` (parsers/llm-jp-harmony.cpp:6 @8642541b2).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

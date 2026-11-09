@@ -17,12 +17,13 @@
 # reference.
 #
 # Usage: scripts/metal-diff
+#   METAL_DIFF_LIB names another port library, for a private build.
 #   Requires: zig build reference --release=fast
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
 
-LIB=zig-out/lib/libggml.a
+LIB="${METAL_DIFF_LIB:-zig-out/lib/libggml.a}"
 [ -f "$LIB" ] || { echo "missing $LIB -- run 'zig build reference --release=fast'" >&2; exit 2; }
 
 tmp="$(mktemp -d)"

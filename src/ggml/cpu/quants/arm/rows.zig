@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.7.0,
-//! `620d2225c`), the row functions at lines 41, 85 and 134. Each function names
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.8.0,
+//! `8642541b2`), the row functions at lines 41, 85 and 134. Each function names
 //! the C it replaces and the line it began at.
 //!
 //! # These are live, and they feed everything
@@ -57,7 +57,7 @@ fn absMax(srcv: *const [8]f32x4) f32 {
     return neon.maxvq_f32(amaxv[0]);
 }
 
-/// Ports `quantize_row_q8_0` (arch/arm/quants.c:41 @620d2225c).
+/// Ports `quantize_row_q8_0` (arch/arm/quants.c:41 @8642541b2).
 ///
 /// Parameters:
 /// - `x`: the source row.
@@ -95,7 +95,7 @@ pub export fn quantize_row_q8_0(x: [*c]const f32, vy: ?*anyopaque, k: i64) void 
     }
 }
 
-/// Ports `quantize_row_q8_1` (arch/arm/quants.c:85 @620d2225c).
+/// Ports `quantize_row_q8_1` (arch/arm/quants.c:85 @8642541b2).
 ///
 /// Identical to `q8_0` but for the per-block sum in `s`, which the `q4_1` and
 /// `q5_1` dot products need to apply their minimum without a second pass.
@@ -140,7 +140,7 @@ pub export fn quantize_row_q8_1(x: [*c]const f32, vy: ?*anyopaque, k: i64) void 
     }
 }
 
-/// Ports `quantize_row_q8_K` (arch/arm/quants.c:134 @620d2225c).
+/// Ports `quantize_row_q8_K` (arch/arm/quants.c:134 @8642541b2).
 ///
 /// The C's comment calls this a "placeholder implementation for Apple
 /// targets": there is no NEON version, so the symbol exists only to occupy the

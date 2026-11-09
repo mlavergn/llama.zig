@@ -126,6 +126,50 @@ fn echo(comptime tag: []const u8) Handler {
     }.f);
 }
 
+/// The websocket route of `harness/http_ref.cpp`: the same greeting, the
+/// same echo and the same log lines.
+fn wsRoute(_: ?*anyopaque, req: *const Req, conn: *http.WsConn) void {
+    wsRouteImpl(req, conn) catch {};
+}
+
+fn wsRouteImpl(req: *const Req, conn: *http.WsConn) !void {
+    {
+        var j = try echoJson(gpa, "ws", req);
+        defer j.deinit(gpa);
+        try j.set(gpa, "stop", try json.Value.from(gpa, req.should_stop.call()));
+        const s = try http.safeJsonToStr(gpa, &j);
+        defer gpa.free(s);
+        _ = conn.send(s);
+    }
+    var msg: std.ArrayList(u8) = .empty;
+    defer msg.deinit(gpa);
+    while (true) {
+        const ty = try conn.read(gpa, &msg);
+        if (ty == 0) {
+            log.inf("harness: ws closed, open=%d stop=%d\n", .{ @as(c_int, @intFromBool(conn.isOpen())), @as(c_int, @intFromBool(req.should_stop.call())) });
+            return;
+        }
+        log.inf("harness: ws read type=%d len=%zu\n", .{ ty, msg.items.len });
+        if (std.mem.eql(u8, msg.items, "close")) {
+            conn.close();
+            continue;
+        }
+        if (std.mem.eql(u8, msg.items, "open")) {
+            _ = conn.send(if (conn.isOpen()) "open=1" else "open=0");
+            continue;
+        }
+        if (std.mem.startsWith(u8, msg.items, "binary:")) {
+            _ = conn.sendBinary(msg.items[7..]);
+            continue;
+        }
+        if (ty == 1) {
+            _ = conn.send(msg.items);
+        } else {
+            _ = conn.sendBinary(msg.items);
+        }
+    }
+}
+
 fn health(_: *const Req) anyerror!*Res {
     var j = json.Value.emptyObject();
     try j.set(gpa, "status", try str(gpa, "ok"));
@@ -378,6 +422,8 @@ pub fn main(init: std.process.Init) !u8 {
     // not wrapped: the error reaches cpp-httplib's exception handler
     try ctx_http.get("/throw-raw", handler(throwRaw));
     try ctx_http.get("/quit", exWrapper(handler(quit)));
+
+    try ctx_http.ws("/ws/:name", .{ .ctx = null, .func = wsRoute });
 
     try ctx_http.registerGcpCompat();
 

@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <memory>
 #include <string>
 #include <vector>
@@ -65,6 +66,9 @@ struct ref_hparams {
     int32_t dsv4_max_n_token;
     int32_t dsv4_max_wh_ratio;
     int32_t max_slice_nums; // v0.7.0
+    float   preproc_max_pixels_tolerance; // v0.8.0
+    int32_t image_round_half_even;        // v0.8.0
+    int32_t image_floor_before_align;     // v0.8.0
 };
 
 typedef void (*ref_log_fn)(int level, const char * text, void * user_data);
@@ -100,14 +104,7 @@ static void put_image(std::vector<uint8_t> & out, const clip_image_f32 & img) {
     }
 }
 
-// Runs preprocessor `kind` (the order of the Zig `Kind` enum) on an RGB
-// image -- a placeholder when `rgb` is null -- and writes the serialized
-// output to `*out` (free with `ref_free`).
-int ref_preprocess(int kind, int proj_type, const ref_hparams * hp, const uint8_t * rgb, int nx, int ny,
-                   uint8_t ** out, size_t * out_len) {
-    clip_ctx ctx;
-    clip_hparams & h = ctx.hparams;
-    ctx.proj = (projector_type) proj_type;
+static void fill_hparams(clip_hparams & h, const ref_hparams * hp) {
     h.image_size         = hp->image_size;
     h.patch_size         = hp->patch_size;
     h.n_merge            = hp->n_merge;
@@ -137,25 +134,56 @@ int ref_preprocess(int kind, int proj_type, const ref_hparams * hp, const uint8_
     h.dsv4_max_wh_ratio    = hp->dsv4_max_wh_ratio;
     h.max_slice_nums       = hp->max_slice_nums;
 
-    std::unique_ptr<mtmd_image_preprocessor> pp;
+    h.preproc_max_pixels_tolerance = hp->preproc_max_pixels_tolerance;
+    h.image_round_half_even        = hp->image_round_half_even != 0;
+    h.image_floor_before_align     = hp->image_floor_before_align != 0;
+}
+
+static std::unique_ptr<mtmd_image_preprocessor> make_preprocessor(int kind, const clip_ctx * ctx) {
     switch (kind) {
-        case 0:  pp = std::make_unique<mtmd_image_preprocessor_llava_uhd>(&ctx); break;
-        case 1:  pp = std::make_unique<mtmd_image_preprocessor_fixed_size>(&ctx); break;
-        case 2:  pp = std::make_unique<mtmd_image_preprocessor_dyn_size>(&ctx); break;
-        case 3:  pp = std::make_unique<mtmd_image_preprocessor_longest_edge>(&ctx); break;
-        case 4:  pp = std::make_unique<mtmd_image_preprocessor_minicpmv>(&ctx); break;
-        case 5:  pp = std::make_unique<mtmd_image_preprocessor_lfm2>(&ctx); break;
-        case 6:  pp = std::make_unique<mtmd_image_preprocessor_idefics3>(&ctx); break;
-        case 7:  pp = std::make_unique<mtmd_image_preprocessor_internvl>(&ctx); break;
-        case 8:  pp = std::make_unique<mtmd_image_preprocessor_deepseekocr>(&ctx); break;
-        case 9:  pp = std::make_unique<mtmd_image_preprocessor_step3vl>(&ctx); break;
-        case 10: pp = std::make_unique<mtmd_image_preprocessor_youtuvl>(&ctx); break;
-        case 11: pp = std::make_unique<mtmd_image_preprocessor_granite>(&ctx); break;
-        case 12: pp = std::make_unique<mtmd_image_preprocessor_muse_glimmer>(&ctx); break;
-        case 13: pp = std::make_unique<mtmd_image_preprocessor_deepseek4v>(&ctx); break;
-        case 14: pp = std::make_unique<mtmd_image_preprocessor_glm5v>(&ctx); break;
-        case 15: pp = std::make_unique<mtmd_image_preprocessor_cohere2v>(&ctx); break;
-        default: return 1;
+        case 0:  return std::make_unique<mtmd_image_preprocessor_llava_uhd>(ctx);
+        case 1:  return std::make_unique<mtmd_image_preprocessor_fixed_size>(ctx);
+        case 2:  return std::make_unique<mtmd_image_preprocessor_dyn_size>(ctx);
+        case 3:  return std::make_unique<mtmd_image_preprocessor_longest_edge>(ctx);
+        case 4:  return std::make_unique<mtmd_image_preprocessor_minicpmv>(ctx);
+        case 5:  return std::make_unique<mtmd_image_preprocessor_lfm2>(ctx);
+        case 6:  return std::make_unique<mtmd_image_preprocessor_idefics3>(ctx);
+        case 7:  return std::make_unique<mtmd_image_preprocessor_internvl>(ctx);
+        case 8:  return std::make_unique<mtmd_image_preprocessor_deepseekocr>(ctx);
+        case 9:  return std::make_unique<mtmd_image_preprocessor_step3vl>(ctx);
+        case 10: return std::make_unique<mtmd_image_preprocessor_youtuvl>(ctx);
+        case 11: return std::make_unique<mtmd_image_preprocessor_granite>(ctx);
+        case 12: return std::make_unique<mtmd_image_preprocessor_muse_glimmer>(ctx);
+        case 13: return std::make_unique<mtmd_image_preprocessor_deepseek4v>(ctx);
+        case 14: return std::make_unique<mtmd_image_preprocessor_glm5v>(ctx);
+        case 15: return std::make_unique<mtmd_image_preprocessor_cohere2v>(ctx);
+        case 16: return std::make_unique<mtmd_image_preprocessor_lfm3vl>(ctx);
+        case 17: return std::make_unique<mtmd_image_preprocessor_deepseek41v>(ctx);
+        case 18: return std::make_unique<mtmd_image_preprocessor_minicpm_ocr_1_0>(ctx);
+        default: return nullptr;
+    }
+}
+
+static void put_what(uint8_t ** out, size_t * out_len, const char * what) {
+    *out_len = strlen(what);
+    *out     = (uint8_t *) malloc(*out_len + 1);
+    memcpy(*out, what, *out_len);
+}
+
+// Runs preprocessor `kind` (the order of the Zig `Kind` enum) on an RGB
+// image -- a placeholder when `rgb` is null -- through `preprocess`, or
+// `preprocess_video_frame` when `video`, and writes the serialized output to
+// `*out` (free with `ref_free`). Returns 0, or 2 with `what()` in `*out` when
+// it threw.
+int ref_preprocess(int kind, int proj_type, const ref_hparams * hp, const uint8_t * rgb, int nx, int ny, int video,
+                   uint8_t ** out, size_t * out_len) {
+    clip_ctx ctx;
+    ctx.proj = (projector_type) proj_type;
+    fill_hparams(ctx.hparams, hp);
+
+    std::unique_ptr<mtmd_image_preprocessor> pp = make_preprocessor(kind, &ctx);
+    if (!pp) {
+        return 1;
     }
 
     clip_image_u8 img;
@@ -164,23 +192,109 @@ int ref_preprocess(int kind, int proj_type, const ref_hparams * hp, const uint8_
         img.cpy_buf(std::vector<uint8_t>(rgb, rgb + (size_t) nx * ny * 3));
     }
 
-    mtmd_image_preproc_out res = pp->preprocess(img);
+    try {
+        mtmd_image_preproc_out res = video ? pp->preprocess_video_frame(img) : pp->preprocess(img);
 
-    std::vector<uint8_t> buf;
-    put_i32(buf, res.grid_x);
-    put_i32(buf, res.grid_y);
-    put_i32(buf, res.has_overview() ? 1 : 0);
-    put_image(buf, res.overview);
-    const uint64_t n = res.entries.size();
-    put(buf, &n, sizeof(n));
-    for (const auto & e : res.entries) {
-        put_image(buf, e);
+        std::vector<uint8_t> buf;
+        put_i32(buf, res.grid_x);
+        put_i32(buf, res.grid_y);
+        put_i32(buf, res.has_overview() ? 1 : 0);
+        put_image(buf, res.overview);
+        const uint64_t n = res.entries.size();
+        put(buf, &n, sizeof(n));
+        for (const auto & e : res.entries) {
+            put_image(buf, e);
+        }
+
+        *out = (uint8_t *) malloc(buf.size());
+        memcpy(*out, buf.data(), buf.size());
+        *out_len = buf.size();
+    } catch (const std::exception & e) {
+        put_what(out, out_len, e.what());
+        return 2;
     }
-
-    *out = (uint8_t *) malloc(buf.size());
-    memcpy(*out, buf.data(), buf.size());
-    *out_len = buf.size();
     return 0;
+}
+
+// `get_video_frame_size` of preprocessor `kind`.
+int ref_video_frame_size(int kind, const ref_hparams * hp, int n_frames, int width, int height, clip_image_size * out) {
+    clip_ctx ctx;
+    ctx.proj = PROJECTOR_TYPE_UNKNOWN;
+    fill_hparams(ctx.hparams, hp);
+    return make_preprocessor(kind, &ctx)->get_video_frame_size(n_frames, width, height, *out) ? 1 : 0;
+}
+
+// The static helpers upstream exposes for tests/test-mtmd-impl.cpp.
+void ref_dyn_target_size(const ref_hparams * hp, int w, int h, clip_image_size * out) {
+    clip_hparams hparams;
+    fill_hparams(hparams, hp);
+    *out = mtmd_image_preprocessor_dyn_size::get_target_size(hparams, { w, h });
+}
+
+// Returns 0, or 2 with `what()` in `*what` (free with `ref_free`) when it threw.
+int ref_longest_target_size(const ref_hparams * hp, int w, int h, clip_image_size * out, uint8_t ** what, size_t * what_len) {
+    clip_hparams hparams;
+    fill_hparams(hparams, hp);
+    try {
+        *out = mtmd_image_preprocessor_longest_edge::get_target_size(hparams, { w, h });
+    } catch (const std::exception & e) {
+        put_what(what, what_len, e.what());
+        return 2;
+    }
+    return 0;
+}
+
+void ref_lfm3vl_smart_resize(int w, int h, int factor, int64_t min_pixels, int64_t max_pixels, int n_frames, int temporal_factor, clip_image_size * out) {
+    *out = mtmd_image_preprocessor_lfm3vl::smart_resize(w, h, factor, min_pixels, max_pixels, n_frames, temporal_factor);
+}
+
+int ref_lfm2_should_tile(const ref_hparams * hp, int w, int h) {
+    clip_hparams hparams;
+    fill_hparams(hparams, hp);
+    return mtmd_image_preprocessor_lfm2::should_tile(hparams, { w, h }) ? 1 : 0;
+}
+
+void ref_lfm2_smart_resize(const ref_hparams * hp, int w, int h, clip_image_size * out) {
+    clip_hparams hparams;
+    fill_hparams(hparams, hp);
+    *out = mtmd_image_preprocessor_lfm2::smart_resize(hparams, { w, h });
+}
+
+void ref_lfm2_grid_layout(const ref_hparams * hp, int height, int width, clip_image_size * out) {
+    clip_hparams hparams;
+    fill_hparams(hparams, hp);
+    *out = mtmd_image_preprocessor_lfm2::get_grid_layout(hparams, height, width);
+}
+
+void ref_deepseek41v_plan_grid(int w, int h, int p, int r, int max_n_token, int min_pixels, int * best_w, int * best_h) {
+    mtmd_image_preprocessor_deepseek41v::plan_grid(w, h, p, r, max_n_token, min_pixels, *best_w, *best_h);
+}
+
+// FNV-1a over `img`'s pixels, as tests/test-mtmd-impl.cpp's `hash_pixels`.
+static uint32_t hash_pixels(const clip_image_u8 & img, uint32_t hash) {
+    for (uint8_t v : img.get_ro_buf()) {
+        hash = (hash ^ v) * 16777619u;
+    }
+    return hash;
+}
+
+// `test_image_preprocessor_lfm2_torch_resize`'s measurement: the hash of the
+// tiles and the thumbnail, through the constructor that takes the hparams.
+uint32_t ref_lfm2_slice_hash(const ref_hparams * hp, const uint8_t * rgb, int nx, int ny) {
+    clip_hparams hparams;
+    fill_hparams(hparams, hp);
+    const mtmd_image_preprocessor_lfm2 preproc(hparams);
+
+    clip_image_u8 img;
+    img.set_size({ nx, ny }, false);
+    img.cpy_buf(std::vector<uint8_t>(rgb, rgb + (size_t) nx * ny * 3));
+    const auto sliced = preproc.slice_image(img, preproc.get_slice_instructions({ nx, ny }));
+
+    uint32_t hash = 2166136261u;
+    for (const auto & slice : sliced.slices) {
+        hash = hash_pixels(slice, hash);
+    }
+    return hash_pixels(sliced.overview, hash);
 }
 
 void ref_free(uint8_t * p) {

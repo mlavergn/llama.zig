@@ -6,7 +6,7 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` and
-//! `llama.cpp/ggml/include/ggml-vulkan.h` at v0.7.0 (`620d2225c`). The C++
+//! `llama.cpp/ggml/include/ggml-vulkan.h` at v0.8.0 (`8642541b2`). The C++
 //! is written against `vulkan.hpp`, a header-only C++ wrapper over the C API
 //! in `vulkan_core.h`; what it adds that changes behaviour is reproduced here
 //! -- the dispatcher, exceptions on a failed `VkResult`, and the
@@ -24,16 +24,16 @@ pub const vk = @import("vulkan_c");
 /// in ggml.
 pub const allocator = std.heap.c_allocator;
 
-/// Ports `GGML_VK_NAME` (ggml-vulkan.h:10 @620d2225c).
+/// Ports `GGML_VK_NAME` (ggml-vulkan.h:10 @8642541b2).
 pub const name = "Vulkan";
 
-/// Ports `GGML_VK_MAX_DEVICES` (ggml-vulkan.h:11 @620d2225c).
+/// Ports `GGML_VK_MAX_DEVICES` (ggml-vulkan.h:11 @8642541b2).
 pub const max_devices = 16;
 
 /// The PCI vendor ids the C++ defines for itself. Ports `VK_VENDOR_ID_AMD`,
 /// `VK_VENDOR_ID_APPLE`, `VK_VENDOR_ID_INTEL`, `VK_VENDOR_ID_NVIDIA`,
 /// `VK_VENDOR_ID_QUALCOMM` and `VK_VENDOR_ID_SAMSUNG`
-/// (ggml-vulkan-types.h:181, 183, 185, 187, 189, 191 @620d2225c).
+/// (ggml-vulkan-types.h:181, 183, 185, 187, 189, 191 @8642541b2).
 pub const vendor_id = struct {
     pub const amd = 0x1002;
     pub const apple = 0x106b;
@@ -42,6 +42,20 @@ pub const vendor_id = struct {
     pub const qualcomm = 0x5143;
     pub const samsung = 0x144d;
 };
+
+/// Ports `ggml_vk_external_memory_host_usable` (ggml-vulkan.cpp:4005 @8642541b2).
+pub fn externalMemoryHostUsable(driver_id: vk.VkDriverId) bool {
+    // Disable external_memory_host until
+    // https://github.com/KhronosGroup/MoltenVK/pull/2622 is available in the
+    // Vulkan SDK.
+    return driver_id != vk.VK_DRIVER_ID_MOLTENVK;
+}
+
+/// Ports `ggml_vk_host_buffer_import_usable` (ggml-vulkan.cpp:4011 @8642541b2).
+pub fn hostBufferImportUsable(vendor: u32) bool {
+    // amdgpu re-faults all pages of every imported host allocation on each submission
+    return vendor != vendor_id.amd;
+}
 
 /// The loader's one entry point every other command is found through. The
 /// C++ links it directly (`VULKAN_HPP_DISPATCH_LOADER_DYNAMIC` still names
@@ -62,7 +76,7 @@ const global_commands = [_][:0]const u8{
 };
 
 /// Ports `vulkan.hpp`'s `DispatchLoaderDynamic`, the C++'s
-/// `ggml_vk_default_dispatcher_instance` (ggml-vulkan.cpp:5180 @620d2225c):
+/// `ggml_vk_default_dispatcher_instance` (ggml-vulkan.cpp:5202 @8642541b2):
 /// one function pointer per command the host layer calls, each field named
 /// after its command and typed by its `PFN_`.
 ///
@@ -359,4 +373,12 @@ pub fn envSet(comptime var_name: [:0]const u8) bool {
 
 test {
     std.testing.refAllDecls(@This());
+}
+
+test "host memory is imported everywhere but MoltenVK and amdgpu" {
+    try std.testing.expect(externalMemoryHostUsable(vk.VK_DRIVER_ID_NVIDIA_PROPRIETARY));
+    try std.testing.expect(!externalMemoryHostUsable(vk.VK_DRIVER_ID_MOLTENVK));
+    try std.testing.expect(hostBufferImportUsable(vendor_id.nvidia));
+    try std.testing.expect(hostBufferImportUsable(vendor_id.intel));
+    try std.testing.expect(!hostBufferImportUsable(vendor_id.amd));
 }

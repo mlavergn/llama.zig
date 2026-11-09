@@ -69,10 +69,14 @@ zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
 zig cc -mcpu=baseline -c harness/proxy_dev.c -o "$tmp/proxy_dev.o" -O2 \
     -I llama.cpp/ggml/include -I llama.cpp/ggml/src 2>"$tmp/perr" \
     || { echo "FAIL: cannot compile harness/proxy_dev.c" >&2; head -20 "$tmp/perr" >&2; exit 1; }
+
+zig c++ -mcpu=baseline -c harness/context_ref.cpp -o "$tmp/context_ref.o" -std=c++17 -O2 -w \
+    -I llama.cpp/src -I llama.cpp/include -I llama.cpp/ggml/include 2>"$tmp/cerr" \
+    || { echo "FAIL: cannot compile harness/context_ref.cpp" >&2; head -20 "$tmp/cerr" >&2; exit 1; }
 zig build-exe -mcpu baseline -femit-bin="$tmp/context_diff" -Ofast -lc \
     --dep harness_root -Mroot=harness/context_diff.zig \
     --dep llama_c -Mharness_root="$PORT/harness_root.zig" -Mllama_c="$tmp/llama_c.zig" \
-    "$tmp/proxy_dev.o" "$LIBS/libllama-ref.a" "$LIBS/libggml.a" -lc++ \
+    "$tmp/proxy_dev.o" "$tmp/context_ref.o" "$LIBS/libllama-ref.a" "$LIBS/libggml.a" -lc++ \
     "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
 
@@ -131,6 +135,21 @@ abort_of() {
     echo "$a"
 }
 
+# A one-side transcript up to its abort, normalized as `normalize` in
+# harness/context_diff.zig does -- each run of input-tensor lines sorted, their
+# order being a hash map's -- without the abort's own lines and backtrace. Since
+# v0.8.0 a case both sides abort on must agree on this too, as scripts/mtp-diff
+# has required since v0.7.0: the abort alone says only where they stopped.
+before_abort() {
+    grep -v -E '^ggml_metal_library_compile_pipeline:|GGML_ASSERT\(|GGML_ABORT|^[0-9]+ +[^ ]+ +0x[0-9a-f]+ |^(ref|port): [0-9]+ nodes' "$1" \
+        | sed -E 's/reserve took [0-9.]+ ms/reserve took N ms/; s/^(ggml_metal_log_allocated_size:[^(]*)\(.*/\1(N)/; s/available_memory_kb: .*/available_memory_kb: N/; s/[0-9]+ MiB free/N MiB free/; s/0x[0-9a-fA-F]*/0xP/g' \
+        | perl -ne 'if (/^llama_graph_n_input_tensors:/) { push @r, $_ } else { print sort @r; @r = (); print } END { print sort @r }'
+}
+
+# On Linux an abort attaches gdb, whose thread lines would land in the
+# transcripts before_abort compares.
+export GGML_NO_BACKTRACE=1
+
 # Sets split=ok|refabort|fail, split_ok, split_aborts, split_why.
 crash_split() {
     local f=$1 m=$2 cs ok=0 aborts=0 total=0 crashes=0
@@ -155,6 +174,11 @@ crash_split() {
         local ra pa
         ra=$(abort_of "$tmp/ref.out"); pa=$(abort_of "$tmp/port.out")
         if [ "$rr" -ge 128 ] && [ "$rp" -ge 128 ] && [ -n "$ra" ] && [ "$ra" = "$pa" ]; then
+            if ! cmp -s <(before_abort "$tmp/ref.out") <(before_abort "$tmp/port.out"); then
+                split=fail; split_why="$cs: both abort on $(echo "$ra" | cut -c1-60), after transcripts that differ"
+                diff <(before_abort "$tmp/ref.out") <(before_abort "$tmp/port.out") | head -6 > "$tmp/out"
+                return
+            fi
             aborts=$((aborts + 1))
             split_why="$cs: both abort on $(echo "$ra" | cut -c1-90)"
         elif [ "$rr" -ge 128 ] && [ -z "$ra" ]; then
@@ -189,6 +213,13 @@ for f in "$DIR"/*.gguf; do
     # ARCH_DIFF_MODELS names the configurations (arch_fixtures_draft.cpp's
     # qwen35-fusedqkv).
     case "$name" in *-fusedqkv) [ -z "${ARCH_DIFF_MODELS:-}" ] && models="$MODELS tensor" ;; esac
+    # Since v0.8.0 every device has the fused top-k mask, so the selection
+    # graphs without it run only on harness/proxy_dev.c's device, which declines
+    # it: the k-pool indexers, `build_top_k_mask` and DSA's `build_attn`.
+    case "$name" in glm5-next*|qwen4exp*|deepseek32*|deepseek4*|glm-dsa*|hy_v4*) [ -z "${ARCH_DIFF_MODELS:-}" ] && models="$MODELS proxy" ;; esac
+    # DeepSeek-V4.1's compressed-KV mirrors exist only with a source layer and
+    # its readers on different devices.
+    case "$name" in deepseek41*) [ -z "${ARCH_DIFF_MODELS:-}" ] && models="$models split3" ;; esac
     for m in $models; do
         mkdir -p "$tmp/state"
         skip=$(skip_for "$name" "$m")

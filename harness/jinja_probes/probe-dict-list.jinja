@@ -1,0 +1,2 @@
+{#- v0.8.0: a mapping as a list is its keys, in order. -#}
+{%- set obj = {'b': 1, 'a': 2} -%}{{ (obj | list) == ['b', 'a'] }} {{ obj | list | join(',') }}

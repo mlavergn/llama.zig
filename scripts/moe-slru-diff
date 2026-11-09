@@ -1,0 +1,37 @@
+#!/bin/bash
+# Compare src/llama/moe_cache.zig's Slru with llama.cpp's moe_cache_slru, in
+# one process. context-diff cannot see the eviction policy: an expert read
+# from a different slot computes the same bits. See harness/moe_slru_diff.zig.
+#
+# Usage: scripts/moe-slru-diff [--quick]
+#   Requires: zig build reference --release=fast
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+for lib in zig-out/lib/libllama-ref.a zig-out/lib/libggml.a; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+. scripts/platform-libs
+platform_libs exe
+
+zig c++ -mcpu=baseline -c harness/moe_slru_ref.cpp -o "$tmp/moe_slru_ref.o" -std=c++17 -O2 -w \
+    -I llama.cpp/src -I llama.cpp/include -I llama.cpp/ggml/include 2>"$tmp/cerr" \
+    || { echo "FAIL: cannot compile harness/moe_slru_ref.cpp" >&2; head -20 "$tmp/cerr" >&2; exit 1; }
+
+zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
+    src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+
+zig build-exe -mcpu baseline -femit-bin="$tmp/moe_slru_diff" -Ofast -lc \
+    --dep harness_root -Mroot=harness/moe_slru_diff.zig \
+    --dep llama_c -Mharness_root=src/llama/harness_root.zig -Mllama_c="$tmp/llama_c.zig" \
+    "$tmp/moe_slru_ref.o" zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
+    "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
+
+"$tmp/moe_slru_diff" "$@"

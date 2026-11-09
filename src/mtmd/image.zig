@@ -4,19 +4,21 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/mtmd/mtmd-image.cpp` and
-//! `llama.cpp/tools/mtmd/mtmd-image.h` at v0.7.0 (`620d2225c`). Each
+//! `llama.cpp/tools/mtmd/mtmd-image.h` at v0.8.0 (`8642541b2`). Each
 //! declaration names what it ports and the line it began at.
 //!
 //! # One preprocessor type, not a class tree
 //!
-//! Upstream has a base class with fifteen subclasses, two of which
-//! (`minicpmv`, `lfm2`) override the virtual `get_slice_instructions` that
-//! `llava_uhd`'s `preprocess` calls. Here `Preprocessor` carries a `Kind`
-//! and dispatches on it at the same two points -- `preprocess` and
-//! `getSliceInstructions` -- so the call graph is upstream's. A
-//! preprocessor reads `clip_hparams` through `clip_get_hparams(ctx)`
-//! upstream; it takes a `*const Hparams` here, with the projector type
-//! `deepseekocr` asks its context for.
+//! Upstream has a base class with nineteen subclasses, three of which
+//! (`minicpmv`, `lfm2`, `cohere2v`) override the virtual
+//! `get_slice_instructions` that `llava_uhd`'s `preprocess` calls, and one
+//! (`lfm3vl`) the video virtuals and `dyn_size`'s `target_size`. Here
+//! `Preprocessor` carries a `Kind` and dispatches on it at the same points
+//! -- `preprocess`, `preprocessVideoFrame`, `getVideoFrameSize`, `targetSize`
+//! and `getSliceInstructions` -- so the call graph is upstream's. A
+//! preprocessor reads `clip_hparams` through `clip_get_hparams(ctx)`, or
+//! since v0.8.0 is handed them, upstream; it takes a `*const Hparams` here,
+//! with the projector type `deepseekocr` asks its context for.
 //!
 //! # Arithmetic
 //!
@@ -48,6 +50,7 @@ const libm = struct {
     extern "c" fn log(x: f64) f64;
     extern "c" fn logf(x: f32) f32;
     extern "c" fn nearbyint(x: f64) f64;
+    extern "c" fn nearbyintf(x: f32) f32;
 };
 
 fn assert_(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void {
@@ -63,7 +66,7 @@ fn toD(x: anytype) f64 {
 }
 
 /// `static_cast<int>(f)`: truncation toward zero.
-/// `CLIP_ALIGN` (clip-impl.h:442 @620d2225c).
+/// `CLIP_ALIGN` (clip-impl.h:473 @8642541b2).
 fn clipAlign(x: c_int, n: c_int) c_int {
     return @divTrunc(x + n - 1, n) * n;
 }
@@ -73,11 +76,16 @@ fn cMin(a: f64, b: f64) f64 {
     return if (b < a) b else a;
 }
 
+/// `std::max` over two doubles: `(a < b) ? b : a`.
+fn cMax(a: f64, b: f64) f64 {
+    return if (a < b) b else a;
+}
+
 fn toI(x: anytype) c_int {
     return @intFromFloat(x);
 }
 
-/// Ports `mtmd_image_preproc_out` (mtmd-image.h:11 @620d2225c): what a
+/// Ports `mtmd_image_preproc_out` (mtmd-image.h:11 @8642541b2): what a
 /// preprocessor produces. The caller owns it.
 pub const PreprocOut = struct {
     entries: std.ArrayList(ImageF32) = .empty,
@@ -93,7 +101,7 @@ pub const PreprocOut = struct {
         self.overview.deinit();
     }
 
-    /// Ports `append` (mtmd-image.cpp:7 @620d2225c),
+    /// Ports `append` (mtmd-image.cpp:7 @8642541b2),
     /// a member of `mtmd_image_preproc_out`: one `u8` image.
     pub fn appendU8(self: *PreprocOut, hparams: *const Hparams, img: *const ImageU8, normalized: bool) !void {
         var dst: ImageF32 = .{};
@@ -103,13 +111,13 @@ pub const PreprocOut = struct {
         try self.entries.append(gpa, dst);
     }
 
-    /// Ports `append` (mtmd-image.cpp:16 @620d2225c),
+    /// Ports `append` (mtmd-image.cpp:16 @8642541b2),
     /// a member of `mtmd_image_preproc_out`: several `u8` images.
     pub fn appendU8s(self: *PreprocOut, hparams: *const Hparams, imgs: []const ImageU8, normalized: bool) !void {
         for (imgs) |*img| try self.appendU8(hparams, img, normalized);
     }
 
-    /// Ports `append` (mtmd-image.cpp:22 @620d2225c),
+    /// Ports `append` (mtmd-image.cpp:22 @8642541b2),
     /// a member of `mtmd_image_preproc_out`: an `f32` image, moved in; `img`
     /// is left empty.
     pub fn appendF32(self: *PreprocOut, hparams: *const Hparams, img: *ImageF32, normalized: bool) !void {
@@ -119,13 +127,13 @@ pub const PreprocOut = struct {
     }
 
     /// Ports `append_overview` (mtmd-image.cpp:29
-    /// @620d2225c), a member of `mtmd_image_preproc_out`.
+    /// @8642541b2), a member of `mtmd_image_preproc_out`.
     pub fn appendOverview(self: *PreprocOut, hparams: *const Hparams, img: *const ImageU8, normalized: bool) !void {
         try self.overview.fromU8(img);
         if (normalized) self.overview.normalize(&hparams.image_mean, &hparams.image_std);
     }
 
-    /// `has_overview` (mtmd-image.h:24 @620d2225c).
+    /// `has_overview` (mtmd-image.h:24 @8642541b2).
     pub fn hasOverview(self: *const PreprocOut) bool {
         return self.overview.nx() > 0 or self.overview.ny() > 0;
     }
@@ -134,10 +142,10 @@ pub const PreprocOut = struct {
 // -----------------------------------------------------------------------------
 // img_tool
 
-/// Ports `img_tool` (mtmd-image.cpp:38 @620d2225c): the image
+/// Ports `img_tool` (mtmd-image.cpp:38 @8642541b2): the image
 /// manipulations every preprocessor shares.
 pub const ImgTool = struct {
-    /// Ports `resize` (mtmd-image.cpp:39 @620d2225c), a member of
+    /// Ports `resize` (mtmd-image.cpp:39 @8642541b2), a member of
     /// `img_tool`.
     pub fn resize(src: *const ImageU8, dst: *ImageU8, target_resolution: ImageSize, algo: ResizeAlgo, padding: PadStyle, pad_color: [3]u8) !void {
         try dst.setSize(target_resolution, src.isPlaceholder());
@@ -192,7 +200,7 @@ pub const ImgTool = struct {
         }
     }
 
-    /// Ports `crop` (mtmd-image.cpp:95 @620d2225c), a member of
+    /// Ports `crop` (mtmd-image.cpp:95 @8642541b2), a member of
     /// `img_tool`.
     pub fn crop(image: *const ImageU8, dst: *ImageU8, x: c_int, y: c_int, w: c_int, h: c_int) !void {
         assert_(x >= 0 and y >= 0 and w > 0 and h > 0, 96, "x >= 0 && y >= 0 && w > 0 && h > 0");
@@ -211,7 +219,7 @@ pub const ImgTool = struct {
         }
     }
 
-    /// Ports `calc_size_opt` (mtmd-image.cpp:112 @620d2225c), a
+    /// Ports `calc_size_opt` (mtmd-image.cpp:112 @8642541b2), a
     /// member of `img_tool`.
     pub const CalcSizeOpt = struct {
         align_size: c_int = 1,
@@ -219,22 +227,24 @@ pub const ImgTool = struct {
         max_pixels: c_int = 0, // 0 = disabled
         // applied before min/max_pixels, so min_pixels can push an edge back above longest_edge
         longest_edge: c_int = 0, // 0 = disabled
+        round_half_even: bool = false, // Python round() instead of std::round
     };
 
-    /// Ports `calc_size_preserved_ratio` (mtmd-image.cpp:122
-    /// @620d2225c), a member of `img_tool`: the size of the **resized**
+    /// Ports `calc_size_preserved_ratio` (mtmd-image.cpp:123
+    /// @8642541b2), a member of `img_tool`: the size of the **resized**
     /// image, preserving the aspect ratio and aligned to `align_size`
     /// ("smart_resize" in transformers).
     pub fn calcSizePreservedRatio(inp_size: ImageSize, opts: CalcSizeOpt) ImageSize {
-        assert_(opts.align_size > 0, 123, "opts.align_size > 0");
+        assert_(opts.align_size > 0, 124, "opts.align_size > 0");
         const width = inp_size.width;
         const height = inp_size.height;
         if (width <= 0 or height <= 0) return .{ .width = 0, .height = 0 };
 
         const f = opts.align_size;
         const F = struct {
-            fn roundBy(fa: c_int, x: f32) c_int {
-                return toI(@round(x / toF(fa))) * fa;
+            fn roundBy(fa: c_int, even: bool, x: f32) c_int {
+                const q = x / toF(fa);
+                return toI(if (even) libm.nearbyintf(q) else @round(q)) * fa;
             }
             fn ceilBy(fa: c_int, x: f32) c_int {
                 return toI(@ceil(x / toF(fa))) * fa;
@@ -252,8 +262,8 @@ pub const ImgTool = struct {
             h_bar = F.ceilBy(f, toF(height) * scale);
         } else {
             // always align up first
-            w_bar = @max(opts.align_size, F.roundBy(f, toF(width)));
-            h_bar = @max(opts.align_size, F.roundBy(f, toF(height)));
+            w_bar = @max(opts.align_size, F.roundBy(f, opts.round_half_even, toF(width)));
+            h_bar = @max(opts.align_size, F.roundBy(f, opts.round_half_even, toF(height)));
         }
 
         if (opts.max_pixels > 0 and h_bar *% w_bar > opts.max_pixels) {
@@ -269,7 +279,7 @@ pub const ImgTool = struct {
         return .{ .width = w_bar, .height = h_bar };
     }
 
-    /// Ports `composite` (mtmd-image.cpp:160 @620d2225c), a member
+    /// Ports `composite` (mtmd-image.cpp:164 @8642541b2), a member
     /// of `img_tool`: draw `src` into `dst` at an offset.
     pub fn composite(dst: *ImageU8, src: *const ImageU8, offset_x: c_int, offset_y: c_int) void {
         if (src.isPlaceholder()) {
@@ -292,7 +302,7 @@ pub const ImgTool = struct {
         }
     }
 
-    /// Ports `fill` (mtmd-image.cpp:182 @620d2225c), a member of
+    /// Ports `fill` (mtmd-image.cpp:186 @8642541b2), a member of
     /// `img_tool`: a solid colour.
     pub fn fill(img: *ImageU8, color: [3]u8) void {
         if (img.isPlaceholder()) {
@@ -312,8 +322,10 @@ pub const ImgTool = struct {
     const precision_bits = 32 - 8 - 2;
 
     /// The `resample_filter` lambda
-    /// (mtmd-image.cpp:226 @620d2225c) of `img_tool::resize_pillow`: the weight at distance `x`. Pillow's
-    /// bicubic uses a = -0.5, where GGML and PyTorch use -0.75.
+    /// (mtmd-image.cpp:239 @8642541b2) of `img_tool::resize_pillow`: the weight at distance `x`. For
+    /// bicubic, Pillow (and PyTorch with antialias) uses a = -0.5, where GGML
+    /// (and PyTorch without antialias) uses -0.75. `algo` is the base
+    /// algorithm, without the torchvision flag.
     fn resampleFilter(algo: ResizeAlgo, x_in: f64) f64 {
         var x = x_in;
         if (algo == .lanczos) {
@@ -345,12 +357,12 @@ pub const ImgTool = struct {
     }
 
     /// The `precompute_weights` lambda
-    /// (mtmd-image.cpp:278 @620d2225c) of `img_tool::resize_pillow`: one dimension's input ranges and
+    /// (mtmd-image.cpp:291 @8642541b2) of `img_tool::resize_pillow`: one dimension's input ranges and
     /// fixed-point weights.
     ///
     /// Return: the kernel size.
-    fn precomputeWeights(algo: ResizeAlgo, filter_support: f64, in_size: c_int, out_size: c_int, bounds: *std.ArrayList(c_int), weights: *std.ArrayList(i32)) !c_int {
-        assert_(in_size > 0 and out_size > 0, 280, "inSize > 0 && outSize > 0");
+    fn precomputeWeights(algo: ResizeAlgo, int16_weights: bool, filter_support: f64, in_size: c_int, out_size: c_int, bounds: *std.ArrayList(c_int), weights: *std.ArrayList(i32)) !c_int {
+        assert_(in_size > 0 and out_size > 0, 293, "inSize > 0 && outSize > 0");
 
         // ratio of input range to output size; keep filterscale = 1 when
         // upsampling, widen the filter when downsampling
@@ -405,20 +417,35 @@ pub const ImgTool = struct {
             bounds.items[xx * 2 + 1] = xmax;
         }
 
-        // round(float * 2^PRECISION_BITS): Pillow adds +/- 0.5 then
-        // truncates toward zero
+        // torchvision rounds the weights to int16, with as many fractional
+        // bits as the largest weight allows; scaled back to precision_bits,
+        // they give the same output in the passes below. The product is by a
+        // power of two, so it is exact and clang's fused form is this one.
+        var precision: c_int = precision_bits;
+        if (int16_weights) {
+            const weight_max = std.mem.max(f64, pre_weights);
+            precision = 0;
+            while (precision < precision_bits) : (precision += 1) {
+                const scaled = 0.5 + weight_max * toD(@as(c_int, 1) << @intCast(precision + 1));
+                if (toI(scaled) >= (1 << 15)) break;
+            }
+        }
+
+        // round(float * 2^precision): Pillow adds +/- 0.5 then truncates
+        // toward zero
         try weights.resize(gpa, outs * ks);
-        const fxp_scale = std.math.ldexp(@as(f64, 1.0), precision_bits);
+        const fxp_scale = std.math.ldexp(@as(f64, 1.0), precision);
+        const to_precision_bits = @as(i32, 1) << @intCast(precision_bits - precision);
         for (pre_weights, 0..) |pw, i| {
             const rounded = @mulAdd(f64, pw, fxp_scale, if (pw < 0) -0.5 else 0.5);
-            weights.items[i] = @intFromFloat(rounded);
+            weights.items[i] = @as(i32, @intFromFloat(rounded)) * to_precision_bits;
         }
 
         return ksize;
     }
 
     /// The `resample_horizontal` lambda
-    /// (mtmd-image.cpp:363 @620d2225c) of `img_tool::resize_pillow`: width from `in_nx` to `out_nx`.
+    /// (mtmd-image.cpp:388 @8642541b2) of `img_tool::resize_pillow`: width from `in_nx` to `out_nx`.
     /// The caller owns the result.
     fn resampleHorizontal(src: []const u8, in_nx: c_int, in_ny: c_int, out_nx: c_int, ksize: c_int, bounds: []const c_int, weights: []const i32) ![]u8 {
         const onx: usize = @intCast(out_nx);
@@ -460,7 +487,7 @@ pub const ImgTool = struct {
     }
 
     /// The `resample_vertical` lambda
-    /// (mtmd-image.cpp:406 @620d2225c) of `img_tool::resize_pillow`: height to `out_ny`, a whole row at
+    /// (mtmd-image.cpp:431 @8642541b2) of `img_tool::resize_pillow`: height to `out_ny`, a whole row at
     /// a time. The caller owns the result.
     fn resampleVertical(src: []const u8, in_nx: c_int, out_ny: c_int, ksize: c_int, bounds: []const c_int, weight: []const i32) ![]u8 {
         const row_elems = @as(usize, @intCast(in_nx)) * 3;
@@ -492,15 +519,28 @@ pub const ImgTool = struct {
         return out;
     }
 
-    /// Ports `resize_pillow` (mtmd-image.cpp:204 @620d2225c), a
+    /// Ports `resize_pillow` (mtmd-image.cpp:210 @8642541b2), a
     /// member of `img_tool`: Pillow-compatible separable resampling
     /// (bilinear, bicubic, Lanczos) in 22-bit fixed point, adapted upstream
-    /// from Pillow's `Resample.c`.
-    fn resizePillow(img: *const ImageU8, dst: *ImageU8, target_width: c_int, target_height: c_int, algo: ResizeAlgo) !void {
+    /// from Pillow's `Resample.c`. `flag_torch` is the same, except for the
+    /// int16 weights of torchvision.
+    fn resizePillow(img: *const ImageU8, dst: *ImageU8, target_width: c_int, target_height: c_int, algo_flagged: ResizeAlgo) !void {
+        const int16_weights = algo_flagged.isTorch();
+        const algo = algo_flagged.base();
+
+        if (int16_weights and algo == .lanczos) {
+            impl.abort("mtmd-image.cpp", 224, "unsupported resize algo: torchvision has no lanczos");
+        }
+
+        // Filter support radius
         const filter_support: f64 = switch (algo) {
             .bilinear => 1.0,
             .bicubic => 2.0,
             .lanczos => 3.0,
+            else => {
+                _ = c.ggml_abort("mtmd-image.cpp", 234, "unsupported resize algo: %d", @as(c_int, @backingInt(algo)));
+                unreachable;
+            },
         };
 
         const src_width = img.getSize().width;
@@ -525,8 +565,8 @@ pub const ImgTool = struct {
         var ksize_horiz: c_int = 0;
         var ksize_vert: c_int = 0;
 
-        if (need_horizontal) ksize_horiz = try precomputeWeights(algo, filter_support, src_width, target_width, &bounds_horiz, &weights_horiz);
-        if (need_vertical) ksize_vert = try precomputeWeights(algo, filter_support, src_height, target_height, &bounds_vert, &weights_vert);
+        if (need_horizontal) ksize_horiz = try precomputeWeights(algo, int16_weights, filter_support, src_width, target_width, &bounds_horiz, &weights_horiz);
+        if (need_vertical) ksize_vert = try precomputeWeights(algo, int16_weights, filter_support, src_height, target_height, &bounds_vert, &weights_vert);
 
         const src = img.roBuf();
         if (need_horizontal and need_vertical) {
@@ -559,46 +599,55 @@ pub const ImgTool = struct {
 
 /// Which of upstream's preprocessor classes a `Preprocessor` is.
 pub const Kind = enum {
-    /// `mtmd_image_preprocessor_llava_uhd` (mtmd-image.h:60 @620d2225c)
+    /// `mtmd_image_preprocessor_llava_uhd` (mtmd-image.h:65 @8642541b2)
     llava_uhd,
-    /// `mtmd_image_preprocessor_fixed_size` (mtmd-image.h:124 @620d2225c)
+    /// `mtmd_image_preprocessor_fixed_size` (mtmd-image.h:130 @8642541b2)
     fixed_size,
-    /// `mtmd_image_preprocessor_dyn_size` (mtmd-image.h:132 @620d2225c)
+    /// `mtmd_image_preprocessor_dyn_size` (mtmd-image.h:138 @8642541b2)
     dyn_size,
-    /// `mtmd_image_preprocessor_longest_edge` (mtmd-image.h:144 @620d2225c)
+    /// `mtmd_image_preprocessor_longest_edge` (mtmd-image.h:166 @8642541b2)
     longest_edge,
-    /// `mtmd_image_preprocessor_minicpmv` (mtmd-image.h:166 @620d2225c)
+    /// `mtmd_image_preprocessor_minicpmv` (mtmd-image.h:198 @8642541b2)
     minicpmv,
-    /// `mtmd_image_preprocessor_lfm2` (mtmd-image.h:193 @620d2225c)
+    /// `mtmd_image_preprocessor_lfm2` (mtmd-image.h:237 @8642541b2)
     lfm2,
-    /// `mtmd_image_preprocessor_idefics3` (mtmd-image.h:215 @620d2225c)
+    /// `mtmd_image_preprocessor_idefics3` (mtmd-image.h:255 @8642541b2)
     idefics3,
-    /// `mtmd_image_preprocessor_internvl` (mtmd-image.h:220 @620d2225c)
+    /// `mtmd_image_preprocessor_internvl` (mtmd-image.h:260 @8642541b2)
     internvl,
-    /// `mtmd_image_preprocessor_deepseekocr` (mtmd-image.h:234 @620d2225c)
+    /// `mtmd_image_preprocessor_deepseekocr` (mtmd-image.h:274 @8642541b2)
     deepseekocr,
-    /// `mtmd_image_preprocessor_step3vl` (mtmd-image.h:260 @620d2225c)
+    /// `mtmd_image_preprocessor_step3vl` (mtmd-image.h:300 @8642541b2)
     step3vl,
-    /// `mtmd_image_preprocessor_youtuvl` (mtmd-image.h:287 @620d2225c)
+    /// `mtmd_image_preprocessor_youtuvl` (mtmd-image.h:327 @8642541b2)
     youtuvl,
-    /// `mtmd_image_preprocessor_granite` (mtmd-image.h:293 @620d2225c)
+    /// `mtmd_image_preprocessor_granite` (mtmd-image.h:333 @8642541b2)
     granite,
-    /// `mtmd_image_preprocessor_muse_glimmer` (mtmd-image.h:299 @620d2225c)
+    /// `mtmd_image_preprocessor_muse_glimmer` (mtmd-image.h:339 @8642541b2)
     muse_glimmer,
-    /// `mtmd_image_preprocessor_deepseek4v` (mtmd-image.h:150 @620d2225c),
+    /// `mtmd_image_preprocessor_deepseek4v` (mtmd-image.h:173 @8642541b2),
     /// last so the earlier kinds keep their ordinals, which
     /// `harness/mtmd_image_ref.cpp` switches on
     deepseek4v,
-    /// `mtmd_image_preprocessor_glm5v` (mtmd-image.h:138 @620d2225c), new
+    /// `mtmd_image_preprocessor_glm5v` (mtmd-image.h:160 @8642541b2), new
     /// at v0.6.0, after `deepseek4v` for the same reason
     glm5v,
-    /// `mtmd_image_preprocessor_cohere2v` (mtmd-image.h:227 @620d2225c), new
+    /// `mtmd_image_preprocessor_cohere2v` (mtmd-image.h:267 @8642541b2), new
     /// at v0.7.0, last for the same reason
     cohere2v,
+    /// `mtmd_image_preprocessor_lfm3vl` (mtmd-image.h:146 @8642541b2), new
+    /// at v0.8.0, after `cohere2v` for the same reason
+    lfm3vl,
+    /// `mtmd_image_preprocessor_deepseek41v` (mtmd-image.h:189 @8642541b2),
+    /// new at v0.8.0, after `lfm3vl` for the same reason
+    deepseek41v,
+    /// `mtmd_image_preprocessor_minicpm_ocr_1_0` (mtmd-image.h:224
+    /// @8642541b2), new at v0.8.0, last for the same reason
+    minicpm_ocr_1_0,
 };
 
 /// Ports `slice_coordinates`
-/// (mtmd-image.h:64 @620d2225c).
+/// (mtmd-image.h:70 @8642541b2).
 pub const SliceCoordinates = struct {
     x: c_int = 0,
     y: c_int = 0,
@@ -606,7 +655,7 @@ pub const SliceCoordinates = struct {
 };
 
 /// Ports `slice_instructions`
-/// (mtmd-image.h:70 @620d2225c).
+/// (mtmd-image.h:76 @8642541b2).
 pub const SliceInstructions = struct {
     overview_size: ImageSize = .{}, // size of downscaled image
     refined_size: ImageSize = .{}, // size of image right before slicing (must be multiple of slice size)
@@ -618,8 +667,8 @@ pub const SliceInstructions = struct {
     }
 };
 
-/// Ports `slice_output` (mtmd-image.h:79
-/// @620d2225c).
+/// Ports `slice_output` (mtmd-image.h:85
+/// @8642541b2).
 pub const SliceOutput = struct {
     overview: ImageU8 = .{},
     slices: std.ArrayList(ImageU8) = .empty,
@@ -631,31 +680,23 @@ pub const SliceOutput = struct {
     }
 };
 
-/// `mtmd_image_preprocessor_lfm2`'s `min_tiles`, `max_tiles`,
-/// `max_pixels_tolerance` and `tile_size` (mtmd-image.h:195, 196, 197, 198
-/// @620d2225c), from LFM2.5-VL's `processor_config.json`.
-pub const lfm2_min_tiles: c_int = 2;
-pub const lfm2_max_tiles: c_int = 10;
-pub const lfm2_max_pixels_tolerance: f32 = 2.0;
-pub const lfm2_tile_size: c_int = 512;
-
 /// `mtmd_image_preprocessor_step3vl`'s `default_image_longest_edge`,
 /// `default_image_crop_size`, `small_aspect_ratio_limit`,
 /// `wide_aspect_ratio_limit` and `crop_rounding_threshold`
-/// (mtmd-image.h:266, 267, 268, 269, 270 @620d2225c).
+/// (mtmd-image.h:306, 307, 308, 309, 310 @8642541b2).
 const step3vl_default_image_longest_edge: c_int = 3024;
 const step3vl_default_image_crop_size: c_int = 504;
 const step3vl_small_aspect_ratio_limit: f32 = 1.5;
 const step3vl_wide_aspect_ratio_limit: f32 = 4.0;
 const step3vl_crop_rounding_threshold: f32 = 0.2;
 
-/// Ports `mtmd_image_preprocessor` (mtmd-image.h:30 @620d2225c) and its
+/// Ports `mtmd_image_preprocessor` (mtmd-image.h:30 @8642541b2) and its
 /// subclasses: one preprocessor of kind `kind`.
 pub const Preprocessor = struct {
     kind: Kind,
     hparams: *const Hparams,
 
-    // `fuse_row` (mtmd-image.h:245 @620d2225c) and the four members after
+    // `fuse_row` (mtmd-image.h:285 @8642541b2) and the four members after
     // it, of `mtmd_image_preprocessor_deepseekocr`, set at construction as
     // upstream sets them
     fuse_row: bool = false, // v1 fuses a tile-row into one image; v2 keeps tiles separate
@@ -664,7 +705,8 @@ pub const Preprocessor = struct {
     min_tiles: c_int = 0,
     max_tiles: c_int = 0,
 
-    /// The constructors: `hparams` as `clip_get_hparams(ctx)` returns it,
+    /// The constructors, from a context and since v0.8.0 from `hparams`
+    /// themselves: `hparams` as `clip_get_hparams(ctx)` returns it,
     /// `proj_type` as `clip_get_projector_type(ctx)` does (only
     /// `deepseekocr` reads it). `hparams` must outlive the preprocessor.
     pub fn init(kind: Kind, hparams: *const Hparams, proj_type: names.ProjectorType) Preprocessor {
@@ -679,16 +721,17 @@ pub const Preprocessor = struct {
         return self;
     }
 
-    /// The virtual `preprocess` (mtmd-image.h:36 @620d2225c), dispatched.
+    /// The virtual `preprocess` (mtmd-image.h:37 @8642541b2), dispatched.
     /// The caller owns the result.
     pub fn preprocess(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
         return switch (self.kind) {
-            .llava_uhd, .minicpmv => self.llavaUhdPreprocess(img),
+            .llava_uhd, .minicpmv, .minicpm_ocr_1_0 => self.llavaUhdPreprocess(img),
             .fixed_size => self.fixedSizePreprocess(img),
-            .dyn_size => self.dynSizePreprocess(img),
+            .dyn_size, .lfm3vl => self.dynSizePreprocess(img),
             .glm5v => self.glm5vPreprocess(img),
             .longest_edge => self.longestEdgePreprocess(img),
             .deepseek4v => self.deepseek4vPreprocess(img),
+            .deepseek41v => self.deepseek41vPreprocess(img),
             .lfm2 => self.lfm2Preprocess(img),
             .idefics3 => self.idefics3Preprocess(img),
             .internvl => self.internvlPreprocess(img),
@@ -701,38 +744,70 @@ pub const Preprocessor = struct {
         };
     }
 
-    /// The virtual `get_slice_instructions` (mtmd-image.h:77 @620d2225c),
+    /// The virtual `preprocess_video_frame` (mtmd-image.h:39 @8642541b2),
+    /// dispatched: the frames of a video, which the video helper may have
+    /// already sized. `preprocess` unless the kind overrides it. The caller
+    /// owns the result.
+    pub fn preprocessVideoFrame(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
+        return switch (self.kind) {
+            .lfm3vl => self.lfm3vlPreprocessVideoFrame(img),
+            else => self.preprocess(img),
+        };
+    }
+
+    /// The virtual `get_video_frame_size` (mtmd-image.h:41 @8642541b2),
+    /// dispatched: the frame size of a video with `n_frames` sampled frames,
+    /// as the reference video processor gives it.
+    ///
+    /// Parameters:
+    /// - `n_frames`: sampled frames.
+    /// - `width`, `height`: the source frame's size.
+    /// - `out`: written when the kind has a size; left alone otherwise.
+    ///
+    /// Return: false if the kind has none.
+    pub fn getVideoFrameSize(self: *const Preprocessor, n_frames: c_int, width: c_int, height: c_int, out: *ImageSize) bool {
+        return switch (self.kind) {
+            .lfm3vl => self.lfm3vlGetVideoFrameSize(n_frames, width, height, out),
+            else => false,
+        };
+    }
+
+    /// The virtual `get_slice_instructions` (mtmd-image.h:83 @8642541b2),
     /// dispatched. The caller owns the result.
     pub fn getSliceInstructions(self: *const Preprocessor, original_size: ImageSize) !SliceInstructions {
         return switch (self.kind) {
-            .minicpmv => self.minicpmvGetSliceInstructions(original_size),
+            .minicpmv, .minicpm_ocr_1_0 => self.minicpmvGetSliceInstructions(original_size),
             .lfm2 => self.lfm2GetSliceInstructions(original_size),
             .cohere2v => self.cohere2vGetSliceInstructions(original_size),
             else => self.llavaUhdGetSliceInstructions(original_size),
         };
     }
 
-    /// Ports `get_slice_align` (mtmd-image.h:87 @620d2225c), a virtual
+    /// Ports `get_slice_align` (mtmd-image.h:93 @8642541b2), a virtual
     /// member of `mtmd_image_preprocessor_llava_uhd`: align slices to a
     /// multiple of the merger factor (integer merger tokens per slice); and
-    /// its override `get_slice_align` (mtmd-image.h:172 @620d2225c) in
+    /// its override `get_slice_align` (mtmd-image.h:204 @8642541b2) in
     /// `mtmd_image_preprocessor_minicpmv`: always `patch_size * 4`, even in
-    /// 4x mode (the 2x2 vit_merger slot stays).
+    /// 4x mode (the 2x2 vit_merger slot stays); and its override
+    /// `get_slice_align` (mtmd-image.h:228 @8642541b2) in
+    /// `mtmd_image_preprocessor_minicpm_ocr_1_0`: `find_best_resize` aligns
+    /// to `patch_size * n_merge` (28 in 4x), with a merge of 2 when unset.
     fn getSliceAlign(self: *const Preprocessor) c_int {
         const hparams = self.hparams;
         if (self.kind == .minicpmv) return hparams.patch_size * 4;
-        const merge: c_int = if (hparams.n_merge > 0) hparams.n_merge else 1;
+        const unset: c_int = if (self.kind == .minicpm_ocr_1_0) 2 else 1;
+        const merge: c_int = if (hparams.n_merge > 0) hparams.n_merge else unset;
         return hparams.patch_size * merge;
     }
 
-    /// Ports `align_round` (mtmd-image.h:93 @620d2225c), a virtual member of
+    /// Ports `align_round` (mtmd-image.h:99 @8642541b2), a virtual member of
     /// `mtmd_image_preprocessor_llava_uhd`: the rounding for snapping a
     /// length to a multiple of the align size, `std::round`; and its
-    /// override `align_round` (mtmd-image.h:177 @620d2225c) in
+    /// override `align_round` (mtmd-image.h:209 @8642541b2) in
     /// `mtmd_image_preprocessor_minicpmv`, which breaks ties to even, as
     /// Python's `round()` does.
     fn alignRound(self: *const Preprocessor, v: f64) c_int {
-        if (self.kind == .minicpmv) {
+        if (self.kind == .minicpmv or self.kind == .minicpm_ocr_1_0) {
             const fl = @floor(v);
             const diff = v - fl;
             if (diff > 0.5) return @as(c_int, @intFromFloat(fl)) + 1;
@@ -746,8 +821,8 @@ pub const Preprocessor = struct {
     // -------------------------------------------------------------------------
     // llava_uhd
 
-    /// Ports `preprocess` (mtmd-image.cpp:494
-    /// @620d2225c), a member of `mtmd_image_preprocessor_llava_uhd`.
+    /// Ports `preprocess` (mtmd-image.cpp:519
+    /// @8642541b2), a member of `mtmd_image_preprocessor_llava_uhd`.
     fn llavaUhdPreprocess(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
         const original_size = img.getSize();
         var inst = try self.getSliceInstructions(original_size);
@@ -766,7 +841,7 @@ pub const Preprocessor = struct {
     }
 
     /// Ports `get_slice_instructions`
-    /// (mtmd-image.cpp:508 @620d2225c), a member of
+    /// (mtmd-image.cpp:533 @8642541b2), a member of
     /// `mtmd_image_preprocessor_llava_uhd`.
     fn llavaUhdGetSliceInstructions(self: *const Preprocessor, original_size: ImageSize) !SliceInstructions {
         const func = "get_slice_instructions";
@@ -876,8 +951,8 @@ pub const Preprocessor = struct {
         return res;
     }
 
-    /// Ports `slice_image` (mtmd-image.cpp:611
-    /// @620d2225c), a member of `mtmd_image_preprocessor_llava_uhd`. The
+    /// Ports `slice_image` (mtmd-image.cpp:636
+    /// @8642541b2), a member of `mtmd_image_preprocessor_llava_uhd`. The
     /// caller owns the result.
     pub fn sliceImage(self: *const Preprocessor, img: *const ImageU8, inst: *const SliceInstructions) !SliceOutput {
         const hparams = self.hparams;
@@ -909,7 +984,7 @@ pub const Preprocessor = struct {
     }
 
     /// Ports `get_best_resize`
-    /// (mtmd-image.cpp:643 @620d2225c), a member of
+    /// (mtmd-image.cpp:668 @8642541b2), a member of
     /// `mtmd_image_preprocessor_llava_uhd`.
     fn getBestResize(self: *const Preprocessor, original_size: ImageSize, scale_resolution: c_int, patch_size: c_int, allow_upscale: bool) ImageSize {
         var width = original_size.width;
@@ -923,7 +998,7 @@ pub const Preprocessor = struct {
     }
 
     /// Ports `resize_maintain_aspect_ratio`
-    /// (mtmd-image.cpp:657 @620d2225c), a member of
+    /// (mtmd-image.cpp:682 @8642541b2), a member of
     /// `mtmd_image_preprocessor_llava_uhd`.
     fn resizeMaintainAspectRatio(orig: ImageSize, target_max: ImageSize) ImageSize {
         const scale_width = toF(target_max.width) / toF(orig.width);
@@ -933,7 +1008,7 @@ pub const Preprocessor = struct {
     }
 
     /// Ports `select_best_resolution`
-    /// (mtmd-image.cpp:667 @620d2225c), a member of
+    /// (mtmd-image.cpp:692 @8642541b2), a member of
     /// `mtmd_image_preprocessor_llava_uhd`: the candidate that wastes the
     /// least resolution.
     pub fn selectBestResolution(original_size: ImageSize, possible_resolutions: []const ImageSize) ImageSize {
@@ -963,14 +1038,14 @@ pub const Preprocessor = struct {
     }
 
     /// Ports `ensure_divide`
-    /// (mtmd-image.cpp:691 @620d2225c), a member of
+    /// (mtmd-image.cpp:716 @8642541b2), a member of
     /// `mtmd_image_preprocessor_llava_uhd`.
     fn ensureDivide(self: *const Preprocessor, length: c_int, patch_size: c_int) c_int {
         return @max(self.alignRound(toD(length) / toD(patch_size)) *% patch_size, patch_size);
     }
 
     /// Ports `get_refine_size`
-    /// (mtmd-image.cpp:695 @620d2225c), a member of
+    /// (mtmd-image.cpp:720 @8642541b2), a member of
     /// `mtmd_image_preprocessor_llava_uhd`.
     fn getRefineSize(self: *const Preprocessor, original_size: ImageSize, grid: ImageSize, scale_resolution: c_int, patch_size: c_int, allow_upscale: bool) ImageSize {
         const width = original_size.width;
@@ -988,7 +1063,7 @@ pub const Preprocessor = struct {
     }
 
     /// Ports `get_best_grid`
-    /// (mtmd-image.cpp:718 @620d2225c), a member of
+    /// (mtmd-image.cpp:743 @8642541b2), a member of
     /// `mtmd_image_preprocessor_llava_uhd`.
     fn getBestGrid(max_slice_nums: c_int, multiple: c_int, log_ratio: f32) !ImageSize {
         var candidate_split_grids_nums: std.ArrayList(c_int) = .empty;
@@ -1023,7 +1098,7 @@ pub const Preprocessor = struct {
     // fixed_size, dyn_size, longest_edge
 
     /// Ports `preprocess`
-    /// (mtmd-image.cpp:754 @620d2225c), a member of
+    /// (mtmd-image.cpp:779 @8642541b2), a member of
     /// `mtmd_image_preprocessor_fixed_size`: downscale or upscale to a fixed
     /// size.
     fn fixedSizePreprocess(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
@@ -1038,38 +1113,118 @@ pub const Preprocessor = struct {
         return output;
     }
 
-    /// Ports `preprocess` (mtmd-image.cpp:770
-    /// @620d2225c), a member of `mtmd_image_preprocessor_dyn_size`: resize to a
-    /// multiple of `patch_size * n_merge`, preserving the aspect ratio.
-    fn dynSizePreprocess(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
-        const hparams = self.hparams;
-        assert_(hparams.image_min_pixels > 0 and hparams.image_max_pixels > 0, 771, "hparams.image_min_pixels > 0 && hparams.image_max_pixels > 0");
-        var resized_image: ImageU8 = .{};
-        defer resized_image.deinit();
-        const original_size = img.getSize();
+    /// Ports `get_target_size` (mtmd-image.cpp:795 @8642541b2), a static
+    /// member of `mtmd_image_preprocessor_dyn_size`: a multiple of
+    /// `patch_size * n_merge`, preserving the aspect ratio.
+    pub fn dynSizeGetTargetSize(hparams: *const Hparams, original_size: ImageSize) ImageSize {
+        assert_(hparams.image_min_pixels > 0 and hparams.image_max_pixels > 0, 796, "hparams.image_min_pixels > 0 && hparams.image_max_pixels > 0");
         // the original pixtral model doesn't have n_merge
         const cur_merge = hparams.n_merge;
-        const target_size = ImgTool.calcSizePreservedRatio(original_size, .{
+        return ImgTool.calcSizePreservedRatio(original_size, .{
             .align_size = hparams.patch_size * cur_merge,
             .min_pixels = hparams.image_min_pixels,
             .max_pixels = hparams.image_max_pixels,
             .longest_edge = 0,
+            .round_half_even = hparams.image_round_half_even,
         });
-        try ImgTool.resize(img, &resized_image, target_size, hparams.image_resize_algo, hparams.image_resize_pad, hparams.image_pad_color);
+    }
+
+    /// The virtual `target_size` (mtmd-image.h:142 @8642541b2) of
+    /// `mtmd_image_preprocessor_dyn_size`, dispatched; and its override
+    /// `target_size` (mtmd-image.cpp:853 @8642541b2) in
+    /// `mtmd_image_preprocessor_lfm3vl`.
+    fn targetSize(self: *const Preprocessor, original_size: ImageSize) ImageSize {
+        const hparams = self.hparams;
+        if (self.kind == .lfm3vl) {
+            return lfm3vlSmartResize(original_size.width, original_size.height, hparams.patch_size * hparams.n_merge, hparams.image_min_pixels, hparams.image_max_pixels, 1, 1);
+        }
+        return dynSizeGetTargetSize(hparams, original_size);
+    }
+
+    /// Ports `preprocess` (mtmd-image.cpp:810 @8642541b2), a member of
+    /// `mtmd_image_preprocessor_dyn_size`: resize to `target_size`.
+    fn dynSizePreprocess(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
+        return self.lfm3vlResizeTo(img, self.targetSize(img.getSize()));
+    }
+
+    /// Ports `smart_resize` (mtmd-image.cpp:826 @8642541b2), a static member
+    /// of `mtmd_image_preprocessor_lfm3vl`, new at v0.8.0: as transformers'
+    /// Qwen2-VL `smart_resize`, rounding before the pixel checks (an edge may
+    /// round to 0) and computing in `double`. With `temporal_factor > 1` it
+    /// is the Qwen3-VL video variant over `n_frames`; upstream's defaults for
+    /// the two are 1.
+    pub fn lfm3vlSmartResize(width: c_int, height: c_int, factor: c_int, min_pixels: i64, max_pixels: i64, n_frames: c_int, temporal_factor: c_int) ImageSize {
+        var h = toD(height);
+        var w = toD(width);
+        const fac = toD(factor);
+        // the video variant first upscales edges below factor
+        if (temporal_factor > 1 and (h < fac or w < fac)) {
+            const scale = cMax(fac / h, fac / w);
+            h = toD(toI(h * scale));
+            w = toD(toI(w * scale));
+        }
+
+        const t_bar = @as(i64, @intFromFloat(libm.nearbyint(toD(n_frames) / toD(temporal_factor)))) * temporal_factor;
+        var h_bar = toI(libm.nearbyint(h / fac)) * factor;
+        var w_bar = toI(libm.nearbyint(w / fac)) * factor;
+        if (t_bar * h_bar * w_bar > max_pixels) {
+            const beta = @sqrt(toD(n_frames) * h * w / toD(max_pixels));
+            h_bar = toI(@floor(h / beta / fac)) * factor;
+            w_bar = toI(@floor(w / beta / fac)) * factor;
+        } else if (t_bar * h_bar * w_bar < min_pixels) {
+            const beta = @sqrt(toD(min_pixels) / (toD(n_frames) * h * w));
+            h_bar = toI(@ceil(h * beta / fac)) * factor;
+            w_bar = toI(@ceil(w * beta / fac)) * factor;
+        }
+
+        return .{ .width = @max(factor, w_bar), .height = @max(factor, h_bar) };
+    }
+
+    /// Ports `get_video_frame_size` (mtmd-image.cpp:858 @8642541b2), a member
+    /// of `mtmd_image_preprocessor_lfm3vl`: `Lfm3VlVideoProcessor`'s size,
+    /// `shortest_edge` 4096, `longest_edge` 25165824, `temporal_patch_size`
+    /// 2.
+    fn lfm3vlGetVideoFrameSize(self: *const Preprocessor, n_frames: c_int, width: c_int, height: c_int, out: *ImageSize) bool {
+        const hparams = self.hparams;
+        out.* = lfm3vlSmartResize(width, height, hparams.patch_size * hparams.n_merge, 4096, 25165824, n_frames, 2);
+        return true;
+    }
+
+    /// Ports `preprocess_video_frame` (mtmd-image.cpp:864 @8642541b2), a
+    /// member of `mtmd_image_preprocessor_lfm3vl`: the video helper sizes the
+    /// frames, so they are only snapped to the grid.
+    fn lfm3vlPreprocessVideoFrame(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
+        const f = self.hparams.patch_size * self.hparams.n_merge;
+        const size = img.getSize();
+        return self.lfm3vlResizeTo(img, .{
+            .width = @max(f, toI(libm.nearbyint(toD(size.width) / toD(f))) * f),
+            .height = @max(f, toI(libm.nearbyint(toD(size.height) / toD(f))) * f),
+        });
+    }
+
+    /// Ports `resize_to` (mtmd-image.cpp:873 @8642541b2), a member of
+    /// `mtmd_image_preprocessor_lfm3vl`. `dyn_size`'s `preprocess`
+    /// (mtmd-image.cpp:810 @8642541b2) has the same body over `target_size`,
+    /// and calls this. The caller owns the result.
+    pub fn lfm3vlResizeTo(self: *const Preprocessor, img: *const ImageU8, size: ImageSize) !PreprocOut {
+        const hparams = self.hparams;
+        var resized_image: ImageU8 = .{};
+        defer resized_image.deinit();
+        try ImgTool.resize(img, &resized_image, size, hparams.image_resize_algo, hparams.image_resize_pad, hparams.image_pad_color);
         var output: PreprocOut = .{};
         errdefer output.deinit();
         try output.appendU8(hparams, &resized_image, true);
         return output;
     }
 
-    /// Ports `preprocess` (mtmd-image.cpp:799 @620d2225c), a member of
+    /// Ports `preprocess` (mtmd-image.cpp:890 @8642541b2), a member of
     /// `mtmd_image_preprocessor_glm5v`, new at v0.6.0: the canvas is
     /// ceil-aligned to `patch_size * n_merge` and fitted to the token budget;
     /// the image is rescaled only to meet the budget and sits top-left, with
     /// black padding on the right and bottom.
     fn glm5vPreprocess(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
         const hparams = self.hparams;
-        assert_(hparams.image_min_pixels > 0 and hparams.image_max_pixels > 0, 800, "hparams.image_min_pixels > 0 && hparams.image_max_pixels > 0");
+        assert_(hparams.image_min_pixels > 0 and hparams.image_max_pixels > 0, 891, "hparams.image_min_pixels > 0 && hparams.image_max_pixels > 0");
 
         const factor: i64 = hparams.patch_size * hparams.n_merge;
         const min_px: i64 = hparams.image_min_pixels; // single-frame pixel counts
@@ -1142,24 +1297,44 @@ pub const Preprocessor = struct {
         return output;
     }
 
-    /// Ports `preprocess`
-    /// (mtmd-image.cpp:866 @620d2225c), a member of
-    /// `mtmd_image_preprocessor_longest_edge`: as `dyn_size`, with the longest
-    /// edge at `image_longest_edge`.
-    fn longestEdgePreprocess(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
-        const hparams = self.hparams;
-        assert_(hparams.image_longest_edge > 0, 867, "hparams.image_longest_edge > 0");
-        var resized_image: ImageU8 = .{};
-        defer resized_image.deinit();
-        const original_size = img.getSize();
+    /// Ports `get_target_size` (mtmd-image.cpp:957 @8642541b2), a static
+    /// member of `mtmd_image_preprocessor_longest_edge`: as `dyn_size`'s,
+    /// with the longest edge capped at `image_longest_edge`.
+    ///
+    /// Return: `error.Runtime`, as `clip.throwErr` gives it, when flooring
+    /// before the alignment leaves an edge at zero.
+    pub fn longestEdgeGetTargetSize(hparams: *const Hparams, original_size: ImageSize) !ImageSize {
+        assert_(hparams.image_longest_edge > 0, 958, "hparams.image_longest_edge > 0");
+        var size = original_size;
+        if (hparams.image_floor_before_align) {
+            const ratio = toD(@max(size.width, size.height)) / toD(hparams.image_longest_edge);
+            if (ratio > 1.0) {
+                size.width = toI(@floor(toD(size.width) / ratio));
+                size.height = toI(@floor(toD(size.height) / ratio));
+                if (size.width <= 0 or size.height <= 0) {
+                    return clip.throwErr("image dimensions must be positive after resizing", .{});
+                }
+            }
+        }
+
         // the original pixtral model doesn't have n_merge
         const cur_merge: c_int = if (hparams.n_merge == 0) 1 else hparams.n_merge;
-        const target_size = ImgTool.calcSizePreservedRatio(original_size, .{
+        return ImgTool.calcSizePreservedRatio(size, .{
             .align_size = hparams.patch_size * cur_merge,
             .min_pixels = @max(0, hparams.image_min_pixels),
             .max_pixels = @max(0, hparams.image_max_pixels),
-            .longest_edge = hparams.image_longest_edge,
+            .longest_edge = @min(hparams.image_longest_edge, @max(size.width, size.height)),
         });
+    }
+
+    /// Ports `preprocess` (mtmd-image.cpp:984 @8642541b2), a member of
+    /// `mtmd_image_preprocessor_longest_edge`: as `dyn_size`, with the longest
+    /// edge capped at `image_longest_edge`.
+    fn longestEdgePreprocess(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
+        const hparams = self.hparams;
+        var resized_image: ImageU8 = .{};
+        defer resized_image.deinit();
+        const target_size = try longestEdgeGetTargetSize(hparams, img.getSize());
         try ImgTool.resize(img, &resized_image, target_size, hparams.image_resize_algo, hparams.image_resize_pad, hparams.image_pad_color);
         var output: PreprocOut = .{};
         errdefer output.deinit();
@@ -1171,7 +1346,7 @@ pub const Preprocessor = struct {
     // minicpmv, lfm2
 
     /// Ports `get_slice_instructions`
-    /// (mtmd-image.cpp:893 @620d2225c), a member of
+    /// (mtmd-image.cpp:1000 @8642541b2), a member of
     /// `mtmd_image_preprocessor_minicpmv`.
     fn minicpmvGetSliceInstructions(self: *const Preprocessor, original_size: ImageSize) !SliceInstructions {
         const hparams = self.hparams;
@@ -1188,8 +1363,8 @@ pub const Preprocessor = struct {
         return self.llavaUhdGetSliceInstructions(original_size);
     }
 
-    /// Ports `preprocess` (mtmd-image.cpp:911
-    /// @620d2225c), a member of `mtmd_image_preprocessor_lfm2`.
+    /// Ports `preprocess` (mtmd-image.cpp:1018
+    /// @8642541b2), a member of `mtmd_image_preprocessor_lfm2`.
     fn lfm2Preprocess(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
         var inst = try self.getSliceInstructions(img.getSize());
         defer inst.deinit();
@@ -1205,8 +1380,8 @@ pub const Preprocessor = struct {
         return output;
     }
 
-    /// Ports `should_tile` (mtmd-image.cpp:925
-    /// @620d2225c), a member of `mtmd_image_preprocessor_lfm2`.
+    /// Ports `should_tile` (mtmd-image.cpp:1032
+    /// @8642541b2), a member of `mtmd_image_preprocessor_lfm2`.
     pub fn lfm2ShouldTile(hparams: *const Hparams, original_size: ImageSize) bool {
         const align_size = hparams.patch_size * hparams.n_merge;
 
@@ -1219,26 +1394,47 @@ pub const Preprocessor = struct {
         const h_bar = @max(hparams.patch_size, R.roundBy(align_size, toF(original_size.height)));
         const w_bar = @max(hparams.patch_size, R.roundBy(align_size, toF(original_size.width)));
 
-        return toD(h_bar) * toD(w_bar) > toD(hparams.image_max_pixels) * @as(f64, lfm2_max_pixels_tolerance);
+        return hparams.preproc_max_tiles > 1 and
+            toD(h_bar) * toD(w_bar) > toD(hparams.image_max_pixels) * @as(f64, hparams.preproc_max_pixels_tolerance);
+    }
+
+    /// Ports `smart_resize` (mtmd-image.cpp:1051 @8642541b2), a static member
+    /// of `mtmd_image_preprocessor_lfm2`: `Lfm2VlImageProcessor.smart_resize`,
+    /// Python's round half to even in `double`.
+    pub fn lfm2SmartResize(hparams: *const Hparams, original_size: ImageSize) ImageSize {
+        const align_size = hparams.patch_size * hparams.n_merge;
+        const al = toD(align_size);
+        const height = toD(original_size.height);
+        const width = toD(original_size.width);
+
+        var h_bar = @max(align_size, toI(libm.nearbyint(height / al)) * align_size);
+        var w_bar = @max(align_size, toI(libm.nearbyint(width / al)) * align_size);
+
+        if (toD(h_bar) * toD(w_bar) > toD(hparams.image_max_pixels)) {
+            const beta = @sqrt(height * width / toD(hparams.image_max_pixels));
+            h_bar = @max(align_size, toI(@floor(height / beta / al)) * align_size);
+            w_bar = @max(align_size, toI(@floor(width / beta / al)) * align_size);
+        } else if (toD(h_bar) * toD(w_bar) < toD(hparams.image_min_pixels)) {
+            const beta = @sqrt(toD(hparams.image_min_pixels) / (height * width));
+            h_bar = toI(@ceil(height * beta / al)) * align_size;
+            w_bar = toI(@ceil(width * beta / al)) * align_size;
+        }
+
+        return .{ .width = w_bar, .height = h_bar };
     }
 
     /// Ports `get_slice_instructions`
-    /// (mtmd-image.cpp:942 @620d2225c), a member of
+    /// (mtmd-image.cpp:1074 @8642541b2), a member of
     /// `mtmd_image_preprocessor_lfm2`.
     fn lfm2GetSliceInstructions(self: *const Preprocessor, original_size: ImageSize) !SliceInstructions {
         const func = "get_slice_instructions";
         const hparams = self.hparams;
         var inst: SliceInstructions = .{};
         errdefer inst.deinit();
-        const align_size = hparams.patch_size * hparams.n_merge;
-        inst.overview_size = ImgTool.calcSizePreservedRatio(original_size, .{
-            .align_size = align_size,
-            .min_pixels = hparams.image_min_pixels,
-            .max_pixels = hparams.image_max_pixels,
-            .longest_edge = 0,
-        });
+        inst.overview_size = lfm2SmartResize(hparams, original_size);
 
         const needs_tiling = lfm2ShouldTile(hparams, original_size);
+        const tile_size = hparams.preproc_tile_size;
 
         if (!needs_tiling) {
             inst.refined_size = .{ .width = 0, .height = 0 };
@@ -1246,10 +1442,10 @@ pub const Preprocessor = struct {
             return inst;
         }
 
-        const grid = try lfm2GetGridLayout(original_size.height, original_size.width);
+        const grid = try lfm2GetGridLayout(hparams, original_size.height, original_size.width);
 
         inst.grid_size = grid;
-        inst.refined_size = .{ .width = lfm2_tile_size * grid.width, .height = lfm2_tile_size * grid.height };
+        inst.refined_size = .{ .width = tile_size * grid.width, .height = tile_size * grid.height };
 
         impl.logDbg("%s: original size: %d x %d, overview size: %d x %d, refined size: %d x %d, grid size: %d x %d\n", .{
             func,                     original_size.width,       original_size.height,
@@ -1262,9 +1458,9 @@ pub const Preprocessor = struct {
             var col: c_int = 0;
             while (col < grid.width) : (col += 1) {
                 const slice: SliceCoordinates = .{
-                    .x = col * lfm2_tile_size,
-                    .y = row * lfm2_tile_size,
-                    .size = .{ .width = lfm2_tile_size, .height = lfm2_tile_size },
+                    .x = col * tile_size,
+                    .y = row * tile_size,
+                    .size = .{ .width = tile_size, .height = tile_size },
                 };
                 try inst.slices.append(gpa, slice);
                 impl.logDbg("%s: slice %d: x=%d, y=%d, size=%d x %d\n", .{
@@ -1278,10 +1474,32 @@ pub const Preprocessor = struct {
     }
 
     /// Ports `find_closest_aspect_ratio`
-    /// (mtmd-image.cpp:985 @620d2225c) and
-    /// `find_closest_aspect_ratio`
-    /// (mtmd-image.cpp:1257 @620d2225c), each a member of its class: the two
-    /// bodies are the same over their own `tile_size`.
+    /// (mtmd-image.cpp:1116 @8642541b2), a static member of
+    /// `mtmd_image_preprocessor_lfm2`: in `double` as in Python, since `float`
+    /// breaks exact ties such as 720/1600 between 2/4 and 2/5.
+    fn lfm2FindClosestAspectRatio(hparams: *const Hparams, aspect_ratio: f64, target_ratios: []const ImageSize, width: c_int, height: c_int) ImageSize {
+        var best_ratio_diff = std.math.floatMax(f64);
+        var best_ratio: ImageSize = .{ .width = 1, .height = 1 };
+        const area = toD(width) * toD(height);
+
+        for (target_ratios) |ratio| {
+            const target_aspect_ratio = toD(ratio.width) / toD(ratio.height);
+            const ratio_diff = @abs(aspect_ratio - target_aspect_ratio);
+            if (ratio_diff < best_ratio_diff) {
+                best_ratio_diff = ratio_diff;
+                best_ratio = ratio;
+            } else if (ratio_diff == best_ratio_diff) {
+                const tile_size = hparams.preproc_tile_size;
+                const target_area = toD(tile_size *% tile_size *% ratio.width *% ratio.height);
+                if (area > 0.5 * target_area) best_ratio = ratio;
+            }
+        }
+        return best_ratio;
+    }
+
+    /// Ports `find_closest_aspect_ratio`
+    /// (mtmd-image.cpp:1392 @8642541b2), a member of
+    /// `mtmd_image_preprocessor_deepseekocr`, which stays in `float`.
     fn findClosestAspectRatio(tile_size: c_int, aspect_ratio: f32, target_ratios: []const ImageSize, width: c_int, height: c_int) ImageSize {
         var best_ratio_diff = std.math.floatMax(f32);
         var best_ratio: ImageSize = .{ .width = 1, .height = 1 };
@@ -1306,9 +1524,9 @@ pub const Preprocessor = struct {
     }
 
     /// Ports `get_target_ratios`
-    /// (mtmd-image.cpp:1009 @620d2225c) and
+    /// (mtmd-image.cpp:1142 @8642541b2) and
     /// `get_target_ratios`
-    /// (mtmd-image.cpp:1230 @620d2225c), each a member of its class: every
+    /// (mtmd-image.cpp:1365 @8642541b2), each a member of its class: every
     /// (w, h) tiling of `min_tiles` to `max_tiles` tiles, by area, with
     /// libc++'s unstable `std::sort` deciding the order among equal areas.
     /// The caller owns the result.
@@ -1338,20 +1556,20 @@ pub const Preprocessor = struct {
     }
 
     /// Ports `get_grid_layout`
-    /// (mtmd-image.cpp:1035 @620d2225c), a member of
+    /// (mtmd-image.cpp:1170 @8642541b2), a static member of
     /// `mtmd_image_preprocessor_lfm2`.
-    fn lfm2GetGridLayout(height: c_int, width: c_int) !ImageSize {
-        const aspect_ratio = toF(width) / toF(height);
-        var ratios = try getTargetRatios(lfm2_min_tiles, lfm2_max_tiles);
+    pub fn lfm2GetGridLayout(hparams: *const Hparams, height: c_int, width: c_int) !ImageSize {
+        const aspect_ratio = toD(width) / toD(height);
+        var ratios = try getTargetRatios(hparams.preproc_min_tiles, hparams.preproc_max_tiles);
         defer ratios.deinit(gpa);
-        return findClosestAspectRatio(lfm2_tile_size, aspect_ratio, ratios.items, width, height);
+        return lfm2FindClosestAspectRatio(hparams, aspect_ratio, ratios.items, width, height);
     }
 
     // -------------------------------------------------------------------------
     // idefics3, internvl
 
-    /// Ports `preprocess` (mtmd-image.cpp:1045
-    /// @620d2225c), a member of `mtmd_image_preprocessor_idefics3`: an
+    /// Ports `preprocess` (mtmd-image.cpp:1180
+    /// @8642541b2), a member of `mtmd_image_preprocessor_idefics3`: an
     /// aspect-preserving resize to the longest edge, then a stretch to
     /// multiples of `image_size`, rounding up.
     fn idefics3Preprocess(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
@@ -1463,7 +1681,7 @@ pub const Preprocessor = struct {
     // -------------------------------------------------------------------------
     // cohere2v
 
-    /// Ports `preprocess` (mtmd-image.cpp:1145 @620d2225c), a member of
+    /// Ports `preprocess` (mtmd-image.cpp:1280 @8642541b2), a member of
     /// `mtmd_image_preprocessor_cohere2v`: the image stretched to a grid of
     /// tiles, slices first, then a thumbnail if there is more than one tile.
     fn cohere2vPreprocess(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
@@ -1487,7 +1705,7 @@ pub const Preprocessor = struct {
         return output;
     }
 
-    /// Ports `get_slice_instructions` (mtmd-image.cpp:1162 @620d2225c), a
+    /// Ports `get_slice_instructions` (mtmd-image.cpp:1297 @8642541b2), a
     /// member of `mtmd_image_preprocessor_cohere2v`: the grid with the least
     /// upscale, or if every grid needs a downscale, the one with the least
     /// downscale; grids are visited by tile count, then by width, the same
@@ -1540,12 +1758,12 @@ pub const Preprocessor = struct {
         return inst;
     }
 
-    /// Ports `preprocess` (mtmd-image.cpp:1211
-    /// @620d2225c), a member of `mtmd_image_preprocessor_internvl`: the slices
+    /// Ports `preprocess` (mtmd-image.cpp:1346
+    /// @8642541b2), a member of `mtmd_image_preprocessor_internvl`: the slices
     /// first, then the overview.
     fn internvlPreprocess(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
         const hparams = self.hparams;
-        assert_(hparams.image_res_candidates.items.len != 0, 1212, "!hparams.image_res_candidates.empty()");
+        assert_(hparams.image_res_candidates.items.len != 0, 1347, "!hparams.image_res_candidates.empty()");
         const original_size = img.getSize();
         var inst = try self.getSliceInstructions(original_size);
         defer inst.deinit();
@@ -1570,7 +1788,7 @@ pub const Preprocessor = struct {
     // The resize solver picks the largest target size (multiple of
     // patch_size) whose LLM token block fits max_n_token.
 
-    /// Ports `grid_info` (mtmd-image.h:155 @620d2225c), private to
+    /// Ports `grid_info` (mtmd-image.h:178 @8642541b2), private to
     /// `mtmd_image_preprocessor_deepseek4v`.
     const Dsv4GridInfo = struct {
         n_llm_h: c_int,
@@ -1578,7 +1796,7 @@ pub const Preprocessor = struct {
         n_tokens: c_int, // token count of the block (incl. newline/pad rows and start/end, excl. lead pads)
     };
 
-    /// Ports `grid_tokens` (mtmd-image.cpp:1290 @620d2225c), a static
+    /// Ports `grid_tokens` (mtmd-image.cpp:1425 @8642541b2), a static
     /// member of `mtmd_image_preprocessor_deepseek4v`.
     fn dsv4GridTokens(best_height: c_int, best_width: c_int, patch_size: c_int, r: c_int) Dsv4GridInfo {
         var g: Dsv4GridInfo = undefined;
@@ -1588,7 +1806,7 @@ pub const Preprocessor = struct {
         return g;
     }
 
-    /// Ports `solve_resize_ratio` (mtmd-image.cpp:1299 @620d2225c), a
+    /// Ports `solve_resize_ratio` (mtmd-image.cpp:1434 @8642541b2), a
     /// static member of `mtmd_image_preprocessor_deepseek4v`.
     fn dsv4SolveResizeRatio(height: c_int, width: c_int, p: c_int, r: c_int, max_n_token: c_int, best_height: *c_int, best_width: *c_int) void {
         const ratio = toD(height) / toD(width);
@@ -1622,7 +1840,7 @@ pub const Preprocessor = struct {
         }
     }
 
-    /// Ports `safe_resize` (mtmd-image.cpp:1333 @620d2225c), a static
+    /// Ports `safe_resize` (mtmd-image.cpp:1468 @8642541b2), a static
     /// member of `mtmd_image_preprocessor_deepseek4v`.
     fn dsv4SafeResize(height: c_int, width: c_int, best_height: *c_int, best_width: *c_int, p: c_int, r: c_int, max_n_token_in: c_int) void {
         var max_n_token = max_n_token_in;
@@ -1636,7 +1854,7 @@ pub const Preprocessor = struct {
         }
     }
 
-    /// Ports `preprocess` (mtmd-image.cpp:1346 @620d2225c), a member of
+    /// Ports `preprocess` (mtmd-image.cpp:1481 @8642541b2), a member of
     /// `mtmd_image_preprocessor_deepseek4v` (`load_image` in the
     /// reference): an aspect-preserving, padded resize to the solver's
     /// size, or a stretch for an extreme aspect ratio.
@@ -1680,10 +1898,121 @@ pub const Preprocessor = struct {
     }
 
     // -------------------------------------------------------------------------
+    // deepseek41v
+    //
+    // DeepSeek-V4.1-Flash: port of plan_image_grid / load_image from
+    // inference/image_processor.py (V4.1). It differs from deepseek4v: block =
+    // h * (w + 1) + 2 tokens, no even-row rounding, a single solve, no stretch
+    // path.
+
+    /// The `n_tokens` lambda of `plan_grid` below.
+    fn dsv41NTokens(bh: c_int, bw: c_int, p: c_int, r: c_int) c_int {
+        const n_llm_h = @divTrunc(@divTrunc(bh, p) + r - 1, r);
+        const n_llm_w = @divTrunc(@divTrunc(bw, p) + r - 1, r);
+        return n_llm_h * (n_llm_w + 1) + 2;
+    }
+
+    /// Ports `plan_grid` (mtmd-image.cpp:1526 @8642541b2), a static member of
+    /// `mtmd_image_preprocessor_deepseek41v`: the target pixel size (multiples
+    /// of `patch_size`) for an image of the given size.
+    pub fn deepseek41vPlanGrid(width_in: c_int, height_in: c_int, p: c_int, r: c_int, max_n_token: c_int, min_pixels: c_int, best_width: *c_int, best_height: *c_int) void {
+        var width = width_in;
+        var height = height_in;
+        const area = @as(i64, width) * height;
+        if (min_pixels > 0 and area > 0 and area < min_pixels) {
+            // python: ratio = (min_pixels / (w * h)) ** 0.5; int(w * ratio)
+            const ratio = @sqrt(toD(min_pixels) / (toD(width) * toD(height)));
+            width = toI(toD(width) * ratio);
+            height = toI(toD(height) * ratio);
+        }
+        best_width.* = clipAlign(width, p);
+        best_height.* = clipAlign(height, p);
+        if (dsv41NTokens(best_height.*, best_width.*, p, r) > max_n_token) {
+            // solve_resize_ratio: largest aspect-preserving size whose token block fits
+            const ratio = toD(height) / toD(width);
+            const max_w_f = @sqrt(toD(max_n_token - 2) / ratio + 0.25) - 0.5;
+            const max_h_f = max_w_f * ratio;
+            const cell = p * r;
+            if (max_w_f < 1.0) {
+                best_height.* = @divTrunc(max_n_token - 2, 2) * cell;
+                best_width.* = cell;
+            } else if (max_h_f < 1.0) {
+                best_height.* = cell;
+                best_width.* = (max_n_token - 3) * cell;
+            } else {
+                const beta = cMin(@floor(max_w_f) * toD(cell) / toD(width), @floor(max_h_f) * toD(cell) / toD(height));
+                best_height.* = toI(@floor(toD(height) * beta / toD(p))) * p;
+                best_width.* = toI(@floor(toD(width) * beta / toD(p))) * p;
+            }
+            assert_(dsv41NTokens(best_height.*, best_width.*, p, r) <= max_n_token, 1558, "n_tokens(best_height, best_width) <= max_n_token");
+        }
+    }
+
+    /// Ports `preprocess` (mtmd-image.cpp:1562 @8642541b2), a member of
+    /// `mtmd_image_preprocessor_deepseek41v` (`load_image` in the reference):
+    /// PIL's `ImageOps.pad(color=127)`, which is `ImageOps.contain` then a
+    /// centered paste, with Python's round half to even, and the normalized
+    /// input rounded to bf16.
+    fn deepseek41vPreprocess(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
+        const hparams = self.hparams;
+        var out: PreprocOut = .{};
+        errdefer out.deinit();
+
+        const p = hparams.patch_size;
+        const orig = img.getSize();
+        var best_width: c_int = 0;
+        var best_height: c_int = 0;
+        deepseek41vPlanGrid(orig.width, orig.height, p, hparams.n_merge, hparams.dsv4_max_n_token, hparams.image_min_pixels, &best_width, &best_height);
+
+        const R = struct {
+            fn halfEven(x: f64) c_int {
+                return toI(libm.nearbyint(x));
+            }
+        };
+        var new_w = best_width;
+        var new_h = best_height;
+        const im_ratio = toD(orig.width) / toD(orig.height);
+        const dest_ratio = toD(best_width) / toD(best_height);
+        if (im_ratio != dest_ratio) {
+            if (im_ratio > dest_ratio) {
+                new_h = R.halfEven(toD(orig.height) / toD(orig.width) * toD(best_width));
+            } else {
+                new_w = R.halfEven(toD(orig.width) / toD(orig.height) * toD(best_height));
+            }
+        }
+        var resized: ImageU8 = .{};
+        defer resized.deinit();
+        try ImgTool.resize(img, &resized, .{ .width = new_w, .height = new_h }, hparams.image_resize_algo, .none, .{ 0, 0, 0 });
+
+        if (new_w == best_width and new_h == best_height) {
+            try out.appendU8(hparams, &resized, true);
+        } else {
+            var padded: ImageU8 = .{};
+            defer padded.deinit();
+            try padded.setSize(.{ .width = best_width, .height = best_height }, img.isPlaceholder());
+            if (!img.isPlaceholder()) {
+                ImgTool.fill(&padded, hparams.image_pad_color);
+                const off_x = R.halfEven(toD(best_width - new_w) * 0.5);
+                const off_y = R.halfEven(toD(best_height - new_h) * 0.5);
+                ImgTool.composite(&padded, &resized, off_x, off_y);
+            }
+            try out.appendU8(hparams, &padded, true);
+        }
+
+        // load_image rounds the normalized input to bf16 (round to nearest even)
+        for (out.entries.items) |*e| {
+            // `get_ro_buf` throws on a placeholder
+            if (e.isPlaceholder()) return clip.throwErr("this clip_image_f32 is a placeholder", .{});
+            for (e.buf.items) |*v| v.* = c.ggml_bf16_to_fp32(c.ggml_fp32_to_bf16(v.*));
+        }
+        return out;
+    }
+
+    // -------------------------------------------------------------------------
     // deepseekocr
 
     /// Ports `preprocess`
-    /// (mtmd-image.cpp:1384 @620d2225c), a member of
+    /// (mtmd-image.cpp:1613 @8642541b2), a member of
     /// `mtmd_image_preprocessor_deepseekocr`: a padded global view, and a
     /// local tile grid for an image larger than one tile.
     fn deepseekocrPreprocess(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
@@ -1763,7 +2092,7 @@ pub const Preprocessor = struct {
     // step3vl
 
     /// Ports `img_u8_resize_bilinear_to_f32`
-    /// (mtmd-image.cpp:1454 @620d2225c), a member of
+    /// (mtmd-image.cpp:1683 @8642541b2), a member of
     /// `mtmd_image_preprocessor_step3vl`: normalize, then interpolate.
     fn step3vlResizeBilinearToF32(src: *const ImageU8, dst: *ImageF32, target_width: c_int, target_height: c_int, mean: *const [3]f32, std_: *const [3]f32) !void {
         const src_size = src.getSize();
@@ -1827,14 +2156,14 @@ pub const Preprocessor = struct {
     }
 
     /// Ports `get_image_longest_edge`
-    /// (mtmd-image.cpp:1515 @620d2225c), a member of
+    /// (mtmd-image.cpp:1744 @8642541b2), a member of
     /// `mtmd_image_preprocessor_step3vl`.
     fn step3vlGetImageLongestEdge(params: *const Hparams) c_int {
         return if (params.image_longest_edge > 0) params.image_longest_edge else step3vl_default_image_longest_edge;
     }
 
     /// Ports `determine_window_size`
-    /// (mtmd-image.cpp:1519 @620d2225c), a member of
+    /// (mtmd-image.cpp:1748 @8642541b2), a member of
     /// `mtmd_image_preprocessor_step3vl`.
     fn step3vlDetermineWindowSize(params: *const Hparams, longer: c_int, shorter: c_int) c_int {
         const image_size = params.image_size;
@@ -1847,7 +2176,7 @@ pub const Preprocessor = struct {
     }
 
     /// Ports `calc_crop_extent`
-    /// (mtmd-image.cpp:1531 @620d2225c), a member of
+    /// (mtmd-image.cpp:1760 @8642541b2), a member of
     /// `mtmd_image_preprocessor_step3vl`.
     fn step3vlCalcCropExtent(length: c_int, window_size: c_int) c_int {
         const ratio = toF(length) / toF(window_size);
@@ -1858,8 +2187,8 @@ pub const Preprocessor = struct {
         return window_size * rounded;
     }
 
-    /// Ports `calc_grid` (mtmd-image.cpp:1544
-    /// @620d2225c), a member of `mtmd_image_preprocessor_step3vl`. The caller
+    /// Ports `calc_grid` (mtmd-image.cpp:1773
+    /// @8642541b2), a member of `mtmd_image_preprocessor_step3vl`. The caller
     /// owns the result.
     fn step3vlCalcGrid(length: c_int, window_size: c_int) !std.ArrayList(c_int) {
         const n: c_int = if (length <= window_size) 1 else toI(@ceil(toF(length - window_size) / toF(window_size) + 1.0));
@@ -1876,8 +2205,8 @@ pub const Preprocessor = struct {
         return starts;
     }
 
-    /// Ports `prepare_image` (mtmd-image.cpp:1561
-    /// @620d2225c), a member of `mtmd_image_preprocessor_step3vl`. The caller
+    /// Ports `prepare_image` (mtmd-image.cpp:1790
+    /// @8642541b2), a member of `mtmd_image_preprocessor_step3vl`. The caller
     /// owns the result.
     fn step3vlPrepareImage(img: *const ImageU8, params: *const Hparams) !ImageU8 {
         var resized = try img.clone();
@@ -1916,7 +2245,7 @@ pub const Preprocessor = struct {
     }
 
     /// Ports `crop_with_black_padding`
-    /// (mtmd-image.cpp:1592 @620d2225c), a member of
+    /// (mtmd-image.cpp:1821 @8642541b2), a member of
     /// `mtmd_image_preprocessor_step3vl`. The caller owns the result.
     fn step3vlCropWithBlackPadding(image: *const ImageU8, x: c_int, y: c_int, w: c_int, h: c_int) !ImageU8 {
         var dst: ImageU8 = .{};
@@ -1947,7 +2276,7 @@ pub const Preprocessor = struct {
     }
 
     /// Ports `build_slice_instructions`
-    /// (mtmd-image.cpp:1619 @620d2225c), a member of
+    /// (mtmd-image.cpp:1848 @8642541b2), a member of
     /// `mtmd_image_preprocessor_step3vl`. The caller owns the result.
     pub fn step3vlBuildSliceInstructions(params: *const Hparams, prepared_size: ImageSize) !SliceInstructions {
         var instructions: SliceInstructions = .{};
@@ -1980,8 +2309,8 @@ pub const Preprocessor = struct {
         return instructions;
     }
 
-    /// Ports `preprocess` (mtmd-image.cpp:1659
-    /// @620d2225c), a member of `mtmd_image_preprocessor_step3vl`.
+    /// Ports `preprocess` (mtmd-image.cpp:1888
+    /// @8642541b2), a member of `mtmd_image_preprocessor_step3vl`.
     fn step3vlPreprocess(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
         const hparams = self.hparams;
         var prepared = try step3vlPrepareImage(img, hparams);
@@ -2032,8 +2361,8 @@ pub const Preprocessor = struct {
     // -------------------------------------------------------------------------
     // youtuvl, granite, muse_glimmer
 
-    /// Ports `preprocess` (mtmd-image.cpp:1713
-    /// @620d2225c), a member of `mtmd_image_preprocessor_youtuvl`: a linear
+    /// Ports `preprocess` (mtmd-image.cpp:1942
+    /// @8642541b2), a member of `mtmd_image_preprocessor_youtuvl`: a linear
     /// search, in steps of 0.02, for the scale that fits `max_num_patches`.
     fn youtuvlPreprocess(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
         const hparams = self.hparams;
@@ -2086,18 +2415,18 @@ pub const Preprocessor = struct {
         return output;
     }
 
-    /// Ports `preprocess` (mtmd-image.cpp:1762
-    /// @620d2225c), a member of `mtmd_image_preprocessor_granite`: llava-next
+    /// Ports `preprocess` (mtmd-image.cpp:1991
+    /// @8642541b2), a member of `mtmd_image_preprocessor_granite`: llava-next
     /// "anyres", the overview and every tile stacked on the Y axis so the
     /// whole grid goes through one graph.
     fn granitePreprocess(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
         const func = "preprocess";
         const hparams = self.hparams;
-        assert_(hparams.image_res_candidates.items.len != 0, 1763, "!hparams.image_res_candidates.empty()");
+        assert_(hparams.image_res_candidates.items.len != 0, 1992, "!hparams.image_res_candidates.empty()");
 
         const orig_size = img.getSize();
         const tile_size = hparams.image_size;
-        assert_(tile_size > 0, 1767, "tile_size > 0");
+        assert_(tile_size > 0, 1996, "tile_size > 0");
 
         // llava-next always encodes an overview plus a grid of tiles, even for small images
         const refined_size = selectBestResolution(orig_size, hparams.image_res_candidates.items);
@@ -2105,7 +2434,7 @@ pub const Preprocessor = struct {
         const grid_y = @divTrunc(refined_size.height, tile_size);
 
         // the tiles are stacked on the Y axis, a big grid overflows the stacked image height
-        assert_(grid_x >= 0 and grid_x <= 1024 and grid_y >= 0 and grid_y <= 1024, 1775, "grid_x >= 0 && grid_x <= 1024 && grid_y >= 0 && grid_y <= 1024");
+        assert_(grid_x >= 0 and grid_x <= 1024 and grid_y >= 0 and grid_y <= 1024, 2004, "grid_x >= 0 && grid_x <= 1024 && grid_y >= 0 && grid_y <= 1024");
 
         var overview: ImageU8 = .{};
         defer overview.deinit();
@@ -2148,14 +2477,14 @@ pub const Preprocessor = struct {
     }
 
     /// Ports `preprocess`
-    /// (mtmd-image.cpp:1857 @620d2225c), a member of
+    /// (mtmd-image.cpp:2086 @8642541b2), a member of
     /// `mtmd_image_preprocessor_muse_glimmer`: the patch grid closest to the
     /// input aspect ratio under the token cap, stretched to.
     fn museGlimmerPreprocess(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
         const hparams = self.hparams;
         const patch_hw = hparams.patch_size * hparams.n_merge;
         const patch_area = hparams.patch_size * hparams.patch_size * hparams.n_merge * hparams.n_merge;
-        assert_(patch_area > 0 and hparams.image_max_pixels > 0, 1860, "patch_area > 0 && hparams.image_max_pixels > 0");
+        assert_(patch_area > 0 and hparams.image_max_pixels > 0, 2089, "patch_area > 0 && hparams.image_max_pixels > 0");
         const max_tokens = @divTrunc(hparams.image_max_pixels, patch_area);
 
         const original_size = img.getSize();
@@ -2173,7 +2502,7 @@ pub const Preprocessor = struct {
     }
 };
 
-/// Ports `muse_glimmer_grid_size` (mtmd-image.cpp:1819 @620d2225c):
+/// Ports `muse_glimmer_grid_size` (mtmd-image.cpp:2048 @8642541b2):
 /// transformers' `get_aspect_ratio_preserving_size`.
 fn museGlimmerGridSize(img_w: c_int, img_h: c_int, patch_hw: c_int, max_tokens: c_int) ImageSize {
     var i_nph = toD(img_h) / toD(patch_hw);
@@ -2237,4 +2566,48 @@ test "a resize to the same size copies, and one to a new size has its bytes" {
     try std.testing.expectEqualSlices(u8, src.buf.items, dst.buf.items);
     try ImgTool.resize(&src, &dst, .{ .width = 7, .height = 2 }, .lanczos, .none, .{ 0, 0, 0 });
     try std.testing.expectEqual(@as(usize, 7 * 2 * 3), dst.buf.items.len);
+}
+
+test "round_half_even parts from std::round on an exact half" {
+    const opts: ImgTool.CalcSizeOpt = .{ .align_size = 32, .min_pixels = 8 * 1024, .max_pixels = 4096 * 1024 };
+    var even = opts;
+    even.round_half_even = true;
+    const size: ImageSize = .{ .width = 400, .height = 400 }; // 12.5 alignments
+    try std.testing.expectEqual(@as(c_int, 416), ImgTool.calcSizePreservedRatio(size, opts).width);
+    try std.testing.expectEqual(@as(c_int, 384), ImgTool.calcSizePreservedRatio(size, even).width);
+}
+
+test "lfm3vl's smart_resize keeps an edge that rounds to zero at the factor" {
+    const s = Preprocessor.lfm3vlSmartResize(3, 1000, 32, 0, 1 << 20, 1, 1);
+    try std.testing.expectEqual(@as(c_int, 32), s.width);
+    try std.testing.expectEqual(@as(c_int, 992), s.height);
+}
+
+test "only lfm3vl has a video frame size, and a frame defaults to preprocess" {
+    var hparams: Hparams = .{};
+    hparams.patch_size = 16;
+    hparams.n_merge = 2;
+    var out: ImageSize = .{ .width = -1, .height = -1 };
+    const dyn = Preprocessor.init(.dyn_size, &hparams, .mlp);
+    try std.testing.expect(!dyn.getVideoFrameSize(4, 640, 480, &out));
+    try std.testing.expectEqual(@as(c_int, -1), out.width);
+    const lfm3vl = Preprocessor.init(.lfm3vl, &hparams, .lfm3vl);
+    try std.testing.expect(lfm3vl.getVideoFrameSize(4, 640, 480, &out));
+    try std.testing.expectEqual(@as(c_int, 640), out.width);
+    try std.testing.expectEqual(@as(c_int, 480), out.height);
+}
+
+test "deepseek41v's plan_grid stays within the token budget" {
+    var w: c_int = 0;
+    var h: c_int = 0;
+    Preprocessor.deepseek41vPlanGrid(4000, 3000, 16, 2, 1024, 0, &w, &h);
+    try std.testing.expect(dsv41Tokens(w, h) <= 1024);
+    // past the flat limit: one row of cells
+    Preprocessor.deepseek41vPlanGrid(5000, 1, 16, 2, 16, 0, &w, &h);
+    try std.testing.expectEqual(@as(c_int, 32), h);
+    try std.testing.expectEqual(@as(c_int, 13 * 32), w);
+}
+
+fn dsv41Tokens(w: c_int, h: c_int) c_int {
+    return Preprocessor.dsv41NTokens(h, w, 16, 2);
 }

@@ -1,0 +1,62 @@
+# --connect (v0.8.0, server-connect.cpp): a stand-in llama-connect on PATH
+# (connect.setup), found the way the real one is, its output forwarded at its
+# own levels, stopped through its stdin. The binary itself is a separate
+# project and out of scope. Its port differs per side; the share code is
+# given on the command line unless a case is about generating one.
+!mask --port \d+
+
+# --- an instance: the code in /props, the banner, the levels, the shutdown
+!env PATH=$DATA/bin:$PATH
+!server -m $FIX/llama-dense.gguf -c 256 -np 1 --no-jinja -lv 4 --connect --connect-code "ABCDEFGH-JKMNPQRS TUVWXYZa-bcdefghj-kmnpqrst"
+!fulllog
+GET /props
+!sleep 2
+GET /health
+
+# --- at the default verbosity, a [DEBUG] line is filtered by our level
+!server -m $FIX/llama-dense.gguf -c 256 -np 1 --no-jinja --connect --connect-code ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrst
+!fulllog
+!sleep 2
+
+# --- a router: the code in its /props, the children told nothing of it
+!server --models-dir $DATA/models -c 256 -np 1 --no-jinja --connect --connect-code ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrst
+GET /props
+GET /models
+
+# --- the code without --connect: warned about and dropped
+!server -m $FIX/llama-dense.gguf -c 256 -np 1 --no-jinja --connect-code ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrst
+GET /props
+!env LLAMA_ARG_CONNECT=1
+!env LLAMA_ARG_CONNECT_CODE=ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrst
+!server -m $FIX/llama-dense.gguf -c 256 -np 1 --no-jinja
+GET /props
+!noenv
+
+# --- servers that cannot start
+!env PATH=$DATA/bin:$PATH
+!server -m $FIX/llama-dense.gguf -c 256 -np 1 --no-jinja --connect --connect-code short
+# forty characters, one outside the alphabet
+!server -m $FIX/llama-dense.gguf -c 256 -np 1 --no-jinja --connect --connect-code 0BCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrst
+!env PATH=$DATA/none:/usr/bin:/bin
+!server -m $FIX/llama-dense.gguf -c 256 -np 1 --no-jinja --connect
+
+# --- llama-connect that dies on its own
+!env PATH=$DATA/exits:$PATH
+!server -m $FIX/llama-dense.gguf -c 256 -np 1 --no-jinja --connect --connect-code ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrst
+!fulllog
+!sleep 2
+GET /health
+
+# --- a file by that name that does not run
+!env PATH=$DATA/noexec:$PATH
+!server -m $FIX/llama-dense.gguf -c 256 -np 1 --no-jinja --connect --connect-code ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrst
+
+!env PATH=$DATA/bin:$PATH
+# --- no code given: one is generated, 40 characters, shown in blocks
+!mask (?:[A-Za-z0-9]{8} ){4}[A-Za-z0-9]{8}
+!mask --code [A-Za-z0-9]{40}
+!mask-key connect_code
+!server -m $FIX/llama-dense.gguf -c 256 -np 1 --no-jinja --connect
+!fulllog
+GET /props
+!sleep 2

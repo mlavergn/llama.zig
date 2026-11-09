@@ -50,6 +50,7 @@ static void show_msg(const common_chat_msg & m) {
     for (const auto & p : m.content_parts) {
         str("part.type", p.type);
         str("part.text", p.text);
+        str("part.name", p.name);
     }
     for (const auto & tc : m.tool_calls) {
         str("tc.name", tc.name);
@@ -59,6 +60,7 @@ static void show_msg(const common_chat_msg & m) {
     str("reasoning_content", m.reasoning_content);
     str("tool_name", m.tool_name);
     str("tool_call_id", m.tool_call_id);
+    str("extra_json", m.extra_json);
     line(std::string("empty ") + (m.empty() ? "1" : "0") + " media " + (m.contains_media() ? "1" : "0"));
     guarded([&] { str("oai", m.to_json_oaicompat(false).dump()); });
     guarded([&] { str("oai_concat", m.to_json_oaicompat(true).dump()); });
@@ -102,6 +104,7 @@ static void run(char op, const std::string & payload) {
                 str("name", t.name);
                 str("description", t.description);
                 str("parameters", t.parameters);
+                line(std::string("defer_loading ") + (t.defer_loading ? "1" : "0"));
             }
             guarded([&] { str("back", common_chat_tools_to_json_oaicompat(tools).dump()); });
         }); break;

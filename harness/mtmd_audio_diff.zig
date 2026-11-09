@@ -22,6 +22,10 @@ extern fn ref_audio_hparams_new() ?*anyopaque;
 extern fn ref_audio_hparams_free(hp: ?*anyopaque) void;
 extern fn ref_audio_hparams_set(hp: ?*anyopaque, n_mel_bins: c_int, n_fft: c_int, window_len: c_int, hop_len: c_int, sample_rate: c_int, chunk_len: c_int, mimi_downsample: c_int) void;
 extern fn ref_audio_hparams_set_parakeet(hp: ?*anyopaque, mel_filters: [*]const f32, n_filters: usize, window: [*]const f32, n_window: usize) void;
+extern fn ref_audio_hparams_set_patches(hp: ?*anyopaque, sizes: [*]const i32, n: usize) void;
+extern fn ref_mel_frame_new(n_fft: c_int, window: c_int, n_mel: c_int, sample_rate: c_int) ?*anyopaque;
+extern fn ref_mel_frame_free(c: ?*anyopaque) void;
+extern fn ref_mel_frame_run(c: ?*anyopaque, samples: [*]const f32, n_fft: c_int, n_mel: c_int, out: [*]f32) void;
 extern fn ref_audio_set_log(cb: ?*const fn (c_int, [*c]const u8, ?*anyopaque) callconv(.c) void, ud: ?*anyopaque) void;
 extern fn ref_audio_proc_new(kind: c_int, hp: ?*anyopaque) ?*anyopaque;
 extern fn ref_audio_proc_free(r: ?*anyopaque) void;
@@ -66,6 +70,8 @@ const Config = struct {
     /// The chunk length in samples each class splits at, for the boundary
     /// lengths; 0 for none.
     chunk_samples: usize = 0,
+    /// `audio_patch_sizes` (muse-spark).
+    patches: []const i32 = &.{},
 };
 
 const configs = [_]Config{
@@ -89,6 +95,11 @@ const configs = [_]Config{
     // the odd one's hop does not divide its padded lengths
     .{ .name = "d1omni", .kind = .d1omni, .n_mel = 128, .n_fft = 512, .window = 400, .hop = 160, .sr = 16000, .chunk_samples = 480000 },
     .{ .name = "d1omni-odd", .kind = .d1omni, .n_mel = 64, .n_fft = 400, .window = 300, .hop = 150, .sr = 12000, .chunk_samples = 360000 },
+    // v0.8.0
+    .{ .name = "lfm3a", .kind = .lfm3a, .n_mel = 128, .n_fft = 400, .window = 400, .hop = 160, .sr = 16000 },
+    .{ .name = "lfm3a-odd", .kind = .lfm3a, .n_mel = 32, .n_fft = 512, .window = 300, .hop = 150, .sr = 12000 },
+    .{ .name = "muse-spark", .kind = .muse_spark_audio, .n_mel = 1, .n_fft = 0, .window = 0, .hop = 0, .sr = 24000, .patches = &.{ 4, 5, 6 } },
+    .{ .name = "muse-spark-one", .kind = .muse_spark_audio, .n_mel = 1, .n_fft = 0, .window = 0, .hop = 0, .sr = 24000, .patches = &.{7} },
 };
 
 // -----------------------------------------------------------------------------
@@ -242,6 +253,11 @@ fn runConfig(cfg: *const Config, quick: bool) !void {
     const hp_ref = ref_audio_hparams_new();
     defer ref_audio_hparams_free(hp_ref);
     ref_audio_hparams_set(hp_ref, cfg.n_mel, cfg.n_fft, cfg.window, cfg.hop, cfg.sr, cfg.chunk_len, cfg.mimi_downsample);
+    defer hp.audio_patch_sizes.deinit(gpa);
+    if (cfg.patches.len != 0) {
+        try hp.audio_patch_sizes.appendSlice(gpa, cfg.patches);
+        ref_audio_hparams_set_patches(hp_ref, cfg.patches.ptr, cfg.patches.len);
+    }
     var tables: ?struct { []f32, []f32 } = null;
     defer if (tables) |t| {
         gpa.free(t[0]);
@@ -272,6 +288,41 @@ fn runConfig(cfg: *const Config, quick: bool) !void {
         for (sigs) |sig| try runCase(cfg, &hp, hp_ref, len, sig);
     }
     std.debug.print("{s:<22} {s}\n", .{ cfg.name, if (n_fail == before) "ok" else "FAIL" });
+}
+
+/// `mtmd_audio_log_mel_frame`: one log10-mel frame from `n_fft` samples, over
+/// a cache built as the Voxtral Realtime stream builds it.
+fn runMelFrame(n_fft: c_int, n_mel: c_int, sr: c_int) !void {
+    const c_ref = ref_mel_frame_new(n_fft, n_fft, n_mel, sr);
+    defer ref_mel_frame_free(c_ref);
+    var cache: audio.Cache = .{};
+    defer cache.deinit();
+    try cache.fillSinCosTable(@bitCast(n_fft));
+    try cache.fillHannWindow(@bitCast(n_fft), true);
+    try cache.fillMelFilterbankMatrix(n_mel, n_fft, sr, 0.0, -1.0, true, 1.0, false);
+
+    const nm: usize = @intCast(n_mel);
+    const a = try gpa.alloc(f32, nm);
+    defer gpa.free(a);
+    const b = try gpa.alloc(f32, nm);
+    defer gpa.free(b);
+    const before = n_fail;
+    var seed: u64 = 1;
+    for ([_]Signal{ .silence, .sweep, .noise, .impulses, .square_clip, .loud }) |sig| {
+        for (0..16) |_| {
+            seed += 1;
+            n_cases += 1;
+            const s = try makeSignal(sig, @intCast(n_fft), sr, seed);
+            defer gpa.free(s);
+            ref_mel_frame_run(c_ref, s.ptr, n_fft, n_mel, a.ptr);
+            try audio.logMelFrame(&cache, s.ptr, n_fft, n_mel, b.ptr);
+            n_checks += nm;
+            if (!std.mem.eql(u8, std.mem.sliceAsBytes(a), std.mem.sliceAsBytes(b))) {
+                fail("mel frame n_fft={d} n_mel={d} {s}: differs", .{ n_fft, n_mel, @tagName(sig) });
+            }
+        }
+    }
+    std.debug.print("mel frame {d:>4}/{d:<4}     {s}\n", .{ @as(u32, @intCast(n_fft)), @as(u32, @intCast(n_mel)), if (n_fail == before) "ok" else "FAIL" });
 }
 
 fn runIstft(n_fft: c_int, hop: c_int, n_frames: usize) !void {
@@ -328,6 +379,9 @@ pub fn main(init: std.process.Init) !u8 {
     for (&configs) |*cfg| {
         if (filter) |f| if (std.mem.indexOf(u8, cfg.name, f) == null) continue;
         try runConfig(cfg, quick);
+    }
+    if (filter == null or std.mem.indexOf(u8, "mel frame", filter.?) != null) {
+        for ([_][3]c_int{ .{ 400, 128, 16000 }, .{ 400, 32, 16000 }, .{ 512, 80, 24000 } }) |m| try runMelFrame(m[0], m[1], m[2]);
     }
     if (filter == null or std.mem.indexOf(u8, "istft", filter.?) != null) {
         for ([_][2]c_int{ .{ 16, 4 }, .{ 20, 5 }, .{ 100, 25 }, .{ 1024, 256 }, .{ 1920, 480 }, .{ 30, 30 }, .{ 25, 7 } }) |c| try runIstft(c[0], c[1], 40);
