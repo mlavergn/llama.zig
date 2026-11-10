@@ -6,7 +6,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/preset.cpp` and `llama.cpp/common/preset.h`
-//! (v0.8.0, `8642541b2`) whole, with what they need from
+//! (v0.9.0, `cd959bae9`) whole, with what they need from
 //! `llama.cpp/common/arg.cpp` -- `common_params_to_map`,
 //! `common_params_add_preset_options`, `common_arg::get_args` and
 //! `get_env`. Each
@@ -537,7 +537,7 @@ pub fn fsIsRegularFile(path: []const u8) bool {
     return st.mode & tc.fs_stat.IFMT == tc.fs_stat.IFREG;
 }
 
-/// Ports `parse_ini_from_file` (preset.cpp:170 @8642541b2): sections in
+/// Ports `parse_ini_from_file` (preset.cpp:170 @cd959bae9): sections in
 /// name order, each its keys in key order. A section named twice keeps
 /// only what follows its last header.
 fn parseIniFromFile(a: Allocator, path: []const u8) Error!Ini {
@@ -674,7 +674,7 @@ pub const Context = struct {
         gpa.destroy(arena);
     }
 
-    /// Ports `load_from_ini` (preset.cpp:285 @8642541b2): every section but
+    /// Ports `load_from_ini` (preset.cpp:285 @cd959bae9): every section but
     /// `*`, which goes to `global`, and an empty `default`.
     pub fn loadFromIni(self: *const Context, path: []const u8, global: *Preset) Error!Presets {
         const gpa = self.gpa;
@@ -779,7 +779,7 @@ pub const Context = struct {
         return out;
     }
 
-    /// Ports `load_from_models_dir` (preset.cpp:387 @8642541b2): one preset
+    /// Ports `load_from_models_dir` (preset.cpp:387 @cd959bae9): one preset
     /// per model file, and per sub-directory holding one, with its mmproj
     /// and draft sidecars.
     pub fn loadFromModelsDir(self: *const Context, models_dir: []const u8) Error!Presets {
@@ -947,7 +947,7 @@ fn isDraftFile(fname: []const u8) bool {
     return false;
 }
 
-/// The `scan_subdir` (preset.cpp:394 @8642541b2) lambda of
+/// The `scan_subdir` (preset.cpp:394 @cd959bae9) lambda of
 /// `load_from_models_dir`: a sub-directory's model, its first shard if it
 /// is split, and its sidecars.
 fn scanSubdir(a: Allocator, models: *std.ArrayList(LocalModel), subdir_path: []const u8, name: []const u8) Error!void {

@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (v0.8.0,
-//! `8642541b2`): the `__AVX2__` arms of the helpers at the top of the file
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (v0.9.0,
+//! `cd959bae9`): the `__AVX2__` arms of the helpers at the top of the file
 //! and the scale shuffles before the dot products. Each names the C it
 //! replaces and the line it began at. At x86-64-v3 and v4 neither AVX-VNNI
 //! nor AVX512-VNNI is defined, so `mul_sum_us8_pairs_float` and

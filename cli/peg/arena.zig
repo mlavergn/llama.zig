@@ -7,7 +7,7 @@
 //! Ports the parser types, `common_peg_ast_arena`, `common_peg_parse_context`,
 //! `common_peg_arena` and `parser_executor` from
 //! `llama.cpp/common/peg-parser.h` and `llama.cpp/common/peg-parser.cpp`
-//! (llama.cpp v0.8.0, `8642541b2`). Each declaration names what it ports and
+//! (llama.cpp v0.9.0, `cd959bae9`). Each declaration names what it ports and
 //! the line it began at. The builder is `builder.zig`, the GBNF export
 //! `gbnf.zig`, the serialization `serialize.zig`.
 //!

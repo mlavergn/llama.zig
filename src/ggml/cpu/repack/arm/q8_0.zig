@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.8.0
-//! (`8642541b2`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.9.0
+//! (`cd959bae9`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # The two shapes take different routes to the same sum
@@ -108,7 +108,9 @@ pub export fn ggml_gemv_q8_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
     }
 }
 
-/// Ports `ggml_gemv_q8_0_4x8_q8_0` (arch/arm/repack.cpp:1775 @8642541b2).
+/// Ports `ggml_gemv_q8_0_4x8_q8_0` (arch/arm/repack.cpp:1829 @cd959bae9).
+/// The `__ARM_FEATURE_SVE` arm v0.9.0 added is not ported: no Apple core has
+/// SVE.
 pub export fn ggml_gemv_q8_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !neon.has_dotprod) return ggml_gemv_q8_0_4x8_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 32);

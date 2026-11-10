@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.8.0, `8642541b2`), roughly
+//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.9.0, `cd959bae9`), roughly
 //! lines 1267-1283 and 1608-2026. Each function names the C function it
 //! replaces and the line it began at.
 //!
@@ -226,7 +226,7 @@ pub export fn ggml_new_buffer(ctx: *Context, nbytes: usize) ?*anyopaque {
 // -----------------------------------------------------------------------------
 // Tensor creation
 
-/// Ports `ggml_new_tensor_impl` (ggml.c:1776 @8642541b2).
+/// Ports `ggml_new_tensor_impl` (ggml.c:1784 @cd959bae9).
 ///
 /// The single place tensors come from. A view shares its base tensor's data
 /// rather than allocating; views of views are collapsed onto the ultimate base
@@ -237,6 +237,8 @@ pub export fn ggml_new_buffer(ctx: *Context, nbytes: usize) ?*anyopaque {
 /// - `t`: element type.
 /// - `n_dims`: 1 to `GGML_MAX_DIMS`; trailing dimensions default to 1.
 /// - `ne`: extent per dimension, `n_dims` entries.
+/// - `nb`: strides for a view built with them, `GGML_MAX_DIMS` entries, or
+///   null for contiguous strides.
 /// - `view_src`: tensor whose data to share, or null to allocate.
 /// - `view_offs`: byte offset into `view_src`'s data.
 ///
@@ -246,6 +248,7 @@ pub fn newTensorImpl(
     t: c.enum_ggml_type,
     n_dims: c_int,
     ne: [*]const i64,
+    nb: ?[*]const usize,
     view_src_in: ?*c.ggml_tensor,
     view_offs_in: usize,
 ) *c.ggml_tensor {
@@ -276,11 +279,6 @@ pub fn newTensorImpl(
     for (1..@intCast(n_dims)) |i| {
         data_size *= @intCast(ne[i]);
     }
-
-    impl.assert(
-        view_src == null or data_size == 0 or data_size + view_offs <= types.ggml_nbytes(view_src.?),
-        "view_src == NULL || data_size == 0 || data_size + view_offs <= ggml_nbytes(view_src)",
-    );
 
     var data: ?*anyopaque = if (view_src) |vs| vs.data else null;
     if (data) |d| {
@@ -317,22 +315,36 @@ pub fn newTensorImpl(
         result.ne[i] = ne[i];
     }
 
-    // Strides are contiguous by construction. Note nb[1] divides by the block
-    // size, so a quantized row is measured in blocks rather than elements.
-    result.nb[0] = types.ggml_type_size(t);
-    result.nb[1] = result.nb[0] * @as(usize, @intCast(@divTrunc(result.ne[0], types.ggml_blck_size(t))));
-    for (2..c.GGML_MAX_DIMS) |i| {
-        result.nb[i] = result.nb[i - 1] * @as(usize, @intCast(result.ne[i - 1]));
+    // a view built with strides takes them from the caller, any other tensor
+    // is contiguous. Note nb[1] divides by the block size, so a quantized row
+    // is measured in blocks rather than elements.
+    if (nb) |strides| {
+        for (0..c.GGML_MAX_DIMS) |i| {
+            result.nb[i] = strides[i];
+        }
+    } else {
+        result.nb[0] = types.ggml_type_size(t);
+        result.nb[1] = result.nb[0] * @as(usize, @intCast(@divTrunc(result.ne[0], types.ggml_blck_size(t))));
+        for (2..c.GGML_MAX_DIMS) |i| {
+            result.nb[i] = result.nb[i - 1] * @as(usize, @intCast(result.ne[i - 1]));
+        }
     }
+
+    // a view stays inside its source, over the bytes its strides actually reach
+    const view_size = types.ggml_nbytes(result);
+    impl.assert(
+        view_src == null or view_size == 0 or view_size + view_offs <= types.ggml_nbytes(view_src.?),
+        "view_src == NULL || view_size == 0 || view_size + view_offs <= ggml_nbytes(view_src)",
+    );
 
     ctx.n_objects += 1;
 
     return result;
 }
 
-/// Ports `ggml_new_tensor` (ggml.c:1863 @8642541b2).
+/// Ports `ggml_new_tensor` (ggml.c:1881 @cd959bae9).
 pub export fn ggml_new_tensor(ctx: *Context, t: c.enum_ggml_type, n_dims: c_int, ne: [*]const i64) *c.ggml_tensor {
-    return newTensorImpl(ctx, t, n_dims, ne, null, 0);
+    return newTensorImpl(ctx, t, n_dims, ne, null, null, 0);
 }
 
 /// Ports `ggml_new_tensor_1d` (ggml.c:1889 @cd959bae9).
@@ -366,16 +378,13 @@ pub export fn ggml_dup_tensor(ctx: *Context, src: *const c.ggml_tensor) *c.ggml_
     return ggml_new_tensor(ctx, src.type, c.GGML_MAX_DIMS, &src.ne);
 }
 
-/// Ports `ggml_view_tensor` (ggml.c:1982 @8642541b2).
+/// Ports `ggml_view_tensor` (ggml.c:2000 @cd959bae9).
 ///
 /// Shares `src`'s data and copies its strides, so the view sees the same
 /// layout rather than a contiguous reinterpretation.
 pub export fn ggml_view_tensor(ctx: *Context, src: *c.ggml_tensor) *c.ggml_tensor {
-    const result = newTensorImpl(ctx, src.type, c.GGML_MAX_DIMS, &src.ne, src, 0);
+    const result = newTensorImpl(ctx, src.type, c.GGML_MAX_DIMS, &src.ne, &src.nb, src, 0);
     _ = ggml_format_name(result, "%s (view)", &src.name);
-    for (0..c.GGML_MAX_DIMS) |i| {
-        result.nb[i] = src.nb[i];
-    }
     return result;
 }
 
@@ -623,8 +632,8 @@ test "a view of a view collapses onto the base tensor" {
     var ctx = testContext(&buf);
 
     const base = ggml_new_tensor_1d(&ctx, c.GGML_TYPE_F32, 64);
-    const first = newTensorImpl(&ctx, c.GGML_TYPE_F32, 1, &[_]i64{16}, base, 16);
-    const second = newTensorImpl(&ctx, c.GGML_TYPE_F32, 1, &[_]i64{8}, first, 8);
+    const first = newTensorImpl(&ctx, c.GGML_TYPE_F32, 1, &[_]i64{16}, null, base, 16);
+    const second = newTensorImpl(&ctx, c.GGML_TYPE_F32, 1, &[_]i64{8}, null, first, 8);
 
     // view_src must be the base, never another view, and the offsets add.
     try std.testing.expectEqual(@as(?*c.ggml_tensor, base), second.view_src);

@@ -7,10 +7,10 @@
 //! - `llama.cpp/src/llama-kv-cache.h` -- `llama_kv_cache` with its
 //!   `stream_copy_info` and `slot_info`, and `llama_kv_cache_context`
 //! - `llama.cpp/src/llama-kv-cache.cpp` -- their bodies, `ggml_gen_hadamard`,
-//!   `args_set_input_kq_mask`, `set_input_kq_mask_impl` and
-//!   `llm_graph_input_k_shift`
+//!   `get_kv_rows_slices`, `args_set_input_attn_mask`,
+//!   `set_input_attn_mask_impl` and `llm_graph_input_k_shift`
 //!
-//! All at v0.8.0 (`8642541b2`). The cell bookkeeping is `kv_cells.zig`'s.
+//! All at v0.9.0 (`cd959bae9`). The cell bookkeeping is `kv_cells.zig`'s.
 //!
 //! # Shared cells
 //!
@@ -180,14 +180,16 @@ pub const SlotInfo = struct {
     }
 };
 
-/// `kv_layer` (llama-kv-cache.h:257 @8642541b2): one layer's K and V, and
-/// their per-stream views.
+/// `kv_layer` (llama-kv-cache.h:263 @cd959bae9): one layer's K and V,
+/// their per-stream views, and their Hadamard rotations.
 const KvLayer = struct {
     il: u32,
     k: *Tensor,
     v: ?*Tensor,
     k_stream: std.ArrayList(*Tensor) = .empty,
     v_stream: std.ArrayList(?*Tensor) = .empty,
+    k_rot: ?*Tensor = null,
+    v_rot: ?*Tensor = null,
 };
 
 /// The cells, shared between a cache and the caches viewing it.
@@ -196,7 +198,7 @@ const Shared = struct {
     cells: std.ArrayList(KvCells) = .empty,
 };
 
-/// Ports `llama_kv_cache` (llama-kv-cache.h:20 @8642541b2).
+/// Ports `llama_kv_cache` (llama-kv-cache.h:20 @cd959bae9).
 pub const KvCache = struct {
     model: *const model_mod.Model,
     hparams: *const Hparams,
@@ -214,6 +216,13 @@ pub const KvCache = struct {
     n_embd_head_v_all: i32 = 0,
     /// The Hadamard matrices by size, kept in host memory.
     attn_rot_hadamard: std.AutoHashMapUnmanaged(i64, []f32) = .empty,
+    /// The rotation matrices' buffers, kept apart from the mutable KV
+    /// buffers.
+    attn_rot_bufs: memory.Bufs,
+    /// `get_k_rot()` and `get_v_rot()`, built once: each layer's rotation by
+    /// model layer, `[n_layer_all]`.
+    k_rot_il: []?*Tensor = &.{},
+    v_rot_il: []?*Tensor = &.{},
 
     debug: c_int = 0,
     swa_type: hparams_mod.SwaType = .none,
@@ -237,7 +246,7 @@ pub const KvCache = struct {
     }
 
     /// Ports the constructor of `llama_kv_cache` (llama-kv-cache.cpp:65
-    /// @8642541b2) at its default `name_tag = ""`.
+    /// @cd959bae9) at its default `name_tag = ""`.
     ///
     /// Parameters mirror the C++'s; `filter`, `reuse` and `share` may be
     /// empty.
@@ -266,7 +275,7 @@ pub const KvCache = struct {
     }
 
     /// Ports the constructor of `llama_kv_cache` (llama-kv-cache.cpp:65
-    /// @8642541b2) with its `name_tag`: a model can hold more than one
+    /// @cd959bae9) with its `name_tag`: a model can hold more than one
     /// cache, so the tag keeps the tensor names unique (`cache_<tag>k_l<il>`).
     ///
     /// Return: the cache, the caller's to `destroy`, or `error.Thrown`.
@@ -300,6 +309,7 @@ pub const KvCache = struct {
             .n_seq_max = n_seq_max,
             .n_stream = if (unified) 1 else n_seq_max,
             .n_swa = n_swa,
+            .attn_rot_bufs = .{ .no_alloc = no_alloc },
             .swa_type = swa_type,
             .ctxs_bufs = .{ .no_alloc = no_alloc },
             .other = mem_other,
@@ -511,7 +521,9 @@ pub const KvCache = struct {
 
             // Always rotate for the DeepSeek lightning indexers.
             const a = model.arch;
-            if ((a == .deepseek32 or a == .deepseek4 or a == .glm_dsa or a == .dots3note) and hparams.n_embd_head_k_full == hparams.indexer_head_size) {
+            if ((a == .deepseek32 or a == .deepseek4 or a == .glm_dsa or a == .dots3note or
+                a == .mistral_large4) and hparams.n_embd_head_k_full == hparams.indexer_head_size)
+            {
                 attn_rot_k = true;
             }
 
@@ -544,8 +556,94 @@ pub const KvCache = struct {
             }
         }
 
+        try self.initRotation(name_tag, exc);
+
         if (std.c.getenv("LLAMA_KV_CACHE_DEBUG")) |v| self.debug = impl.atoi(v);
         return self;
+    }
+
+    /// Ports `llama_kv_cache`'s `init_rotation` (llama-kv-cache.cpp:378
+    /// @cd959bae9): a copy of each rotation in a buffer of the type its
+    /// layer's cache lives in, so no rotation travels host to device per
+    /// graph. Also builds `k_rot_il` and `v_rot_il`, which `get_k_rot` and
+    /// `get_v_rot` return.
+    ///
+    /// Return: nothing, or `error.Thrown`.
+    fn initRotation(self: *KvCache, name_tag: [*:0]const u8, exc: *Exception) Thrown!void {
+        defer self.buildRotIndex();
+
+        if (!(self.n_rot_k != 0 or self.n_rot_v != 0) or self.layers.items.len == 0) {
+            return;
+        }
+
+        // The C++'s `std::map` keyed by the buffer type's address.
+        var ctx_map: std.ArrayList(struct { buft: c.ggml_backend_buffer_type_t, ctx: *c.ggml_context }) = .empty;
+        var n_moved: usize = 0;
+        defer {
+            for (ctx_map.items[n_moved..]) |e| c.ggml_free(e.ctx);
+            ctx_map.deinit(allocator);
+        }
+
+        for (self.layers.items) |*layer| {
+            for ([_]bool{ true, false }) |is_k| {
+                const n_rot = if (is_k) self.n_rot_k else self.n_rot_v;
+                const cache: ?*Tensor = if (is_k) layer.k else layer.v;
+                if (n_rot == 0 or cache == null) {
+                    continue;
+                }
+
+                const buft = c.ggml_backend_buffer_get_type(cache.?.buffer);
+                var pos: usize = 0;
+                while (pos < ctx_map.items.len and @intFromPtr(ctx_map.items[pos].buft) < @intFromPtr(buft)) pos += 1;
+                if (pos == ctx_map.items.len or ctx_map.items[pos].buft != buft) {
+                    const ctx = c.ggml_init(.{
+                        .mem_size = 2 * self.layers.items.len * c.ggml_tensor_overhead(),
+                        .mem_buffer = null,
+                        .no_alloc = true,
+                    }) orelse return exc.throw(.runtime_error, "failed to create ggml context for rotation matrices", .{});
+                    ctx_map.insert(allocator, pos, .{ .buft = buft, .ctx = ctx }) catch oom();
+                }
+                const ctx = ctx_map.items[pos].ctx;
+
+                const rot = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, n_rot, n_rot);
+                _ = c.ggml_format_name(rot, "cache_%s%s_rot_l%d", name_tag, @as([*:0]const u8, if (is_k) "k" else "v"), layer.il);
+                if (is_k) layer.k_rot = rot else layer.v_rot = rot;
+            }
+        }
+
+        for (ctx_map.items) |e| {
+            const buf = try self.attn_rot_bufs.emplace(e.ctx, e.buft, "rotation matrices", exc);
+            n_moved += 1;
+            c.ggml_backend_buffer_set_usage(buf, c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+            impl.logInfo("%s: %10s rotation buffer size = %8.2f MiB\n", .{ "init_rotation", c.ggml_backend_buffer_name(buf), @as(f64, @floatFromInt(c.ggml_backend_buffer_get_size(buf))) / 1024.0 / 1024.0 });
+        }
+
+        if (!self.attn_rot_bufs.no_alloc) {
+            for (self.layers.items) |*layer| {
+                for ([_]?*Tensor{ layer.k_rot, layer.v_rot }) |t_| {
+                    if (t_) |t| {
+                        // `attn_rot_hadamard.at()`: every rotation size was precomputed.
+                        const m = self.attn_rot_hadamard.get(t.ne[0]).?;
+                        c.ggml_backend_tensor_set(t, m.ptr, 0, c.ggml_nbytes(t));
+                    }
+                }
+            }
+        }
+    }
+
+    fn buildRotIndex(self: *KvCache) void {
+        const n_layer = self.hparams.n_layer_all;
+        self.k_rot_il = allocator.alloc(?*Tensor, n_layer) catch oom();
+        self.v_rot_il = allocator.alloc(?*Tensor, n_layer) catch oom();
+        @memset(self.k_rot_il, null);
+        @memset(self.v_rot_il, null);
+        var it = self.map_layer_ids.iterator();
+        while (it.next()) |e| {
+            const il: usize = @intCast(e.key_ptr.*);
+            const layer = &self.layers.items[@intCast(e.value_ptr.*)];
+            self.k_rot_il[il] = layer.k_rot;
+            self.v_rot_il[il] = layer.v_rot;
+        }
     }
 
     fn ctxForBuft(map: anytype, buft: c.ggml_backend_buffer_type_t, n_stream: u32, n_layer: u32) ?*c.ggml_context {
@@ -571,6 +669,9 @@ pub const KvCache = struct {
     /// Return: nothing.
     pub fn destroy(self: *KvCache) void {
         self.ctxs_bufs.deinit();
+        self.attn_rot_bufs.deinit();
+        if (self.k_rot_il.len != 0) allocator.free(self.k_rot_il);
+        if (self.v_rot_il.len != 0) allocator.free(self.v_rot_il);
         var it = self.attn_rot_hadamard.valueIterator();
         while (it.next()) |v| allocator.free(v.*);
         self.attn_rot_hadamard.deinit(allocator);
@@ -783,9 +884,11 @@ pub const KvCache = struct {
         return self.cells()[self.seq_to_stream.items[@intCast(seq_id)]].seqPosMax(seq_id);
     }
 
-    /// Ports `llama_kv_cache`'s `memory_breakdown` (llama-kv-cache.cpp:692 @8642541b2).
+    /// Ports `llama_kv_cache`'s `memory_breakdown` (llama-kv-cache.cpp:742
+    /// @cd959bae9): the KV buffers and the rotation buffers.
     pub fn memoryBreakdown(self: *const KvCache, out: *std.ArrayList(memory.BuftSize)) void {
         self.ctxs_bufs.memoryBreakdown(out);
+        self.attn_rot_bufs.memoryBreakdown(out);
     }
 
     /// Ports `llama_kv_cache`'s `init_batch` (llama-kv-cache.cpp:752 @cd959bae9):
@@ -1244,6 +1347,81 @@ pub const KvCache = struct {
         return result;
     }
 
+    /// Ports `llama_kv_cache`'s `get_n_kv_slices` (llama-kv-cache.cpp:1327
+    /// @cd959bae9): attention over the cells of each sequence of the ubatch
+    /// instead of the whole cache (`ggml_flash_attn_ext_rows`). The ubatch
+    /// splits into slices of tokens with one sequence each; when it cannot
+    /// (interleaved or coupled sequences), it is one slice over the cells
+    /// of all its sequences.
+    pub fn getNKvSlices(ubatch: *const Ubatch) u32 {
+        if (ubatch.n_seqs_unq == 1) {
+            return 1;
+        }
+
+        // Each sequence set of an equal split is a single sequence.
+        if (ubatch.equalSeqs() and ubatch.n_seqs == ubatch.n_seqs_unq) {
+            return ubatch.n_seqs;
+        }
+
+        // Runs of equal length with a single sequence each, as one token
+        // per sequence or the drafts of several slots; there are n_seqs_unq
+        // runs, so each run has a different sequence.
+        if (ubatch.n_tokens % ubatch.n_seqs_unq == 0) {
+            const n_tps = ubatch.n_tokens / ubatch.n_seqs_unq;
+
+            var is_runs = true;
+            var i: u32 = 0;
+            while (i < ubatch.n_tokens and is_runs) : (i += 1) {
+                is_runs = ubatch.n_seq_id[i] == 1 and ubatch.seq_id[i][0] == ubatch.seq_id[i - i % n_tps][0];
+            }
+
+            if (is_runs) {
+                return ubatch.n_seqs_unq;
+            }
+        }
+
+        // No per-sequence slices: one slice over the cells of all the
+        // sequences of the ubatch.
+        return 1;
+    }
+
+    /// Ports `llama_kv_cache`'s `get_n_kv_rows` (llama-kv-cache.cpp:1390
+    /// @cd959bae9): the padded length of the longest cell list of the
+    /// slices; 0 when kv_rows are not used (several streams).
+    pub fn getNKvRows(self: *const KvCache, ubatch: *const Ubatch) u32 {
+        if (self.n_stream != 1) {
+            return 0;
+        }
+
+        const n_slices = getNKvSlices(ubatch);
+
+        const cl = &self.cells()[0];
+
+        const n_pad_cur: u32 = 256;
+
+        var n_max: u32 = 0;
+
+        var slices = getKvRowsSlices(ubatch, n_slices, self.n_swa, self.swa_type);
+        defer freeRowsSlices(&slices);
+
+        for (slices.items) |*slice| {
+            // A cell several sequences of the slice share counts once per
+            // sequence; an upper bound is enough.
+            var n: u32 = 0;
+            for (slice.seq_ids.items) |seq_id| {
+                n +%= if (slice.p_min < 0) cl.seqNCells(seq_id) else cl.seqNCellsFrom(seq_id, slice.p_min);
+            }
+
+            n_max = @max(n_max, @min(n, cl.usedMaxP1()));
+        }
+
+        // Padded as n_kv, so the graph can be reused; never 0, which means
+        // kv_rows are not used (the sequences have no cells yet in a cache
+        // that shares the cells of another one, say).
+        const padded = (n_max + n_pad_cur - 1) / n_pad_cur * n_pad_cur;
+        return @min(@max(n_pad_cur, padded), self.getSize());
+    }
+
     fn layerAt(self: *const KvCache, il: i32) *const KvLayer {
         const ikv = self.map_layer_ids.get(il) orelse impl.abort("llama-kv-cache.cpp", 1421, "map::at:  key not found");
         return &self.layers.items[@intCast(ikv)];
@@ -1359,23 +1537,20 @@ pub const KvCache = struct {
         return v_idxs;
     }
 
-    /// Ports `llama_kv_cache`'s `build_input_k_rot` (llama-kv-cache.cpp:1442 @8642541b2).
-    pub fn buildInputKRot(self: *const KvCache, ctx: *c.ggml_context) ?*Tensor {
-        if (self.n_rot_k == 0) return null;
-        const res = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, self.n_rot_k, self.n_rot_k);
-        c.ggml_set_input(res);
-        _ = c.ggml_set_name(res, "attn_inp_k_rot");
-        return res;
+    /// Ports `llama_kv_cache`'s `get_k_rot` (llama-kv-cache.cpp:1591
+    /// @cd959bae9): each model layer's K rotation, null where it has none.
+    ///
+    /// Return: `[n_layer_all]`, borrowed until the cache is destroyed.
+    pub fn getKRot(self: *const KvCache) []const ?*Tensor {
+        return self.k_rot_il;
     }
 
-    /// Ports `llama_kv_cache`'s `build_input_v_rot` (llama-kv-cache.cpp:1454
-    /// @8642541b2): V uses the smallest rotation.
-    pub fn buildInputVRot(self: *const KvCache, ctx: *c.ggml_context) ?*Tensor {
-        if (self.n_rot_v == 0) return null;
-        const res = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, self.n_rot_v, self.n_rot_v);
-        c.ggml_set_input(res);
-        _ = c.ggml_set_name(res, "attn_inp_v_rot");
-        return res;
+    /// Ports `llama_kv_cache`'s `get_v_rot` (llama-kv-cache.cpp:1599
+    /// @cd959bae9): each model layer's V rotation, null where it has none.
+    ///
+    /// Return: `[n_layer_all]`, borrowed until the cache is destroyed.
+    pub fn getVRot(self: *const KvCache) []const ?*Tensor {
+        return self.v_rot_il;
     }
 
     /// Ports `llama_kv_cache`'s `set_input_k_idxs` (llama-kv-cache.cpp:1607 @cd959bae9).
@@ -1427,16 +1602,50 @@ pub const KvCache = struct {
         }
     }
 
-    /// Ports `llama_kv_cache`'s `set_input_kq_mask` (llama-kv-cache.cpp:1734
-    /// @8642541b2), dispatching to `set_input_kq_mask_impl` (llama-kv-cache.cpp:1726
-    /// @8642541b2) over the element type and the four flags.
-    pub fn setInputKqMask(self: *const KvCache, dst: *Tensor, ubatch: *const Ubatch, causal_attn_: bool) void {
+    /// Ports `llama_kv_cache`'s `set_input_attn_mask` (llama-kv-cache.cpp:1897
+    /// @cd959bae9): the cell rows of each slice, when kv_rows are used, and
+    /// the mask, dispatching to `set_input_attn_mask_impl`
+    /// (llama-kv-cache.cpp:1889 @cd959bae9) over the element type and the
+    /// four flags. Either tensor left unallocated is not set.
+    pub fn setInputAttnMask(self: *const KvCache, attn_mask: *const graph.AttnMask, ubatch: *const Ubatch, causal_attn_: bool) void {
+        // The cell rows of each slice.
+        if (attn_mask.rows) |rows_t| {
+            if (rows_t.buffer != null) {
+                impl.assert(c.ggml_backend_buffer_is_host(rows_t.buffer), "llama-kv-cache.cpp", 1900, "ggml_backend_buffer_is_host(attn_mask.rows->buffer)");
+                impl.assert(self.n_stream == 1, "llama-kv-cache.cpp", 1901, "n_stream == 1");
+
+                const n_rows = rows_t.ne[0];
+                const n_slices: u32 = @intCast(rows_t.ne[1]);
+
+                const cl = &self.cells()[0];
+                const data: [*]i32 = @ptrCast(@alignCast(rows_t.data));
+
+                var slices = getKvRowsSlices(ubatch, n_slices, self.n_swa, self.swa_type);
+                defer freeRowsSlices(&slices);
+                cl.getSeqCells(slices.items, data, n_rows);
+            }
+        }
+
+        // The mask is left unallocated when the graph only stores K/V
+        // without attending.
+        const dst = attn_mask.raw orelse return;
+        if (dst.buffer == null) return;
+
+        const rows: ?[*]const i32 = if (attn_mask.rows) |r| (if (r.buffer != null) @ptrCast(@alignCast(r.data)) else null) else null;
+
         const n_tokens: i64 = ubatch.n_tokens;
-        impl.assert(c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 1737, "ggml_backend_buffer_is_host(dst->buffer)");
+
         const n_kv = dst.ne[0];
         // The streams in the current ubatch.
         const n_stream = dst.ne[3];
-        impl.assert(@rem(n_tokens, n_stream) == 0, "llama-kv-cache.cpp", 1742, "n_tokens%n_stream == 0");
+
+        impl.assert(c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 1922, "ggml_backend_buffer_is_host(dst->buffer)");
+
+        if (rows != null) {
+            impl.assert(attn_mask.rows.?.ne[0] == n_kv and attn_mask.rows.?.ne[1] == n_stream, "llama-kv-cache.cpp", 1925, "attn_mask.rows->ne[0] == n_kv && attn_mask.rows->ne[1] == n_stream");
+        }
+
+        impl.assert(@rem(n_tokens, n_stream) == 0, "llama-kv-cache.cpp", 1928, "n_tokens%n_stream == 0");
 
         // See `llama_non_causal_type`: with SWA_ONLY only the SWA cache, or
         // the SWA layers of a single cache, become non-causal.
@@ -1458,6 +1667,8 @@ pub const KvCache = struct {
             .n_kv = n_kv,
             .n_stream = n_stream,
             .n_tps = @divTrunc(n_tokens, n_stream),
+            .rows = rows,
+            .block_uniform = attn_mask.block_uniform,
         };
         const swa = self.swa_type != .none;
         const is_2d = ubatch.isPos2d();
@@ -1485,22 +1696,6 @@ pub const KvCache = struct {
                 data[i * n_kv + j] = graph.relativePositionBucket(p0, ubatch.pos[i], self.hparams.n_rel_attn_bkts, false);
             }
         }
-    }
-
-    /// Ports `llama_kv_cache`'s `set_input_k_rot` (llama-kv-cache.cpp:1806 @8642541b2).
-    pub fn setInputKRot(self: *const KvCache, dst: *Tensor) void {
-        self.setInputRot(dst, 1810);
-    }
-
-    /// Ports `llama_kv_cache`'s `set_input_v_rot` (llama-kv-cache.cpp:1815 @8642541b2).
-    pub fn setInputVRot(self: *const KvCache, dst: *Tensor) void {
-        self.setInputRot(dst, 1819);
-    }
-
-    fn setInputRot(self: *const KvCache, dst: *Tensor, comptime line: c_int) void {
-        impl.assert(c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", line - 3, "ggml_backend_buffer_is_host(dst->buffer)");
-        const m = self.attn_rot_hadamard.get(dst.ne[0]) orelse impl.abort("llama-kv-cache.cpp", line, "GGML_ASSERT(attn_rot_hadamard.count(dst->ne[0])) failed");
-        @memcpy(@as([*]u8, @ptrCast(dst.data))[0..c.ggml_nbytes(dst)], std.mem.sliceAsBytes(m)[0..c.ggml_nbytes(dst)]);
     }
 
     /// Ports `llama_kv_cache`'s `has_cell_ext` (llama-kv-cache.cpp:1995
@@ -1616,7 +1811,7 @@ pub const KvCache = struct {
         return c.ggml_rope_ext_inplace(ctx, cur, shift, factors, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale, cparams.yarn_ext_factor, cparams.yarn_attn_factor, cparams.yarn_beta_fast, cparams.yarn_beta_slow);
     }
 
-    /// Ports `llama_kv_cache`'s `build_graph_shift` (llama-kv-cache.cpp:1997 @8642541b2).
+    /// Ports `llama_kv_cache`'s `build_graph_shift` (llama-kv-cache.cpp:2161 @cd959bae9).
     fn buildGraphShift(self: *const KvCache, res: *graph.Result, lctx: *context_mod.Context) *c.ggml_cgraph {
         impl.assert(self.other == null, "llama-kv-cache.cpp", 2163, "!other");
         const ctx = res.getCtx();
@@ -1626,7 +1821,6 @@ pub const KvCache = struct {
         inp.* = .{ .kv_self = self };
         inp.k_shift = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, @as(i64, self.getSize()) * self.n_stream);
         c.ggml_set_input(inp.k_shift);
-        inp.k_rot = self.buildInputKRot(ctx);
 
         const cparams = lctx.getCparams();
         for (self.layers.items) |*layer| {
@@ -1643,7 +1837,7 @@ pub const KvCache = struct {
             const rope_factors = self.model.getRopeFactors(cparams, il);
 
             const k = c.ggml_view_3d(ctx, layer.k, n_rot, n_head_kv, @as(i64, self.getSize()) * self.n_stream, c.ggml_row_size(layer.k.type, n_embd_head_k), c.ggml_row_size(layer.k.type, n_embd_k_gqa), c.ggml_row_size(layer.k.type, n_embd_nope));
-            const cur = self.buildRopeShift(cparams, ctx, k, inp.k_shift.?, inp.k_rot, rope_factors, freq_base_l, freq_scale_l, il);
+            const cur = self.buildRopeShift(cparams, ctx, k, inp.k_shift.?, layer.k_rot, rope_factors, freq_base_l, freq_scale_l, il);
             c.ggml_build_forward_expand(gf, cur);
         }
         _ = res.addInput(InpKShift, inp);
@@ -2310,31 +2504,71 @@ fn releaseUbatches(list: *std.ArrayList(Ubatch)) void {
     list.deinit(allocator);
 }
 
-/// Mirrors `llm_graph_input_k_shift` (llama-kv-cache.cpp:1970 @8642541b2).
+/// Mirrors `llm_graph_input_k_shift` (llama-kv-cache.cpp:2141 @cd959bae9).
 const InpKShift = struct {
     /// I32 `[kv_size*n_stream]`.
     k_shift: ?*Tensor = null,
-    /// Assumes `k_rot^2 == I`.
-    k_rot: ?*Tensor = null,
     kv_self: *const KvCache,
 
-    /// Ports `llm_graph_input_k_shift`'s `set_input` (llama-kv-cache.cpp:1985
-    /// @8642541b2): a shift or a rotation the scheduler gave no buffer is
-    /// not set.
+    /// Ports `llm_graph_input_k_shift`'s `set_input` (llama-kv-cache.cpp:2153
+    /// @cd959bae9): a shift the scheduler gave no buffer is not set.
     pub fn setInput(self: *InpKShift, _: ?*const Ubatch) void {
         if (self.k_shift) |t| {
             if (t.buffer != null) self.kv_self.setInputKShift(t);
         }
-        if (self.k_rot) |t| {
-            if (t.buffer != null) self.kv_self.setInputKRot(t);
-        }
     }
 };
+
+/// Ports `get_kv_rows_slices` (llama-kv-cache.cpp:1357 @cd959bae9): per
+/// slice, the sequences whose cells form its list, and the smallest
+/// position the SWA does not mask.
+///
+/// Return: the slices, the caller's to free with `freeRowsSlices`.
+fn getKvRowsSlices(ubatch: *const Ubatch, n_slices: u32, n_swa: u32, swa_type: hparams_mod.SwaType) std.ArrayList(kv_cells.RowsSlice) {
+    var res: std.ArrayList(kv_cells.RowsSlice) = .empty;
+    res.appendNTimes(allocator, .{}, n_slices) catch oom();
+
+    if (n_slices == 1) {
+        res.items[0].seq_ids.appendSlice(allocator, ubatch.seq_id_unq[0..ubatch.n_seqs_unq]) catch oom();
+    } else {
+        const n_tps = ubatch.n_tokens / n_slices;
+
+        for (0..n_slices) |s| {
+            res.items[s].seq_ids.append(allocator, ubatch.seq_id[s * n_tps][0]) catch oom();
+        }
+    }
+
+    // The cells below these positions are masked by the SWA for every
+    // token of the slice, only for SWA types that mask more cells as the
+    // token's position grows.
+    if (n_swa == 0 or (swa_type != .standard and swa_type != .chunked)) {
+        return res;
+    }
+
+    const n_tps = ubatch.n_tokens / n_slices;
+    const swa: i32 = @bitCast(n_swa);
+
+    for (0..n_slices) |s| {
+        var p = ubatch.pos[s * n_tps];
+        for (1..n_tps) |i| {
+            p = @min(p, ubatch.pos[s * n_tps + i]);
+        }
+
+        res.items[s].p_min = if (swa_type == .standard) p -% swa +% 1 else @divTrunc(p, swa) *% swa;
+    }
+
+    return res;
+}
+
+fn freeRowsSlices(list: *std.ArrayList(kv_cells.RowsSlice)) void {
+    for (list.items) |*sl| sl.deinit();
+    list.deinit(allocator);
+}
 
 // -----------------------------------------------------------------------------
 // The KQ mask
 
-/// Mirrors `args_set_input_kq_mask` (llama-kv-cache.cpp:1529 @8642541b2).
+/// Mirrors `args_set_input_attn_mask` (llama-kv-cache.cpp:1670 @cd959bae9).
 const MaskArgs = struct {
     hparams: *const Hparams,
     ubatch: *const Ubatch,
@@ -2345,6 +2579,12 @@ const MaskArgs = struct {
     n_kv: i64,
     n_stream: i64,
     n_tps: i64,
+    /// The cell of each mask column per stream, null when the columns are
+    /// the cells.
+    rows: ?[*]const i32 = null,
+    /// Every token of a sequence reuses the mask row of its first one
+    /// (DSpark's draft blocks).
+    block_uniform: bool = false,
 };
 
 fn maskDispatch(comptime T: type, args: MaskArgs, data: [*]T, causal: bool, swa: bool, is_2d: bool, alibi: bool) void {
@@ -2353,7 +2593,7 @@ fn maskDispatch(comptime T: type, args: MaskArgs, data: [*]T, causal: bool, swa:
             inline for (.{ false, true }) |d2| {
                 inline for (.{ false, true }) |al| {
                     if (causal == cz and swa == sw and is_2d == d2 and alibi == al) {
-                        return setInputKqMaskImpl(T, cz, sw, d2, al, args, data);
+                        return setInputAttnMaskImpl(T, cz, sw, d2, al, args, data);
                     }
                 }
             }
@@ -2366,12 +2606,13 @@ fn maskCast(comptime T: type, v: f32) T {
     return v;
 }
 
-/// Ports `set_input_kq_mask_impl` (llama-kv-cache.cpp:1545 @8642541b2).
+/// Ports `set_input_attn_mask_impl` (llama-kv-cache.cpp:1692 @cd959bae9).
 ///
 /// For tokens of the same sequence the mask is mostly the same, so the row
 /// of the first token of each sequence is copied and only the cells near
-/// the batch's positions are revisited -- not with ALiBi.
-fn setInputKqMaskImpl(comptime T: type, comptime causal: bool, comptime swa: bool, comptime is_2d: bool, comptime alibi: bool, args: MaskArgs, data: [*]T) void {
+/// the batch's positions are revisited -- not with ALiBi. With `rows`, a
+/// column is a cell of the stream's list rather than the cell itself.
+fn setInputAttnMaskImpl(comptime T: type, comptime causal: bool, comptime swa: bool, comptime is_2d: bool, comptime alibi: bool, args: MaskArgs, data: [*]T) void {
     const ubatch = args.ubatch;
     const n_kv: usize = @intCast(args.n_kv);
     const n_tps: usize = @intCast(args.n_tps);
@@ -2380,9 +2621,13 @@ fn setInputKqMaskImpl(comptime T: type, comptime causal: bool, comptime swa: boo
 
     // The smallest position of each sequence in the batch.
     var seq_pos_min: [max_seq]i32 = @splat(std.math.maxInt(i32));
+    // The first token of each sequence, for mask rows shared within a
+    // sequence.
+    var seq_first: [max_seq]u32 = @splat(ubatch.n_tokens);
     for (0..ubatch.n_tokens) |i| {
         const seq_id: usize = @intCast(ubatch.seq_id[i][0]);
         seq_pos_min[seq_id] = @min(seq_pos_min[seq_id], ubatch.pos[i]);
+        seq_first[seq_id] = @min(seq_first[seq_id], @as(u32, @intCast(i)));
     }
 
     // Per stream: each sequence's source row and its revisited cells. The
@@ -2395,18 +2640,24 @@ fn setInputKqMaskImpl(comptime T: type, comptime causal: bool, comptime swa: boo
         seq_srct = @splat(null);
         for (&seq_idxs) |*v| v.clearRetainingCapacity();
 
+        const rows: ?[*]const i32 = if (args.rows) |r| r + s * n_kv else null;
+
         for (0..n_tps) |ii| {
             const i = s * n_tps + ii;
             const seq_id = ubatch.seq_id[i][0];
             const sid: usize = @intCast(seq_id);
             const cl = &args.cells[args.seq_to_stream[sid]];
 
+            // Shared mask rows: every query of the sequence uses the row of
+            // its first token.
+            const iq: usize = if (args.block_uniform) seq_first[sid] else i;
+
             var p0: i32 = -1;
-            const p1 = ubatch.pos[i];
+            const p1 = ubatch.pos[iq];
 
             // For M-RoPE.
-            const p1_x: i32 = if (is_2d) ubatch.pos[i + ubatch.n_tokens * 2] else 0;
-            const p1_y: i32 = if (is_2d) ubatch.pos[i + ubatch.n_tokens] else 0;
+            const p1_x: i32 = if (is_2d) ubatch.pos[iq + ubatch.n_tokens * 2] else 0;
+            const p1_y: i32 = if (is_2d) ubatch.pos[iq + ubatch.n_tokens] else 0;
 
             const idst = n_kv * i;
             var prev = false;
@@ -2426,21 +2677,27 @@ fn setInputKqMaskImpl(comptime T: type, comptime causal: bool, comptime swa: boo
 
             var jj: usize = 0;
             while (jj < n_kv) : (jj += 1) {
-                var j: u32 = @intCast(jj);
+                // The column of the mask.
+                var col: u32 = @intCast(jj);
                 // An existing mask for this sequence: update only its cells.
                 if (!alibi and prev) {
                     if (jj >= idxs.items.len) break;
-                    j = idxs.items[jj];
+                    col = idxs.items[jj];
                 }
 
+                // The cell of the column, negative for padding.
+                const jc: i32 = if (rows) |r| r[col] else @intCast(col);
+
                 const keep: bool = blk: {
+                    if (jc < 0) break :blk false;
+                    const j: u32 = @intCast(jc);
                     if (cl.isEmpty(j)) break :blk false;
                     // Mask a token of another sequence.
                     if (!cl.seqHas(j, seq_id)) break :blk false;
                     p0 = cl.posGet(j);
                     if (!alibi and !prev) {
                         // Record every cell with p0 >= seq_pos_min - n_swa - 32.
-                        if (p0 +% @as(i32, @intCast(args.n_swa + 32)) >= seq_pos_min[sid]) idxs.append(allocator, j) catch oom();
+                        if (p0 +% @as(i32, @intCast(args.n_swa + 32)) >= seq_pos_min[sid]) idxs.append(allocator, col) catch oom();
                     }
                     if (causal) {
                         // Mask future tokens.
@@ -2460,11 +2717,11 @@ fn setInputKqMaskImpl(comptime T: type, comptime causal: bool, comptime swa: boo
                 };
 
                 if (!keep) {
-                    data[idst + j] = mask_drop;
+                    data[idst + col] = mask_drop;
                 } else if (alibi) {
-                    data[idst + j] = maskCast(T, @floatFromInt(-@as(i32, @intCast(@abs(p0 - p1)))));
+                    data[idst + col] = maskCast(T, @floatFromInt(-@as(i32, @intCast(@abs(p0 - p1)))));
                 } else {
-                    data[idst + j] = mask_keep;
+                    data[idst + col] = mask_keep;
                 }
             }
         }
@@ -2474,7 +2731,7 @@ fn setInputKqMaskImpl(comptime T: type, comptime causal: bool, comptime swa: boo
 // -----------------------------------------------------------------------------
 // The per-batch context
 
-/// Ports `llama_kv_cache_context` (llama-kv-cache.h:356 @8642541b2).
+/// Ports `llama_kv_cache_context` (llama-kv-cache.h:370 @cd959bae9).
 pub const KvCacheContext = struct {
     status: memory.Status,
     kv: ?*KvCache = null,
@@ -2485,6 +2742,8 @@ pub const KvCacheContext = struct {
     sinfos: std.ArrayList(SlotInfo) = .empty,
     ubatches: std.ArrayList(Ubatch) = .empty,
     n_kv: u32 = 0,
+    /// See `KvCache.getNKvRows`.
+    n_kv_rows: u32 = 0,
 
     /// Ports the status constructor of `llama_kv_cache_context`
     /// (llama-kv-cache.cpp:2953 @cd959bae9).
@@ -2495,12 +2754,16 @@ pub const KvCacheContext = struct {
     }
 
     /// Ports the full-cache constructor of `llama_kv_cache_context`
-    /// (llama-kv-cache.cpp:2793 @8642541b2): a dummy slot, enough to build
+    /// (llama-kv-cache.cpp:2955 @cd959bae9): a dummy slot, enough to build
     /// the worst-case graph.
     pub fn createFull(kv: *KvCache) *KvCacheContext {
         const self = allocator.create(KvCacheContext) catch oom();
         self.* = .{ .status = .success, .kv = kv };
         self.n_kv = kv.getSize();
+
+        // The worst case for graph reservation: only a unified cache splits
+        // into per-sequence lists.
+        self.n_kv_rows = if (kv.getNStream() == 1) self.n_kv else 0;
         const n_stream = kv.getNStream();
         var si: SlotInfo = .{ .s0 = 0, .s1 = n_stream - 1 };
         si.idxs.resize(allocator, n_stream) catch oom();
@@ -2546,7 +2809,7 @@ pub const KvCacheContext = struct {
         return self.i_cur < self.ubatches.items.len;
     }
 
-    /// Ports `llama_kv_cache_context`'s `apply` (llama-kv-cache.cpp:2838 @8642541b2).
+    /// Ports `llama_kv_cache_context`'s `apply` (llama-kv-cache.cpp:3003 @cd959bae9).
     pub fn apply(self: *KvCacheContext) bool {
         std.debug.assert(!memory.statusIsFail(self.status));
         // No ubatches: a cache update.
@@ -2556,6 +2819,7 @@ pub const KvCacheContext = struct {
         }
         self.kv.?.applyUbatch(&self.sinfos.items[self.i_cur], &self.ubatches.items[self.i_cur]);
         self.n_kv = self.kv.?.getNKv(&self.sinfos.items[self.i_cur]);
+        self.n_kv_rows = self.kv.?.getNKvRows(&self.ubatches.items[self.i_cur]);
         return true;
     }
 
@@ -2573,6 +2837,11 @@ pub const KvCacheContext = struct {
     /// Ports `llama_kv_cache_context`'s `get_n_kv` (llama-kv-cache.cpp:3030 @cd959bae9).
     pub fn getNKv(self: *const KvCacheContext) u32 {
         return self.n_kv;
+    }
+
+    /// Ports `llama_kv_cache_context`'s `get_n_kv_rows` (llama-kv-cache.cpp:3034 @cd959bae9).
+    pub fn getNKvRows(self: *const KvCacheContext) u32 {
+        return self.n_kv_rows;
     }
 
     pub fn typeK(self: *const KvCacheContext) c.enum_ggml_type {
@@ -2604,11 +2873,13 @@ pub const KvCacheContext = struct {
     pub fn buildInputVIdxs(self: *const KvCacheContext, ctx: *c.ggml_context, ubatch: *const Ubatch) *Tensor {
         return self.kv.?.buildInputVIdxs(ctx, ubatch);
     }
-    pub fn buildInputKRot(self: *const KvCacheContext, ctx: *c.ggml_context) ?*Tensor {
-        return self.kv.?.buildInputKRot(ctx);
+    /// Ports `llama_kv_cache_context`'s `get_k_rot` (llama-kv-cache.cpp:3070 @cd959bae9).
+    pub fn getKRot(self: *const KvCacheContext) []const ?*Tensor {
+        return self.kv.?.getKRot();
     }
-    pub fn buildInputVRot(self: *const KvCacheContext, ctx: *c.ggml_context) ?*Tensor {
-        return self.kv.?.buildInputVRot(ctx);
+    /// Ports `llama_kv_cache_context`'s `get_v_rot` (llama-kv-cache.cpp:3074 @cd959bae9).
+    pub fn getVRot(self: *const KvCacheContext) []const ?*Tensor {
+        return self.kv.?.getVRot();
     }
     pub fn setInputKShift(self: *const KvCacheContext, dst: *Tensor) void {
         self.kv.?.setInputKShift(dst);
@@ -2619,17 +2890,12 @@ pub const KvCacheContext = struct {
     pub fn setInputVIdxs(self: *const KvCacheContext, dst: *Tensor, ubatch: *const Ubatch) void {
         self.kv.?.setInputVIdxs(dst, ubatch, self.sinfo());
     }
-    pub fn setInputKqMask(self: *const KvCacheContext, dst: *Tensor, ubatch: *const Ubatch, causal_attn: bool) void {
-        self.kv.?.setInputKqMask(dst, ubatch, causal_attn);
+    /// Ports `llama_kv_cache_context`'s `set_input_attn_mask` (llama-kv-cache.cpp:3090 @cd959bae9).
+    pub fn setInputAttnMask(self: *const KvCacheContext, attn_mask: *const graph.AttnMask, ubatch: *const Ubatch, causal_attn: bool) void {
+        self.kv.?.setInputAttnMask(attn_mask, ubatch, causal_attn);
     }
     pub fn setInputPosBucket(self: *const KvCacheContext, dst: *Tensor, ubatch: *const Ubatch) void {
         self.kv.?.setInputPosBucket(dst, ubatch);
-    }
-    pub fn setInputKRot(self: *const KvCacheContext, dst: *Tensor) void {
-        self.kv.?.setInputKRot(dst);
-    }
-    pub fn setInputVRot(self: *const KvCacheContext, dst: *Tensor) void {
-        self.kv.?.setInputVRot(dst);
     }
 
     /// Ports `llama_kv_cache_context`'s `get_prev_tokens`

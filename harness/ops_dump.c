@@ -1302,6 +1302,115 @@ int main(int argc, char ** argv) {
         }
     }
 
+    /* v0.9.0: ggml_flash_attn_ext_rows. Each q slice i3 attends over its own
+     * list of K/V rows, kv_rows[:, i3] (src[5]); a negative row is padding.
+     * The kv_rows fill (`skip:`) puts -1 in a third of the slots and in all
+     * of slice 1, so a slice with nothing to attend to is compared too. K and
+     * V hold more rows than any list names, and the lists repeat and reorder
+     * rows, so reading row ic instead of kv_rows[ic] shows. One case per
+     * kernel path: the one-chunk path (few q rows; f16, q8_0 and f32 K/V),
+     * the tiled path (64+ q rows, a ragged last KV tile), and a single q row
+     * over 520 mask columns, which without kv_rows would take the split-KV
+     * path -- kv_rows must keep it off. */
+    puts("=== flash attention over K/V row lists ===");
+    {
+        const enum ggml_type kvt[] = { GGML_TYPE_F16, GGML_TYPE_Q8_0, GGML_TYPE_F32 };
+        for (int t = 0; t < 3; t++) {
+            struct ggml_tensor * q  = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 64, 5, 4, 3);
+            struct ggml_tensor * k  = ggml_new_tensor_4d(ctx, kvt[t], 64, 45, 2, 1);
+            struct ggml_tensor * v  = ggml_new_tensor_4d(ctx, kvt[t], 64, 45, 2, 1);
+            struct ggml_tensor * m  = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 37, 5, 1, 3);
+            struct ggml_tensor * kr = named(ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 37, 3), "skip:%d", 45);
+            char label[96];
+            snprintf(label, sizeof label, "flash_attn_ext_rows %s", ggml_type_name(kvt[t]));
+            run_amp(label, ggml_flash_attn_ext_rows(ctx, q, k, v, m, kr, 0.125f, 0.0f, 0.0f), 0, 1.0f);
+            snprintf(label, sizeof label, "flash_attn_ext_rows %s alibi+softcap", ggml_type_name(kvt[t]));
+            run_amp(label, ggml_flash_attn_ext_rows(ctx, q, k, v, m, kr, 0.125f, 8.0f, 30.0f), 0, 1.0f);
+        }
+        for (int t = 0; t < 3; t += 2) {
+            struct ggml_tensor * q  = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 64, 70, 4, 2);
+            struct ggml_tensor * k  = ggml_new_tensor_4d(ctx, kvt[t], 64, 160, 2, 1);
+            struct ggml_tensor * v  = ggml_new_tensor_4d(ctx, kvt[t], 64, 160, 2, 1);
+            struct ggml_tensor * m  = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 150, 70, 1, 2);
+            struct ggml_tensor * kr = named(ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 150, 2), "skip:%d", 160);
+            char label[96];
+            snprintf(label, sizeof label, "flash_attn_ext_rows tiled %s", ggml_type_name(kvt[t]));
+            run_amp(label, ggml_flash_attn_ext_rows(ctx, q, k, v, m, kr, 0.125f, 0.0f, 0.0f), 0, 1.0f);
+            {
+                struct ggml_tensor * o = ggml_flash_attn_ext_rows(ctx, q, k, v, m, kr, 0.125f, 8.0f, 30.0f);
+                ggml_flash_attn_ext_add_sinks(o, ggml_scale(ctx, ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 4), 4.0f));
+                snprintf(label, sizeof label, "flash_attn_ext_rows tiled %s alibi+softcap+sinks", ggml_type_name(kvt[t]));
+                run_amp(label, o, 0, 1.0f);
+            }
+        }
+        for (int t = 0; t < 3; t += 2) {
+            struct ggml_tensor * q  = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 64, 1, 4, 1);
+            struct ggml_tensor * k  = ggml_new_tensor_4d(ctx, kvt[t], 64, 600, 2, 1);
+            struct ggml_tensor * v  = ggml_new_tensor_4d(ctx, kvt[t], 64, 600, 2, 1);
+            struct ggml_tensor * m  = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 520, 1, 1, 1);
+            struct ggml_tensor * kr = named(ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 520, 1), "skip:%d", 600);
+            char label[96];
+            snprintf(label, sizeof label, "flash_attn_ext_rows 1 row %s", ggml_type_name(kvt[t]));
+            run_amp(label, ggml_flash_attn_ext_rows(ctx, q, k, v, m, kr, 0.125f, 0.0f, 0.0f), 0, 1.0f);
+        }
+    }
+
+    /* v0.9.0: GGML_TYPE_F8_E4M3 on the CPU. Its vec_dot takes f32 rows
+     * directly (vec_dot_type F32) and runs 16 lanes at a time, then a scalar
+     * tail, so the row lengths are chosen off multiples of 16; at amplitude
+     * 30 the inputs reach the format's coarse top binades. The conversions
+     * through dup go every way the kernel allows, and add, add1 and
+     * out_prod take the dequantize-quantize path with its work buffer. */
+    puts("=== f8_e4m3 ===");
+    {
+        static const int lens[] = { 16, 37, 515 };
+        static const int ncols[] = { 1, 2, 7 };
+        for (int li = 0; li < 3; li++) {
+            for (int ci = 0; ci < 3; ci++) {
+                char label[96];
+                snprintf(label, sizeof label, "mul_mat f8_e4m3 x f32 [%d x 9] x %d", lens[li], ncols[ci]);
+                run_amp(label, ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F8_E4M3, lens[li], 9),
+                                                 ggml_new_tensor_2d(ctx, GGML_TYPE_F32, lens[li], ncols[ci])), 0, 1.0f);
+            }
+            char label[96];
+            snprintf(label, sizeof label, "mul_mat f8_e4m3 x f32 [%d x 9] x 3 amp30", lens[li]);
+            run_amp(label, ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F8_E4M3, lens[li], 9),
+                                             ggml_new_tensor_2d(ctx, GGML_TYPE_F32, lens[li], 3)), 0, 30.0f);
+        }
+        /* An f8 value has 4 significant bits and the fill's f32 values at
+         * most 16, so every product above is exact in f32 and a fused and an
+         * unfused multiply-add agree -- measured: an unfused tail passed.
+         * Scaling src1 by 1/3 first gives it a full 24-bit significand, so
+         * the products round and where the fusion sits shows. */
+        for (int li = 1; li < 3; li++) {
+            for (int nc = 1; nc <= 2; nc++) {
+                char label[96];
+                snprintf(label, sizeof label, "mul_mat f8_e4m3 x f32/3 [%d x 9] x %d", lens[li], nc);
+                run_amp(label, ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F8_E4M3, lens[li], 9),
+                                                 ggml_scale(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, lens[li], nc), 1.0f / 3.0f)), 0, 1.0f);
+            }
+        }
+        const enum ggml_type ft[] = { GGML_TYPE_F32, GGML_TYPE_F16, GGML_TYPE_BF16 };
+        for (int t = 0; t < 3; t++) {
+            char label[96];
+            snprintf(label, sizeof label, "cpy %s -> f8_e4m3", ggml_type_name(ft[t]));
+            run_amp(label, ggml_cpy(ctx, ggml_new_tensor_2d(ctx, ft[t], 37, 6), ggml_new_tensor_2d(ctx, GGML_TYPE_F8_E4M3, 37, 6)), 0, 30.0f);
+            snprintf(label, sizeof label, "cpy f8_e4m3 -> %s", ggml_type_name(ft[t]));
+            run_amp(label, ggml_cpy(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F8_E4M3, 37, 6), ggml_new_tensor_2d(ctx, ft[t], 37, 6)), 0, 30.0f);
+            snprintf(label, sizeof label, "cpy f8_e4m3 -> %s, transposed", ggml_type_name(ft[t]));
+            run_amp(label, ggml_cpy(ctx, ggml_transpose(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F8_E4M3, 6, 37)),
+                                    ggml_new_tensor_2d(ctx, ft[t], 37, 6)), 0, 30.0f);
+        }
+        run_amp("cpy f32 -> f8_e4m3, amp 1000", ggml_cpy(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 64, 4), ggml_new_tensor_2d(ctx, GGML_TYPE_F8_E4M3, 64, 4)), 0, 1000.0f);
+        run_amp("cpy f8_e4m3 -> f8_e4m3", ggml_cpy(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F8_E4M3, 37, 6), ggml_new_tensor_2d(ctx, GGML_TYPE_F8_E4M3, 37, 6)), 0, 1.0f);
+        RB(ggml_get_rows(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F8_E4M3, 37, 20), ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 7)), 20);
+        RB(ggml_set_rows(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F8_E4M3, 37, 10), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 37, 3),
+                         ggml_new_tensor_1d(ctx, GGML_TYPE_I64, 3)), 10);
+        R(ggml_add(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F8_E4M3, 37, 6), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 37, 6)));
+        R(ggml_add1(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F8_E4M3, 37, 6), ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1)));
+        R(ggml_out_prod(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F8_E4M3, 37, 8), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 6, 8)));
+    }
+
     puts("=== state space and recurrent ===");
     R(ggml_ssm_conv(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3 + 5, 16, 2), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 4, 16)));
     R(ggml_ssm_conv(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3 + 1, 16, 1), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 4, 16)));

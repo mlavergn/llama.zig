@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.8.0, `8642541b2`), lines
+//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.9.0, `cd959bae9`), lines
 //! 2488-2765. Each function names the C function it replaces and the line it
 //! began at. The quantizers are in `iq_quant.zig`; these are separate because
 //! decoding a codebook index is trivial and choosing one is not.

@@ -7,7 +7,7 @@
 //! `llama.cpp/ggml/src/ggml-cuda/mmq-config-pascal-dp4a.cuh`,
 //! `llama.cpp/ggml/src/ggml-cuda/mmq-config-ampere.cuh`,
 //! `llama.cpp/ggml/src/ggml-cuda/mmq-config-blackwell.cuh`,
-//! at v0.8.0 (`8642541b2`). Each table is a function's `CASE` lines in
+//! at v0.9.0 (`cd959bae9`). Each table is a function's `CASE` lines in
 //! order; the first entry matching (type, J, fallback) wins, else the
 //! function's last line: a default entry, or another family's table.
 

@@ -7,7 +7,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/download.cpp` and `llama.cpp/common/download.h`
-//! (v0.8.0, `8642541b2`) whole, with what they and router mode need from
+//! (v0.9.0, `cd959bae9`) whole, with what they and router mode need from
 //! the rest of `common/`: `common_models_handler_init`, `_is_preset_repo`
 //! and `_apply` and their helpers from `common/arg.cpp`; the client helpers
 //! of `common/http.h` (`common_http_parse_url`, `common_http_client`,
@@ -130,7 +130,7 @@ pub fn fsGetCacheDirectory(a: Allocator) Error![]const u8 {
     return hf_cache.pathJoin(a, cache_directory, "llama.cpp");
 }
 
-/// Ports `fs_get_cache_file` (common/common.cpp:1037 @8642541b2): `filename`
+/// Ports `fs_get_cache_file` (common/common.cpp:1048 @cd959bae9): `filename`
 /// in the cache directory, which is created.
 pub fn fsGetCacheFile(a: Allocator, filename: []const u8) Error![]const u8 {
     common.ggmlAssert(std.mem.indexOfScalar(u8, filename, '/') == null, "common/common.cpp", 1049, "filename.find(DIRECTORY_SEPARATOR) == std::string::npos");
@@ -143,7 +143,7 @@ pub fn fsGetCacheFile(a: Allocator, filename: []const u8) Error![]const u8 {
     return hf_cache.pathJoin(a, cache_directory, filename);
 }
 
-/// Ports `fs_write_atomic` (common/common.cpp:926 @8642541b2): through a
+/// Ports `fs_write_atomic` (common/common.cpp:937 @cd959bae9): through a
 /// temporary file renamed into place, the parent directories created first
 /// (their failure ignored). A random suffix gives every writer its own
 /// temporary file, across processes and containers.
@@ -1423,9 +1423,10 @@ fn icaseSearch(pattern: []const u8, text: []const u8) Error!bool {
     return re.search(text, &m);
 }
 
-/// Ports `find_best_model` (download.cpp:740 @8642541b2): the first model
-/// file whose name carries the tag (by default Q4_K_M, then Q8_0), the
-/// first shard of a split; with no tag, any model file.
+/// Ports `find_best_model` (download.cpp:740 @cd959bae9): the first model
+/// file whose name carries the tag (by default Q4_K_M, then Q8_0) as a
+/// whole token, so that ":F16" does not match a BF16 file; the first shard
+/// of a split; with no tag, any model file.
 fn findBestModel(a: Allocator, files: []const HfFile, tag: []const u8) Error!HfFile {
     var tags: []const []const u8 = undefined;
 
@@ -1436,7 +1437,8 @@ fn findBestModel(a: Allocator, files: []const HfFile, tag: []const u8) Error!HfF
     }
 
     for (tags) |t| {
-        const pattern = try std.mem.concat(a, u8, &.{ t, "[.-]" });
+        // match the tag as a full token, so ":F16" does not match a BF16 file
+        const pattern = try std.mem.concat(a, u8, &.{ "(^|[-./])", t, "[.-]" });
         for (files) |f| {
             if (ggufFilenameIsModel(f.path) and
                 try icaseSearch(pattern, f.path))
@@ -1658,7 +1660,7 @@ fn dockerGetToken(a: Allocator, repo: []const u8) Error![]const u8 {
     return (try response.index(a, "token")).get([]const u8);
 }
 
-/// Ports `common_docker_resolve_model` (download.cpp:927 @8642541b2): a
+/// Ports `common_docker_resolve_model` (download.cpp:928 @cd959bae9): a
 /// Docker model's GGUF layer downloaded to the cache.
 ///
 /// Return: the local path.
@@ -1986,7 +1988,7 @@ pub const ModelsHandler = struct {
     opts: Opts = .{},
 };
 
-/// Ports `get_default_local_path` (arg.cpp:351 @8642541b2): a URL's last
+/// Ports `get_default_local_path` (arg.cpp:327 @cd959bae9): a URL's last
 /// path element, in the cache.
 fn getDefaultLocalPath(a: Allocator, url: []const u8) Error![]const u8 {
     var f = (try tc.strings.split(a, url, '#')).items[0];

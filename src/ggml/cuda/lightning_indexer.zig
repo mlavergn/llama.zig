@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/lightning-indexer.cu` at v0.8.0
-//! (`8642541b2`), the host half. The kernels,
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/lightning-indexer.cu` at v0.9.0
+//! (`cd959bae9`), the host half. The kernels,
 //! `lightning_indexer_kernel_wmma`, `lightning_indexer_kernel_vec` and
 //! (v0.6.0, for four heads) `lightning_indexer_kernel_tile`, stay CUDA. The
 //! HIP/MUSA arm, which always takes the vector kernel, is not compiled

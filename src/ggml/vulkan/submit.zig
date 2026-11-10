@@ -6,8 +6,8 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-buffers.cpp`, and
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.8.0
-//! (`8642541b2`). Upstream split `ggml-vulkan.cpp` into those files at
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.9.0
+//! (`cd959bae9`). Upstream split `ggml-vulkan.cpp` into those files at
 //! v0.5.0. A `vk_context` is a `std::shared_ptr` in the C++, kept alive
 //! either by the backend context's garbage list or by the one caller that
 //! made it ("temporary"); here the owner frees it explicitly.
@@ -35,11 +35,14 @@ pub const Semaphore = struct {
     value: u64 = 0,
 };
 
-/// Ports `vk_submission` (ggml-vulkan-types.h:1086 @8642541b2).
+/// Ports `vk_submission` (ggml-vulkan-types.h:1087 @cd959bae9).
 pub const Submission = struct {
     buffer: ?*CommandBuffer = null,
     wait_semaphores: std.ArrayList(Semaphore) = .empty,
     signal_semaphores: std.ArrayList(Semaphore) = .empty,
+    // submit waits until *ready >= ready_value
+    ready: ?*const std.atomic.Value(u64) = null,
+    ready_value: u64 = 0,
 
     fn deinit(self: *Submission) void {
         self.wait_semaphores.deinit(allocator);
@@ -278,8 +281,14 @@ pub fn ctxBegin(device: *Device, subctx: *Context) void {
 /// queue submission, serialised by the handle's mutex unless the queue
 /// synchronises itself, and first by the device's submit mutex where the
 /// NVIDIA workaround set one. A lost device prints what is known about it
-/// before the C++'s rethrow.
+/// before the C++'s rethrow, which nothing catches here.
 pub fn queueSubmit(h: *m.device.QueueHandle, submits: []const vk.VkSubmitInfo, fence: vk.VkFence) void {
+    queueSubmitChecked(h, submits, fence) catch common.abortLastError();
+}
+
+/// `queueSubmit` where the C++'s caller catches the throw:
+/// `error.VulkanError`, with `common.last_error` set.
+pub fn queueSubmitChecked(h: *m.device.QueueHandle, submits: []const vk.VkSubmitInfo, fence: vk.VkFence) common.VkError!void {
     // Workaround for NVIDIA driver bug
     if (h.device_submit_mutex) |dm| _ = std.c.pthread_mutex_lock(dm);
     h.lock();
@@ -287,10 +296,10 @@ pub fn queueSubmit(h: *m.device.QueueHandle, submits: []const vk.VkSubmitInfo, f
     h.unlock();
     if (h.device_submit_mutex) |dm| _ = std.c.pthread_mutex_unlock(dm);
     if (result == vk.VK_ERROR_DEVICE_LOST) printDeviceLostInfo(h.device);
-    common.checkOrAbort(result, "vk::Queue::submit");
+    return common.check(result, "vk::Queue::submit");
 }
 
-/// Ports `ggml_vk_submit` (ggml-vulkan.cpp:902 @8642541b2): submits every
+/// Ports `ggml_vk_submit` (ggml-vulkan.cpp:902 @cd959bae9): submits every
 /// recorded sequence as timeline-semaphore submissions, then forgets them.
 pub fn submit(ctx: *Context, fence: vk.VkFence) void {
     const h = ctx.p.?.q.?.handle;
@@ -324,6 +333,9 @@ pub fn submit(ctx: *Context, fence: vk.VkFence) void {
     const stage_flags = ctx.p.?.q.?.stage_flags;
     var idx: usize = 0;
     for (ctx.seqs.items) |seq| for (seq.items) |*sub| {
+        if (sub.ready) |ready| {
+            while (ready.load(.acquire) < sub.ready_value) common.yield();
+        }
         const nw = sub.wait_semaphores.items.len;
         const ns = sub.signal_semaphores.items.len;
         const wait_vals = scratch.items.len;
@@ -371,10 +383,17 @@ pub fn submit(ctx: *Context, fence: vk.VkFence) void {
 /// prints what is known about it; any failure logs and throws, and nothing
 /// catches it.
 pub fn vkCheck(result: vk.VkResult, comptime msg: [:0]const u8, device: *Device) void {
+    vkCheckChecked(result, msg, device) catch impl.abort("ggml_vulkan: " ++ msg);
+}
+
+/// `VK_CHECK` where the C++'s caller catches the throw: logs as `vkCheck`
+/// does, then returns `error.VulkanError` with `common.last_error` naming
+/// `"ggml_vulkan: " msg`, the exception's message.
+pub fn vkCheckChecked(result: vk.VkResult, comptime msg: [:0]const u8, device: *Device) common.VkError!void {
     if (result == vk.VK_SUCCESS) return;
     if (result == vk.VK_ERROR_DEVICE_LOST) printDeviceLostInfo(device);
     impl.logError("ggml_vulkan: %s error %s\n", .{ @as([*:0]const u8, msg), common.resultString(result).ptr });
-    impl.abort("ggml_vulkan: " ++ msg);
+    return common.check(result, "ggml_vulkan: " ++ msg);
 }
 
 /// `device->device.waitForFences({ fence }, true, UINT64_MAX)` under

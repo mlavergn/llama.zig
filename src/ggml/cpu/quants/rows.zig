@@ -3,20 +3,20 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/quants.c` (v0.8.0, `8642541b2`),
-//! the row functions at lines 25-125. Each function names the C it replaces
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/quants.c` (v0.9.0, `cd959bae9`),
+//! the row functions at lines 26-130. Each function names the C it replaces
 //! and the line it began at.
 //!
-//! # Seventeen of these are one line
+//! # Eighteen of these are one line
 //!
 //! `quantize_row_q4_0` and its siblings forward to `quantize_row_q4_0_ref` in
 //! `ggml-quants.c`, which `src/ggml/quants/` already ports. The C keeps them as
 //! separate symbols because an architecture may replace any one of them with a
 //! vectorised version -- `arch/arm/quants.c` does exactly that for `q8_0`,
 //! `q8_1` and `q8_K`, which is why those three are `_generic` here and the
-//! other seventeen are not.
+//! other eighteen are not.
 //!
-//! So this file looks redundant and is not: the seventeen names are the ABI the
+//! So this file looks redundant and is not: the eighteen names are the ABI the
 //! traits table is built from, and the three `_generic` ones are the fallbacks
 //! a `GGML_CPU_GENERIC` build would use instead of the NEON kernels.
 
@@ -40,6 +40,7 @@ const ref = struct {
     extern fn quantize_row_q8_K_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
     extern fn quantize_row_mxfp4_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
     extern fn quantize_row_nvfp4_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
+    extern fn quantize_row_f8_e4m3_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
     extern fn quantize_row_q2_K_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
     extern fn quantize_row_q3_K_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
     extern fn quantize_row_q4_K_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
@@ -103,6 +104,11 @@ pub export fn quantize_row_mxfp4(x: [*c]const f32, y: ?*anyopaque, k: i64) void 
 /// Ports `quantize_row_nvfp4` (ggml-cpu/quants.c:62 @cd959bae9).
 pub export fn quantize_row_nvfp4(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
     ref.quantize_row_nvfp4_ref(x, y, k);
+}
+
+/// Ports `quantize_row_f8_e4m3` (ggml-cpu/quants.c:66 @cd959bae9).
+pub export fn quantize_row_f8_e4m3(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
+    ref.quantize_row_f8_e4m3_ref(x, y, k);
 }
 
 /// Ports `quantize_row_q2_K` (ggml-cpu/quants.c:76 @cd959bae9).

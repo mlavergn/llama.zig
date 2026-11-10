@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/nemotron-h-moe.cpp` at v0.8.0
-//! (`8642541b2`): `llama_model_nemotron_h_moe`'s `build_arch_graph` and its
+//! Ported from `llama.cpp/src/models/nemotron-h-moe.cpp` at v0.9.0
+//! (`cd959bae9`): `llama_model_nemotron_h_moe`'s `build_arch_graph` and its
 //! `graph_mtp`. It reuses `llama_model_nemotron_h`'s loading and `graph`,
 //! in `nemotron_h.zig`.
 

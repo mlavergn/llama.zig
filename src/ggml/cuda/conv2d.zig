@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/conv2d.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/conv2d.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/conv2d.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels -- `conv2d_kernel`, `conv2d_pad_f16`, `conv2d_implicit_gemm_f16`
 //! and `conv2d_reduce_split_k` -- stay CUDA.
 //!

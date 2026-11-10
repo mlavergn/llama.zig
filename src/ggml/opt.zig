@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-opt.cpp` (v0.8.0, `8642541b2`), 1,094
+//! Ported from `llama.cpp/ggml/src/ggml-opt.cpp` (v0.9.0, `cd959bae9`), 1,094
 //! lines of C++, plus the three pieces of libc++ its one `std::shuffle`
 //! reaches, which are not upstream code and are cited by header and template:
 //! `__random/mersenne_twister_engine.h`, `__random/uniform_int_distribution.h`

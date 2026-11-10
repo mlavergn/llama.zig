@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Mirrors the `ggml_metal_kargs_*` structs of
-//! `llama.cpp/ggml/src/ggml-metal/ggml-metal-impl.h` at v0.8.0
-//! (`8642541b2`).
+//! `llama.cpp/ggml/src/ggml-metal/ggml-metal-impl.h` at v0.9.0
+//! (`cd959bae9`).
 //!
 //! # Generated, not written
 //!
@@ -226,6 +226,19 @@ pub const flash_attn_ext_kv_f16 = extern struct {
     nb2: u64,
     nb3: u64,
     nblocks: i32,
+};
+
+/// Mirrors `ggml_metal_kargs_flash_attn_ext_rows` (ggml-metal-impl.h:389 @cd959bae9).
+pub const flash_attn_ext_rows = extern struct {
+    ne11: i32,
+    ne_12_2: i32,
+    ne10: i32,
+    ne20: i32,
+    v_off: u64,
+    nb11: u64,
+    nb12: u64,
+    nb21: u64,
+    nb22: u64,
 };
 
 /// Mirrors `ggml_metal_kargs_flash_attn_ext_pad` (ggml-metal-impl.h:401 @cd959bae9).
@@ -1346,6 +1359,7 @@ const all = .{
     set,
     rope,
     flash_attn_ext_kv_f16,
+    flash_attn_ext_rows,
     flash_attn_ext_pad,
     flash_attn_ext_blk,
     flash_attn_ext,

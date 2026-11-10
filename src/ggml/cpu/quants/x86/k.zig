@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (v0.8.0,
-//! `8642541b2`), the `__AVX2__` arms of the K-quant dot products. Each
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (v0.9.0,
+//! `cd959bae9`), the `__AVX2__` arms of the K-quant dot products. Each
 //! function names the C it replaces and the line it began at; the `__AVX__`
 //! and scalar arms below each are not compiled at x86-64-v3.
 //!

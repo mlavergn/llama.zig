@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/mtmd/mtmd-cli.cpp` at v0.8.0 (`8642541b2`).
+//! Ported from `llama.cpp/tools/mtmd/mtmd-cli.cpp` at v0.9.0 (`cd959bae9`).
 //! Each declaration names the C++ it replaces and the line it began at.
 //!
 //! # What differs

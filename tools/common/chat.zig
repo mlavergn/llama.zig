@@ -7,7 +7,7 @@
 //! `common_chat_format_single`, `common_chat_format_example` and
 //! `common_chat_templates_apply_legacy` from `llama.cpp/common/chat.cpp`,
 //! and the source normalization of `jinja::lexer::tokenize` from
-//! `llama.cpp/common/jinja/lexer.cpp`, at v0.8.0 (`8642541b2`). Each
+//! `llama.cpp/common/jinja/lexer.cpp`, at v0.9.0 (`cd959bae9`). Each
 //! declaration names the C++ it replaces and the line it began at.
 //!
 //! # The Jinja path

@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Mirrors the `vk_*_push_constants` structs of
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-push-constants.h` at v0.8.0
-//! (`8642541b2`), which upstream split out of
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-push-constants.h` at v0.9.0
+//! (`cd959bae9`), which upstream split out of
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.5.0.
 //!
 //! # Generated, not written

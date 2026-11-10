@@ -13,7 +13,7 @@
 //!   `llama_kv_cache_dsa_context`
 //! - `llama.cpp/src/llama-kv-cache-dsa.cpp` -- their bodies
 //!
-//! All at v0.8.0 (`8642541b2`).
+//! All at v0.9.0 (`cd959bae9`).
 
 const std = @import("std");
 const impl = @import("impl.zig");
@@ -50,8 +50,8 @@ pub const KvCacheDsa = struct {
     kv_mla: *KvCache,
     kv_lid: *KvCache,
 
-    /// Ports the constructor of `llama_kv_cache_dsa` (llama-kv-cache-dsa.cpp:14
-    /// @8642541b2).
+    /// Ports the constructor of `llama_kv_cache_dsa` (llama-kv-cache-dsa.cpp:15
+    /// @cd959bae9).
     ///
     /// Parameters:
     /// - `filter_mla`: the layers of the main cache; empty selects every layer.
@@ -101,9 +101,12 @@ pub const KvCacheDsa = struct {
         self.hparams_lid.n_embd_head_k_full = model.hparams.indexer_head_size;
         self.hparams_lid.rope_type = c.LLAMA_ROPE_TYPE_NEOX;
 
+        // KV sharing applies to the MLA cache only: each indexer owns its keys.
+        for (&self.hparams_lid.kv_source_impl, 0..) |*src, i| src.* = @intCast(i);
+
         impl.logInfo("%s: creating indexer KV cache, size = %u cells\n", .{ func, kv_size });
 
-        self.kv_lid = try KvCache.create(model, no_alloc, &self.hparams_lid, type_k, type_v, v_trans, offload, unified, kv_size, n_seq_max, n_swa, swa_type, null, filter_lid, reuse, .{}, exc);
+        self.kv_lid = try KvCache.create(model, no_alloc, &self.hparams_lid, type_k, type_v, v_trans, offload, unified, kv_size, n_seq_max, n_swa, swa_type, null, filter_lid, .{}, .{}, exc);
 
         return self;
     }

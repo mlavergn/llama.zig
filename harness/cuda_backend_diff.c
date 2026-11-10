@@ -37,7 +37,15 @@
  *   calls `graph_optimize` at all. Since v0.6.0 also the shared-expert
  *   reordering: the node order it leaves and the two dependencies it adds;
  * - since v0.6.0, whether each buffer type sets `alloc_buffer_n` and
- *   `get_alloc_size_n`, and `get_alloc_size_n` over short tensor lists.
+ *   `get_alloc_size_n`, and `get_alloc_size_n` over short tensor lists;
+ * - since v0.9.0, the device buffer's batched slots (`set_tensor_n`,
+ *   `get_tensor_n`, `cpy_tensor_n`): whether each is set, and the bytes a
+ *   round trip through them gives back -- 200 small reads and two above the
+ *   128 KiB gather limit packed into one host span (batch-get.cu's gather,
+ *   unless `GGML_CUDA_NO_PINNED`), the same reads spread too sparsely to
+ *   register, 100 reads (below its 128-read minimum), and `copy_n` into a
+ *   second buffer from CUDA tensors, views of them and CPU tensors (which
+ *   `cpy_tensor_n` must refuse, having copied nothing).
  */
 #include <math.h>
 #include <stdbool.h>
@@ -66,6 +74,8 @@ static void ask_reg(ggml_backend_reg_t reg) {
         "ggml_backend_comm_init", "ggml_backend_comm_free", "ggml_backend_comm_allreduce_tensor",
         "ggml_backend_register_host_buffer", "ggml_backend_unregister_host_buffer",
         "ggml_backend_get_features", "ggml_backend_split_buffer_type", "no_such_function",
+        /* v0.9.0, NCCL only: null without GGML_USE_NCCL on both sides. */
+        "ggml_backend_comm_init_rank",
     };
     for (size_t i = 0; i < sizeof(procs) / sizeof(procs[0]); i++) {
         SAY("reg proc %s = %s", procs[i], ggml_backend_reg_get_proc_address(reg, procs[i]) ? "yes" : "null");
@@ -488,6 +498,146 @@ static void ask_graph_optimize(ggml_backend_dev_t dev) {
     ggml_backend_free(backend);
 }
 
+/* FNV-1a over a byte range. */
+static uint64_t hash_bytes(const void * p, size_t n) {
+    const uint8_t * b = (const uint8_t *) p;
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (size_t i = 0; i < n; i++) {
+        h = (h ^ b[i]) * 0x100000001b3ull;
+    }
+    return h;
+}
+
+/* Set when a round trip on the reference did not give back what was put
+ * in: the section would then compare two wrong answers. */
+static bool tensor_n_ref_bad;
+
+enum { TN_SMALL = 200, TN_BIG = 2, TN_N = TN_SMALL + TN_BIG };
+
+/* The batched slots, v0.9.0. */
+static void ask_tensor_n(ggml_backend_buffer_type_t buft) {
+    const int64_t ne_small = 64;      /* 256 bytes: gathered */
+    const int64_t ne_big = 64 * 1024; /* 256 KiB: above max_gather_read_bytes, DMA */
+    struct ggml_init_params ip = { (3 * TN_N + 8) * ggml_tensor_overhead(), NULL, true };
+    struct ggml_context * ctx = ggml_init(ip);
+    struct ggml_context * ctx2 = ggml_init(ip);
+    struct ggml_context * ctx_cpu = ggml_init(ip);
+    struct ggml_tensor * t[TN_N], * u[TN_N], * cpu[4], * view[4];
+    for (int i = 0; i < TN_N; i++) {
+        t[i] = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, i < TN_SMALL ? ne_small : ne_big);
+        u[i] = ggml_new_tensor_1d(ctx2, GGML_TYPE_F32, i < TN_SMALL ? ne_small : ne_big);
+    }
+    for (int i = 0; i < 4; i++) {
+        cpu[i] = ggml_new_tensor_1d(ctx_cpu, GGML_TYPE_F32, ne_small);
+        view[i] = ggml_view_1d(ctx, t[TN_SMALL], ne_small, (size_t) (i + 1) * 1024);
+    }
+    ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors_from_buft(ctx, buft);
+    ggml_backend_buffer_t buf2 = ggml_backend_alloc_ctx_tensors_from_buft(ctx2, buft);
+    ggml_backend_buffer_t buf_cpu = ggml_backend_alloc_ctx_tensors_from_buft(ctx_cpu, ggml_backend_cpu_buffer_type());
+    SAY("tensor_n allocated = %d %d %d", buf != NULL, buf2 != NULL, buf_cpu != NULL);
+    if (!buf || !buf2 || !buf_cpu) {
+        goto done;
+    }
+    SAY("buft iface set_tensor_n = %s", buf->iface.set_tensor_n ? "set" : "null");
+    SAY("buft iface get_tensor_n = %s", buf->iface.get_tensor_n ? "set" : "null");
+    SAY("buft iface cpy_tensor_n = %s", buf->iface.cpy_tensor_n ? "set" : "null");
+
+    size_t sizes[TN_N], offsets[TN_N], packed[TN_N], sparse[TN_N];
+    size_t total = 0, total_sparse = 0;
+    for (int i = 0; i < TN_N; i++) {
+        sizes[i] = ggml_nbytes(t[i]);
+        offsets[i] = 0;
+        packed[i] = total;
+        total += sizes[i];
+        /* gaps of three times each read: more than the payload, so
+         * ggml_cuda_get_tensor_n declines to register the span */
+        sparse[i] = total_sparse;
+        total_sparse += 4 * sizes[i];
+    }
+    uint8_t * in = malloc(total);
+    uint8_t * out = malloc(total_sparse);
+    for (size_t i = 0; i < total; i++) {
+        in[i] = (uint8_t) (i * 131 + (i >> 8) * 7 + 1);
+    }
+
+    /* set_n from one packed host array, then get_n back into one. */
+    ggml_backend_tensor_set_n(t, in, offsets, sizes, packed, TN_N);
+    memset(out, 0, total_sparse);
+    ggml_backend_tensor_get_n((const struct ggml_tensor * const *) t, out, offsets, sizes, packed, TN_N);
+    const bool ok_packed = memcmp(in, out, total) == 0;
+    SAY("tensor_n packed roundtrip = %d hash = %016llx", ok_packed, (unsigned long long) hash_bytes(out, total));
+
+    /* The same reads spread out. */
+    memset(out, 0, total_sparse);
+    ggml_backend_tensor_get_n((const struct ggml_tensor * const *) t, out, offsets, sizes, sparse, TN_N);
+    bool ok_sparse = true;
+    for (int i = 0; i < TN_N; i++) {
+        ok_sparse = ok_sparse && memcmp(in + packed[i], out + sparse[i], sizes[i]) == 0;
+    }
+    SAY("tensor_n sparse roundtrip = %d hash = %016llx", ok_sparse, (unsigned long long) hash_bytes(out, total_sparse));
+
+    /* 100 small reads at odd offsets inside the tensors, below the minimum. */
+    size_t off100[100], sz100[100], dst100[100], tot100 = 0;
+    for (int i = 0; i < 100; i++) {
+        off100[i] = (size_t) (i % 7) * 4;
+        sz100[i] = sizes[i] - off100[i] - (size_t) (i % 3) * 4;
+        dst100[i] = tot100;
+        tot100 += sz100[i];
+    }
+    memset(out, 0, total_sparse);
+    ggml_backend_tensor_get_n((const struct ggml_tensor * const *) t, out, off100, sz100, dst100, 100);
+    bool ok_100 = true;
+    for (int i = 0; i < 100; i++) {
+        ok_100 = ok_100 && memcmp(in + packed[i] + off100[i], out + dst100[i], sz100[i]) == 0;
+    }
+    SAY("tensor_n 100 reads roundtrip = %d hash = %016llx", ok_100, (unsigned long long) hash_bytes(out, tot100));
+
+    /* copy_n into the second buffer, every source a CUDA tensor. */
+    ggml_backend_tensor_copy_n((const struct ggml_tensor * const *) t, u, TN_N);
+    memset(out, 0, total_sparse);
+    ggml_backend_tensor_get_n((const struct ggml_tensor * const *) u, out, offsets, sizes, packed, TN_N);
+    const bool ok_copy = memcmp(in, out, total) == 0;
+    SAY("tensor_n copy_n roundtrip = %d hash = %016llx", ok_copy, (unsigned long long) hash_bytes(out, total));
+
+    /* copy_n from views of a CUDA tensor: their own buffer is the view
+     * source's. */
+    struct ggml_tensor * dsts[4] = { u[0], u[1], u[2], u[3] };
+    ggml_backend_tensor_copy_n((const struct ggml_tensor * const *) view, dsts, 4);
+    memset(out, 0, total_sparse);
+    ggml_backend_tensor_get_n((const struct ggml_tensor * const *) u, out, offsets, sizes, packed, 4);
+    bool ok_view = true;
+    for (int i = 0; i < 4; i++) {
+        ok_view = ok_view && memcmp(in + packed[TN_SMALL] + (size_t) (i + 1) * 1024, out + packed[i], sizes[i]) == 0;
+    }
+    SAY("tensor_n copy_n views roundtrip = %d", ok_view);
+
+    /* copy_n with CPU sources: cpy_tensor_n must refuse, and the generic
+     * path copy each. */
+    for (int i = 0; i < 4; i++) {
+        memset(cpu[i]->data, 0x40 + i, ggml_nbytes(cpu[i]));
+    }
+    const struct ggml_tensor * mixed[4] = { t[4], cpu[1], t[6], cpu[3] };
+    struct ggml_tensor * dsts2[4] = { u[4], u[5], u[6], u[7] };
+    const bool refused = buf->iface.cpy_tensor_n ? !buf2->iface.cpy_tensor_n(buf2, mixed, dsts2, 4) : true;
+    ggml_backend_tensor_copy_n(mixed, dsts2, 4);
+    memset(out, 0, total_sparse);
+    ggml_backend_tensor_get_n((const struct ggml_tensor * const *) dsts2, out, offsets, sizes, packed, 4);
+    SAY("tensor_n copy_n mixed refused = %d hash = %016llx", refused, (unsigned long long) hash_bytes(out, 4 * sizes[0]));
+
+    if (strcmp(side, "ref") == 0 && !(ok_packed && ok_sparse && ok_100 && ok_copy && ok_view)) {
+        tensor_n_ref_bad = true;
+    }
+    free(in);
+    free(out);
+done:
+    if (buf) ggml_backend_buffer_free(buf);
+    if (buf2) ggml_backend_buffer_free(buf2);
+    if (buf_cpu) ggml_backend_buffer_free(buf_cpu);
+    ggml_free(ctx);
+    ggml_free(ctx2);
+    ggml_free(ctx_cpu);
+}
+
 static void ask_device(size_t i, ggml_backend_dev_t dev) {
     SAY("dev %zu name = %s", i, ggml_backend_dev_name(dev));
     SAY("dev %zu description = %s", i, ggml_backend_dev_description(dev));
@@ -523,6 +673,7 @@ static void ask_device(size_t i, ggml_backend_dev_t dev) {
     ask_alloc_n("host_buft", host, ctx);
     ask_alloc_fattn(buft, ctx);
     ggml_free(ctx);
+    ask_tensor_n(buft);
     ask_graph_optimize(dev);
 }
 
@@ -541,6 +692,10 @@ int main(void) {
      * nothing about the v0.5.0 arm: say so rather than pass. */
     if (opt_deps_topk == 0) {
         fprintf(stderr, "cuda_backend_diff: graph_optimize recorded no top-k MoE dependency\n");
+        return 3;
+    }
+    if (tensor_n_ref_bad) {
+        fprintf(stderr, "cuda_backend_diff: a batched round trip on the reference gave back other bytes\n");
         return 3;
     }
     /* Likewise for v0.6.0's shared-expert reordering. */

@@ -616,9 +616,14 @@ pub fn build(b: *std.Build) !void {
     llamacpp.addCudaLibraries(b, cli_module, cuda);
     llamacpp.addVulkanLibraries(b, cli_module, vulkan);
 
+    // upstream embeds `common/win-app.manifest` (the UTF-8 active code page
+    // and long paths) in every executable under `tools/`, `llama-cli`
+    // included, since v0.9.0 (cmake/win-app.cmake); Zig ignores it off
+    // Windows.
     const cli = b.addExecutable(.{
         .name = cfg.cli_name,
         .root_module = cli_module,
+        .win32_manifest = b.path("llama.cpp/common/win-app.manifest"),
     });
     b.installArtifact(cli);
 

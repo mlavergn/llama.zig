@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/ui/ui.cpp.in` and `llama.cpp/tools/ui/ui.h.in`
-//! (v0.8.0, `8642541b2`) -- the templates upstream's
+//! (v0.9.0, `cd959bae9`) -- the templates upstream's
 //! `llama.cpp/scripts/ui-assets.cmake` fills with the built SvelteKit bundle.
 //! The bundle itself is never ported: it is JavaScript, CSS and images the
 //! browser runs, and travels as data, as the Metal kernels do.

@@ -6,7 +6,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/hf-cache.cpp` and `llama.cpp/common/hf-cache.h`
-//! (v0.8.0, `8642541b2`) whole, their POSIX arms. Each declaration names
+//! (v0.9.0, `cd959bae9`) whole, their POSIX arms. Each declaration names
 //! the C++ it replaces and the line it began at.
 //!
 //! # `std::filesystem`
@@ -689,7 +689,7 @@ pub const HfFile = struct {
 /// Ports `hf_files` (hf-cache.h:20 @cd959bae9).
 pub const HfFiles = []HfFile;
 
-/// Ports `get_repo_files` (hf-cache.cpp:282 @8642541b2): every file of the
+/// Ports `get_repo_files` (hf-cache.cpp:282 @cd959bae9): every file of the
 /// repository at its current commit, from the hub's tree API; a blob not
 /// yet in a snapshot downloads to `blobs/<oid>`. Empty on any failure,
 /// which is logged.
@@ -817,7 +817,7 @@ fn walk(a: Allocator, root: []const u8, out: *std.ArrayList([]const u8)) Allocat
     }
 }
 
-/// Ports `get_cache_path` (hf-cache.cpp:65 @8642541b2): the HuggingFace hub
+/// Ports `get_cache_path` (hf-cache.cpp:65 @cd959bae9): the HuggingFace hub
 /// cache path, as UTF-8.
 ///
 /// Return: process-lifetime; the error `get_cache_directory` throws when no
@@ -826,7 +826,7 @@ pub fn getCachePath() Error![]const u8 {
     return getCacheDirectory();
 }
 
-/// Ports `get_cached_files` (hf-cache.cpp:392 @8642541b2): every file in
+/// Ports `get_cached_files` (hf-cache.cpp:392 @cd959bae9): every file in
 /// the snapshot of each cached repository's current commit, or of `repo_id`'s
 /// alone.
 pub fn getCachedFiles(a: Allocator, repo_id: []const u8) Error!HfFiles {
@@ -987,7 +987,7 @@ fn copyFile(a: Allocator, from: []const u8, to: []const u8) bool {
     return writeFile(a, to, data.items);
 }
 
-/// Ports `remove_cached_repo` (hf-cache.cpp:510 @8642541b2): the whole
+/// Ports `remove_cached_repo` (hf-cache.cpp:510 @cd959bae9): the whole
 /// cached directory of a repository.
 ///
 /// Return: whether anything was removed.

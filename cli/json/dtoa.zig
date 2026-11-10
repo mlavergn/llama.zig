@@ -4,7 +4,7 @@
 //!
 //! Ports `nlohmann::detail::dtoa_impl` and `nlohmann::detail::to_chars` from
 //! `llama.cpp/vendor/nlohmann/json.hpp` (nlohmann/json 3.12.0, vendored at
-//! llama.cpp v0.8.0, `8642541b2`). Each declaration names what it ports and
+//! llama.cpp v0.9.0, `cd959bae9`). Each declaration names what it ports and
 //! the line it began at.
 //!
 //! This is Florian Loitsch's **Grisu2**, not a shortest-digits algorithm:

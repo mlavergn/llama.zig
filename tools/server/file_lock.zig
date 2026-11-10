@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/file-lock.cpp` and `llama.cpp/common/file-lock.h`
-//! (v0.8.0, `8642541b2`), their POSIX arm: `llama-server` is not a Windows
+//! (v0.9.0, `cd959bae9`), their POSIX arm: `llama-server` is not a Windows
 //! target. Each declaration names what it ports and the line it began at.
 
 const std = @import("std");

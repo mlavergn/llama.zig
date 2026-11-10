@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.8.0 (`8642541b2`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.9.0 (`cd959bae9`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # The C++ templates
@@ -584,7 +584,7 @@ fn dupFromQ(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_dup` (ops.cpp:526 @8642541b2).
+/// Ports `ggml_compute_forward_dup` (ops.cpp:526 @cd959bae9).
 pub export fn ggml_compute_forward_dup(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -595,16 +595,20 @@ pub export fn ggml_compute_forward_dup(params: *const ComputeParams, dst: *Tenso
 
     const F16 = c.ggml_fp16_t;
     const BF16 = c.ggml_bf16_t;
+    const F8 = c.ggml_fp8_e4m3_t;
 
     switch (src0.type) {
         c.GGML_TYPE_F16 => {
-            if (dst.type == c.GGML_TYPE_F16) dupFlt(F16, F16, params, dst) else if (dst.type == c.GGML_TYPE_BF16) dupFlt(F16, BF16, params, dst) else if (dst.type == c.GGML_TYPE_F32) dupFlt(F16, f32, params, dst) else dupToQ(F16, params, dst);
+            if (dst.type == c.GGML_TYPE_F16) dupFlt(F16, F16, params, dst) else if (dst.type == c.GGML_TYPE_BF16) dupFlt(F16, BF16, params, dst) else if (dst.type == c.GGML_TYPE_F32) dupFlt(F16, f32, params, dst) else if (dst.type == c.GGML_TYPE_F8_E4M3) dupFlt(F16, F8, params, dst) else dupToQ(F16, params, dst);
         },
         c.GGML_TYPE_BF16 => {
-            if (dst.type == c.GGML_TYPE_F16) dupFlt(BF16, F16, params, dst) else if (dst.type == c.GGML_TYPE_BF16) dupFlt(BF16, BF16, params, dst) else if (dst.type == c.GGML_TYPE_F32) dupFlt(BF16, f32, params, dst) else dupToQ(BF16, params, dst);
+            if (dst.type == c.GGML_TYPE_F16) dupFlt(BF16, F16, params, dst) else if (dst.type == c.GGML_TYPE_BF16) dupFlt(BF16, BF16, params, dst) else if (dst.type == c.GGML_TYPE_F32) dupFlt(BF16, f32, params, dst) else if (dst.type == c.GGML_TYPE_F8_E4M3) dupFlt(BF16, F8, params, dst) else dupToQ(BF16, params, dst);
         },
         c.GGML_TYPE_F32 => {
-            if (dst.type == c.GGML_TYPE_F16) dupFlt(f32, F16, params, dst) else if (dst.type == c.GGML_TYPE_BF16) dupFlt(f32, BF16, params, dst) else if (dst.type == c.GGML_TYPE_F32) dupFlt(f32, f32, params, dst) else if (dst.type == c.GGML_TYPE_I32) dupFlt(f32, i32, params, dst) else dupToQ(f32, params, dst);
+            if (dst.type == c.GGML_TYPE_F16) dupFlt(f32, F16, params, dst) else if (dst.type == c.GGML_TYPE_BF16) dupFlt(f32, BF16, params, dst) else if (dst.type == c.GGML_TYPE_F32) dupFlt(f32, f32, params, dst) else if (dst.type == c.GGML_TYPE_F8_E4M3) dupFlt(f32, F8, params, dst) else if (dst.type == c.GGML_TYPE_I32) dupFlt(f32, i32, params, dst) else dupToQ(f32, params, dst);
+        },
+        c.GGML_TYPE_F8_E4M3 => {
+            if (dst.type == c.GGML_TYPE_F16) dupFlt(F8, F16, params, dst) else if (dst.type == c.GGML_TYPE_BF16) dupFlt(F8, BF16, params, dst) else if (dst.type == c.GGML_TYPE_F32) dupFlt(F8, f32, params, dst) else impl.abort("not implemented");
         },
         c.GGML_TYPE_I32 => {
             if (dst.type == c.GGML_TYPE_F32) dupFlt(i32, f32, params, dst) else impl.abort("not implemented");

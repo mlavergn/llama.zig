@@ -8,7 +8,7 @@
 //! (`basic_json<ordered_map>`, `llama.cpp/vendor/nlohmann/json.hpp`, 3.12.0)
 //! that `common_json` reaches: the value model, `ordered_map`, the accessors
 //! and their exceptions, `operator==`, and `from_json` for the `get<T>()`
-//! types `json.cpp` instantiates. llama.cpp v0.8.0, `8642541b2`. Each
+//! types `json.cpp` instantiates. llama.cpp v0.9.0, `cd959bae9`. Each
 //! declaration names what it ports and the line it began at.
 //!
 //! # Shape
@@ -551,9 +551,9 @@ pub const Value = union(Type) {
     /// false`): `lhs` and `rhs` walked in lockstep on an explicit stack,
     /// element by element in order, a key before its value. A pair that is
     /// not two arrays or two objects is a leaf, compared by `==`
-    /// (`compare_leaves`, json.hpp:21467 @8642541b2, with `order_leaves`,
-    /// json.hpp:21530 @8642541b2), and keys by bytes (`compare_keys`,
-    /// json.hpp:21504 @8642541b2); the first pair that is not equal ends
+    /// (`compare_leaves`, json.hpp:21467 @cd959bae9, with `order_leaves`,
+    /// json.hpp:21530 @cd959bae9), and keys by bytes (`compare_keys`,
+    /// json.hpp:21504 @cd959bae9); the first pair that is not equal ends
     /// the walk. Whichever container runs out first is the smaller.
     ///
     /// The C's operators are `noexcept`, so a failed allocation of the

@@ -6,7 +6,7 @@
 //! Ports `llama.cpp/common/reasoning-budget.cpp` and
 //! `llama.cpp/common/reasoning-budget.h`, with `common_utf8_is_complete` from
 //! `llama.cpp/common/unicode.cpp` and the `common_aho_corasick` constructor
-//! from `llama.cpp/common/trie.cpp` (v0.8.0, `8642541b2`). Each declaration
+//! from `llama.cpp/common/trie.cpp` (v0.9.0, `cd959bae9`). Each declaration
 //! names what it ports and the line it began at.
 //!
 //! # The sampler
@@ -215,7 +215,7 @@ fn name(_: ?*const c.llama_sampler) callconv(.c) [*c]const u8 {
     return "reasoning-budget";
 }
 
-/// Ports `common_reasoning_budget_accept` (reasoning-budget.cpp:74 @8642541b2).
+/// Ports `common_reasoning_budget_accept` (reasoning-budget.cpp:74 @cd959bae9).
 fn accept(smpl: ?*c.llama_sampler, token: c.llama_token) callconv(.c) void {
     const ctx = ctxOf(smpl);
     const func = "common_reasoning_budget_accept";
@@ -277,7 +277,8 @@ fn accept(smpl: ?*c.llama_sampler, token: c.llama_token) callconv(.c) void {
             // track the end sequence within forced_tokens so it is also reported on DONE
             const match = ctx.end_matcher.advance(token);
             ctx.force_pos += 1;
-            if (ctx.force_pos >= ctx.forced_tokens.len) {
+            // an end tag that is already in the prompt (e.g. "<think></think>") also ends forcing
+            if (match >= 0 or ctx.force_pos >= ctx.forced_tokens.len) {
                 ctx.state = .done;
                 ctx.end_match = match;
                 comTrc(func, "%s", .{@as([*:0]const u8, "forced sequence complete, done\n")});

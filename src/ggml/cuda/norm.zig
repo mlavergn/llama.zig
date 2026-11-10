@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/norm.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/norm.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/norm.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels -- `norm_f32`, `group_norm_f32`, `rms_norm_f32`,
 //! `rms_norm_back_f32`, `l2_norm_f32` -- stay CUDA.
 //!

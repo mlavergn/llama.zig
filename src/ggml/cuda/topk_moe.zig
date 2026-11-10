@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/topk-moe.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/topk-moe.cuh` at v0.8.0 (`8642541b2`), the
+//! `llama.cpp/ggml/src/ggml-cuda/topk-moe.cuh` at v0.9.0 (`cd959bae9`), the
 //! host half. The kernel, `topk_moe_cuda`, stays CUDA.
 
 const std = @import("std");

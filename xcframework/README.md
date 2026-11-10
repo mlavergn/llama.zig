@@ -19,23 +19,25 @@ two.
 
 ## Slices
 
-Upstream's seven, with upstream's minimums (`build-xcframework.sh:7-10`):
+Upstream's seven, at minimum OS 26.0 on every platform since v0.9.0 (upstream's
+`build-xcframework.sh:7-10` says iOS 16.4, macOS 13.3, tvOS 16.4, visionOS 1.0):
 
 | Library | Platform | Minimum | arm64 CPU | x86_64 CPU |
 |---|---|---|---|---|
-| `macos-arm64_x86_64` | macOS | 13.3 | `apple_m1` | `x86_64_v3` |
-| `ios-arm64` | iOS | 16.4 | `apple_a7` | — |
-| `ios-arm64_x86_64-simulator` | iOS Simulator | 16.4 | `apple_m1` | `x86_64_v3` |
-| `tvos-arm64` | tvOS | 16.4 | `apple_a7` | — |
-| `tvos-arm64_x86_64-simulator` | tvOS Simulator | 16.4 | `apple_m1` | `x86_64_v3` |
-| `xros-arm64` | visionOS | 1.0 | `apple_a12` | — |
-| `xros-arm64_x86_64-simulator` | visionOS Simulator | 1.0 | `apple_m1` | `x86_64_v3` |
+| `macos-arm64_x86_64` | macOS | 26.0 | `apple_m1` | `x86_64_v3` |
+| `ios-arm64` | iOS | 26.0 | `apple_a7` | — |
+| `ios-arm64_x86_64-simulator` | iOS Simulator | 26.0 | `apple_m1` | `x86_64_v3` |
+| `tvos-arm64` | tvOS | 26.0 | `apple_a7` | — |
+| `tvos-arm64_x86_64-simulator` | tvOS Simulator | 26.0 | `apple_m1` | `x86_64_v3` |
+| `xros-arm64` | visionOS | 26.0 | `apple_a12` | — |
+| `xros-arm64_x86_64-simulator` | visionOS Simulator | 26.0 | `apple_m1` | `x86_64_v3` |
 
 The arm64 CPU of each slice is the one Apple clang picks for that target when
 nothing names one, which is what upstream's CMake does with `GGML_NATIVE`
 off: measured with `clang -###`. So every device upstream's framework runs on,
-this one runs on -- `apple_a7` covers every iPhone iOS 16.4 supports and every
-Apple TV tvOS 16.4 does.
+this one runs on -- `apple_a7` covers every iPhone iOS 26.0 supports and every
+Apple TV tvOS 26.0 does. (Those OSes need newer cores than the A7; the CPU is
+kept at upstream's choice, since a new CPU target is a new reference.)
 
 ## Using it
 
@@ -79,7 +81,7 @@ None of these changes what an app writes or links against.
   The device slices compile the same kernel arms as upstream's.
 - **x86_64 is `x86_64_v3` (AVX2)**, the floor of the port's x86 kernels;
   upstream's is `penryn`/`core2` running the generic kernels. Every Intel
-  Mac macOS 13.3 supports has AVX2; under Rosetta the x86_64 slices need a
+  Mac macOS 26.0 supports has AVX2; under Rosetta the x86_64 slices need a
   Rosetta that translates AVX2. Neither has run here -- this Mac has no
   Rosetta installed -- so the x86_64 slices are built, linked and held to
   upstream's structurally, and their kernels are gated on Intel hardware
@@ -134,10 +136,10 @@ as upstream's are; every slice ships a dSYM.
 | Form | Upstream's: a dynamic framework per slice, dSYMs beside | drop-in: an app embeds and signs it as it does upstream's, and one linked against upstream's loads ours by the same install name |
 | Name | `llama` throughout | upstream's framework, module and binary name |
 | Slices | upstream's seven, arm64 and x86_64 where upstream has both | an app's every destination must find its slice |
-| Minimums | upstream's: iOS 16.4, macOS 13.3, tvOS 16.4, visionOS 1.0 | a higher one would refuse to load on an OS upstream's supports |
+| Minimums | 26.0 on every platform, since v0.9.0 (upstream's: iOS 16.4, macOS 13.3, tvOS 16.4, visionOS 1.0) | the port's Apple baseline is 26.0 (Marc, 2026-11-09). It no longer loads on an OS older than 26.0 that upstream's supports: a drop-in for apps whose deployment target is 26.0 or later. `verify.sh compat` holds each slice to 26.0 (`COMPAT_MINOS`) and every other byte of the bundle to upstream's |
 | arm64 CPU | Apple clang's default per target | the oldest device upstream's runs on; each is gated (`GATE_CPU=apple_a7`, `apple_a12`; `apple_m1` is the baseline) |
 | x86_64 CPU | `x86_64_v3` | the port's x86 floor (AVX2, gated on Intel hardware) |
-| Headers, module map, Info.plist | upstream's, byte for byte (`bundle.sh`) | `verify.sh compat` holds them to upstream's own build |
+| Headers, module map, Info.plist | upstream's, byte for byte (`bundle.sh`), but for the Info.plist's minimum (`MinimumOSVersion`, `DTSDKName`) | `verify.sh compat` holds them to upstream's own build |
 | Contents | libggml + BLAS, libllama, libmtmd | what upstream's has: `LLAMA_BUILD_MTMD=ON`, `GGML_BLAS_DEFAULT=ON` |
 | Toolchain | `../zig17`, Zig 0.17.0 patched for Apple's mobile SDKs | it finds every SDK and links for the simulators, which the release cannot |
 | Optimize | `--release=fast` | what the bit-exact gates build |

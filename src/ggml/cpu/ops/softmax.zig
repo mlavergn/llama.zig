@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.8.0 (`8642541b2`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.9.0 (`cd959bae9`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # `MIN` and `MAX` are ternaries, not `@min` and `@max`
@@ -292,7 +292,7 @@ fn clamp(comptime T: type, params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_clamp` (ops.cpp:6091 @8642541b2).
+/// Ports `ggml_compute_forward_clamp` (ops.cpp:6106 @cd959bae9).
 pub export fn ggml_compute_forward_clamp(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 

@@ -787,9 +787,12 @@ fn runDecode(params: *params_mod.Params) !u8 {
                 }
             }
         } else {
+            // SPEC_PREFILL_LAST_OUT: an output on each sequence's last prefill token, as the
+            // server's prompt batch has (v0.9.0's MTP keeps only that row on a shared memory)
+            const last_out = c.getenv("SPEC_PREFILL_LAST_OUT") != null;
             for (0..n_seq) |s| {
                 var i: usize = 0;
-                while (i + 1 < inp[s].len) : (i += 1) _ = b.add(inp[s][i], @intCast(i), @intCast(s), false);
+                while (i + 1 < inp[s].len) : (i += 1) _ = b.add(inp[s][i], @intCast(i), @intCast(s), last_out and i + 2 == inp[s].len);
             }
         }
         const rc = c.llama_process(ctx_tgt, c.LLAMA_PROCESS_TYPE_DECODE, b.get());

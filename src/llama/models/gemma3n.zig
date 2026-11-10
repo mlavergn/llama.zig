@@ -7,7 +7,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gemma3n.cpp` at v0.8.0 (`8642541b2`):
+//! Ported from `llama.cpp/src/models/gemma3n.cpp` at v0.9.0 (`cd959bae9`):
 //! `llama_model_gemma3n`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `graph` and the graph's helpers.
 
@@ -24,7 +24,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_gemma3n`'s `load_arch_hparams` (models/gemma3n.cpp:3 @8642541b2).
+/// Ports `llama_model_gemma3n`'s `load_arch_hparams` (models/gemma3n.cpp:3 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -34,6 +34,15 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 
     hp.n_layer_kv_from_start = 20;
     hp.f_attention_scale = 1.0;
+
+    // Shared layers read the KV of the last layer with its own KV and the
+    // same SWA type.
+    {
+        var il: u32 = @bitCast(hp.n_layer_kv_from_start);
+        while (il < hp.n_layer_all) : (il += 1) {
+            hp.kv_source_impl[il] = @bitCast(hp.n_layer_kv_from_start -% @as(i32, if (hp.isSwa(il)) 2 else 1));
+        }
+    }
 
     if (try meta.getKey(f32, .rope_freq_base_swa, false, exc)) |v| hp.rope_freq_base_train_swa = v;
     hp.n_swa = (try meta.getKey(u32, .attention_sliding_window, true, exc)).?;
@@ -46,7 +55,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_gemma3n`'s `load_arch_tensors` (models/gemma3n.cpp:21 @8642541b2).
+/// Ports `llama_model_gemma3n`'s `load_arch_tensors` (models/gemma3n.cpp:26 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -55,13 +64,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     const laurel_rank: i64 = hp.laurel_rank;
     const n_embd_altup: i64 = hp.n_embd_altup;
 
+    self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
+
     self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_not_required, exc);
     // Without an output, the input token embedding is used.
     if (self.output == null) {
         self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
     }
-
-    self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
     self.altup_proj = try self.createTensor(.{ .tensor = .altup_proj, .suffix = "weight" }, &.{ l.n_embd, l.n_embd, n_altup - 1 }, 0, exc);
     self.altup_unembd_proj = try self.createTensor(.{ .tensor = .altup_unembd_proj, .suffix = "weight" }, &.{ l.n_embd, l.n_embd, n_altup - 1 }, 0, exc);

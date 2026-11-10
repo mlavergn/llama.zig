@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `common_chat_template` (llama.cpp v0.8.0, `8642541b2`,
+//! Ports `common_chat_template` (llama.cpp v0.9.0, `cd959bae9`,
 //! `llama.cpp/common/chat.h`), the rendering half of
 //! `llama.cpp/common/chat.cpp` -- `format_time`,
 //! `common_chat_template_direct_apply_impl`,

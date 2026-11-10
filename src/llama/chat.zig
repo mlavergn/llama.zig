@@ -9,7 +9,7 @@
 //!   `llm_chat_apply_template` and `llama_chat_builtin_templates`
 //! - `llama.cpp/src/llama-chat.h` -- `llm_chat_template`
 //!
-//! Both at v0.8.0 (`8642541b2`). Each declaration below names the line it
+//! Both at v0.9.0 (`cd959bae9`). Each declaration below names the line it
 //! came from.
 //!
 //! # Not a Jinja engine

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/soprano.cpp` at v0.8.0 (`8642541b2`),
+//! Ports `llama.cpp/tools/mtmd/models/soprano.cpp` at v0.9.0 (`cd959bae9`),
 //! and the `PROJECTOR_TYPE_SOPRANO` arm of `clip_get_graph_builder`
 //! (`llama.cpp/tools/mtmd/clip.cpp`). Each declaration names what it ports
 //! and the line it began at.

@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/jinja/caps.h` and `llama.cpp/common/jinja/caps.cpp`
-//! (llama.cpp v0.8.0, `8642541b2`): `jinja`'s `caps`, `caps_get` and its
+//! (llama.cpp v0.9.0, `cd959bae9`): `jinja`'s `caps`, `caps_get` and its
 //! `caps_try_execute`. `caps_apply_preserve_reasoning` and
 //! `caps_apply_reasoning_effort` live in `template.zig`, beside the
 //! rendering they set up. Each declaration names what it ports and the line

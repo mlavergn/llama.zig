@@ -5,8 +5,8 @@
 //! # Provenance
 //!
 //! Ports parts of `llama.cpp/vendor/cpp-httplib/httplib.cpp` and
-//! `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib 0.62.0, vendored at
-//! llama.cpp v0.8.0, `8642541b2`): `ClientImpl` -- `send`, `send_`,
+//! `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib 0.64.0, vendored at
+//! llama.cpp v0.9.0, `cd959bae9`): `ClientImpl` -- `send`, `send_`,
 //! `handle_request`, `process_request`, `write_request`, the redirect path
 //! -- and the `detail` functions under it: `create_client_socket`,
 //! `wait_until_socket_is_ready`, `parse_url`, `parse_port`,
@@ -51,8 +51,8 @@ const O_NONBLOCK: c_int = if (is_darwin) 0x0004 else 0o4000;
 const EINPROGRESS: c_int = if (is_darwin) 36 else 115;
 const SO_ERROR: c_int = if (is_darwin) 0x1007 else 4;
 
-/// Ports `CPPHTTPLIB_VERSION` (httplib.h:11 @8642541b2).
-pub const cpphttplib_version = "0.62.0";
+/// Ports `CPPHTTPLIB_VERSION` (httplib.h:11 @cd959bae9).
+pub const cpphttplib_version = "0.64.0";
 /// Ports `CPPHTTPLIB_CONNECTION_TIMEOUT_SECOND` (httplib.h:45 @cd959bae9).
 const connection_timeout_second: i64 = 300;
 /// Ports `CPPHTTPLIB_CLIENT_READ_TIMEOUT_SECOND` (httplib.h:69 @cd959bae9).
@@ -283,7 +283,33 @@ fn firstOfOrLen(s: []const u8, set: []const u8, pos: usize) usize {
     return findFirstOf(s, set, pos) orelse s.len;
 }
 
-/// Ports `resolve_relative_location` (httplib.h:995 @8642541b2): a
+/// Ports `remove_dot_segments` (httplib.h:1000 @cd959bae9): the "." and
+/// ".." segments taken out of a path that starts with '/' (RFC 3986
+/// section 5.2.4).
+fn removeDotSegments(a: std.mem.Allocator, path: []const u8) Oom![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    var i: usize = 0;
+    while (i < path.len) {
+        const next = @min(std.mem.findScalarPos(u8, path, i + 1, '/') orelse path.len, path.len);
+        const segment = path[i + 1 .. next];
+        const is_last = next == path.len;
+        if (std.mem.eql(u8, segment, ".") or std.mem.eql(u8, segment, "..")) {
+            if (std.mem.eql(u8, segment, "..")) {
+                // out.erase(min(out.rfind('/'), out.size()))
+                if (std.mem.findScalarLast(u8, out.items, '/')) |slash| out.shrinkRetainingCapacity(slash);
+            }
+            if (is_last) try out.append(a, '/');
+        } else {
+            try out.append(a, '/');
+            try out.appendSlice(a, segment);
+        }
+        i = next;
+    }
+    if (out.items.len == 0) try out.append(a, '/');
+    return out.items;
+}
+
+/// Ports `resolve_relative_location` (httplib.h:1025 @cd959bae9): a
 /// relative-path or query-only `Location` resolved against the path of the
 /// request being redirected (RFC 3986 section 5.2). An absolute URI and a
 /// reference starting with '/' come back unchanged.
@@ -312,28 +338,7 @@ fn resolveRelativeLocation(a: std.mem.Allocator, location: []const u8, base: []c
 
     // Remove "." and ".." segments from the merged path.
     const path_end = firstOfOrLen(merged, "?#", 0);
-    var path: std.ArrayList(u8) = .empty;
-    var i: usize = 0;
-    while (i < path_end) {
-        const next = @min(std.mem.findScalarPos(u8, merged, i + 1, '/') orelse merged.len, path_end);
-        const segment = merged[i + 1 .. next];
-        const is_last = next == path_end;
-        if (std.mem.eql(u8, segment, ".") or std.mem.eql(u8, segment, "..")) {
-            if (std.mem.eql(u8, segment, "..")) {
-                // path.erase(min(path.rfind('/'), path.size()))
-                if (std.mem.findScalarLast(u8, path.items, '/')) |slash| path.shrinkRetainingCapacity(slash);
-            }
-            if (is_last) try path.append(a, '/');
-        } else {
-            try path.append(a, '/');
-            try path.appendSlice(a, segment);
-        }
-        i = next;
-    }
-    if (path.items.len == 0) try path.append(a, '/');
-
-    try path.appendSlice(a, merged[path_end..]);
-    return path.items;
+    return std.mem.concat(a, u8, &.{ try removeDotSegments(a, merged[0..path_end]), merged[path_end..] });
 }
 
 /// Ports `encode_path` (httplib.cpp:1201 @cd959bae9): over the C string, so the
@@ -508,14 +513,21 @@ fn waitUntilSocketIsReady(sock: Socket, sec: i64, usec: i64) Error {
     return .connection;
 }
 
-/// Ports `is_redirect` (httplib.cpp:11306 @8642541b2): a 3xx without a
-/// Location, such as a 304, is a final response.
+/// Ports `is_redirect` (httplib.cpp:11368 @cd959bae9): only 301, 302, 303,
+/// 307 and 308 redirect. Any other 3xx, such as a 304, or a redirect
+/// without a Location, is a final response.
 fn isRedirect(res: *const Response) bool {
-    return 300 < res.status and res.status < 400 and res.getHeaderValue("Location").len != 0;
+    return switch (res.status) {
+        301, 302, 303, 307, 308 => res.getHeaderValue("Location").len != 0,
+        else => false,
+    };
 }
 
-/// Ports `ClientImpl` (httplib.h:2744 @8642541b2): one host and port, the
-/// settings the proxy sets, and the socket of the request in flight.
+/// Ports `ClientImpl` (httplib.h:2763 @cd959bae9): one host and port, the
+/// settings the proxy sets, and the socket of the request in flight. No
+/// hostname map is ever set (0.64.0 split it into a direct and a tunnel
+/// one), and nothing TLS is compiled in, so the TLS settings version 0.64.0
+/// keeps beside the socket is not a member.
 pub const ClientImpl = struct {
     a: std.mem.Allocator,
     host: []const u8,
@@ -764,8 +776,24 @@ pub const ClientImpl = struct {
         return self.sendImpl(req, res, err);
     }
 
-    /// Ports `ClientImpl`'s `send_` (httplib.cpp:10791 @8642541b2): connects unless
-    /// the open socket is still alive, runs the request, and closes the
+    /// Ports `socket_reusable` (httplib.cpp:10785 @cd959bae9), a member of
+    /// `ClientImpl`, called under `socket_mutex`: whether the connection
+    /// kept alive can take another request. One the peer seems to have
+    /// closed is closed here, without a graceful shutdown to avoid
+    /// `SIGPIPE`. Nothing TLS is compiled in, so its settings never retire
+    /// the connection.
+    fn socketReusable(self: *ClientImpl) bool {
+        if (self.sock == socket.invalid_socket) return false;
+        if (!socket.isSocketAlive(self.sock)) {
+            // Peer seems gone — non-graceful shutdown to avoid SIGPIPE.
+            self.disconnect();
+            return false;
+        }
+        return true;
+    }
+
+    /// Ports `ClientImpl`'s `send_` (httplib.cpp:10866 @cd959bae9): connects unless
+    /// the open socket can be reused, runs the request, and closes the
     /// connection after it (no keep-alive here).
     fn sendImpl(self: *ClientImpl, req: *Request, res: *Response, err: *Error) Oom!bool {
         {
@@ -777,13 +805,7 @@ pub const ClientImpl = struct {
             // socket.
             self.socket_should_be_closed_when_request_is_done = false;
 
-            var is_alive = false;
-            if (self.sock != socket.invalid_socket) {
-                is_alive = socket.isSocketAlive(self.sock);
-                // Peer seems gone — non-graceful shutdown to avoid SIGPIPE.
-                if (!is_alive) self.disconnect();
-            }
-            if (!is_alive) {
+            if (!self.socketReusable()) {
                 const sock = try self.createClientSocket(err);
                 if (sock == socket.invalid_socket) return false;
                 self.sock = sock;
@@ -862,9 +884,11 @@ pub const ClientImpl = struct {
         }
     }
 
-    /// Ports `handle_request` (httplib.cpp:11329 @8642541b2): the request processed,
+    /// Ports `handle_request` (httplib.cpp:11398 @cd959bae9): the request processed,
     /// the connection dropped if the server closes it or the request asked for
-    /// it, and a redirect followed.
+    /// it, and a redirect followed. Through a proxy, a path that does not
+    /// begin with '/' would follow the authority and name another host, so it
+    /// is a write error.
     fn handleRequest(self: *ClientImpl, strm: *socket.SocketStream, req: *Request, res: *Response, close_connection: bool, err: *Error) Oom!bool {
         if (req.path.len == 0) {
             err.* = .connection;
@@ -876,6 +900,13 @@ pub const ClientImpl = struct {
         const prefix = try self.proxyTargetPrefix(req.a);
         var ret: bool = undefined;
         if (prefix.len != 0) {
+            // The path follows the authority in absolute-form, so one that does not
+            // begin with '/' (e.g. "@evil.example/x") would name another host.
+            if (req.path[0] != '/') {
+                err.* = .write;
+                return false;
+            }
+
             var req2 = try req.clone();
             req2.path = try std.mem.concat(req.a, u8, &.{ prefix, req.path });
             ret = try self.processRequest(strm, &req2, res, close_connection, err);
@@ -889,9 +920,10 @@ pub const ClientImpl = struct {
         {
             _ = std.c.pthread_mutex_lock(&self.socket_mutex);
             defer _ = std.c.pthread_mutex_unlock(&self.socket_mutex);
-            // Also when the request asked for it (e.g. a body that was never sent),
-            // so that a redirect or an auth retry below does not reuse the socket.
-            if (self.socket_should_be_closed_when_request_is_done or
+            // Also when the request asked for it (e.g. a body that was never sent,
+            // or "Connection: close"), so that a redirect or an auth retry below does
+            // not reuse the socket.
+            if (self.socket_should_be_closed_when_request_is_done or close_connection or
                 detail.hasHeaderToken(&res.headers, "Connection", "close") or
                 (std.mem.eql(u8, res.version, "HTTP/1.0") and !std.mem.eql(u8, res.reason, "Connection established")))
             {
@@ -906,9 +938,10 @@ pub const ClientImpl = struct {
         return ret;
     }
 
-    /// Ports `ClientImpl`'s `redirect` (httplib.cpp:11421 @8642541b2): a same-host
+    /// Ports `ClientImpl`'s `redirect` (httplib.cpp:11498 @cd959bae9): a same-host
     /// `Location` through this client, another host through a new one; a
-    /// relative one resolved against the request's path first. Since 0.60.0
+    /// relative one resolved against the request's path first, and since
+    /// 0.64.0 an absolute one's dot segments removed too. Since 0.60.0
     /// the path is kept as the `Location` spelled it, not percent-decoded,
     /// so `write_request`'s encoding sees what the server sent.
     fn redirect(self: *ClientImpl, req: *Request, res: *Response, err: *Error) Oom!bool {
@@ -943,6 +976,8 @@ pub const ClientImpl = struct {
         if (next_scheme.len == 0) next_scheme = scheme;
         if (next_host.len == 0) next_host = self.host;
         if (next_path.len == 0) next_path = "/";
+        // An absolute or absolute-path location can have dot segments too.
+        if (next_path[0] == '/') next_path = try removeDotSegments(req.a, next_path);
 
         const path = try std.mem.concat(req.a, u8, &.{ next_path, next_query });
 
@@ -955,9 +990,10 @@ pub const ClientImpl = struct {
         return self.createRedirectClient(next_scheme, next_host, next_port, req, res, path, location, err);
     }
 
-    /// Ports `create_redirect_client` (httplib.cpp:11473 @8642541b2), with
-    /// `setup_redirect_client` (httplib.cpp:11565 @8642541b2): the credentials and
-    /// `Host` left behind; `https` is an SSL error in this build.
+    /// Ports `create_redirect_client` (httplib.cpp:11554 @cd959bae9), with
+    /// `setup_redirect_client` (httplib.cpp:11646 @cd959bae9): the credentials and
+    /// `Host` left behind; `https` is an SSL error in this build, so its CA
+    /// handling is not here, and no hostname map is set to copy.
     fn createRedirectClient(self: *ClientImpl, scheme: []const u8, host: []const u8, port: c_int, req: *Request, res: *Response, path: []const u8, location: []const u8, err: *Error) Oom!bool {
         // Remove headers that should not be carried over to new host
         for ([_][]const u8{ "Host", "Proxy-Authorization", "Authorization", "Cookie", "Cookie2" }) |name| {
@@ -1101,7 +1137,7 @@ pub const ClientImpl = struct {
         }
     };
 
-    /// Ports `process_request` (httplib.cpp:11992 @8642541b2): the request written
+    /// Ports `process_request` (httplib.cpp:12074 @cd959bae9): the request written
     /// (with `Expect: 100-continue` past the threshold), the status line and
     /// headers read, the response handler told, the body read into the
     /// content receiver.
@@ -1190,7 +1226,7 @@ pub const ClientImpl = struct {
                 }
             }
 
-            const is_redirect = self.follow_location and isRedirect(res) and res.status != 304;
+            const is_redirect = self.follow_location and isRedirect(res);
 
             if (req.response_handler) |rh| {
                 if (!is_redirect) {
@@ -1237,7 +1273,7 @@ pub fn errorToString(e: Error) []const u8 {
 /// `Headers`.
 pub const HeadersMap = Headers;
 
-/// Ports `Client` (httplib.h:3182 @8642541b2) for a plain-HTTP host: the
+/// Ports `Client` (httplib.h:3221 @cd959bae9) for a plain-HTTP host: the
 /// verbs over a `ClientImpl`. A failure to allocate is reported as
 /// `Error.unknown`, where the C++ throws `std::bad_alloc`.
 pub const Client = struct {
@@ -1422,7 +1458,28 @@ test "parse_status_line reads what the regex read and no more" {
     try std.testing.expect(!try parseStatusLine(a, "HTTP/1.1 200 OK\r\nX", &version, &status, &reason));
 }
 
-test "resolve_relative_location and parse_port answer as cpp-httplib 0.62.0" {
+test "remove_dot_segments answers as cpp-httplib 0.64.0" {
+    // expected values printed by `detail::remove_dot_segments` from
+    // llama.cpp/vendor/cpp-httplib/httplib.h
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const cases = [_][2][]const u8{
+        .{ "/a/b/../c", "/a/c" },
+        .{ "/a/./b/.", "/a/b/" },
+        .{ "/..", "/" },
+        .{ "/a/..", "/" },
+        .{ "/a/b/..", "/a/" },
+        .{ "//x/../y", "//y" },
+        .{ "/a/b/c/./../../g", "/a/g" },
+        .{ "/.", "/" },
+        .{ "/a//b/../", "/a//" },
+        .{ "/a/.../b", "/a/.../b" },
+    };
+    for (cases) |cs| try std.testing.expectEqualStrings(cs[1], try removeDotSegments(a, cs[0]));
+}
+
+test "resolve_relative_location and parse_port answer as cpp-httplib 0.64.0" {
     // expected values printed by `detail::resolve_relative_location` and
     // `detail::parse_port` from llama.cpp/vendor/cpp-httplib/httplib.h
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

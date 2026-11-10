@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/out-prod.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/out-prod.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/out-prod.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernel, `k_compute_out_prod_ptrs`, stays CUDA.
 //!
 //! Like `ssm-scan.cu`'s SSD path, this calls cuBLAS through

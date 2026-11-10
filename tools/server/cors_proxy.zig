@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/server/server-cors-proxy.h` (llama.cpp v0.8.0,
-//! `8642541b2`) -- `proxy_header_to_lower`, `proxy_request` and the two
+//! Ports `llama.cpp/tools/server/server-cors-proxy.h` (llama.cpp v0.9.0,
+//! `cd959bae9`) -- `proxy_header_to_lower`, `proxy_request` and the two
 //! handlers -- and `common_http_parse_url` from `llama.cpp/common/http.h`.
 //! Each declaration names what it ports and the line it began at. The
 //! forwarding itself is `proxy.zig`'s `server_http_proxy`.

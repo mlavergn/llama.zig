@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/src/llama-vocab.cpp` and
-//! `llama.cpp/src/llama-vocab.h` at v0.8.0 (`8642541b2`), with `replace_all`
+//! `llama.cpp/src/llama-vocab.h` at v0.9.0 (`cd959bae9`), with `replace_all`
 //! from `llama.cpp/src/llama-impl.cpp`. `struct llama_vocab` and its pimpl
 //! `llama_vocab::impl` are one struct here; the C++'s forwarding layer adds
 //! nothing.
@@ -70,7 +70,7 @@ pub const type_plamo2: Type = c.LLAMA_VOCAB_TYPE_PLAMO2;
 pub const type_test: Type = c.LLAMA_VOCAB_TYPE_TEST;
 pub const type_plamo3: Type = c.LLAMA_VOCAB_TYPE_PLAMO3;
 
-/// Ports `enum llama_vocab_pre_type` (llama-vocab.h:10 @8642541b2).
+/// Ports `enum llama_vocab_pre_type` (llama-vocab.h:10 @cd959bae9).
 pub const PreType = enum(c_int) {
     default = 0,
     llama3 = 1,
@@ -138,6 +138,7 @@ pub const PreType = enum(c_int) {
     domyn_small = 63,
     nemotron_3_5_embd = 64,
     soprano = 65,
+    tekken_num3 = 66,
 };
 
 /// Ports `enum llama_metaspace_prepend_scheme` (llama-vocab.h:81 @cd959bae9):
@@ -528,7 +529,7 @@ pub const Vocab = struct {
     // -------------------------------------------------------------------------
     // Loading
 
-    /// Ports `llama_vocab::impl`'s `load` (llama-vocab.cpp:2234 @8642541b2).
+    /// Ports `llama_vocab::impl`'s `load` (llama-vocab.cpp:2241 @cd959bae9).
     ///
     /// Parameters:
     /// - `ml`: the metadata, as `llama_model_loader` reads it.
@@ -928,6 +929,11 @@ pub const Vocab = struct {
             self.pre_type = .jais;
         } else if (oneOf(p, &.{ "tekken", "pixtral" })) {
             self.pre_type = .tekken;
+            self.clean_spaces = false;
+            self.ignore_merges = true;
+            self.add_bos = true;
+        } else if (eql(p, "tekken-num3")) {
+            self.pre_type = .tekken_num3;
             self.clean_spaces = false;
             self.ignore_merges = true;
             self.add_bos = true;

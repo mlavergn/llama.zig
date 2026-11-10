@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/argsort.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/argsort.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/argsort.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels -- `init_indices`, `init_offsets`, `k_argsort_f32_i32` -- stay
 //! CUDA.
 //!

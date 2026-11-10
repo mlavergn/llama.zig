@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! **Not a port.** This is our own code. The *flag surface* it accepts is
-//! modelled on `llama.cpp/common/arg.cpp` (v0.8.0, `8642541b2`) and the
+//! modelled on `llama.cpp/common/arg.cpp` (v0.9.0, `cd959bae9`) and the
 //! defaults on `llama.cpp/common/common.h`, so a command line written for
 //! upstream's `llama-cli` runs unchanged against this binary for the features
 //! that are ported. Each option below names the upstream spelling it matches.
@@ -664,7 +664,7 @@ fn pushKwarg(args: *Args, op: KwargOp) bool {
 }
 
 /// The `what()` of the exception the flag's handler in
-/// `common_params_parser_init` throws on `v` (common/arg.cpp @8642541b2):
+/// `common_params_parser_init` throws on `v` (common/arg.cpp @cd959bae9):
 /// `common_reasoning_format_from_name`'s, `--reasoning`'s and `--color`'s
 /// own, and `--reasoning-budget`'s "invalid value".
 fn writeWhat(w: *std.Io.Writer, flag: []const u8, v: []const u8) !void {
@@ -942,7 +942,7 @@ test "a real upstream flag is refused differently from a typo" {
 test "v0.6.0's new flags are real upstream flags this CLI does not take" {
     // `--spec-draft-sampling` (no speculative decoding here), `--rpc` (no RPC
     // backend) and `--nextn` (llama-imatrix's) are refused as ours to add,
-    // not as typos: cli/upstream_flags.zig lists them at 8642541b2.
+    // not as typos: cli/upstream_flags.zig lists them at cd959bae9.
     for ([_][]const u8{ "--spec-draft-sampling", "--rpc", "--nextn" }) |f| {
         const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", f, "x" });
         try testing.expectEqual(Error.UnsupportedFlag, r.fail.err);

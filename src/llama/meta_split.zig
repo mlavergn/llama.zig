@@ -8,7 +8,7 @@
 //! - `llama.cpp/src/llama-model.h` -- `llama_meta_device_get_split_state_userdata`
 //! - `llama.cpp/src/llama-model.cpp` -- `llama_meta_device_get_split_state`
 //!
-//! All at v0.8.0 (`8642541b2`).
+//! All at v0.9.0 (`cd959bae9`).
 //!
 //! # Gating
 //!
@@ -61,6 +61,7 @@ const pattern_sources = [_][]const u8{
     "blk\\.\\d*\\.attn_output_a\\.weight", // attn_out_a_weight
     "blk\\.\\d*\\.attn_output_b\\.weight", // attn_out_b_weight
     "blk\\.\\d*\\.attn_q_b\\.weight", // attn_q_b_weight
+    "blk\\.\\d*\\.attn_(k|v)_b\\.weight", // attn_kv_b_weight
     "blk\\.\\d*\\.attn_gate.weight", // attn_gate_weight
     "blk\\.\\d*\\.ssm_dt.bias", // ssm_dt
     "blk\\.\\d*\\.ssm_a", // ssm_a
@@ -72,6 +73,8 @@ const pattern_sources = [_][]const u8{
     "cache_s_l\\d*", // s_cache
     "blk\\.\\d*\\.ssm_conv1d.weight", // ssm_conv1d
     "blk\\.\\d*\\.ssm_out.weight", // ssm_out_weight
+    "blk\\.\\d*\\.ssm_conv1d_(q|k|v)\\.weight", // kda_conv1d
+    "blk\\.\\d*\\.ssm_(f|g)_b\\.weight", // kda_gate_b
     "blk\\.\\d*\\.ffn_up(_exps)?.weight", // ffn_up_weight
     "blk\\.\\d*\\.ffn_up(_exps)?.bias", // ffn_up_bias
     "blk\\.\\d*\\.ffn_gate(_exps)?.weight", // ffn_gate_weight
@@ -106,6 +109,7 @@ const P = enum(u8) {
     attn_out_a_weight,
     attn_out_b_weight,
     attn_q_b_weight,
+    attn_kv_b_weight,
     attn_gate_weight,
     ssm_dt,
     ssm_a,
@@ -117,6 +121,8 @@ const P = enum(u8) {
     s_cache,
     ssm_conv1d,
     ssm_out_weight,
+    kda_conv1d,
+    kda_gate_b,
     ffn_up_weight,
     ffn_up_bias,
     ffn_gate_weight,
@@ -160,6 +166,7 @@ const Ctx = struct {
     ud: *const Userdata,
     model: *const Model,
     is_dsv4: bool,
+    is_glm5_next: bool,
 
     fn m(self: *const Ctx, p: P) bool {
         var match = regex.Match.init();
@@ -199,7 +206,7 @@ fn lcm(a: i64, b: i64) i64 {
     return @intCast(aa / std.math.gcd(aa, bb) * bb);
 }
 
-/// The `get_tensor_config_impl` lambda (llama-model.cpp:463 @8642541b2).
+/// The `get_tensor_config_impl` lambda (llama-model.cpp:475 @cd959bae9).
 fn configImpl(cx: *const Ctx, axis: c_uint, suffix: []const u8, suffix_fallback: []const u8) TensorConfig {
     const hparams = &cx.model.hparams;
     const n_devices = cx.ud.n_devices;
@@ -228,7 +235,9 @@ fn configImpl(cx: *const Ctx, axis: c_uint, suffix: []const u8, suffix_fallback:
         const length_prefix = std.mem.indexOfScalarPos(u8, name, 4, '.') orelse impl.abort("llama-model.cpp", 494, "GGML_ASSERT(length_prefix != std::string::npos) failed");
         prefix = name[0 .. length_prefix + 1];
         il = @truncate(stoull(name[4..@min(name.len, 4 + length_prefix)]));
-        rotation = getIlEff(hparams, il) % n_devices;
+        const is_attn = name.len >= prefix.len + 5 and std.mem.eql(u8, name[prefix.len .. prefix.len + 5], "attn_");
+        // attention heads must be on the same device as the KV of the source layer
+        rotation = getIlEff(hparams, if (is_attn) hparams.kvSource(il) else il) % n_devices;
     } else if (name.len >= 6 and std.mem.eql(u8, name[0..6], "cache_")) {
         const layer_index_start = std.mem.indexOfPos(u8, name, 6, "_l") orelse impl.abort("llama-model.cpp", 502, "GGML_ASSERT(layer_index_start != std::string::npos) failed");
         il = @truncate(stoull(name[layer_index_start + 2 ..]));
@@ -256,9 +265,9 @@ fn configImpl(cx: *const Ctx, axis: c_uint, suffix: []const u8, suffix_fallback:
     return .{ .axis = axis, .tensor_axis_0 = tensor_axis_0.?, .il = il, .rotation = rotation };
 }
 
-/// The `get_tensor_config` lambda (llama-model.cpp:505 @8642541b2).
+/// The `get_tensor_config` lambda (llama-model.cpp:519 @cd959bae9).
 fn tensorConfig(cx: *const Ctx) TensorConfig {
-    if (cx.model.arch == .hrm_text) {
+    if (cx.model.arch == .hrm_text or cx.model.arch == .metis16) {
         // aliased cache slots cannot satisfy the meta-split invariants, so replicate all tensors
         return .{ .axis = axis_mirrored, .tensor_axis_0 = cx.tensor, .il = 0, .rotation = 0 };
     }
@@ -268,6 +277,15 @@ fn tensorConfig(cx: *const Ctx) TensorConfig {
         if (cx.m(.attn_q_b_weight)) return configImpl(cx, axis_1, "attn_output_a.weight", "");
         if (cx.m(.attn_out_a_weight)) return configImpl(cx, axis_2, "", "");
         if (cx.m(.attn_out_b_weight)) return configImpl(cx, axis_0, "", "");
+    }
+    if (cx.is_glm5_next) {
+        // split the KDA and MLA heads, the MLA latent cache and the indexer stay mirrored
+        if (cx.m(.kv_cache)) return configImpl(cx, axis_mirrored, "", "");
+        if (cx.m(.attn_q_b_weight) or cx.m(.kda_gate_b) or cx.m(.ssm_beta)) return configImpl(cx, axis_1, "attn_output.weight", "");
+        if (cx.m(.attn_kv_b_weight) or cx.m(.kda_conv1d)) return configImpl(cx, axis_2, "attn_output.weight", "");
+        if (cx.m(.ssm_dt) or cx.m(.ssm_a) or cx.m(.r_cache) or cx.m(.s_cache)) return configImpl(cx, axis_0, "attn_output.weight", "");
+    }
+    if (cx.is_dsv4 or cx.is_glm5_next) {
         if (cx.m(.ffn_up_shexp_weight) or cx.m(.ffn_gate_shexp_weight)) return configImpl(cx, axis_1, "ffn_down_shexp.weight", "");
         if (cx.m(.ffn_down_shexp_weight)) return configImpl(cx, axis_0, "ffn_down_shexp.weight", "");
     }
@@ -295,7 +313,7 @@ fn tensorConfig(cx: *const Ctx) TensorConfig {
     if (cx.m(.ssm_dt) or cx.m(.ssm_a)) return configImpl(cx, axis_0, "ssm_out.weight", "");
     if (cx.m(.ssm_alpha) or cx.m(.ssm_beta) or cx.m(.ssm_beta_alpha)) return configImpl(cx, axis_1, "ssm_out.weight", "");
     if (cx.m(.r_cache) or cx.m(.s_cache)) {
-        if (cx.model.arch == .lfm2 or cx.model.arch == .lfm2moe) {
+        if (cx.model.arch == .lfm2 or cx.model.arch == .lfm2moe or cx.model.arch == .lfm3) {
             // The LFM2 shortconv block runs fully mirrored, its conv state too.
             return configImpl(cx, axis_mirrored, "", "");
         }
@@ -331,13 +349,19 @@ fn segs(out: *[max_segments]Segment, list: []const Segment) usize {
     return list.len;
 }
 
-/// The `get_split_segments` lambda (llama-model.cpp:639 @8642541b2): a
+/// The `get_split_segments` lambda (llama-model.cpp:672 @cd959bae9): a
 /// model's fused tensors in their segments.
 fn splitSegments(cx: *const Ctx, axis: usize, il: u32, out: *[max_segments]Segment) usize {
     const hparams = &cx.model.hparams;
     const t = cx.tensor;
     const a = cx.model.arch;
-    if (a == .qwen3next or a == .qwen35 or a == .qwen35moe or a == .clef or a == .qwen4exp) {
+    if (cx.is_glm5_next and cx.m(.r_cache)) {
+        // the conv state holds the q, k and v windows one after the other
+        const conv_state_size: i64 = (hparams.ssm_d_conv -% 1) *% hparams.nHead(il) *% hparams.n_embd_head_kda;
+        impl.assert(t.ne[axis] == 3 * conv_state_size, "llama-model.cpp", 676, "tensor->ne[axis] == 3*conv_state_size");
+        return segs(out, &.{.{ .ne = conv_state_size, .nr = 3 }});
+    }
+    if (a == .qwen3next or a == .qwen35 or a == .qwen35moe or a == .clef or a == .clover_moe or a == .qwen4exp) {
         // Fused full attention layers with Q gate tensors, which need
         // n_embd doubled.
         if (!hparams.isRecr(il) and (cx.m(.qkv_weight) or cx.m(.qkv_bias))) {
@@ -417,11 +441,32 @@ fn fill(out: *[max_segments]i64, n: usize, v: i64) void {
     for (out[0..n]) |*g| g.* = v;
 }
 
-/// The `get_split_granularity` lambda (llama-model.cpp:729 @8642541b2).
+/// The `get_split_granularity` lambda (llama-model.cpp:768 @cd959bae9).
 fn splitGranularity(cx: *const Ctx, blck_size: i64, il: u32, n_segments: usize, out: *[max_segments]i64) void {
     const hparams = &cx.model.hparams;
     const t = cx.tensor;
-    if (hparams.isRecr(il)) {
+    if (cx.is_glm5_next and hparams.isRecr(il)) {
+        // KDA, each device holds whole heads
+        const head_dim: i64 = hparams.n_embd_head_kda;
+        const blck_size_perf = lcm(blck_size, 128);
+        const granularity_qkv = lcm(blck_size_perf, head_dim);
+        if (cx.m(.q_weight) or cx.m(.kv_weight) or cx.m(.kda_conv1d) or cx.m(.kda_gate_b) or
+            cx.m(.ssm_dt) or cx.m(.attn_out_weight))
+        {
+            return fill(out, n_segments, granularity_qkv);
+        }
+        if (cx.m(.ssm_a) or cx.m(.ssm_beta)) return fill(out, n_segments, @divTrunc(granularity_qkv, head_dim));
+        if (cx.m(.r_cache)) return fill(out, n_segments, granularity_qkv * (@as(i64, hparams.ssm_d_conv) - 1));
+        if (cx.m(.s_cache)) return fill(out, n_segments, granularity_qkv * head_dim);
+    } else if (cx.is_glm5_next) {
+        // MLA, each device holds whole heads; an even number of heads per
+        // device, the HIP tile FA kernel for D=512 needs an even GQA ratio
+        const head_v_mla: i64 = hparams.nEmbdHeadVMla();
+        const granularity_head = lcm(@divTrunc(lcm(head_v_mla, blck_size), head_v_mla), 2);
+        if (cx.m(.attn_q_b_weight)) return fill(out, n_segments, granularity_head * hparams.nEmbdHeadKMla());
+        if (cx.m(.attn_kv_b_weight)) return fill(out, n_segments, granularity_head);
+        if (cx.m(.attn_out_weight)) return fill(out, n_segments, granularity_head * head_v_mla);
+    } else if (hparams.isRecr(il)) {
         // Linear attention.
         const head_dim: i64 = hparams.ssm_d_state;
         const blck_size_perf = lcm(blck_size, 128);
@@ -487,7 +532,7 @@ fn splitGranularity(cx: *const Ctx, blck_size: i64, il: u32, n_segments: usize, 
             impl.assert(n_segments == 1, "llama-model.cpp", 868, "segments.size() == 1");
             // Q gate tensors double the granularity.
             const a = cx.model.arch;
-            if (a == .qwen3next or a == .qwen35 or a == .qwen35moe or a == .clef or a == .qwen4exp) {
+            if (a == .qwen3next or a == .qwen35 or a == .qwen35moe or a == .clef or a == .clover_moe or a == .qwen4exp) {
                 out[0] = lcm(2 * @as(i64, n_embd_q), blck_size_perf);
                 return;
             }
@@ -519,7 +564,7 @@ fn splitGranularity(cx: *const Ctx, blck_size: i64, il: u32, n_segments: usize, 
         if (cx.m(.qkv_weight) or cx.m(.qkv_bias)) {
             // Fused full attention layers handle Q gate tensors as above.
             const a = cx.model.arch;
-            if (a == .qwen3next or a == .qwen35 or a == .qwen35moe or a == .clef or a == .qwen4exp) {
+            if (a == .qwen3next or a == .qwen35 or a == .qwen35moe or a == .clef or a == .clover_moe or a == .qwen4exp) {
                 out[0] = lcm(2 * @as(i64, n_embd_q), blck_size_perf);
                 out[1] = granularity_kv;
                 return;
@@ -565,8 +610,8 @@ fn splitGranularity(cx: *const Ctx, blck_size: i64, il: u32, n_segments: usize, 
     out[0] = 1;
 }
 
-/// Ports `llama_meta_device_get_split_state` (llama-model.cpp:401
-/// @8642541b2): which slice of `tensor` each device holds.
+/// Ports `llama_meta_device_get_split_state` (llama-model.cpp:409
+/// @cd959bae9): which slice of `tensor` each device holds.
 ///
 /// Parameters:
 /// - `tensor`: a weight or a memory tensor, by its name.
@@ -584,6 +629,7 @@ pub fn getSplitState(tensor: ?*const Tensor, userdata: ?*anyopaque) callconv(.c)
         .ud = ud,
         .model = model,
         .is_dsv4 = model.arch == .deepseek4 or model.arch == .deepseek41 or (model.arch == .dflash and hparams.dsv4_hc_mult > 0),
+        .is_glm5_next = model.arch == .glm5_next,
     };
     const n_devices = ud.n_devices;
 

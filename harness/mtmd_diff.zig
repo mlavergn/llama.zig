@@ -106,6 +106,13 @@ const Api = struct {
     mtmd_bitmap_get_ny: *const fn (P) callconv(.c) u32,
     mtmd_bitmap_get_n_bytes: *const fn (P) callconv(.c) usize,
     mtmd_bitmap_is_audio: *const fn (P) callconv(.c) bool,
+    // v0.9.0: predefined voices
+    mtmd_bitmap_is_voice: *const fn (P) callconv(.c) bool,
+    mtmd_bitmap_get_data: *const fn (P) callconv(.c) ?[*]const u8,
+    mtmd_gen_audio_voice_name: *const fn (P, i32) callconv(.c) ?[*:0]const u8,
+    mtmd_gen_audio_get_voice: *const fn (P, ?[*:0]const u8) callconv(.c) OptP,
+    mtmd_gen_audio_read_tensor: *const fn (P, [*:0]const u8, ?[*]f32, usize) callconv(.c) usize,
+    mtmd_gen_state_set_ref: *const fn (P, OptP) callconv(.c) i32,
     mtmd_input_chunks_init: *const fn () callconv(.c) P,
     mtmd_input_chunks_free: *const fn (OptP) callconv(.c) void,
     mtmd_input_chunks_size: *const fn (P) callconv(.c) usize,
@@ -196,6 +203,7 @@ const Api = struct {
     llama_model_get_vocab: *const fn (?*const c.llama_model) callconv(.c) ?*const c.llama_vocab,
     llama_vocab_n_tokens: *const fn (?*const c.llama_vocab) callconv(.c) i32,
     llama_vocab_get_text: *const fn (?*const c.llama_vocab, c.llama_token) callconv(.c) [*c]const u8,
+    llama_vocab_eos: *const fn (?*const c.llama_vocab) callconv(.c) c.llama_token,
 };
 
 /// The port's definition of `name`: libmtmd's three files, then libllama's
@@ -747,6 +755,19 @@ fn runTts(x: *const Ctx, modality: []const u8, steps: c_int) void {
     // pocket: two sentences past its 50-token chunk, run until the first
     // chunk's budget ends it, so finish_chunk re-prompts the second
     if (pocket) runTtsPrompt(x, modality, 400, "one two three four five six seven. eight nine ten eleven twelve.");
+    // chatterbox: a predefined voice, its end of speech, a language tag
+    // (lowercased, multilingual only) and a prompt longer than the T3
+    // position table
+    if (std.mem.startsWith(u8, modality, "tts-chatterbox")) {
+        if (x.api.mtmd_gen_audio_get_voice(x.mctx, "alba")) |v| {
+            defer x.api.mtmd_bitmap_free(v);
+            runTtsPromptRef(x, modality, steps, "hello there, test.", v);
+            runTtsPromptRef(x, modality, 50, "stop early.", v);
+            runTtsPromptRefLang(x, modality, steps, "bonjour.", v, "FR");
+            runTtsPromptRef(x, modality, 2, "a b c d e f g h i j k l m n o p q r s t u v w x y z a b c d e f g h i j k l m n o p q r s t u v w x y z.", v);
+            runTtsPromptRef(x, modality, 2, "", v);
+        }
+    }
     if (lfm3a) {
         // a prompt the "tts" chat template did not write, and a sequence continued
         runTtsPrompt(x, modality, steps, "no mode token");
@@ -763,30 +784,114 @@ fn runTts(x: *const Ctx, modality: []const u8, steps: c_int) void {
     runGenApi(x, modality);
     runTtsStream(x, modality, .pcm, steps);
     runTtsStream(x, modality, .wav, steps);
+    // v0.9.0: a predefined voice as the speaker reference, by a name cased
+    // differently from the model's
+    if (x.api.mtmd_gen_audio_voice_name(x.mctx, 0)) |name0| {
+        var buf: [256]u8 = undefined;
+        const n = std.mem.span(name0);
+        const up = std.ascii.upperString(buf[0..@min(n.len, buf.len - 1)], n[0..@min(n.len, buf.len - 1)]);
+        buf[up.len] = 0;
+        const v = x.api.mtmd_gen_audio_get_voice(x.mctx, buf[0..up.len :0].ptr);
+        defer x.api.mtmd_bitmap_free(v);
+        print("tts voice {s} found {}\n", .{ n, v != null });
+        if (v != null) runTtsPromptRef(x, modality, steps, if (lfm3a) "hello<|audio_start|>" else "hello there, test.", v);
+    }
+}
+
+/// v0.9.0: the predefined voices and the gen-side tensor reader, on every
+/// fixture (none on most): each voice's bitmap, then a voice through the
+/// tokenizer and the encoder, where a voice needs no audio encoder.
+fn runVoices(x: *const Ctx) void {
+    const api = x.api;
+    const info = api.mtmd_gen_audio_get_info(x.mctx);
+    print("voices {d}, name(-1) {}, name(n) {}, get(null) {}, get(nonexistent) {}\n", .{
+        info.n_voices,
+        api.mtmd_gen_audio_voice_name(x.mctx, -1) != null,
+        api.mtmd_gen_audio_voice_name(x.mctx, info.n_voices) != null,
+        api.mtmd_gen_audio_get_voice(x.mctx, null) != null,
+        api.mtmd_gen_audio_get_voice(x.mctx, "no such voice") != null,
+    });
+    print("read_tensor missing {d}\n", .{api.mtmd_gen_audio_read_tensor(x.mctx, "a.no.such.tensor", null, 0)});
+    var i: i32 = 0;
+    while (api.mtmd_gen_audio_voice_name(x.mctx, i)) |name| : (i += 1) {
+        const v = api.mtmd_gen_audio_get_voice(x.mctx, name) orelse {
+            print("voice {d} {s}: not found by its own name\n", .{ i, name });
+            continue;
+        };
+        defer api.mtmd_bitmap_free(v);
+        const nb = api.mtmd_bitmap_get_n_bytes(v);
+        print("voice {d} {s}: is_voice {} is_audio {} nx {d} ny {d} id {s} bytes {d} data {x:0>16}\n", .{
+            i,                           name,                      api.mtmd_bitmap_is_voice(v),
+            api.mtmd_bitmap_is_audio(v), api.mtmd_bitmap_get_nx(v), api.mtmd_bitmap_get_ny(v),
+            api.mtmd_bitmap_get_id(v),   nb,                        if (api.mtmd_bitmap_get_data(v)) |d| hashBytes(d[0..nb]) else 0,
+        });
+        // through the tokenizer: one audio chunk of the voice's rows, or the error of an empty voice
+        const marker = std.mem.span(api.mtmd_get_marker(x.mctx));
+        const chunks = api.mtmd_input_chunks_init();
+        defer api.mtmd_input_chunks_free(chunks);
+        const text: M.InputText = .{ .text = marker.ptr, .text_len = marker.len, .add_special = false, .parse_special = true };
+        const bms = [_]P{v};
+        const rc = api.mtmd_tokenize(x.mctx, chunks, &text, &bms, 1);
+        print("voice {d} tokenize {d}\n", .{ i, rc });
+        if (rc == 0) {
+            dumpChunks(x, chunks);
+            encodeChunks(x, chunks);
+            // the last encode was a voice: set_ref takes its reference, if it has one
+            if (api.mtmd_gen_state_init(x.mctx, api.mtmd_gen_state_params_default())) |st| {
+                defer api.mtmd_gen_state_free(st);
+                print("voice {d} set_ref {d}\n", .{ i, api.mtmd_gen_state_set_ref(x.mctx, st) });
+            }
+        }
+        flush();
+    }
 }
 
 fn runTtsPrompt(x: *const Ctx, modality: []const u8, steps: c_int, prompt: [:0]const u8) void {
+    const soprano = std.mem.eql(u8, modality, "tts-soprano");
+    const api = x.api;
+    const spk = makeAudio(x.a, 24000) catch return;
+    defer x.a.free(spk);
+    const spk_bm = api.mtmd_bitmap_init_from_audio(spk.len, spk.ptr);
+    defer api.mtmd_bitmap_free(spk_bm);
+    runTtsPromptRef(x, modality, steps, prompt, if (soprano) null else spk_bm);
+}
+
+/// One generation of `prompt` with `spk` (a speaker clip, a voice bitmap or
+/// null) as the speaker reference.
+fn runTtsPromptRef(x: *const Ctx, modality: []const u8, steps: c_int, prompt: [:0]const u8, spk: OptP) void {
+    runTtsPromptRefLang(x, modality, steps, prompt, spk, "");
+}
+
+/// v0.9.0: chatterbox's backbone token at step `s`: speech tokens, a text
+/// token (decoded, but no speech code) at step 2, the end of speech at 5.
+fn cbxToken(x: *const Ctx, s: c_int) c.llama_token {
+    if (s == 5) return x.api.llama_vocab_eos(x.api.llama_model_get_vocab(x.model));
+    if (s == 2) return tokenOf(x, "h");
+    return tokenOf(x, "<|speech_0|>") + 5 * s + 3;
+}
+
+/// `runTtsPromptRef` with a language code (`inp.lang`).
+fn runTtsPromptRefLang(x: *const Ctx, modality: []const u8, steps: c_int, prompt: [:0]const u8, spk: OptP, lang: [*:0]const u8) void {
+    const cbx = std.mem.startsWith(u8, modality, "tts-chatterbox");
     const qwen = std.mem.eql(u8, modality, "tts-qwen3");
     const soprano = std.mem.eql(u8, modality, "tts-soprano");
     const api = x.api;
     const lctx = x.lctx orelse return;
     const gen = api.mtmd_helper_gen_audio_init(lctx, x.mctx);
     defer api.mtmd_helper_gen_audio_free(gen);
-    const spk = makeAudio(x.a, 24000) catch return;
-    defer x.a.free(spk);
-    const spk_bm = api.mtmd_bitmap_init_from_audio(spk.len, spk.ptr);
-    defer api.mtmd_bitmap_free(spk_bm);
     api.llama_memory_clear(api.llama_get_memory(lctx), true);
     var inp = api.mtmd_helper_gen_audio_inp_default();
     inp.prompt = prompt.ptr;
     inp.prompt_len = prompt.len;
-    inp.speaker_ref = if (soprano) null else @ptrCast(@alignCast(spk_bm));
-    inp.lang = "";
+    inp.speaker_ref = @ptrCast(@alignCast(spk));
+    inp.lang = lang;
     inp.top_k = 8;
     inp.seed = 42;
     var rc = api.mtmd_helper_gen_audio_set_input(gen, &inp);
     print("tts set_input {d}\n", .{rc});
     if (rc != 0) return;
+    const vocab = api.llama_model_get_vocab(x.model);
+    const n_vocab: usize = @intCast(api.llama_vocab_n_tokens(vocab));
     while (true) {
         // a few tokens a step, so the prompt takes several batches and the
         // last batch's output row sits past its start
@@ -794,7 +899,8 @@ fn runTtsPrompt(x: *const Ctx, modality: []const u8, steps: c_int, prompt: [:0]c
         print("tts step_prompt {d}\n", .{r});
         if (r <= 0) break;
     }
-    const vocab = api.llama_model_get_vocab(x.model);
+    // chatterbox's multilingual cfg mixes into the last logits row
+    if (cbx) print("tts prompt logits {x:0>16}\n", .{hashF32(api.llama_get_logits_ith(lctx, -1), n_vocab)});
     var codec_0: c.llama_token = -1;
     if (qwen) {
         var t: c.llama_token = 0;
@@ -809,11 +915,12 @@ fn runTtsPrompt(x: *const Ctx, modality: []const u8, steps: c_int, prompt: [:0]c
     var h: ?[*]const f32 = api.llama_get_embeddings_ith(lctx, -1);
     var s: c_int = 0;
     while (s < steps) : (s += 1) {
-        const sampled: c.llama_token = if (qwen) codec_0 + 7 * (s + 1) else if (soprano) 10 + s else -1;
+        const sampled: c.llama_token = if (qwen) codec_0 + 7 * (s + 1) else if (soprano) 10 + s else if (cbx) cbxToken(x, s) else -1;
         var h_next: ?[*]const f32 = null;
         var stop = false;
         rc = api.mtmd_helper_gen_audio_step_gen(gen, sampled, h, &h_next, &stop);
         print("tts step_gen {d} rc {d} stop {} h {x:0>16}\n", .{ s, rc, stop, hashF32(h_next, n_embd) });
+        if (cbx and h_next != null) print("tts step logits {x:0>16}\n", .{hashF32(api.llama_get_logits_ith(lctx, -1), n_vocab)});
         flush();
         if (rc != 0 or h_next == null or stop) break;
         h = h_next;
@@ -1086,6 +1193,37 @@ fn runGenApi(x: *const Ctx, modality: []const u8) void {
         Show.out(api, "wav reset", api.mtmd_gen_audio_process(x.mctx, st, &inp, &o), &o, n_embd);
         return;
     }
+    if (std.mem.startsWith(u8, modality, "tts-chatterbox")) {
+        // v0.9.0: one TTS decode over the whole utterance, after the voice's
+        // reference is taken from the last encode
+        var codes = [_]i32{ 3, 10, 4299, 0, 17 };
+        inp.type = .gen_wav;
+        Show.out(api, "cbx no codes", api.mtmd_gen_audio_process(x.mctx, st, &inp, &o), &o, n_embd);
+        inp.codes = &codes;
+        inp.n_codes = codes.len;
+        Show.out(api, "cbx no ref", api.mtmd_gen_audio_process(x.mctx, st, &inp, &o), &o, n_embd);
+        print("cbx set_ref before encode {d}\n", .{api.mtmd_gen_state_set_ref(x.mctx, st)});
+        const v = api.mtmd_gen_audio_get_voice(x.mctx, "alba") orelse return;
+        defer api.mtmd_bitmap_free(v);
+        const marker = std.mem.span(api.mtmd_get_marker(x.mctx));
+        const chunks = api.mtmd_input_chunks_init();
+        defer api.mtmd_input_chunks_free(chunks);
+        const text: M.InputText = .{ .text = marker.ptr, .text_len = marker.len, .add_special = false, .parse_special = true };
+        const bms = [_]P{v};
+        print("cbx voice tokenize {d}\n", .{api.mtmd_tokenize(x.mctx, chunks, &text, &bms, 1)});
+        encodeChunks(x, chunks);
+        print("cbx set_ref {d}\n", .{api.mtmd_gen_state_set_ref(x.mctx, st)});
+        Show.out(api, "cbx wav", api.mtmd_gen_audio_process(x.mctx, st, &inp, &o), &o, n_embd);
+        Show.out(api, "cbx wav again", api.mtmd_gen_audio_process(x.mctx, st, &inp, &o), &o, n_embd);
+        api.mtmd_gen_state_reset(st);
+        inp.n_codes = 1;
+        Show.out(api, "cbx wav one", api.mtmd_gen_audio_process(x.mctx, st, &inp, &o), &o, n_embd);
+        codes[0] = 5000;
+        Show.out(api, "cbx wav range", api.mtmd_gen_audio_process(x.mctx, st, &inp, &o), &o, n_embd);
+        codes[0] = -1;
+        Show.out(api, "cbx wav negative", api.mtmd_gen_audio_process(x.mctx, st, &inp, &o), &o, n_embd);
+        return;
+    }
     // the older pipelines, with gen_wav's refusal
     inp.type = .gen_wav;
     Show.out(api, "wav none", api.mtmd_gen_audio_process(x.mctx, st, &inp, &o), &o, n_embd);
@@ -1111,6 +1249,11 @@ fn runTtsStream(x: *const Ctx, modality: []const u8, out_type: G.OutType, steps:
     inp.top_k = 8;
     inp.seed = 42;
     inp.out_type = out_type;
+    // chatterbox needs a voice
+    const cbx = std.mem.startsWith(u8, modality, "tts-chatterbox");
+    const voice: OptP = if (cbx) api.mtmd_gen_audio_get_voice(x.mctx, "Bob") else null;
+    defer if (voice) |v| api.mtmd_bitmap_free(v);
+    if (voice) |v| inp.speaker_ref = @ptrCast(@alignCast(v));
     var rc = api.mtmd_helper_gen_audio_set_input(gen, &inp);
     print("stream tts set_input {d}\n", .{rc});
     if (rc != 0) return;
@@ -1134,7 +1277,7 @@ fn runTtsStream(x: *const Ctx, modality: []const u8, out_type: G.OutType, steps:
     };
     var s: c_int = 0;
     while (s < steps) : (s += 1) {
-        const sampled: c.llama_token = if (qwen) codec_0 + 7 * (s + 1) else if (soprano) 10 + s else -1;
+        const sampled: c.llama_token = if (qwen) codec_0 + 7 * (s + 1) else if (soprano) 10 + s else if (cbx) cbxToken(x, s) else -1;
         var h_next: ?[*]const f32 = null;
         var stop = false;
         rc = api.mtmd_helper_gen_audio_step_gen(gen, sampled, h, &h_next, &stop);
@@ -1354,6 +1497,8 @@ pub fn main(init: std.process.Init) !u8 {
     cp.n_batch = 2048;
     cp.n_ubatch = 2048;
     cp.embeddings = std.mem.startsWith(u8, modality, "tts");
+    // v0.9.0: chatterbox's multilingual cfg pairs seq 0 with n_seq_max / 2
+    if (std.mem.startsWith(u8, modality, "tts-chatterbox")) cp.n_seq_max = 2;
     cp.n_threads = 4;
     cp.n_threads_batch = 4;
     const lctx = api.llama_init_from_model(model, cp);
@@ -1393,6 +1538,7 @@ pub fn main(init: std.process.Init) !u8 {
     flush();
 
     const ctx: Ctx = .{ .a = a, .api = api, .mctx = mctx, .model = model, .lctx = lctx };
+    runVoices(&ctx);
     if (std.mem.startsWith(u8, modality, "tts")) {
         var steps: c_int = 3;
         if (std.mem.indexOf(u8, inputs, "tts:")) |i| steps = std.fmt.parseInt(c_int, std.mem.sliceTo(inputs[i + 4 ..], ';'), 10) catch 3;

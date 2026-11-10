@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.8.0, `8642541b2`):
+//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.9.0, `cd959bae9`):
 //! `iq2_data_index` (2833), `iq2_grid_size` (2841), `iq2_compare_func`,
 //! `iq2xs_init_impl` (2838), `iq2xs_free_impl`, and the `iq3` equivalents at
 //! 3679-3900. The tables they embed are in `grids.zig`, extracted separately.

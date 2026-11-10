@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ports that stretch of `common_params_parser_init` (arg.cpp:1344 @cd959bae9)
-//! from `llama.cpp/common/arg.cpp` (v0.8.0, `8642541b2`), as
+//! from `llama.cpp/common/arg.cpp` (v0.9.0, `cd959bae9`), as
 //! `arg_options.zig` describes, with `arg_removed` from the same file and
 //! the speculative type names from `llama.cpp/common/speculative.cpp`:
 //! `common_speculative_type_from_name_map`,

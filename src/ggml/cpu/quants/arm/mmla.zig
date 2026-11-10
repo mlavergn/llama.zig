@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.8.0,
-//! `8642541b2`), the `__ARM_FEATURE_MATMUL_INT8` arms of the dot products at
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.9.0,
+//! `cd959bae9`), the `__ARM_FEATURE_MATMUL_INT8` arms of the dot products at
 //! lines 297, 590, 1150, 2334 and 2964. Each function names the C it replaces
 //! and the line its arm began at.
 //!

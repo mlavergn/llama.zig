@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/sensenova-u1.cpp` at v0.8.0
-//! (`8642541b2`): `llm_graph_input_pos_sensenova_u1`,
+//! Ported from `llama.cpp/src/models/sensenova-u1.cpp` at v0.9.0
+//! (`cd959bae9`): `llm_graph_input_pos_sensenova_u1`,
 //! `llama_model_sensenova_u1`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`. `rope_freq_base_spatial`, a member
 //! of the C++'s class (src/models/models.h:627 @cd959bae9), is a field of

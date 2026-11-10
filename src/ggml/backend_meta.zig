@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-backend-meta.cpp` (v0.8.0,
-//! `8642541b2`), with the declarations it implements from
+//! Ported from `llama.cpp/ggml/src/ggml-backend-meta.cpp` (v0.9.0,
+//! `cd959bae9`), with the declarations it implements from
 //! `llama.cpp/ggml/include/ggml-backend.h` (the split axis, the split state and
 //! `ggml_backend_meta_device`) and `llama.cpp/ggml/src/ggml-backend-impl.h`
 //! (the `is_meta` predicates and the three backend accessors). Each
@@ -806,7 +806,35 @@ fn bufferSimpleTensor(tensor: *const c.ggml_tensor, index: usize) ?*c.ggml_tenso
     return simple[index];
 }
 
-/// The lambdas of `ggml_backend_meta_get_split_state` (ggml-backend-meta.cpp:494 @8642541b2),
+/// Ports `ggml_backend_meta_inner_extent` (ggml-backend-meta.cpp:493 @cd959bae9):
+/// the bytes spanned by every dimension of `tensor` but `skip_dim`.
+fn innerExtent(tensor: *const c.ggml_tensor, skip_dim: usize) usize {
+    var extent: usize = 0;
+    for (0..max_dims) |i| {
+        if (i != skip_dim and tensor.ne[i] > 1) {
+            extent +%= @as(usize, @intCast(tensor.ne[i] - 1)) *% tensor.nb[i];
+        }
+    }
+    return extent;
+}
+
+/// Ports `ggml_backend_meta_view_slab_dim` (ggml-backend-meta.cpp:505 @cd959bae9):
+/// the dimension of `view` that holds `src`'s split axis `axis`, or -1. Every
+/// other dimension of `src` and of `view` must stay inside one slab of it.
+fn viewSlabDim(view: *const c.ggml_tensor, src: *const c.ggml_tensor, axis: usize) c_int {
+    const slab = src.nb[axis];
+    if (innerExtent(src, axis) >= slab) {
+        return -1;
+    }
+    for (0..max_dims) |dim| {
+        if (view.ne[dim] == src.ne[axis] and view.nb[dim] == slab) {
+            return if (innerExtent(view, dim) < slab) @intCast(dim) else -1;
+        }
+    }
+    return -1;
+}
+
+/// The lambdas of `ggml_backend_meta_get_split_state` (ggml-backend-meta.cpp:520 @cd959bae9),
 /// which all capture the same four values.
 const Propagate = struct {
     stc: *SimpleTensorContainer,
@@ -1016,7 +1044,7 @@ const Propagate = struct {
         return p.generic(src_ss, false);
     }
 
-    /// Ports the `handle_view` lambda (ggml-backend-meta.cpp:675 @8642541b2).
+    /// Ports the `handle_view` lambda (ggml-backend-meta.cpp:701 @cd959bae9).
     fn view(p: *const Propagate, src_ss: []const SplitState) SplitState {
         const tensor = p.tensor;
         const src0 = srcOf(tensor, 0);
@@ -1047,8 +1075,40 @@ const Propagate = struct {
             }
             impl.abort("fatal error");
         }
+        // permuted view: split the view dim that spans the src split axis, other dims must be inside one element of it or outside the span
+        if (c.ggml_is_permuted(tensor) and !c.ggml_is_permuted(src0) and axis >= 0 and axis < max_dims - 1) {
+            const ax: usize = @intCast(axis);
+            const nb_axis = src0.nb[ax];
+            const nb_next = src0.nb[ax + 1];
+            for (0..max_dims) |dim| {
+                // `nb[dim]*ne[dim]` is `size_t` arithmetic in the C.
+                if (tensor.ne[dim] == 1 or tensor.nb[dim] < nb_axis or tensor.nb[dim] *% @as(usize, @bitCast(tensor.ne[dim])) != nb_next) {
+                    continue;
+                }
+                var others_ok = true;
+                for (0..max_dims) |i| {
+                    if (i == dim or tensor.ne[i] == 1) {
+                        continue;
+                    }
+                    others_ok = others_ok and (tensor.nb[i] *% @as(usize, @bitCast(tensor.ne[i])) <= tensor.nb[dim] or tensor.nb[i] % nb_next == 0);
+                }
+                if (others_ok) {
+                    return ssMake(@intCast(dim));
+                }
+            }
+        }
         if (src_ss[0].axis == axis_mirrored or src_ss[0].axis == axis_partial) {
             return src_ss[0];
+        }
+        // a view that only regroups dims inside one slab of the split axis keeps the split,
+        // the per-device strides are only rescaled above nb[axis] (e.g. the KV streams of a permuted q)
+        if (axis >= 0 and axis < max_dims and tensor.view_offs == src0.view_offs) {
+            const dim = viewSlabDim(tensor, src0, @intCast(axis));
+            if (dim >= 0) {
+                var ret = src_ss[0];
+                ret.axis = @intCast(dim);
+                return ret;
+            }
         }
         impl.abort("view of permuted tensor not implemented");
     }
@@ -1184,7 +1244,7 @@ const Propagate = struct {
         return ssMake(axis_0);
     }
 
-    /// Ports the `calculate_split_state` lambda (ggml-backend-meta.cpp:834 @8642541b2).
+    /// Ports the `calculate_split_state` lambda (ggml-backend-meta.cpp:890 @cd959bae9).
     ///
     /// A statically allocated tensor asks the caller's callback and has its
     /// answer checked; anything else derives its state from its sources' by
@@ -1281,7 +1341,10 @@ const Propagate = struct {
             c.GGML_OP_UPSCALE,
             => p.generic(src_ss, true),
             c.GGML_OP_PAD => p.pad(src_ss),
-            c.GGML_OP_PAD_REFLECT_1D, c.GGML_OP_ROLL, c.GGML_OP_ARANGE, c.GGML_OP_TIMESTEP_EMBEDDING => p.generic(src_ss, true),
+            c.GGML_OP_PAD_REFLECT_1D, c.GGML_OP_ROLL => p.generic(src_ss, true),
+            // no sources, every device computes the full range
+            c.GGML_OP_ARANGE => ssMake(axis_mirrored),
+            c.GGML_OP_TIMESTEP_EMBEDDING => p.generic(src_ss, true),
             c.GGML_OP_ARGSORT, c.GGML_OP_TOP_K => p.perRow(src_ss),
             c.GGML_OP_LEAKY_RELU => p.generic(src_ss, false),
             c.GGML_OP_TRI => p.generic(src_ss, true),
@@ -1362,7 +1425,7 @@ fn appendNeInfo(out: *std.ArrayList(u8), ss: *const SplitState, n_bufs: usize) v
     }
 }
 
-/// Ports `ggml_backend_meta_get_split_state` (ggml-backend-meta.cpp:494 @8642541b2),
+/// Ports `ggml_backend_meta_get_split_state` (ggml-backend-meta.cpp:520 @cd959bae9),
 /// the three-argument overload.
 ///
 /// Memoised per `(tensor, assume_sync)` in the tensor's buffer. An entry is
@@ -1995,7 +2058,12 @@ fn bufferReset(buffer: c.ggml_backend_buffer_t) callconv(.c) void {
     }
 }
 
-/// Ports `ggml_backend_meta_buffer_iface` (ggml-backend-meta.cpp:1690 @8642541b2).
+/// Ports `ggml_backend_meta_buffer_iface` (ggml-backend-meta.cpp:1751 @cd959bae9).
+///
+/// The three batched slots v0.9.0 added (`set_tensor_n`, `get_tensor_n`,
+/// `cpy_tensor_n`) are null here as in the C, and listed explicitly:
+/// translate-c gives every field a null default, so leaving them out would
+/// compile and read as an oversight.
 const buffer_iface: c.struct_ggml_backend_buffer_i = .{
     .free_buffer = &bufferFreeBuffer,
     .get_base = &bufferGetBase,
@@ -2008,6 +2076,9 @@ const buffer_iface: c.struct_ggml_backend_buffer_i = .{
     .cpy_tensor = null,
     .clear = &bufferClear,
     .reset = &bufferReset,
+    .set_tensor_n = null,
+    .get_tensor_n = null,
+    .cpy_tensor_n = null,
 };
 
 /// Ports `ggml_backend_buffer_is_meta` (ggml-backend-meta.cpp:1768 @cd959bae9).

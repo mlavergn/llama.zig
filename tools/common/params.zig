@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Ports `common_cpu_params`, `common_params_sampling`, `common_params_model`
-//! and `common_params` from `llama.cpp/common/common.h` (v0.8.0,
-//! `8642541b2`) -- the members the tools' options and the tools themselves
+//! and `common_params` from `llama.cpp/common/common.h` (v0.9.0,
+//! `cd959bae9`) -- the members the tools' options and the tools themselves
 //! touch, with upstream's defaults, and the server's: its block of
 //! `common_params`, `common_params_speculative` with its draft and n-gram
 //! sub-structs, and the reasoning and chat-template members its options set.

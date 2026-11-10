@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/scale.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/scale.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/scale.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernel, `scale_f32`, stays CUDA and is launched from here; since v0.6.0
 //! it is a template over the element type, and computes in F32 either way.
 //! Since v0.8.0 `src` and `dst` may be views: rows are contiguous, dimensions

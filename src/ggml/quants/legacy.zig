@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.8.0, `8642541b2`), lines
+//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.9.0, `cd959bae9`), lines
 //! 40-618: the ten formats whose blocks stand alone rather than being grouped
 //! into 256-element super-blocks. Each function names the C function it
 //! replaces and the line it began at.
@@ -620,6 +620,26 @@ pub export fn dequantize_row_nvfp4(x: [*c]const blocks.NVFP4, y: [*c]f32, k: i64
                 yb[j + qk_sub / 2] = @as(f32, @floatFromInt(v1)) * d;
             }
         }
+    }
+}
+
+/// Ports `quantize_row_f8_e4m3_ref` (ggml-quants.c:416 @cd959bae9).
+///
+/// Not a block format: one byte per element, each `fp32ToF8E4m3`.
+pub export fn quantize_row_f8_e4m3_ref(x: [*c]const f32, y: [*c]c.ggml_fp8_e4m3_t, k: i64) void {
+    var i: i64 = 0;
+    while (i < k) : (i += 1) {
+        const u: usize = @intCast(i);
+        y[u].bits = impl.fp32ToF8E4m3(x[u]);
+    }
+}
+
+/// Ports `dequantize_row_f8_e4m3` (ggml-quants.c:617 @cd959bae9).
+pub export fn dequantize_row_f8_e4m3(x: [*c]const c.ggml_fp8_e4m3_t, y: [*c]f32, k: i64) void {
+    var i: i64 = 0;
+    while (i < k) : (i += 1) {
+        const u: usize = @intCast(i);
+        y[u] = impl.f8E4m3ToFp32(x[u].bits);
     }
 }
 

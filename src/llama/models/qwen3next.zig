@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/qwen3next.cpp` at v0.8.0 (`8642541b2`):
+//! Ported from `llama.cpp/src/models/qwen3next.cpp` at v0.9.0 (`cd959bae9`):
 //! `llama_model_qwen3next`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph` and `graph_mtp`.
 
@@ -351,7 +351,7 @@ fn buildLayerAttn(model: *const Model, b: *const graph.Builder, inp: *graph.InpA
 }
 
 /// Ports `llama_model_qwen3next::graph`'s `build_qkvz` (models/qwen3next.cpp:311
-/// @8642541b2): the separate QKV and gate projections, or the legacy joint
+/// @cd959bae9): the separate QKV and gate projections, or the legacy joint
 /// one split four ways.
 fn buildQkvz(model: *const Model, b: *const graph.Builder, input: *Tensor, il: c_int) struct { *Tensor, *Tensor } {
     const ctx = b.ctx0;
@@ -367,11 +367,11 @@ fn buildQkvz(model: *const Model, b: *const graph.Builder, input: *Tensor, il: c
 
     if (layer.wqkv) |wqkv| {
         // The optimized path.
-        var qkv_mixed = b.buildLoraMm(wqkv, input, null);
+        var qkv_mixed = b.buildLoraMm(wqkv, input, layer.wqkv_s);
         qkv_mixed = c.ggml_reshape_3d(ctx, qkv_mixed, qkv_mixed.*.ne[0], n_seq_tokens, n_seqs);
         b.cb(qkv_mixed, "linear_attn_qkv_mixed", il);
 
-        const z = b.buildLoraMm(layer.wqkv_gate.?, input, null);
+        const z = b.buildLoraMm(layer.wqkv_gate.?, input, layer.wqkv_gate_s);
         b.cb(z, "z", il);
 
         return .{ qkv_mixed, z };

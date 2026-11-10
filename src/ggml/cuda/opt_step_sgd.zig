@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/opt-step-sgd.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/opt-step-sgd.cuh` at v0.8.0
-//! (`8642541b2`). The kernel, `opt_step_sgd_f32`, stays CUDA.
+//! `llama.cpp/ggml/src/ggml-cuda/opt-step-sgd.cuh` at v0.9.0
+//! (`cd959bae9`). The kernel, `opt_step_sgd_f32`, stays CUDA.
 
 const impl = @import("../impl.zig");
 const common = @import("common.zig");

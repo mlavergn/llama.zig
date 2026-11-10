@@ -3,11 +3,14 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/quants.c` (v0.8.0, `8642541b2`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/quants.c` (v0.9.0, `cd959bae9`),
 //! the `_generic` dot products at lines 127-480 and 1254. Each function names
 //! the C it replaces and the line it began at.
 //!
-//! # Every function here is unreachable on this target
+//! # Every function here but one is unreachable on this target
+//!
+//! The exception is `ggml_vec_dot_f8_e4m3_f32`, new at v0.9.0, which has no
+//! `_generic` suffix and no architecture replacement.
 //!
 //! `arch-fallback.h` renames nothing from `quants.c` on ARM, and
 //! `arch/arm/quants.c` supplies the real `ggml_vec_dot_q4_0_q8_0` and its
@@ -26,8 +29,10 @@
 //! accumulation *order* is what has to match, not just the arithmetic.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const impl = @import("../../impl.zig");
 const convert = @import("../convert.zig");
+const simd = @import("../simd.zig");
 const blocks = @import("../../quants/blocks.zig");
 const c = impl.c;
 
@@ -355,6 +360,98 @@ pub export fn ggml_vec_dot_nvfp4_q8_0_generic(
 
     s[0] = sumf;
 }
+
+/// Ports `ggml_vec_dot_f8_e4m3_f32` (ggml-cpu/quants.c:370 @cd959bae9).
+///
+/// **Live, unlike every other dot product in this file**: it has no
+/// `_generic` suffix and no `arch/` replacement, so it is the entry point
+/// `type_traits_cpu` calls for `GGML_TYPE_F8_E4M3` on every target. The
+/// right-hand operand is plain `f32` (`vec_dot_type` is `F32`).
+///
+/// The C's `GGML_SIMD` arm, written against `GGML_F32_VEC`: each register's
+/// lanes are looked up in `ggml_table_f32_f8_e4m3` and fused into one of
+/// `GGML_F32_ARR` accumulators, which `GGML_F32_VEC_REDUCE` folds; the
+/// `n % GGML_F32_STEP` tail runs scalar. Its `__AVX2__` and
+/// `__AVX512F__ && __AVX512BW__` arms fetch the same lanes with
+/// `_mm256_i32gather_ps` and `_mm512_i32gather_ps` from the same table, so
+/// they load bit-identical vectors and share this body (ported without an x86
+/// oracle; the Windows pickup gates it). The tail is `f8_tail_group`'s
+/// shape, not plain fused arithmetic -- see there. The C's `assert(nrc == 1)`
+/// is compiled out in the reference and ports as nothing.
+pub export fn ggml_vec_dot_f8_e4m3_f32(
+    n: c_int,
+    s: [*c]f32,
+    bs: usize,
+    vx: ?*const anyopaque,
+    bx: usize,
+    vy: ?*const anyopaque,
+    by: usize,
+    nrc: c_int,
+) void {
+    _ = .{ bs, bx, by, nrc };
+    const F = simd.F32;
+    const table = &convert.ggml_table_f32_f8_e4m3;
+
+    const x: [*]const u8 = @ptrCast(vx.?);
+    const y: [*]const f32 = @ptrCast(@alignCast(vy.?));
+    const nn: usize = @intCast(n);
+
+    var sumf: f32 = 0.0;
+    var pos: usize = 0;
+    var sum: [F.arr]F.Vec = @splat(F.zero);
+    const np = nn - nn % F.step;
+    while (pos < np) : (pos += F.step) {
+        inline for (0..F.arr) |j| {
+            const offset = pos + j * F.epr;
+            var values: [F.epr]f32 = undefined;
+            inline for (0..F.epr) |k| values[k] = table[x[offset + k]];
+            sum[j] = F.fma(sum[j], F.load(&values), F.load(y + offset));
+        }
+    }
+    sumf = F.reduce(&sum);
+    const t = nn - pos;
+    const group = f8_tail_group orelse t + 1;
+    const split = pos + (t - t % group);
+    while (pos < split) : (pos += 1) {
+        sumf += table[x[pos]] * y[pos];
+    }
+    while (pos < nn) : (pos += 1) {
+        sumf = @mulAdd(f32, table[x[pos]], y[pos], sumf);
+    }
+    s[0] = sumf;
+}
+
+/// How the reference compiler emits the scalar tail of
+/// `ggml_vec_dot_f8_e4m3_f32`, `for (; pos < n; ++pos) sumf += table[x[pos]]
+/// * y[pos];`. Not a port of anything in the C: a property of the compiler,
+/// which the C's arithmetic inherits.
+///
+/// The table lookup is a gather NEON has no instruction for, so the loop
+/// vectorizer does not vectorize this loop the way `simd.strict_loop`
+/// describes; it **interleaves it as scalar code**, which is still a strict
+/// in-order reduction: groups of products are rounded (`fmul s`) and added in
+/// order (`fadd s`), and only the `t % group` left over run fused (`fmadd`).
+/// The group is the interleave factor, entered at that many iterations.
+/// Measured from `quants.c` compiled by the same toolchain at each CPU:
+///
+/// - Apple A14 and later (`max_interleave_factor_4`): groups of 4.
+/// - `generic` and Apple A7 to A13: groups of 2.
+/// - `x86_64_v3`, `x86_64_v4`, `tigerlake`: unrolled by four but every
+///   product `vfmadd...ss`, so null -- all fused.
+///
+/// `make ops-diff` saw it: all-fused failed at `GATE_CPU=generic` on a
+/// 37-element row (a tail of 5), where the products round. With the f8 fill
+/// alone the products are exact in `f32` and no shape could be seen.
+const f8_tail_group: ?usize = blk: {
+    const model = builtin.cpu.model.name;
+    if (builtin.cpu.arch == .aarch64 and std.mem.startsWith(u8, model, "apple_"))
+        break :blk if (std.Target.aarch64.featureSetHas(builtin.cpu.features, .max_interleave_factor_4)) 4 else 2;
+    if (builtin.cpu.arch == .aarch64 and std.mem.eql(u8, model, "generic"))
+        break :blk 2;
+    if (builtin.cpu.arch == .x86_64 and (std.mem.eql(u8, model, "x86_64_v3") or std.mem.eql(u8, model, "x86_64_v4") or std.mem.eql(u8, model, "tigerlake")))
+        break :blk null;
+    @compileError("the f8 dot product's tail shape is not measured for CPU model '" ++ model ++ "'");
+};
 
 /// Ports `ggml_vec_dot_q5_0_q8_0_generic` (ggml-cpu/quants.c:413 @cd959bae9).
 ///

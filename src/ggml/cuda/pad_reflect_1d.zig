@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/pad_reflect_1d.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/pad_reflect_1d.cuh` at v0.8.0
-//! (`8642541b2`). The kernel, `pad_reflect_1d_kernel_f32`, stays CUDA.
+//! `llama.cpp/ggml/src/ggml-cuda/pad_reflect_1d.cuh` at v0.9.0
+//! (`cd959bae9`). The kernel, `pad_reflect_1d_kernel_f32`, stays CUDA.
 //!
 //! The grid's x covers rows and column tiles together, `ne01 * tiles0`; the
 //! kernel splits it back with `fast_div_modulo` over `ne01`'s fastdiv

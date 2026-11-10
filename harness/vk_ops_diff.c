@@ -248,7 +248,7 @@ static bool no_callback(int i, struct ggml_tensor * t1, struct ggml_tensor * t2,
     return true;
 }
 
-/* `graph_copy_dup_tensor` (ggml-backend.cpp:2263 @8642541b2) records a
+/* `graph_copy_dup_tensor` (ggml-backend.cpp:2523 @cd959bae9) records a
  * node's copy only after copying its sources, so `ggml_cast`'s `src[1]`,
  * the node itself, comes back NULL in the copy. Put it back; see the file
  * comment. */
@@ -945,7 +945,7 @@ static struct ggml_tensor * build_conv_3d_oc256(struct ggml_context * ctx, struc
     return out;
 }
 
-/* v0.8.0's supports_op answers no case of test-backend-ops can ask: extras
+/* Answers of supports_op no case of test-backend-ops asks (from v0.8.0): extras
  * compute directly, and upstream's list sets no refused precision. MUL_MAT
  * and MUL_MAT_ID refuse a src1 precision of F32 alone, whichever the other
  * precisions and whichever path; MUL_MAT broadcasts over dim 3; SUM takes
@@ -953,7 +953,7 @@ static struct ggml_tensor * build_conv_3d_oc256(struct ggml_context * ctx, struc
  * nothing here runs TOP_K_MASK. The answers go through
  * `vk_diff_supports_op`, so a disagreement prints `SUPPORTS` and fails. */
 static void supports_extra(void) {
-    struct ggml_init_params params = { 64 * ggml_tensor_overhead(), NULL, true };
+    struct ggml_init_params params = { 128 * ggml_tensor_overhead(), NULL, true };
     struct ggml_context * ctx = ggml_init(params);
     ggml_backend_t port = ggml_backend_vk_init(0);
 
@@ -987,6 +987,34 @@ static void supports_extra(void) {
     struct ggml_tensor * mask = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, 256, 8);
     struct ggml_tensor * top_k = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 16, 8);
     printf("  SUPPORTED top_k_mask: %d\n", vk_diff_supports_op(port, ggml_top_k_mask(ctx, mask, top_k, NULL, NULL, NULL)));
+
+    /* v0.9.0: flash attention over K/V row lists (`ggml_flash_attn_ext_rows`,
+     * `src[5]`) is refused; the same attention without them is asked too. */
+    struct ggml_tensor * fq = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 64, 4, 8, 2);
+    struct ggml_tensor * fk_rows = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 64, 32, 8, 1);
+    struct ggml_tensor * fv_rows = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 64, 32, 8, 1);
+    struct ggml_tensor * fk = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 64, 16, 8, 2);
+    struct ggml_tensor * fv = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 64, 16, 8, 2);
+    struct ggml_tensor * fmask = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 16, 4, 1, 2);
+    struct ggml_tensor * frows = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 16, 2);
+    printf("  SUPPORTED flash_attn_ext: plain %d, kv rows %d\n",
+        vk_diff_supports_op(port, ggml_flash_attn_ext(ctx, fq, fk, fv, fmask, 0.125f, 0.0f, 0.0f)),
+        vk_diff_supports_op(port, ggml_flash_attn_ext_rows(ctx, fq, fk_rows, fv_rows, fmask, frows, 0.125f, 0.0f, 0.0f)));
+
+    /* v0.9.0: an op that computes nothing (NONE, RESHAPE, VIEW, PERMUTE,
+     * TRANSPOSE) is no longer held to the buffer size limits, for its own
+     * size or its sources'; anything else still is. 4 TiB exceeds every
+     * device's limit, and nothing is allocated. */
+    struct ggml_tensor * huge = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, (int64_t) 1 << 40);
+    struct ggml_tensor * huge2 = ggml_reshape_2d(ctx, huge, (int64_t) 1 << 20, (int64_t) 1 << 20);
+    printf("  SUPPORTED over 4 TiB: none %d, reshape %d, view %d, permute %d, transpose %d, add %d, cont of a view %d\n",
+        vk_diff_supports_op(port, huge),
+        vk_diff_supports_op(port, huge2),
+        vk_diff_supports_op(port, ggml_view_1d(ctx, huge, 16, 0)),
+        vk_diff_supports_op(port, ggml_permute(ctx, huge2, 1, 0, 2, 3)),
+        vk_diff_supports_op(port, ggml_transpose(ctx, huge2)),
+        vk_diff_supports_op(port, ggml_add(ctx, huge, huge)),
+        vk_diff_supports_op(port, ggml_cont(ctx, ggml_view_1d(ctx, huge, 16, 0))));
 
     ggml_backend_free(port);
     ggml_free(ctx);

@@ -1,6 +1,6 @@
 //! The per-model encoder graphs (`llama.cpp/tools/mtmd/models/`), and
-//! `clip_get_graph_builder` (`llama.cpp/tools/mtmd/clip.cpp`, v0.8.0,
-//! `8642541b2`), which picks one by projector type.
+//! `clip_get_graph_builder` (`llama.cpp/tools/mtmd/clip.cpp`, v0.9.0,
+//! `cd959bae9`), which picks one by projector type.
 //!
 //! Each file here ports the `models/*.cpp` of the same name (hyphens become
 //! underscores) and exposes `build(g, params)`: the class's `build()`, run
@@ -16,6 +16,9 @@ const model_mod = @import("../model.zig");
 const names = @import("../names.zig");
 const c = impl.c;
 
+pub const chatterbox_base = @import("chatterbox_base.zig");
+pub const chatterbox_gen = @import("chatterbox_gen.zig");
+pub const chatterbox_spkenc = @import("chatterbox_spkenc.zig");
 pub const cogvlm = @import("cogvlm.zig");
 pub const conformer = @import("conformer.zig");
 pub const deepseek4v = @import("deepseek4v.zig");
@@ -49,6 +52,7 @@ pub const mobilenetv5 = @import("mobilenetv5.zig");
 pub const muse_glimmer = @import("muse_glimmer.zig");
 pub const muse_spark_audio = @import("muse_spark_audio.zig");
 pub const nemotron_omni = @import("nemotron_omni.zig");
+pub const nemotron_transcribe = @import("nemotron_transcribe.zig");
 pub const nemotron_v2_vl = @import("nemotron_v2_vl.zig");
 pub const paddleocr = @import("paddleocr.zig");
 pub const parakeet = @import("parakeet.zig");
@@ -85,7 +89,7 @@ pub const Built = struct {
     }
 };
 
-/// The `support_batch()` override of each builder (models.h @8642541b2),
+/// The `support_batch()` override of each builder (models.h @cd959bae9),
 /// or null for a projector `clip_get_graph_builder` has no builder for.
 pub fn supportBatch(t: names.ProjectorType) ?bool {
     return switch (t) {
@@ -129,11 +133,14 @@ pub fn supportBatch(t: names.ProjectorType) ?bool {
         .mimo_audio => false,
         .qwen3tts_spkenc => false,
         .pockettts_spkenc => false,
+        .chatterbox_spkenc => false,
+        .chatterbox => false,
         .pockettts_gen => false,
         .qwen3tts_gen => false,
         .youtuvl => false,
         .yasa2 => false,
         .parakeet => false,
+        .nemotron_transcribe => false,
         .granite4_vision => false,
         .lfm3a => false,
         .soprano => false,
@@ -146,7 +153,7 @@ pub fn supportBatch(t: names.ProjectorType) ?bool {
     };
 }
 
-/// Ports `clip_get_graph_builder` (mtmd/clip.cpp:979 @8642541b2) and the
+/// Ports `clip_get_graph_builder` (mtmd/clip.cpp:980 @cd959bae9) and the
 /// builder's `build()`.
 pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*const clip.EncodeParams) clip.Error!Built {
     const img = &imgs.entries.items[0];
@@ -195,11 +202,14 @@ pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*con
         .mimo_audio => try mimo_audio.build(&g, params),
         .qwen3tts_spkenc => try qwen3tts_spkenc.build(&g, params),
         .pockettts_spkenc => try pockettts_spkenc.build(&g, params),
+        .chatterbox_spkenc => try chatterbox_spkenc.build(&g, params),
+        .chatterbox => try chatterbox_gen.build(&g, params),
         .pockettts_gen => try pockettts_gen.build(&g, params),
         .qwen3tts_gen => try qwen3tts_gen.build(&g, params),
         .youtuvl => try youtuvl.build(&g, params),
         .yasa2 => try yasa2.build(&g, params),
         .parakeet => try parakeet.build(&g, params),
+        .nemotron_transcribe => try nemotron_transcribe.build(&g, params),
         .granite4_vision => try granite4_vision.build(&g, params),
         .lfm3a => try lfm3a.build(&g, params),
         .soprano => try soprano.build(&g, params),

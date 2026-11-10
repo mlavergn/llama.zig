@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/cross-entropy-loss.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/cross-entropy-loss.cuh` at v0.8.0
-//! (`8642541b2`). The kernels -- `cross_entropy_loss_f32` and
+//! `llama.cpp/ggml/src/ggml-cuda/cross-entropy-loss.cuh` at v0.9.0
+//! (`cd959bae9`). The kernels -- `cross_entropy_loss_f32` and
 //! `cross_entropy_loss_back_f32` -- stay CUDA.
 //!
 //! # The forward op is not wired

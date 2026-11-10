@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.8.0, `8642541b2`), lines
+//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.9.0, `cd959bae9`), lines
 //! 5330-5700. Each function names the C function it replaces and the line it
 //! began at.
 //!
@@ -129,7 +129,7 @@ fn checkDVec(comptime Block: type, comptime nr: usize, data: [*]const u8, nb: us
     return true;
 }
 
-/// Ports `ggml_validate_row_data` (ggml-quants.c:5381 @8642541b2).
+/// Ports `ggml_validate_row_data` (ggml-quants.c:5397 @cd959bae9).
 ///
 /// Parameters:
 /// - `t`: the format `data` is in.
@@ -206,11 +206,21 @@ pub export fn ggml_validate_row_data(t: c.enum_ggml_type, data: ?*const anyopaqu
         c.GGML_TYPE_Q5_1 => checkDM(blocks.Q5_1, "m", bytes, nb),
         c.GGML_TYPE_Q8_0 => checkD(blocks.Q8_0, bytes, nb),
         c.GGML_TYPE_MXFP4 => checkE(blocks.MXFP4, bytes, nb),
-        // NVFP4 is deliberately not checked: its scales are UE4M3 bytes and
-        // every byte value is a valid one, so there is nothing that could be
-        // a NaN. `checkDVec` exists for the C's macro of the same shape, which
+        // NVFP4 is not checked: its scales are UE4M3 bytes, decoded without
+        // a NaN (upstream's TODO is to reject the NaN encodings and the sign
+        // bit). `checkDVec` exists for the C's macro of the same shape, which
         // no format currently reaches.
         c.GGML_TYPE_NVFP4 => true,
+        c.GGML_TYPE_F8_E4M3 => blk: {
+            const q: [*]const c.ggml_fp8_e4m3_t = @ptrCast(bytes);
+            for (0..nb) |i| {
+                if ((q[i].bits & 0x7F) == 0x7F) {
+                    warn("%s: found NaN at index %zu in row of %zu F8_E4M3 values\n", .{ "ggml_validate_row_data", i, nb });
+                    break :blk false;
+                }
+            }
+            break :blk true;
+        },
 
         c.GGML_TYPE_Q2_K => checkDM(blocks.Q2_K, "dmin", bytes, nb),
         c.GGML_TYPE_Q3_K => checkD(blocks.Q3_K, bytes, nb),

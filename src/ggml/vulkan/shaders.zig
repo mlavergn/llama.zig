@@ -6,8 +6,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` and
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.8.0
-//! (`8642541b2`). Upstream split `ggml-vulkan.cpp` into those files at
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.9.0
+//! (`cd959bae9`). Upstream split `ggml-vulkan.cpp` into those files at
 //! v0.5.0. The C++ spells each family of pipelines as a macro pasting the
 //! shader's variable name together (`NAMELC ## F16ACC ## _cm2_data`); the
 //! port pastes the same name at comptime and looks it up in the generated
@@ -74,7 +74,7 @@ pub const Tile = struct {
     }
 };
 
-/// Ports `ggml_vk_matmul_shmem_support` (ggml-vulkan.cpp:1422 @8642541b2):
+/// Ports `ggml_vk_matmul_shmem_support` (ggml-vulkan.cpp:1429 @cd959bae9):
 /// whether a float matmul tile fits in shared memory.
 pub fn matmulShmemSupport(device: *const Device, warptile: Tile, mul_mat_id: bool, src0_type: c.ggml_type) bool {
     const lut_size: u32 = switch (src0_type) {
@@ -86,8 +86,8 @@ pub fn matmulShmemSupport(device: *const Device, warptile: Tile, mul_mat_id: boo
         c.GGML_TYPE_IQ3_XXS => 4 * 256,
         c.GGML_TYPE_IQ3_S => 4 * 512,
         c.GGML_TYPE_IQ4_NL, c.GGML_TYPE_IQ4_XS, c.GGML_TYPE_MXFP4 => 4 * 16,
-        // Same kvalues budget as MXFP4 plus ue4m3_fp32_lut[128].
-        c.GGML_TYPE_NVFP4 => 4 * 16 + 128 * @sizeOf(f32),
+        // Same kvalues budget as MXFP4 plus ue4m3_fp32_lut[256] (types.glsl, DATA_A_NVFP4).
+        c.GGML_TYPE_NVFP4 => 4 * 16 + 256 * @sizeOf(f32),
         else => 0,
     };
 
@@ -167,7 +167,7 @@ pub fn matmulIntShmemSupport(device: *const Device, warptile: Tile, mul_mat_id: 
     return total_size <= device.properties.limits.maxComputeSharedMemorySize;
 }
 
-/// Ports `ggml_vk_matmul_cm1_int_shmem_support` (ggml-vulkan.cpp:1546 @8642541b2):
+/// Ports `ggml_vk_matmul_cm1_int_shmem_support` (ggml-vulkan.cpp:1553 @cd959bae9):
 /// the same question for the coopmat1 integer-dot matmul (`mul_mmq_cm1.comp`),
 /// whose tiles stage packed q8 quants and per-block scales.
 pub fn matmulCm1IntShmemSupport(device: *const Device, warptile: Tile, mul_mat_id: bool, src0_type: c.ggml_type) bool {
@@ -209,7 +209,7 @@ pub fn matmulCm1IntShmemSupport(device: *const Device, warptile: Tile, mul_mat_i
         total +%= 16 * @sizeOf(i8); // cm1_kvalues[16]
     }
     if (src0_type == c.GGML_TYPE_NVFP4 and !device.ocp_fp4) {
-        total +%= 128 * @sizeOf(f32); // ue4m3_fp32_lut[128]
+        total +%= 256 * @sizeOf(f32); // ue4m3_fp32_lut[256]
     }
     if (mul_mat_id) {
         total +%= BN *% 2 *% @sizeOf(u16); // row_ids[BN] (u16vec2)

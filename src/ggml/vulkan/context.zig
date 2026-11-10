@@ -8,8 +8,8 @@
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-buffers.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-common.h`, and
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.8.0
-//! (`8642541b2`). Upstream split `ggml-vulkan.cpp` into those files at
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.9.0
+//! (`cd959bae9`). Upstream split `ggml-vulkan.cpp` into those files at
 //! v0.5.0. The C++'s `vk_context_ref`s -- weak pointers to contexts the
 //! garbage list owns -- are plain pointers here, nulled where the list is
 //! cleared (`graphCleanup`), the only place those contexts die.
@@ -65,12 +65,13 @@ pub const DescriptorSetBindings = struct {
     }
 };
 
-/// Ports `ggml_backend_vk_context` (ggml-vulkan-types.h:1223 @8642541b2).
+/// Ports `ggml_backend_vk_context` (ggml-vulkan-types.h:1227 @cd959bae9).
 pub const BackendCtx = struct {
     name: [:0]const u8 = "",
     device: *Device = undefined,
 
     semaphore_idx: usize = 0,
+    binary_semaphore_idx: usize = 0,
     event_idx: usize = 0,
     gc: GarbageCollector = .{},
     prealloc_size_x: usize = 0,
@@ -149,7 +150,7 @@ pub const BackendCtx = struct {
     query_idx: i32 = 0,
 };
 
-/// Ports `ggml_vk_init` (ggml-vulkan.cpp:5486 @8642541b2).
+/// Ports `ggml_vk_init` (ggml-vulkan.cpp:5499 @cd959bae9).
 pub fn init(ctx: *BackendCtx, idx: usize) void {
     m.instance.instanceInitOrAbort();
     impl.assert(idx < m.instance.instance.device_indices.items.len, "idx < vk_instance.device_indices.size()");
@@ -158,6 +159,7 @@ pub fn init(ctx: *BackendCtx, idx: usize) void {
     ctx.device = m.device.getDevice(idx);
 
     ctx.semaphore_idx = 0;
+    ctx.binary_semaphore_idx = 0;
     ctx.event_idx = 0;
     ctx.prealloc_size_x = 0;
     ctx.prealloc_size_y = 0;
@@ -198,12 +200,16 @@ pub fn createContext(ctx: *BackendCtx, p: *CommandPool) *Context {
     return result;
 }
 
-/// Ports `ggml_vk_create_binary_semaphore` (ggml-vulkan.cpp:1085 @8642541b2).
-pub fn createBinarySemaphore(ctx: *BackendCtx) *Semaphore {
-    const s = allocator.create(Semaphore) catch oom();
-    s.* = .{ .s = createSemaphore(ctx.device, vk.VK_SEMAPHORE_TYPE_BINARY), .value = 0 };
-    ctx.gc.semaphores.append(allocator, s) catch oom();
-    return s;
+/// Ports `ggml_vk_create_binary_semaphore` (ggml-vulkan.cpp:1090 @cd959bae9):
+/// pooled, and handed out again only after `graphCleanup` resets the index.
+pub fn createBinarySemaphore(ctx: *BackendCtx) vk.VkSemaphore {
+    if (ctx.binary_semaphore_idx >= ctx.gc.semaphores.items.len) {
+        const s = allocator.create(Semaphore) catch oom();
+        s.* = .{ .s = createSemaphore(ctx.device, vk.VK_SEMAPHORE_TYPE_BINARY), .value = 0 };
+        ctx.gc.semaphores.append(allocator, s) catch oom();
+    }
+    defer ctx.binary_semaphore_idx += 1;
+    return ctx.gc.semaphores.items[ctx.binary_semaphore_idx].s;
 }
 
 /// Ports `ggml_vk_create_timeline_semaphore` (ggml-vulkan.cpp:1102 @cd959bae9).
@@ -451,7 +457,7 @@ pub fn synchronize(ctx: *BackendCtx) void {
     }
 }
 
-/// Ports `ggml_vk_graph_cleanup` (ggml-vulkan.cpp:12991 @8642541b2): frees
+/// Ports `ggml_vk_graph_cleanup` (ggml-vulkan.cpp:13015 @cd959bae9): frees
 /// what one graph's recording made, and resets the per-graph state.
 pub fn graphCleanup(ctx: *BackendCtx) void {
     ctx.prealloc_y_last_pipeline_used = null;
@@ -467,11 +473,7 @@ pub fn graphCleanup(ctx: *BackendCtx) void {
     m.submit.commandPoolCleanup(ctx.device, &ctx.compute_cmd_pool);
     if (ctx.device.async_use_transfer_queue) m.submit.commandPoolCleanup(ctx.device, &ctx.transfer_cmd_pool);
 
-    for (ctx.gc.semaphores.items) |s| {
-        d.vkDestroySemaphore.?(ctx.device.device, s.s, null);
-        allocator.destroy(s);
-    }
-    ctx.gc.semaphores.clearRetainingCapacity();
+    ctx.binary_semaphore_idx = 0;
 
     for (ctx.gc.tl_semaphores.items) |s| {
         d.vkDestroySemaphore.?(ctx.device.device, s.s, null);
@@ -496,7 +498,7 @@ pub fn graphCleanup(ctx: *BackendCtx) void {
     ctx.descriptor_set_idx = 0;
 }
 
-/// Ports `ggml_vk_cleanup` (ggml-vulkan.cpp:13029 @8642541b2): everything
+/// Ports `ggml_vk_cleanup` (ggml-vulkan.cpp:13050 @cd959bae9): everything
 /// the backend owns, on free.
 pub fn cleanup(ctx: *BackendCtx) void {
     // discard any unsubmitted command buffers
@@ -522,6 +524,12 @@ pub fn cleanup(ctx: *BackendCtx) void {
 
     for (ctx.gc.events.items) |e| d.vkDestroyEvent.?(ctx.device.device, e, null);
     ctx.gc.events.clearRetainingCapacity();
+
+    for (ctx.gc.semaphores.items) |sem| {
+        d.vkDestroySemaphore.?(ctx.device.device, sem.s, null);
+        allocator.destroy(sem);
+    }
+    ctx.gc.semaphores.clearRetainingCapacity();
 
     d.vkDestroyFence.?(ctx.device.device, ctx.fence, null);
     d.vkDestroyFence.?(ctx.device.device, ctx.almost_ready_fence, null);

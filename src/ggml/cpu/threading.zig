@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.8.0, `8642541b2`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.9.0, `cd959bae9`),
 //! the sections at lines 418 (threading defs), 540 (NUMA), 2711 (threadpool
 //! lifecycle) and 3065 (graph compute). Each declaration names the C it
 //! replaces and the line it began at.

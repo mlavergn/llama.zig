@@ -76,6 +76,7 @@ static mtmd_audio_preprocessor * make(int kind, const clip_ctx * ctx) {
         case 11: return new mtmd_audio_preprocessor_d1omni(ctx);
         case 12: return new mtmd_audio_preprocessor_lfm3a(ctx);
         case 13: return new mtmd_audio_preprocessor_muse_spark_audio(ctx);
+        case 14: return new mtmd_audio_preprocessor_nemotron_transcribe((clip_ctx *) ctx);
         default: return nullptr;
     }
 }
@@ -92,6 +93,18 @@ void * ref_audio_proc_new(int kind, void * hp) {
 }
 
 void ref_audio_proc_free(void * r) { delete (ref_proc *) r; }
+
+// v0.9.0's chatterbox front-end, `audio.Kind.chatterbox_ref` (15), takes a
+// variant flag (`is_mtl`) the other preprocessors do not
+void * ref_audio_proc_new_flag(int kind, void * hp, int flag) {
+    if (kind != 15) {
+        return nullptr;
+    }
+    auto * r = new ref_proc();
+    r->p.reset(new mtmd_audio_preprocessor_chatterbox_ref((const clip_ctx *) hp, flag != 0));
+    r->p->initialize();
+    return r;
+}
 
 // Runs one preprocess. Returns ok, and through `out` a malloc'd blob the
 // caller frees: n_mels, then per mel n_len, n_len_org, n_mel (as int64) and

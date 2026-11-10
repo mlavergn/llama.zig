@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/internvl.cpp` at v0.8.0 (`8642541b2`).
+//! Ports `llama.cpp/tools/mtmd/models/internvl.cpp` at v0.9.0 (`cd959bae9`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -12,7 +12,7 @@ const graph = @import("../graph.zig");
 const model_mod = @import("../model.zig");
 const c = impl.c;
 
-/// Ports `build` (internvl.cpp:3 @8642541b2), a member of `clip_graph_internvl`.
+/// Ports `build` (internvl.cpp:3 @cd959bae9), a member of `clip_graph_internvl`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
@@ -26,7 +26,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
 
     // add CLS token
     const cls_repeated = c.ggml_repeat_4d(ctx0, model.class_embedding, graph.ne(model.class_embedding, 0), 1, g.n_batch, 1);
-    inp = c.ggml_concat(ctx0, inp, cls_repeated, 1);
+    inp = c.ggml_concat(ctx0, cls_repeated, inp, 1);
 
     // The larger models use a different ViT, which uses RMS norm instead of layer norm
     const norm_t: model_mod.NormType = if (hparams.n_embd == 3200 and hparams.n_layer == 45)
@@ -37,7 +37,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     var cur = g.buildVit(inp, n_pos, norm_t, hparams.ffn_op, model.position_embeddings, null, .{});
 
     // remove CLS token
-    cur = c.ggml_view_3d(ctx0, cur, g.n_embd, g.n_patches, g.n_batch, graph.nb(cur, 1), graph.nb(cur, 2), 0);
+    cur = c.ggml_view_3d(ctx0, cur, g.n_embd, g.n_patches, g.n_batch, graph.nb(cur, 1), graph.nb(cur, 2), graph.nb(cur, 1));
     cur = c.ggml_cont(ctx0, cur);
 
     // pixel shuffle

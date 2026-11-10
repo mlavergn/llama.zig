@@ -4,15 +4,16 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/mtmd/mtmd-image.cpp` and
-//! `llama.cpp/tools/mtmd/mtmd-image.h` at v0.8.0 (`8642541b2`). Each
+//! `llama.cpp/tools/mtmd/mtmd-image.h` at v0.9.0 (`cd959bae9`). Each
 //! declaration names what it ports and the line it began at.
 //!
 //! # One preprocessor type, not a class tree
 //!
 //! Upstream has a base class with nineteen subclasses, three of which
 //! (`minicpmv`, `lfm2`, `cohere2v`) override the virtual
-//! `get_slice_instructions` that `llava_uhd`'s `preprocess` calls, and one
-//! (`lfm3vl`) the video virtuals and `dyn_size`'s `target_size`. Here
+//! `get_slice_instructions` that `llava_uhd`'s `preprocess` calls, one
+//! (`qwen3vl`) the video virtuals, and one (`lfm3vl`, derived from
+//! `qwen3vl`) `dyn_size`'s `target_size` as well. Here
 //! `Preprocessor` carries a `Kind` and dispatches on it at the same points
 //! -- `preprocess`, `preprocessVideoFrame`, `getVideoFrameSize`, `targetSize`
 //! and `getSliceInstructions` -- so the call graph is upstream's. A
@@ -603,7 +604,7 @@ pub const Kind = enum {
     llava_uhd,
     /// `mtmd_image_preprocessor_fixed_size` (mtmd-image.h:130 @cd959bae9)
     fixed_size,
-    /// `mtmd_image_preprocessor_dyn_size` (mtmd-image.h:138 @8642541b2)
+    /// `mtmd_image_preprocessor_dyn_size` (mtmd-image.h:138 @cd959bae9)
     dyn_size,
     /// `mtmd_image_preprocessor_longest_edge` (mtmd-image.h:172 @cd959bae9)
     longest_edge,
@@ -635,15 +636,20 @@ pub const Kind = enum {
     /// `mtmd_image_preprocessor_cohere2v` (mtmd-image.h:273 @cd959bae9), new
     /// at v0.7.0, last for the same reason
     cohere2v,
-    /// `mtmd_image_preprocessor_lfm3vl` (mtmd-image.h:146 @8642541b2), new
-    /// at v0.8.0, after `cohere2v` for the same reason
+    /// `mtmd_image_preprocessor_lfm3vl` (mtmd-image.h:160 @cd959bae9), new
+    /// at v0.8.0, after `cohere2v` for the same reason; derived from
+    /// `qwen3vl` since v0.9.0
     lfm3vl,
     /// `mtmd_image_preprocessor_deepseek41v` (mtmd-image.h:195 @cd959bae9),
     /// new at v0.8.0, after `lfm3vl` for the same reason
     deepseek41v,
     /// `mtmd_image_preprocessor_minicpm_ocr_1_0` (mtmd-image.h:230
-    /// @cd959bae9), new at v0.8.0, last for the same reason
+    /// @cd959bae9), new at v0.8.0, after `deepseek41v` for the same reason
     minicpm_ocr_1_0,
+    /// `mtmd_image_preprocessor_qwen3vl` (mtmd-image.h:147 @cd959bae9), new
+    /// at v0.9.0, last for the same reason: `dyn_size` for images, video
+    /// frames sized as `Qwen3VLVideoProcessor`
+    qwen3vl,
 };
 
 /// Ports `slice_coordinates`
@@ -727,7 +733,7 @@ pub const Preprocessor = struct {
         return switch (self.kind) {
             .llava_uhd, .minicpmv, .minicpm_ocr_1_0 => self.llavaUhdPreprocess(img),
             .fixed_size => self.fixedSizePreprocess(img),
-            .dyn_size, .lfm3vl => self.dynSizePreprocess(img),
+            .dyn_size, .qwen3vl, .lfm3vl => self.dynSizePreprocess(img),
             .glm5v => self.glm5vPreprocess(img),
             .longest_edge => self.longestEdgePreprocess(img),
             .deepseek4v => self.deepseek4vPreprocess(img),
@@ -750,7 +756,7 @@ pub const Preprocessor = struct {
     /// owns the result.
     pub fn preprocessVideoFrame(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
         return switch (self.kind) {
-            .lfm3vl => self.lfm3vlPreprocessVideoFrame(img),
+            .qwen3vl, .lfm3vl => self.qwen3vlPreprocessVideoFrame(img),
             else => self.preprocess(img),
         };
     }
@@ -767,7 +773,7 @@ pub const Preprocessor = struct {
     /// Return: false if the kind has none.
     pub fn getVideoFrameSize(self: *const Preprocessor, n_frames: c_int, width: c_int, height: c_int, out: *ImageSize) bool {
         return switch (self.kind) {
-            .lfm3vl => self.lfm3vlGetVideoFrameSize(n_frames, width, height, out),
+            .qwen3vl, .lfm3vl => self.qwen3vlGetVideoFrameSize(n_frames, width, height, out),
             else => false,
         };
     }
@@ -1131,12 +1137,12 @@ pub const Preprocessor = struct {
 
     /// The virtual `target_size` (mtmd-image.h:143 @cd959bae9) of
     /// `mtmd_image_preprocessor_dyn_size`, dispatched; and its override
-    /// `target_size` (mtmd-image.cpp:853 @8642541b2) in
-    /// `mtmd_image_preprocessor_lfm3vl`.
+    /// `target_size` (mtmd-image.cpp:883 @cd959bae9) in
+    /// `mtmd_image_preprocessor_lfm3vl` (`qwen3vl` keeps `dyn_size`'s).
     fn targetSize(self: *const Preprocessor, original_size: ImageSize) ImageSize {
         const hparams = self.hparams;
         if (self.kind == .lfm3vl) {
-            return lfm3vlSmartResize(original_size.width, original_size.height, hparams.patch_size * hparams.n_merge, hparams.image_min_pixels, hparams.image_max_pixels, 1, 1);
+            return qwen3vlSmartResize(original_size.width, original_size.height, hparams.patch_size * hparams.n_merge, hparams.image_min_pixels, hparams.image_max_pixels, 1, 1);
         }
         return dynSizeGetTargetSize(hparams, original_size);
     }
@@ -1144,16 +1150,16 @@ pub const Preprocessor = struct {
     /// Ports `preprocess` (mtmd-image.cpp:810 @cd959bae9), a member of
     /// `mtmd_image_preprocessor_dyn_size`: resize to `target_size`.
     fn dynSizePreprocess(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
-        return self.lfm3vlResizeTo(img, self.targetSize(img.getSize()));
+        return self.qwen3vlResizeTo(img, self.targetSize(img.getSize()));
     }
 
-    /// Ports `smart_resize` (mtmd-image.cpp:826 @8642541b2), a static member
-    /// of `mtmd_image_preprocessor_lfm3vl`, new at v0.8.0: as transformers'
+    /// Ports `smart_resize` (mtmd-image.cpp:826 @cd959bae9), a static member
+    /// of `mtmd_image_preprocessor_qwen3vl` (`lfm3vl`'s until v0.9.0): as transformers'
     /// Qwen2-VL `smart_resize`, rounding before the pixel checks (an edge may
     /// round to 0) and computing in `double`. With `temporal_factor > 1` it
     /// is the Qwen3-VL video variant over `n_frames`; upstream's defaults for
     /// the two are 1.
-    pub fn lfm3vlSmartResize(width: c_int, height: c_int, factor: c_int, min_pixels: i64, max_pixels: i64, n_frames: c_int, temporal_factor: c_int) ImageSize {
+    pub fn qwen3vlSmartResize(width: c_int, height: c_int, factor: c_int, min_pixels: i64, max_pixels: i64, n_frames: c_int, temporal_factor: c_int) ImageSize {
         var h = toD(height);
         var w = toD(width);
         const fac = toD(factor);
@@ -1180,33 +1186,33 @@ pub const Preprocessor = struct {
         return .{ .width = @max(factor, w_bar), .height = @max(factor, h_bar) };
     }
 
-    /// Ports `get_video_frame_size` (mtmd-image.cpp:858 @8642541b2), a member
-    /// of `mtmd_image_preprocessor_lfm3vl`: `Lfm3VlVideoProcessor`'s size,
-    /// `shortest_edge` 4096, `longest_edge` 25165824, `temporal_patch_size`
-    /// 2.
-    fn lfm3vlGetVideoFrameSize(self: *const Preprocessor, n_frames: c_int, width: c_int, height: c_int, out: *ImageSize) bool {
+    /// Ports `get_video_frame_size` (mtmd-image.cpp:853 @cd959bae9), a member
+    /// of `mtmd_image_preprocessor_qwen3vl`: `Qwen3VLVideoProcessor`'s (and
+    /// `Lfm3VlVideoProcessor`'s) size, `shortest_edge` 4096, `longest_edge`
+    /// 25165824, `temporal_patch_size` 2.
+    fn qwen3vlGetVideoFrameSize(self: *const Preprocessor, n_frames: c_int, width: c_int, height: c_int, out: *ImageSize) bool {
         const hparams = self.hparams;
-        out.* = lfm3vlSmartResize(width, height, hparams.patch_size * hparams.n_merge, 4096, 25165824, n_frames, 2);
+        out.* = qwen3vlSmartResize(width, height, hparams.patch_size * hparams.n_merge, 4096, 25165824, n_frames, 2);
         return true;
     }
 
-    /// Ports `preprocess_video_frame` (mtmd-image.cpp:864 @8642541b2), a
-    /// member of `mtmd_image_preprocessor_lfm3vl`: the video helper sizes the
+    /// Ports `preprocess_video_frame` (mtmd-image.cpp:859 @cd959bae9), a
+    /// member of `mtmd_image_preprocessor_qwen3vl`: the video helper sizes the
     /// frames, so they are only snapped to the grid.
-    fn lfm3vlPreprocessVideoFrame(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
+    fn qwen3vlPreprocessVideoFrame(self: *const Preprocessor, img: *const ImageU8) !PreprocOut {
         const f = self.hparams.patch_size * self.hparams.n_merge;
         const size = img.getSize();
-        return self.lfm3vlResizeTo(img, .{
+        return self.qwen3vlResizeTo(img, .{
             .width = @max(f, toI(libm.nearbyint(toD(size.width) / toD(f))) * f),
             .height = @max(f, toI(libm.nearbyint(toD(size.height) / toD(f))) * f),
         });
     }
 
-    /// Ports `resize_to` (mtmd-image.cpp:873 @8642541b2), a member of
-    /// `mtmd_image_preprocessor_lfm3vl`. `dyn_size`'s `preprocess`
+    /// Ports `resize_to` (mtmd-image.cpp:868 @cd959bae9), a member of
+    /// `mtmd_image_preprocessor_qwen3vl`. `dyn_size`'s `preprocess`
     /// (mtmd-image.cpp:810 @cd959bae9) has the same body over `target_size`,
     /// and calls this. The caller owns the result.
-    pub fn lfm3vlResizeTo(self: *const Preprocessor, img: *const ImageU8, size: ImageSize) !PreprocOut {
+    pub fn qwen3vlResizeTo(self: *const Preprocessor, img: *const ImageU8, size: ImageSize) !PreprocOut {
         const hparams = self.hparams;
         var resized_image: ImageU8 = .{};
         defer resized_image.deinit();
@@ -2577,13 +2583,13 @@ test "round_half_even parts from std::round on an exact half" {
     try std.testing.expectEqual(@as(c_int, 384), ImgTool.calcSizePreservedRatio(size, even).width);
 }
 
-test "lfm3vl's smart_resize keeps an edge that rounds to zero at the factor" {
-    const s = Preprocessor.lfm3vlSmartResize(3, 1000, 32, 0, 1 << 20, 1, 1);
+test "qwen3vl's smart_resize keeps an edge that rounds to zero at the factor" {
+    const s = Preprocessor.qwen3vlSmartResize(3, 1000, 32, 0, 1 << 20, 1, 1);
     try std.testing.expectEqual(@as(c_int, 32), s.width);
     try std.testing.expectEqual(@as(c_int, 992), s.height);
 }
 
-test "only lfm3vl has a video frame size, and a frame defaults to preprocess" {
+test "only qwen3vl and lfm3vl have a video frame size, and a frame defaults to preprocess" {
     var hparams: Hparams = .{};
     hparams.patch_size = 16;
     hparams.n_merge = 2;
@@ -2593,6 +2599,11 @@ test "only lfm3vl has a video frame size, and a frame defaults to preprocess" {
     try std.testing.expectEqual(@as(c_int, -1), out.width);
     const lfm3vl = Preprocessor.init(.lfm3vl, &hparams, .lfm3vl);
     try std.testing.expect(lfm3vl.getVideoFrameSize(4, 640, 480, &out));
+    try std.testing.expectEqual(@as(c_int, 640), out.width);
+    try std.testing.expectEqual(@as(c_int, 480), out.height);
+    out = .{ .width = -1, .height = -1 };
+    const qwen3vl = Preprocessor.init(.qwen3vl, &hparams, .qwen3vl);
+    try std.testing.expect(qwen3vl.getVideoFrameSize(4, 640, 480, &out));
     try std.testing.expectEqual(@as(c_int, 640), out.width);
     try std.testing.expectEqual(@as(c_int, 480), out.height);
 }

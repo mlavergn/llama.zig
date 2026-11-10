@@ -68,3 +68,17 @@ POST /slots/0?action=save {"filename": "nodft.bin"}
 !fulllog
 POST /slots/0?action=restore {"filename": "nodft.bin"}
 POST /completion {"prompt": "Count: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12", "n_predict": 12, "temperature": 0, "id_slot": 0}
+
+# v0.9.0: on a recurrent or hybrid target the speculative checkpoint is
+# restored when the *draft* is longer than n_rs_seq, no longer only when the
+# rollback is (server-context.cpp:4962). n_rs_seq is the MTP drafter's n_max,
+# 2; ngram-simple proposes 6. The prompt (the fixture's own 7-token loop,
+# then a copy whose last bigram is followed by 4 right tokens and 2 wrong
+# ones) makes a 6-token draft accepted 4/6 and 5/6: rollback 2 and 1, within
+# n_rs_seq, so only the new rule restores the checkpoint. LLAMA_TRACE logs
+# each draft's acceptance and the restore.
+!env LLAMA_TRACE=1
+!server -m $FIX/mtp/qwen35-mtp-dense.gguf -c 512 -np 1 --no-jinja --spec-type draft-mtp,ngram-simple --spec-draft-n-max 2 --spec-ngram-simple-size-n 2 --spec-ngram-simple-size-m 6 -lv 4
+!fulllog
+POST /completion {"prompt": [6, 105, 4, 123, 24, 11, 36, 91, 74, 97, 123, 24, 11, 36, 91, 74, 50, 60], "n_predict": 24, "temperature": 0}
+POST /completion {"prompt": [6, 105, 4, 123, 24, 11, 36, 91, 74, 97, 123, 24, 11, 36, 91, 74, 97, 50], "n_predict": 24, "temperature": 0}

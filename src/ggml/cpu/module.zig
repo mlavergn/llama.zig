@@ -7,7 +7,7 @@
 //! directory up.
 //!
 //! Everything it gathers is a port of
-//! `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` at v0.8.0 (`8642541b2`), split
+//! `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` at v0.9.0 (`cd959bae9`), split
 //! seven ways:
 //!
 //! - `defs.zig`      — the structs and constants the rest share

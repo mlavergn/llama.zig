@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/gguf-split/gguf-split.cpp` at v0.8.0
-//! (`8642541b2`). Each declaration names the C++ it replaces and the line it
+//! Ported from `llama.cpp/tools/gguf-split/gguf-split.cpp` at v0.9.0
+//! (`cd959bae9`). Each declaration names the C++ it replaces and the line it
 //! began at.
 //!
 //! # Upstream's output, byte for byte
@@ -477,7 +477,7 @@ fn ggufSplit(allocator: std.mem.Allocator, split_params: Params) !void {
     io.eprintf("%s: %d gguf split written with a total of %d tensors.\n", .{ "gguf_split", n_split, strategy.n_tensors });
 }
 
-/// Ports `gguf_merge` (gguf-split.cpp:411 @8642541b2).
+/// Ports `gguf_merge` (gguf-split.cpp:411 @cd959bae9).
 fn ggufMerge(allocator: std.mem.Allocator, split_params: Params) !void {
     const func = "gguf_merge";
     io.eprintf("%s: %s -> %s\n", .{ func, split_params.input.ptr, split_params.output.ptr });
@@ -521,6 +521,18 @@ fn ggufMerge(allocator: std.mem.Allocator, split_params: Params) !void {
         };
         try ctx_ggufs.append(allocator, ctx_gguf);
         try ctx_metas.append(allocator, ctx_meta.?);
+
+        // Verify that this split belongs to the same set as the first one
+        if (i_split > 0) {
+            const key_split_no = c.gguf_find_key(ctx_gguf, common.kv_split_no);
+            const key_split_count = c.gguf_find_key(ctx_gguf, common.kv_split_count);
+            if (key_split_no < 0 or c.gguf_get_val_u16(ctx_gguf, key_split_no) != i_split or
+                key_split_count < 0 or c.gguf_get_val_u16(ctx_gguf, key_split_count) != n_split)
+            {
+                io.eprintf("\n%s: %s is not split %d of %d\n", .{ func, cstr(&split_path), i_split + 1, n_split });
+                common.cExit(1);
+            }
+        }
 
         if (i_split == 0) {
             const key_n_split = c.gguf_find_key(ctx_gguf, common.kv_split_count);
@@ -567,6 +579,13 @@ fn ggufMerge(allocator: std.mem.Allocator, split_params: Params) !void {
         total_tensors += @intCast(n_tensors);
 
         io.eprintf("\x1b[3Ddone\n", .{});
+    }
+
+    // Verify that no tensor is missing
+    const key_n_tensors = c.gguf_find_key(ctx_ggufs.items[0], common.kv_split_tensors_count);
+    if (key_n_tensors < 0 or c.gguf_get_val_i32(ctx_ggufs.items[0], key_n_tensors) != total_tensors) {
+        io.eprintf("%s: splits contain %d tensors, which does not match %s\n", .{ func, total_tensors, common.kv_split_tensors_count.ptr });
+        common.cExit(1);
     }
 
     var fout: ?*anyopaque = null;

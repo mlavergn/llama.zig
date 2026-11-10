@@ -5,7 +5,7 @@
 //!
 //! Ports the parts of `llama.cpp/tools/mtmd/clip-impl.h` and
 //! `llama.cpp/tools/mtmd/clip.h` that are not name tables (those are
-//! `names.zig`, generated) at v0.8.0 (`8642541b2`). Each declaration names
+//! `names.zig`, generated) at v0.9.0 (`cd959bae9`). Each declaration names
 //! what it ports and the line it began at.
 //!
 //! # One C namespace
@@ -70,8 +70,99 @@ pub const Modality = enum(c_int) { vision, audio, gen_audio };
 /// Ports `clip_flash_attn_type` (clip.h:45 @cd959bae9).
 pub const FlashAttnType = enum(c_int) { auto = -1, disabled = 0, enabled = 1 };
 
-/// Ports `clip_gen_process_type` (clip.h:95 @8642541b2).
-pub const GenProcessType = enum(c_int) { unknown, gen_code, gen_wav };
+/// Ports `clip_gen_process_type` (clip.h:95 @cd959bae9).
+pub const GenProcessType = enum(c_int) {
+    unknown,
+    gen_code, // h_state to codes
+    gen_wav, // codes to raw PCM audio
+    tts, // full utterance of codes to raw PCM audio
+    tts_vocode, // internal: mel + source stft to istft input
+    tokenize, // raw PCM audio to semantic speech tokens
+};
+
+/// Ports `clip_gen_ref` (clip.h:105 @cd959bae9): the gen-side voice
+/// reference (chatterbox): speech tokens, mel-rate features and the speaker
+/// vector.
+pub const GenRef = struct {
+    tokens: std.ArrayList(i32) = .empty,
+    feat: std.ArrayList(f32) = .empty,
+    spk: std.ArrayList(f32) = .empty,
+
+    pub fn deinit(self: *GenRef) void {
+        self.tokens.deinit(gpa);
+        self.feat.deinit(gpa);
+        self.spk.deinit(gpa);
+        self.* = .{};
+    }
+
+    /// The C++'s copy assignment: `self` takes a copy of `other`.
+    pub fn assign(self: *GenRef, other: *const GenRef) !void {
+        if (self == other) return;
+        self.tokens.clearRetainingCapacity();
+        try self.tokens.appendSlice(gpa, other.tokens.items);
+        self.feat.clearRetainingCapacity();
+        try self.feat.appendSlice(gpa, other.feat.items);
+        self.spk.clearRetainingCapacity();
+        try self.spk.appendSlice(gpa, other.spk.items);
+    }
+
+    pub fn clone(self: *const GenRef) !GenRef {
+        var out: GenRef = .{};
+        errdefer out.deinit();
+        try out.assign(self);
+        return out;
+    }
+};
+
+/// Ports `clip_gen_voice` (clip.h:167 @cd959bae9): a predefined voice:
+/// backbone rows, plus the gen-side reference when the gen stack needs one.
+pub const GenVoice = struct {
+    rows: std.ArrayList(f32) = .empty,
+    ref: GenRef = .{},
+
+    pub fn deinit(self: *GenVoice) void {
+        self.rows.deinit(gpa);
+        self.ref.deinit();
+    }
+};
+
+/// Ports `gen_voices` (clip-model.h:1135 @cd959bae9), a member of
+/// `clip_model`, a `std::map<std::string, clip_gen_voice>`: kept sorted by name, as `std::less<std::string>`
+/// orders it (bytes compared unsigned, a prefix first), so walking it is the
+/// map's iteration order. Names keep a NUL past their end for `c_str()`.
+pub const GenVoiceMap = struct {
+    pub const Entry = struct { name: [:0]u8, voice: GenVoice };
+
+    entries: std.ArrayList(Entry) = .empty,
+
+    pub fn deinit(self: *GenVoiceMap) void {
+        for (self.entries.items) |*e| {
+            gpa.free(e.name);
+            e.voice.deinit();
+        }
+        self.entries.deinit(gpa);
+    }
+
+    pub fn count(self: *const GenVoiceMap) usize {
+        return self.entries.items.len;
+    }
+
+    /// `operator[]`: the voice named `name`, inserted empty if absent.
+    pub fn getOrPut(self: *GenVoiceMap, name: []const u8) !*GenVoice {
+        var i: usize = 0;
+        while (i < self.entries.items.len) : (i += 1) {
+            switch (std.mem.order(u8, self.entries.items[i].name, name)) {
+                .lt => continue,
+                .eq => return &self.entries.items[i].voice,
+                .gt => break,
+            }
+        }
+        const owned = try gpa.dupeSentinel(u8, name, 0);
+        errdefer gpa.free(owned);
+        try self.entries.insert(gpa, i, .{ .name = owned, .voice = .{} });
+        return &self.entries.items[i].voice;
+    }
+};
 
 /// Ports `clip_image_u8` (clip-impl.h:700 @cd959bae9): RGB, eight bits a
 /// channel. An empty buffer marks a placeholder, which reads as black and

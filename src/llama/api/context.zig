@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-context.cpp` (v0.8.0, `8642541b2`):
+//! Ported from `llama.cpp/src/llama-context.cpp` (v0.9.0, `cd959bae9`):
 //! the C API at the end of the file, from `llama_new_context_with_model`
 //! through `llama_get_ctx_other`, except the state API
 //! (`api/state.zig`), the adapters (`api/adapter.zig`) and training
@@ -193,6 +193,18 @@ pub fn llama_get_embeddings_seq(ctx: ?*c.struct_llama_context, seq_id: c.llama_s
 /// Ports `llama_set_embeddings_nextn` (llama-context.cpp:4524 @cd959bae9).
 pub fn llama_set_embeddings_nextn(ctx: ?*c.struct_llama_context, value: bool, masked: bool) callconv(.c) void {
     ctxOf(ctx).setEmbeddingsNextn(value, masked);
+}
+
+/// Ports `llama_set_embeddings_layer_inp_dev` (llama-context.cpp:4528
+/// @cd959bae9), which `llama-ext.h` declares with C++ linkage.
+pub fn llama_set_embeddings_layer_inp_dev(ctx: ?*c.struct_llama_context, value: bool) callconv(.c) void {
+    ctxOf(ctx).setEmbeddingsLayerInpDev(value);
+}
+
+/// Ports `llama_supports_embd_row` (llama-context.cpp:4532 @cd959bae9),
+/// which `llama-ext.h` declares with C++ linkage.
+pub fn llama_supports_embd_row(ctx: ?*const c.struct_llama_context) callconv(.c) bool {
+    return ctxOf(ctx).supportsEmbdRow();
 }
 
 /// Ports `llama_set_embeddings_layer_inp` (llama-context.cpp:4536 @cd959bae9).

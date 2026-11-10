@@ -14,7 +14,7 @@
 //! - `llama.cpp/src/llama-impl.cpp` -- `replace_all`, `gguf_data_to_str`
 //!   and `gguf_kv_to_str`
 //!
-//! All at v0.8.0 (`8642541b2`). The typed getters the constructor and the
+//! All at v0.9.0 (`cd959bae9`). The typed getters the constructor and the
 //! model use are `gguf_meta.zig`'s.
 //!
 //! # Scope
@@ -73,7 +73,7 @@ pub fn fileVersionName(version: FileVersion) [:0]const u8 {
     };
 }
 
-/// Ports `llama_ftype_name` (llama-model-loader.cpp:34 @8642541b2): the
+/// Ports `llama_ftype_name` (llama-model-loader.cpp:34 @cd959bae9): the
 /// name, with `(guessed) ` in front when `LLAMA_FTYPE_GUESSED` is set.
 pub fn ftypeName(ftype: c_uint) [:0]const u8 {
     const prefixed: [:0]const u8 = switch (ftype & ~@as(c_uint, c.LLAMA_FTYPE_GUESSED)) {
@@ -82,6 +82,7 @@ pub fn ftypeName(ftype: c_uint) [:0]const u8 {
         c.LLAMA_FTYPE_MOSTLY_BF16 => "(guessed) BF16",
         c.LLAMA_FTYPE_MOSTLY_Q1_0 => "(guessed) Q1_0",
         c.LLAMA_FTYPE_MOSTLY_Q2_0 => "(guessed) Q2_0",
+        c.LLAMA_FTYPE_MOSTLY_F8_E4M3 => "(guessed) F8_E4M3",
         c.LLAMA_FTYPE_MOSTLY_Q4_0 => "(guessed) Q4_0",
         c.LLAMA_FTYPE_MOSTLY_Q4_1 => "(guessed) Q4_1",
         c.LLAMA_FTYPE_MOSTLY_Q5_0 => "(guessed) Q5_0",
@@ -481,8 +482,8 @@ pub const Loader = struct {
         file: *c.FILE,
     };
 
-    /// Ports the constructor of `llama_model_loader` (llama-model-loader.cpp:535
-    /// @8642541b2), up to `print_info`.
+    /// Ports the constructor of `llama_model_loader` (llama-model-loader.cpp:537
+    /// @cd959bae9), up to `print_info`.
     ///
     /// Parameters:
     /// - `source`: the metadata, a path, or an open file.
@@ -540,7 +541,7 @@ pub const Loader = struct {
                 self.meta.ctx = self.owned.?;
 
                 // mmap places tensors at their file offsets, so an embedded GGUF must be aligned in the file too.
-                // From `llama_model_loader` (llama-model-loader.cpp:535 @8642541b2).
+                // From `llama_model_loader` (llama-model-loader.cpp:537 @cd959bae9).
                 const tensor_align = c.ggml_backend_buft_get_alignment(c.ggml_backend_cpu_buffer_type());
                 if (self.use_mmap and c.gguf_get_data_offset(self.meta.ctx) % tensor_align != 0) {
                     return exc.throw(.runtime_error, "llama_model_loader: GGUF data section at file offset {d} is not {d} byte aligned, cannot mmap", .{ c.gguf_get_data_offset(self.meta.ctx), tensor_align });
@@ -660,7 +661,7 @@ pub const Loader = struct {
     }
 
     /// The file-type guess and its override, from the constructor of
-    /// `llama_model_loader` (llama-model-loader.cpp:535 @8642541b2).
+    /// `llama_model_loader` (llama-model-loader.cpp:537 @cd959bae9).
     fn guessFtype(self: *Loader, trace: c_int, exc: *Exception) Thrown!void {
         var n_type: [c.GGML_TYPE_COUNT]u32 = @splat(0);
         var n_type_max: u32 = 0;
@@ -711,6 +712,7 @@ pub const Loader = struct {
             c.GGML_TYPE_NVFP4 => c.LLAMA_FTYPE_MOSTLY_NVFP4,
             c.GGML_TYPE_Q1_0 => c.LLAMA_FTYPE_MOSTLY_Q1_0,
             c.GGML_TYPE_Q2_0 => c.LLAMA_FTYPE_MOSTLY_Q2_0,
+            c.GGML_TYPE_F8_E4M3 => c.LLAMA_FTYPE_MOSTLY_F8_E4M3,
             else => blk: {
                 impl.logWarn("%s: unknown type %s\n", .{ "llama_model_loader", c.ggml_type_name(type_max) });
                 break :blk c.LLAMA_FTYPE_ALL_F32;
@@ -726,7 +728,7 @@ pub const Loader = struct {
     }
 
     /// The metadata dump and the type counts, from the constructor of
-    /// `llama_model_loader` (llama-model-loader.cpp:535 @8642541b2).
+    /// `llama_model_loader` (llama-model-loader.cpp:537 @cd959bae9).
     fn dumpMetadata(self: *Loader) void {
         const ctx = self.meta.ctx;
         impl.logInfo("%s: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\n", .{"llama_model_loader"});
@@ -1313,8 +1315,8 @@ pub const Loader = struct {
         return data;
     }
 
-    /// Ports `llama_model_loader`'s `load_all_data` (llama-model-loader.cpp:1562
-    /// @8642541b2): every tensor of `ctx` gets its data, from the mapping --
+    /// Ports `llama_model_loader`'s `load_all_data` (llama-model-loader.cpp:1565
+    /// @cd959bae9): every tensor of `ctx` gets its data, from the mapping --
     /// with mmap, or for a lazy tensor -- or from the file. Without mmap the
     /// staged tensors go first, biggest first, so the largest staging buffer
     /// is allocated while the fewest weights are resident.
@@ -1388,6 +1390,10 @@ pub const Loader = struct {
         // temporary buffer sized like the tensor: `std::stable_sort`.
         if (!self.use_mmap) std.sort.block(*c.ggml_tensor, tensors.items, {}, stagedBiggestFirst);
 
+        // Staging buffer for non-host buffers without async uploads, reused
+        // because a fresh allocation per tensor page faults on every load.
+        var read_buf: []u8 = &.{};
+        defer allocator.free(read_buf);
         for (tensors.items) |cur| {
             // This can happen with split experts models.
             const weight = self.getWeight(gguf_meta.cString(c.ggml_get_name(cur))) orelse continue;
@@ -1482,14 +1488,30 @@ pub const Loader = struct {
                         buffer_idx %= n_buffers;
                     }
                 } else {
-                    // Scoped to one tensor, so only one staging buffer is
-                    // alive at a time.
-                    const read_buf = allocator.alloc(u8, n_size) catch oom();
-                    defer allocator.free(read_buf);
-                    try file.seek(weight.offs, c.SEEK_SET, exc);
-                    try file.readRaw(read_buf.ptr, n_size, exc);
-                    c.ggml_backend_tensor_set(cur, read_buf.ptr, 0, n_size);
-                    if (self.check_tensors and !c.ggml_validate_row_data(cur.type, read_buf.ptr, n_size)) {
+                    // With direct IO, read the aligned range around the
+                    // tensor and use the data inside it, so no bounce
+                    // buffer is needed.
+                    const align_ = file.readAlignment();
+                    const aligned_offset = weight.offs & ~(align_ - 1);
+                    const pad = weight.offs - aligned_offset;
+                    const read_size = (pad + n_size + align_ - 1) & ~(align_ - 1);
+                    const buf_size = read_size + align_ - 1;
+
+                    // Tensors come biggest first: shrink the buffer when it
+                    // gets too large, so peak memory stays close to one
+                    // tensor. The old buffer is freed first.
+                    if (read_buf.len < buf_size or read_buf.len > 2 * buf_size) {
+                        allocator.free(read_buf);
+                        read_buf = &.{};
+                        read_buf = allocator.alloc(u8, buf_size) catch oom();
+                    }
+                    const read_dst: [*]u8 = @ptrFromInt((@intFromPtr(read_buf.ptr) + align_ - 1) & ~(align_ - 1)); // GGML_PAD
+                    try file.seek(aligned_offset, c.SEEK_SET, exc);
+                    try file.readRawUnsafe(read_dst, read_size, exc);
+
+                    const data = read_dst + pad;
+                    c.ggml_backend_tensor_set(cur, data, 0, n_size);
+                    if (self.check_tensors and !c.ggml_validate_row_data(cur.type, data, n_size)) {
                         return exc.throw(.runtime_error, "tensor '{s}' has invalid data", .{gguf_meta.cString(c.ggml_get_name(cur))});
                     }
                 }
@@ -1533,7 +1555,7 @@ pub const Loader = struct {
     const Validation = struct { tensor: *c.ggml_tensor, data: *const anyopaque, size: usize };
 
     /// The `std::stable_sort` comparator of `load_all_data`
-    /// (llama-model-loader.cpp:1562 @8642541b2): staged tensors -- in a
+    /// (llama-model-loader.cpp:1565 @cd959bae9): staged tensors -- in a
     /// non-host buffer -- before the rest, and among them the bigger first.
     fn stagedBiggestFirst(_: void, a: *c.ggml_tensor, b: *c.ggml_tensor) bool {
         const staged_a = a.buffer != null and !c.ggml_backend_buffer_is_host(a.buffer);
@@ -1543,7 +1565,7 @@ pub const Loader = struct {
     }
 
     /// The `upload_backend` lambda of `load_all_data`
-    /// (llama-model-loader.cpp:1562 @8642541b2): a backend for async
+    /// (llama-model-loader.cpp:1565 @cd959bae9): a backend for async
     /// uploads from pinned memory, when nothing is mapped and the device
     /// supports it; else null.
     fn uploadBackend(

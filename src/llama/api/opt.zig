@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-context.cpp` (v0.8.0, `8642541b2`): the
+//! Ported from `llama.cpp/src/llama-context.cpp` (v0.9.0, `cd959bae9`): the
 //! three functions under its `// training` banner in the C API. The work is
 //! `context_opt.zig`'s.
 //!

@@ -6,8 +6,8 @@
 //! # Provenance
 //!
 //! Ports parts of `llama.cpp/vendor/cpp-httplib/httplib.cpp` and
-//! `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib 0.62.0, vendored
-//! at v0.8.0, `8642541b2`), built as `llama.cpp.zmake` builds it: no SSL,
+//! `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib 0.64.0, vendored
+//! at v0.9.0, `cd959bae9`), built as `llama.cpp.zmake` builds it: no SSL,
 //! no zlib, brotli or zstd, and `build/tools.zig`'s `httplib_defines`. Each
 //! declaration names what it ports and the line it began at.
 //!
@@ -31,6 +31,10 @@ pub const header_max_count: usize = 100;
 pub const multipart_form_data_file_max_count: usize = 1024;
 /// `CPPHTTPLIB_PAYLOAD_MAX_LENGTH` (httplib.h:142 @cd959bae9).
 pub const payload_max_length: usize = 100 * 1024 * 1024;
+/// `CPPHTTPLIB_UNREAD_PAYLOAD_MAX_LENGTH` (httplib.h:147 @cd959bae9): how
+/// much of a request body nobody read the server skips to reuse the
+/// connection.
+pub const unread_payload_max_length: usize = 256 * 1024;
 /// `CPPHTTPLIB_FORM_URL_ENCODED_PAYLOAD_MAX_LENGTH`, as `httplib_defines` sets it.
 pub const form_url_encoded_payload_max_length: usize = 1048576;
 /// `CPPHTTPLIB_RANGE_MAX_COUNT` (httplib.h:170 @cd959bae9).
@@ -71,6 +75,7 @@ pub const StatusCode = struct {
     pub const range_not_satisfiable_416: c_int = 416;
     pub const expectation_failed_417: c_int = 417;
     pub const internal_server_error_500: c_int = 500;
+    pub const not_implemented_501: c_int = 501;
 };
 
 // -----------------------------------------------------------------------------
@@ -201,7 +206,7 @@ pub fn OrderedMultimap(comptime V: type, comptime case_insensitive: bool) type {
 
         /// `get_multimap_value`: the `id`th value under `key`. The walk
         /// stops at the key's last entry, as `bounded_next` (httplib.h:3615
-        /// @cd959bae9) does in 0.62.0 and the saturating iterator did before.
+        /// @cd959bae9) does since 0.62.0 and the saturating iterator did before.
         ///
         /// Return: borrowed, or null where the C returns a default value.
         pub fn get(self: *const Self, key: []const u8, id: usize) ?V {
@@ -1033,6 +1038,19 @@ pub fn hasHeaderToken(headers: *const Headers, key: []const u8, token: []const u
 /// its name and value are valid, and silently drops it otherwise.
 pub fn setHeader(a: std.mem.Allocator, headers: *Headers, key: []const u8, val: []const u8) error{OutOfMemory}!void {
     if (isFieldValid(key, val)) _ = try headers.emplace(a, key, val);
+}
+
+/// Ports `erase_invalid_fields` (httplib.cpp:3581 @cd959bae9): drops the
+/// fields `set_header` would refuse, from headers an application can fill
+/// directly, since CR or LF in one would split the message.
+pub fn eraseInvalidFields(headers: *Headers) void {
+    var w: usize = 0;
+    for (headers.entries.items) |e| {
+        if (!isFieldValid(e.key, e.value)) continue;
+        headers.entries.items[w] = e;
+        w += 1;
+    }
+    headers.entries.shrinkRetainingCapacity(w);
 }
 
 /// Ports `is_chunked_transfer_encoding` (httplib.cpp:3876 @cd959bae9): whether

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-context.cpp` (v0.8.0, `8642541b2`):
+//! Ported from `llama.cpp/src/llama-context.cpp` (v0.9.0, `cd959bae9`):
 //! `llama_set_param` and `llama_context`'s `opt_init`, `opt_epoch_iter` and
 //! `opt_epoch`. They are methods of `llama_context` in the C++; here they
 //! are free functions over `*Context`, the same split as

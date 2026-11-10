@@ -4,8 +4,8 @@
 //!
 //! Ports `llama.cpp/common/json-schema-to-grammar.h` and
 //! `llama.cpp/common/json-schema-to-grammar.cpp`, with the three string
-//! helpers it takes from `llama.cpp/common/common.cpp` (llama.cpp v0.8.0,
-//! `8642541b2`). Each declaration names what it ports and the line it
+//! helpers it takes from `llama.cpp/common/common.cpp` (llama.cpp v0.9.0,
+//! `cd959bae9`). Each declaration names what it ports and the line it
 //! began at.
 //!
 //! # What it stands on

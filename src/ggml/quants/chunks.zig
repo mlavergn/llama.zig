@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.8.0, `8642541b2`), the
+//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.9.0, `cd959bae9`), the
 //! `quantize_*` functions scattered through the file, plus the
 //! `quantize_row_*_impl` helpers they call. Each names the C function it
 //! replaces and the line it began at.
@@ -111,7 +111,9 @@ fn forwardingChunk(
 }
 
 // Ports `quantize_q8_0` (ggml-quants.c:2305 @cd959bae9), `quantize_mxfp4`,
-// `quantize_nvfp4`, `quantize_tq1_0` (2420) and `quantize_tq2_0`.
+// `quantize_nvfp4`, `quantize_f8_e4m3` (2324 @cd959bae9), `quantize_tq1_0`
+// (2420) and `quantize_tq2_0`. `f8_e4m3` is one byte per element, a block of
+// one.
 //
 // `q1_0` and `q2_0` are *not* here: their C versions take the imatrix
 // argument, ignore it, and still run the row loop, so they keep that shape
@@ -120,6 +122,7 @@ comptime {
     @export(&forwardingChunk(blocks.Q8_0, c.QK8_0, legacy.quantize_row_q8_0_ref), .{ .name = "quantize_q8_0" });
     @export(&forwardingChunk(blocks.MXFP4, c.QK_MXFP4, legacy.quantize_row_mxfp4_ref), .{ .name = "quantize_mxfp4" });
     @export(&forwardingChunk(blocks.NVFP4, c.QK_NVFP4, legacy.quantize_row_nvfp4_ref), .{ .name = "quantize_nvfp4" });
+    @export(&forwardingChunk(c.ggml_fp8_e4m3_t, 1, legacy.quantize_row_f8_e4m3_ref), .{ .name = "quantize_f8_e4m3" });
     @export(&forwardingChunk(blocks.TQ1_0, QK_K, ternary.quantize_row_tq1_0_ref), .{ .name = "quantize_tq1_0" });
     @export(&forwardingChunk(blocks.TQ2_0, QK_K, ternary.quantize_row_tq2_0_ref), .{ .name = "quantize_tq2_0" });
 }

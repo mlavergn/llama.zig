@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports, from `llama.cpp/vendor/miniaudio/miniaudio.h` (miniaudio v0.11.25)
-//! at v0.8.0 (`8642541b2`), the decoder path `mtmd-helper.cpp` compiles
+//! Ports, from `llama.cpp/vendor/miniaudio/miniaudio.h` (miniaudio v0.11.26)
+//! at v0.9.0 (`cd959bae9`), the decoder path `mtmd-helper.cpp` compiles
 //! with `MA_NO_ENCODING`, `MA_NO_DEVICE_IO`, `MA_NO_RESOURCE_MANAGER`,
 //! `MA_NO_NODE_GRAPH`, `MA_NO_ENGINE` and `MA_NO_GENERATION`: backend
 //! selection, the data-source read loop, the data converter (mono mix-down

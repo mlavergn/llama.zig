@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-backend.cpp` (v0.8.0, `8642541b2`),
+//! Ported from `llama.cpp/ggml/src/ggml-backend.cpp` (v0.9.0, `cd959bae9`),
 //! lines 901 to 2200 — the half the C marks off with its own `// scheduler`
 //! comment. The other half is `src/ggml/backend.zig`, whose header carries the
 //! provenance note for both. Each declaration below names the C++ it replaces

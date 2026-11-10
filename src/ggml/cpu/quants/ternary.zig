@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/quants.c` (v0.8.0, `8642541b2`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/quants.c` (v0.9.0, `cd959bae9`),
 //! the `_generic` dot products at lines 481 and 533. Each function names the C
 //! it replaces and the line it began at.
 //!

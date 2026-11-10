@@ -278,6 +278,80 @@ fn runMut(gpa: std.mem.Allocator, label: *std.ArrayList(u8), name: []const u8, k
 fn runFile(gpa: std.mem.Allocator, name: []const u8, bytes: []const u8) !void {
     checkAll(gpa, name, bytes, true);
     try mutate(gpa, name, bytes);
+    if (std.mem.endsWith(u8, name, ".mp3")) try xingVariants(gpa, name, bytes);
+}
+
+/// A layer III frame's length from its header, or null for free format
+/// and reserved values.
+fn l3FrameBytes(h: *const [4]u8) ?usize {
+    const mpeg1 = (h[1] >> 3) & 3 == 3;
+    const br_idx = h[2] >> 4;
+    const sr_idx = (h[2] >> 2) & 3;
+    if (br_idx == 0 or br_idx == 15 or sr_idx == 3) return null;
+    const br1 = [_]u32{ 0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320 };
+    const br2 = [_]u32{ 0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160 };
+    const sr = [_]u32{ 44100, 48000, 32000 };
+    const version = (h[1] >> 3) & 3;
+    const rate = if (mpeg1) sr[sr_idx] else if (version == 2) sr[sr_idx] / 2 else sr[sr_idx] / 4;
+    const pad: usize = (h[2] >> 1) & 1;
+    if (mpeg1) return 144 * br1[br_idx] * 1000 / rate + pad;
+    return 72 * br2[br_idx] * 1000 / rate + pad;
+}
+
+/// An MP3 whose first frame carries a Xing or Info tag, re-headed at
+/// smaller bitrates so the frame no longer holds the whole tag: dr_mp3
+/// v0.7.4 reads the tag only as far as the frame goes, and a tag cut short
+/// is not skipped, its frame decoded as audio. The flags byte is varied
+/// too, which moves where the LAME extension is read.
+fn xingVariants(gpa: std.mem.Allocator, name: []const u8, bytes: []const u8) !void {
+    var off: usize = 0;
+    if (bytes.len >= 10 and std.mem.eql(u8, bytes[0..3], "ID3")) {
+        off = 10 + ((@as(usize, bytes[6] & 0x7F) << 21) | (@as(usize, bytes[7] & 0x7F) << 14) | (@as(usize, bytes[8] & 0x7F) << 7) | (bytes[9] & 0x7F));
+        if (bytes[5] & 0x10 != 0) off += 10;
+    }
+    if (off + 4 > bytes.len or bytes[off] != 0xFF or bytes[off + 1] & 0xE0 != 0xE0) return;
+    if ((bytes[off + 1] >> 1) & 3 != 1) return; // layer III only
+    const mpeg1 = (bytes[off + 1] >> 3) & 3 == 3;
+    const mono = bytes[off + 3] >> 6 == 3;
+    const side: usize = if (mpeg1) (if (mono) 17 else 32) else (if (mono) 9 else 17);
+    const crc: usize = if (bytes[off + 1] & 1 == 0) 2 else 0;
+    const tag = off + 4 + crc + side;
+    if (tag + 8 > bytes.len) return;
+    if (!std.mem.eql(u8, bytes[tag..][0..4], "Xing") and !std.mem.eql(u8, bytes[tag..][0..4], "Info")) return;
+    const copy = try gpa.dupe(u8, bytes);
+    defer gpa.free(copy);
+    var label: std.ArrayList(u8) = .empty;
+    defer label.deinit(gpa);
+    const old_size = l3FrameBytes(bytes[off..][0..4]) orelse return;
+    if (off + old_size > bytes.len) return;
+    for ([_]u8{ 1, 2, 3, 4 }) |br| {
+        for ([_]?u8{ null, 0x01, 0x03, 0x07 }) |flags| {
+            // the frame cut to its new length, so the next frame follows
+            // it and the sync search still takes it
+            var hdr: [4]u8 = bytes[off..][0..4].*;
+            hdr[2] = (br << 4) | (hdr[2] & 0x0F);
+            const new_size = l3FrameBytes(&hdr) orelse continue;
+            if (new_size > old_size) continue;
+            var v: std.ArrayList(u8) = .empty;
+            defer v.deinit(gpa);
+            try v.appendSlice(gpa, bytes[0 .. off + new_size]);
+            try v.appendSlice(gpa, bytes[off + old_size ..]);
+            v.items[off + 2] = hdr[2];
+            if (flags) |f| v.items[tag + 7] = f;
+            label.clearRetainingCapacity();
+            try label.print(gpa, "{s}#xing-br{d}-flags{x}", .{ name, br, v.items[tag + 7] });
+            checkAll(gpa, label.items, v.items, true);
+        }
+    }
+    // a frame count whose product with the frame's length passes 32 bits,
+    // which v0.7.4 multiplies in 64
+    if (bytes[tag + 7] & 0x01 != 0 and tag + 12 <= bytes.len) {
+        @memcpy(copy, bytes);
+        std.mem.writeInt(u32, copy[tag + 8 ..][0..4], 0x00E38E39, .big);
+        label.clearRetainingCapacity();
+        try label.print(gpa, "{s}#xing-count", .{name});
+        checkAll(gpa, label.items, copy, true);
+    }
 }
 
 /// Decodes `buf` frame by frame through both decoders and compares each
@@ -720,9 +794,130 @@ fn synth(gpa: std.mem.Allocator) !std.ArrayList(File) {
         add(gpa, &list, try std.fmt.bufPrint(&name_buf, "synth/wav-{d}-tag{x}-{d}bit-{d}ch-{d}", .{ idx, sp.tag, sp.bits, sp.ch, sp.rate }), &b);
     }
 
+    try synthWavEdges(gpa, &list, rnd);
     try synthFlac(gpa, &list, rnd);
     try synthImages(gpa, &list, rnd);
     return list;
+}
+
+/// RIFF chunks dr_wav v0.14.6 reads differently from v0.14.5: a `fmt `
+/// chunk shorter than 16 bytes or than what its extension read, a `fact`
+/// chunk under 4 bytes, MS-ADPCM's frame count from `fact`, ADPCM data
+/// shorter than its block headers, and MS-ADPCM deltas past the point
+/// where `int` overflows.
+fn synthWavEdges(gpa: std.mem.Allocator, list: *std.ArrayList(File), _: std.Random) !void {
+    // a generator of its own, so the corpus after it stays as it was
+    var prng = std.Random.DefaultPrng.init(0x14_6);
+    const rnd = prng.random();
+    const Edge = enum { fmt_short, fmt_17, fact_short, adpcm_fact_less, adpcm_fact_more, adpcm_stereo_fact, adpcm_tiny, ima_tiny, adpcm_max_88, adpcm_max_77, adpcm_max_stereo };
+    for (std.enums.values(Edge)) |edge| {
+        var b: Builder = .{ .gpa = gpa };
+        const adpcm = switch (edge) {
+            .fmt_short, .fmt_17, .fact_short => false,
+            else => true,
+        };
+        const ima = edge == .ima_tiny;
+        const ch: u16 = if (edge == .adpcm_stereo_fact or edge == .adpcm_max_stereo) 2 else 1;
+        const block: u16 = if (adpcm) 256 else 2 * ch;
+        const rate: u32 = 16000;
+        b.bytes("RIFF");
+        b.le32(0);
+        b.bytes("WAVE");
+        b.bytes("fmt ");
+        switch (edge) {
+            .fmt_short => {
+                // declared 14 bytes, but holding all 16: v0.14.5 read them
+                // and found the data chunk after
+                b.le32(14);
+                b.le16(1);
+                b.le16(ch);
+                b.le32(rate);
+                b.le32(rate * block);
+                b.le16(block);
+                b.le16(16);
+            },
+            .fmt_17 => {
+                b.le32(17);
+                b.le16(1);
+                b.le16(ch);
+                b.le32(rate);
+                b.le32(rate * block);
+                b.le16(block);
+                b.le16(16);
+                b.u8_(0); // one byte of the cbSize v0.14.5 read past
+                b.u8_(0); // padding to even
+            },
+            else => {
+                b.le32(if (adpcm) 20 else 16);
+                b.le16(if (ima) 0x11 else if (adpcm) 2 else 1);
+                b.le16(ch);
+                b.le32(rate);
+                b.le32(rate * block);
+                b.le16(block);
+                b.le16(if (adpcm) 4 else 16);
+                if (adpcm) {
+                    b.le16(2);
+                    b.le16(if (ima) (block - 4 * ch) * 2 / ch + 1 else (block - 7 * ch) * 2 / ch + 2);
+                }
+            },
+        }
+        switch (edge) {
+            .fact_short => {
+                // declared 3 bytes, padded to 4: v0.14.5 read 4, and its
+                // wrapped size plus the padding seeked nowhere
+                b.bytes("fact");
+                b.le32(3);
+                b.le32(1234);
+            },
+            .adpcm_fact_less, .adpcm_stereo_fact => {
+                b.bytes("fact");
+                b.le32(4);
+                b.le32(700);
+            },
+            .adpcm_fact_more => {
+                b.bytes("fact");
+                b.le32(4);
+                b.le32(100000);
+            },
+            else => {},
+        }
+        b.bytes("data");
+        const data_size: usize = switch (edge) {
+            .adpcm_tiny => 5,
+            .ima_tiny => 3,
+            .fmt_short, .fmt_17, .fact_short => 2000 * @as(usize, block),
+            else => 6 * @as(usize, block),
+        };
+        b.le32(@intCast(data_size));
+        const start = b.b.items.len;
+        for (0..data_size) |i| {
+            const t: f32 = @floatFromInt(i);
+            b.u8_(if (adpcm) rnd.int(u8) else @truncate(@as(u32, @intFromFloat(@abs(@sin(t * 0.017) * 255.0)))));
+        }
+        if (adpcm and !ima) {
+            var off: usize = 0;
+            while (off + block <= data_size) : (off += block) {
+                const blk = b.b.items[start + off ..][0..block];
+                for (0..ch) |c| blk[c] = rnd.uintLessThan(u8, 7);
+                switch (edge) {
+                    .adpcm_max_88, .adpcm_max_77, .adpcm_max_stereo => {
+                        // predictor 0, delta 0x7FFF, then nibbles whose
+                        // adaptation triples (8) or more than doubles (7)
+                        // the delta until it clamps at 0x7FFFFFFF
+                        for (0..ch) |c| {
+                            blk[c] = 0;
+                            std.mem.writeInt(u16, blk[ch + 2 * c ..][0..2], 0x7FFF, .little);
+                        }
+                        @memset(blk[7 * ch ..], if (edge == .adpcm_max_77) 0x77 else 0x88);
+                    },
+                    else => {},
+                }
+            }
+        }
+        b.patch32le(4, @intCast(b.b.items.len - 8));
+        var name_buf: [64]u8 = undefined;
+        add(gpa, list, try std.fmt.bufPrint(&name_buf, "synth/wav-edge-{s}", .{@tagName(edge)}), &b);
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -806,7 +1001,32 @@ const FlacSpec = struct {
     /// shift matters: unshifted, the 64-bit sum truncated to 32 bits is the
     /// wrapped 32-bit sum, and the two predictions agree.
     big_coefs: u32 = 0,
+    /// STREAMINFO's bit depth and maximum block size where they differ from
+    /// the frames' (dr_flac v0.13.4 decodes a frame's own depth, and grows
+    /// its buffer for a frame past the maximum).
+    si_bps: ?u32 = null,
+    si_max_block: ?u16 = null,
+    /// The frame header's sample-size code, where not derived from `bps`
+    /// (7 is 32 bits since v0.13.4).
+    bps_code: ?u8 = null,
+    /// The highest partition order a residual may take (v0.13.4 allows 15
+    /// where the block divides).
+    max_porder: u32 = 4,
+    /// Frame 1's first residual gets partition order 4 over a block it does
+    /// not divide, which v0.13.4 refuses.
+    bad_porder: bool = false,
+    /// The side channel's wasted bits are all but one, so its shift in a
+    /// left- or right-side frame is the whole 32 bits (`decode_duplicate_mono`).
+    side_wasted_full: bool = false,
+    /// `0xFF` bytes before each frame, which v0.13.4's sync search reads as
+    /// a possible first byte instead of skipping two at a time.
+    junk_ff: bool = false,
+    meta: FlacMeta = .normal,
 };
+
+/// Metadata dr_flac v0.13.4 refuses (and so recovers from by decoding from
+/// the first frame after STREAMINFO) or, for a short VORBIS_COMMENT, skips.
+const FlacMeta = enum { normal, invalid_type, bad_seektable, short_vorbis, overrun };
 
 /// The decoder's prediction, so residuals reproduce samples exactly.
 fn flacPredict(bps: u32, order: u32, precision: u32, shift: u5, coefs: []const i32, s: []const i32, n: usize) i32 {
@@ -822,10 +1042,15 @@ fn flacPredict(bps: u32, order: u32, precision: u32, shift: u5, coefs: []const i
 }
 
 fn writeResidual(w: *BitWriter, rnd: std.Random, spec: FlacSpec, res: []const i32, block: usize, order: usize) void {
+    writeResidualPorder(w, rnd, spec, res, block, order, null);
+}
+
+fn writeResidualPorder(w: *BitWriter, rnd: std.Random, spec: FlacSpec, res: []const i32, block: usize, order: usize, force_porder: ?u32) void {
     const rice2 = spec.rice2 or rnd.uintLessThan(u8, 4) == 0;
     w.put(@intFromBool(rice2), 2);
-    var porder: u32 = rnd.uintLessThan(u32, 5);
+    var porder: u32 = rnd.uintLessThan(u32, spec.max_porder + 1);
     while (porder > 0 and ((block >> @intCast(porder)) < order or (block & ((@as(usize, 1) << @intCast(porder)) - 1)) != 0)) porder -= 1;
+    if (force_porder) |f| porder = f;
     w.put(porder, 4);
     const parts = @as(usize, 1) << @intCast(porder);
     var idx: usize = 0;
@@ -870,7 +1095,80 @@ fn writeResidual(w: *BitWriter, rnd: std.Random, spec: FlacSpec, res: []const i3
     }
 }
 
+/// A 32-bit stream's subframe: samples up to 33 bits, predicted in 64 bits
+/// without truncation, as `ma_dr_flac__calculate_prediction_64_s64` does. A
+/// predicted subframe whose residuals do not fit 31 bits is written
+/// verbatim instead.
+fn writeSubframe64(w: *BitWriter, gpa: std.mem.Allocator, rnd: std.Random, spec: FlacSpec, kind_in: u8, samples: []const i64, sbps: u32, wasted: u32) void {
+    const block = samples.len;
+    const bits = sbps - wasted;
+    const s = gpa.alloc(i64, block) catch @panic("oom");
+    defer gpa.free(s);
+    for (samples, s) |x, *y| y.* = x >> @intCast(wasted);
+    var kind = kind_in;
+    var order: u32 = 0;
+    var coefs: [32]i32 = @splat(0);
+    var precision: u32 = 4;
+    var shift: u5 = 0;
+    const res = gpa.alloc(i32, block) catch @panic("oom");
+    defer gpa.free(res);
+    if (kind == 'f' or kind == 'l') {
+        if (kind == 'f') {
+            order = @min(rnd.uintLessThan(u32, 5), @as(u32, @intCast(block)));
+            const table = [5][4]i32{ .{ 0, 0, 0, 0 }, .{ 1, 0, 0, 0 }, .{ 2, -1, 0, 0 }, .{ 3, -3, 1, 0 }, .{ 4, -6, 4, -1 } };
+            for (0..order) |j| coefs[j] = table[order][j];
+        } else {
+            order = @min(1 + rnd.uintLessThan(u32, spec.max_order), @as(u32, @intCast(block)));
+            precision = 1 + rnd.uintLessThan(u32, 15);
+            shift = rnd.int(u4);
+            const lim: i32 = @intCast((@as(u32, 1) << @intCast(precision - 1)) - 1);
+            for (0..order) |j| coefs[j] = if (j == 0) @min(lim, @as(i32, 1) << shift) else rnd.intRangeAtMost(i32, -@min(lim, 3), @min(lim, 3));
+        }
+        for (order..block) |n| {
+            var p: i64 = 0;
+            for (0..order) |j| p +%= @as(i64, coefs[j]) *% s[n - 1 - j];
+            const r = s[n] -% (p >> shift);
+            // the decoder refuses a residual coded as 0xFFFFFFFF
+            if (r <= std.math.minInt(i32) or r > std.math.maxInt(i32)) {
+                kind = 'v';
+                break;
+            }
+            res[n - order] = @intCast(r);
+        }
+    }
+    const type_code: u32 = switch (kind) {
+        'c' => 0,
+        'v' => 1,
+        'f' => 8 | order,
+        else => 32 | (order - 1),
+    };
+    w.put(0, 1);
+    w.put(type_code, 6);
+    if (wasted > 0) {
+        w.put(1, 1);
+        w.put(0, wasted - 1);
+        w.put(1, 1);
+    } else w.put(0, 1);
+    switch (kind) {
+        'c' => w.putSigned(s[0], bits),
+        'v' => for (s) |x| w.putSigned(x, bits),
+        else => {
+            for (s[0..order]) |x| w.putSigned(x, bits);
+            if (kind == 'l') {
+                w.put(precision - 1, 4);
+                w.put(shift, 5);
+                for (0..order) |j| w.putSigned(coefs[j], precision);
+            }
+            writeResidual(w, rnd, spec, res[0 .. block - order], block, order);
+        },
+    }
+}
+
 fn writeSubframe(w: *BitWriter, gpa: std.mem.Allocator, rnd: std.Random, spec: FlacSpec, kind: u8, samples: []const i32, sbps: u32, wasted: u32) void {
+    writeSubframePorder(w, gpa, rnd, spec, kind, samples, sbps, wasted, null);
+}
+
+fn writeSubframePorder(w: *BitWriter, gpa: std.mem.Allocator, rnd: std.Random, spec: FlacSpec, kind: u8, samples: []const i32, sbps: u32, wasted: u32, force_porder: ?u32) void {
     const block = samples.len;
     const bits = sbps - wasted;
     const s = gpa.alloc(i32, block) catch @panic("oom");
@@ -920,7 +1218,7 @@ fn writeSubframe(w: *BitWriter, gpa: std.mem.Allocator, rnd: std.Random, spec: F
             const res = gpa.alloc(i32, block) catch @panic("oom");
             defer gpa.free(res);
             for (order..block) |n| res[n - order] = s[n] -% flacPredict(bits, order, precision, shift, &coefs, s, n);
-            writeResidual(w, rnd, spec, res[0 .. block - order], block, order);
+            writeResidualPorder(w, rnd, spec, res[0 .. block - order], block, order, force_porder);
         },
     }
 }
@@ -955,9 +1253,10 @@ fn flacStream(gpa: std.mem.Allocator, rnd: std.Random, spec: FlacSpec) std.Array
     si[0] = if (spec.metadata or spec.seektable) 0x00 else 0x80;
     std.mem.writeInt(u24, si[1..4], 34, .big);
     std.mem.writeInt(u16, si[4..6], @intCast(if (spec.block != 0) spec.block else 16), .big);
-    std.mem.writeInt(u16, si[6..8], @intCast(@min(max_block, 65535)), .big);
+    std.mem.writeInt(u16, si[6..8], spec.si_max_block orelse @intCast(@min(max_block, 65535)), .big);
     @memset(si[8..14], 0);
-    const props: u64 = (@as(u64, spec.rate) << 44) | (@as(u64, spec.channels - 1) << 41) | (@as(u64, spec.bps - 1) << 36) | (if (spec.total_zero) 0 else total & 0xFFFFFFFFF);
+    const si_bps = spec.si_bps orelse spec.bps;
+    const props: u64 = (@as(u64, spec.rate) << 44) | (@as(u64, spec.channels - 1) << 41) | (@as(u64, si_bps - 1) << 36) | (if (spec.total_zero) 0 else total & 0xFFFFFFFFF);
     std.mem.writeInt(u64, si[14..22], props, .big);
     @memset(si[22..38], 0);
     out.appendSlice(gpa, &si) catch @panic("oom");
@@ -968,9 +1267,30 @@ fn flacStream(gpa: std.mem.Allocator, rnd: std.Random, spec: FlacSpec) std.Array
     }
     if (spec.metadata) {
         // VORBIS_COMMENT, APPLICATION, PADDING (last)
-        out.appendSlice(gpa, &.{ 4, 0, 0, 16 }) catch @panic("oom");
-        out.appendSlice(gpa, "\x04\x00\x00\x00zigs\x01\x00\x00\x00\x00\x00\x00\x00") catch @panic("oom");
-        out.appendSlice(gpa, &.{ 2, 0, 0, 8 }) catch @panic("oom");
+        if (spec.meta == .short_vorbis) {
+            out.appendSlice(gpa, &.{ 4, 0, 0, 4 }) catch @panic("oom");
+            out.appendSlice(gpa, "\x04\x00\x00\x00") catch @panic("oom");
+        } else {
+            out.appendSlice(gpa, &.{ 4, 0, 0, 16 }) catch @panic("oom");
+            out.appendSlice(gpa, "\x04\x00\x00\x00zigs\x01\x00\x00\x00\x00\x00\x00\x00") catch @panic("oom");
+        }
+        switch (spec.meta) {
+            .invalid_type => {
+                out.appendSlice(gpa, &.{ 127, 0, 0, 4 }) catch @panic("oom");
+                out.appendSlice(gpa, "bad!") catch @panic("oom");
+            },
+            .bad_seektable => {
+                out.appendSlice(gpa, &.{ 3, 0, 0, 20 }) catch @panic("oom");
+                for (0..20) |k| out.append(gpa, @truncate(k)) catch @panic("oom");
+            },
+            else => {},
+        }
+        if (spec.meta == .overrun) {
+            // an APPLICATION block claiming more than the file holds
+            out.appendSlice(gpa, &.{ 2, 0xFF, 0xFF, 0xF0 }) catch @panic("oom");
+        } else {
+            out.appendSlice(gpa, &.{ 2, 0, 0, 8 }) catch @panic("oom");
+        }
         out.appendSlice(gpa, "ZIG!data") catch @panic("oom");
         out.appendSlice(gpa, &.{ 0x81, 0, 0, 13 }) catch @panic("oom");
         for (0..13) |_| out.append(gpa, 0) catch @panic("oom");
@@ -1014,7 +1334,7 @@ fn flacStream(gpa: std.mem.Allocator, rnd: std.Random, spec: FlacSpec) std.Array
         hdr.append(gpa, (bcode << 4) | rcode) catch @panic("oom");
         const rotation = [_]u8{ 1, 8, 9, 10 };
         const assignment: u8 = if (spec.channels == 2) (if (spec.assignment == 255) rotation[fi % 4] else if (spec.assignment == 0) 1 else spec.assignment) else @intCast(spec.channels - 1);
-        const scode: u8 = switch (spec.bps) {
+        const scode: u8 = spec.bps_code orelse switch (spec.bps) {
             8 => 1,
             12 => 2,
             16 => 4,
@@ -1032,26 +1352,41 @@ fn flacStream(gpa: std.mem.Allocator, rnd: std.Random, spec: FlacSpec) std.Array
 
         var w: BitWriter = .{ .gpa = gpa };
         defer w.bytes.deinit(gpa);
+        if (spec.junk_ff) {
+            const junk = [_][]const u8{ "\xFF", "\x00\xFF", "\xFF\xFF\xFF", "\x12\xFF\xFE\xFF" };
+            out.appendSlice(gpa, junk[fi % junk.len]) catch @panic("oom");
+        }
         w.bytes.appendSlice(gpa, hdr.items) catch @panic("oom");
         const chan = gpa.alloc(i32, block) catch @panic("oom");
         defer gpa.free(chan);
+        const chan64 = gpa.alloc(i64, block) catch @panic("oom");
+        defer gpa.free(chan64);
+        // STREAMINFO's depth decides whether the decoder takes 64 bits
+        const wide = (spec.si_bps orelse spec.bps) == 32;
         for (0..spec.channels) |c| {
             var sbps = spec.bps;
-            if ((assignment == 8 or assignment == 10) and c == 1) sbps += 1;
-            if (assignment == 9 and c == 0) sbps += 1;
-            const wasted: u32 = if (spec.wasted and rnd.boolean()) 1 + rnd.uintLessThan(u32, @min(sbps - 1, 6)) else 0;
+            const side = ((assignment == 8 or assignment == 10) and c == 1) or (assignment == 9 and c == 0);
+            if (side) sbps += 1;
+            var wasted: u32 = if (spec.wasted and rnd.boolean()) 1 + rnd.uintLessThan(u32, @min(sbps - 1, 6)) else 0;
+            if (spec.side_wasted_full and side) wasted = sbps - 1;
             const kind = spec.kinds[(fi + c) % spec.kinds.len];
             const amp: f64 = std.math.ldexp(@as(f64, 0.9), @as(i32, @intCast(sbps - 1 - wasted)));
             const noise: i64 = @max(1, @as(i64, @intFromFloat(amp / 64)));
-            for (chan, 0..) |*x, i| {
+            for (chan64, 0..) |*x, i| {
                 const t: f64 = @floatFromInt(sample_no + i);
                 var v: i64 = @intFromFloat(@sin(t * (0.01 + 0.003 * @as(f64, @floatFromInt(c)))) * amp);
                 v += rnd.intRangeAtMost(i64, -noise, noise);
                 const lim = (@as(i64, 1) << @intCast(sbps - 1 - wasted)) - 1;
                 v = std.math.clamp(v, -lim - 1, lim);
-                x.* = @intCast(v << @intCast(wasted));
+                x.* = v << @intCast(wasted);
             }
-            writeSubframe(&w, gpa, rnd, spec, kind, chan, sbps, wasted);
+            if (wide) {
+                writeSubframe64(&w, gpa, rnd, spec, kind, chan64, sbps, wasted);
+            } else {
+                for (chan, chan64) |*x, y| x.* = @intCast(y);
+                const force: ?u32 = if (spec.bad_porder and fi == 1 and c == 0) 4 else null;
+                writeSubframePorder(&w, gpa, rnd, spec, kind, chan, sbps, wasted, force);
+            }
         }
         w.align8();
         const crc = crc16Bits(w.bytes.items);
@@ -1129,7 +1464,6 @@ fn id3Prefix(gpa: std.mem.Allocator, body: []const u8, tag_len: u32, footer: boo
 }
 
 fn synthFlac(gpa: std.mem.Allocator, list: *std.ArrayList(File), rnd: std.Random) !void {
-    var name_buf: [160]u8 = undefined;
     const specs = [_]FlacSpec{
         .{ .channels = 1, .bps = 16, .rate = 16000, .block = 4096, .frames = 4 },
         .{ .channels = 2, .bps = 16, .rate = 44100, .block = 4608, .frames = 3, .assignment = 255 },
@@ -1154,7 +1488,47 @@ fn synthFlac(gpa: std.mem.Allocator, list: *std.ArrayList(File), rnd: std.Random
         .{ .channels = 1, .bps = 20, .rate = 16000, .block = 256, .frames = 12, .kinds = "l", .max_order = 3, .rice2 = true, .big_coefs = 12 },
         .{ .channels = 2, .bps = 19, .rate = 16000, .block = 256, .frames = 12, .kinds = "l", .max_order = 3, .rice2 = true, .big_coefs = 13, .assignment = 255 },
     };
-    for (specs, 0..) |sp, idx| {
+    try synthFlacSpecs(gpa, list, rnd, &specs, 0);
+    // what dr_flac v0.13.4 changed, from a generator of its own so the
+    // streams above stay as they were
+    var prng = std.Random.DefaultPrng.init(0x13_4);
+    const specs_v0134 = [_]FlacSpec{
+        // dr_flac v0.13.4: 32-bit streams decode in 64 bits, side channels
+        // at 33, with the frame header's 32-bit code or STREAMINFO's
+        .{ .channels = 2, .bps = 32, .rate = 48000, .block = 1024, .frames = 4, .assignment = 8, .kinds = "cvf", .bps_code = 7 },
+        .{ .channels = 2, .bps = 32, .rate = 44100, .block = 576, .frames = 4, .assignment = 9, .kinds = "fvc", .bps_code = 7, .wasted = true },
+        .{ .channels = 2, .bps = 32, .rate = 32000, .block = 0, .frames = 8, .assignment = 10, .kinds = "fl", .escape = true },
+        .{ .channels = 2, .bps = 32, .rate = 16000, .block = 256, .frames = 8, .assignment = 255, .kinds = "lfv", .bps_code = 7, .rice2 = true },
+        .{ .channels = 3, .bps = 32, .rate = 22050, .block = 512, .frames = 3, .kinds = "flv", .bps_code = 7 },
+        // partition orders past 8, and one that does not divide its block
+        .{ .channels = 1, .bps = 16, .rate = 16000, .block = 4096, .frames = 4, .kinds = "fl", .max_porder = 12, .max_order = 1 },
+        .{ .channels = 2, .bps = 16, .rate = 22050, .block = 32768, .frames = 2, .kinds = "f", .max_porder = 15, .assignment = 255 },
+        .{ .channels = 1, .bps = 16, .rate = 16000, .block = 1000, .frames = 4, .kinds = "ff", .bad_porder = true },
+        // frames past STREAMINFO's maximum block, and of another depth
+        .{ .channels = 2, .bps = 16, .rate = 44100, .block = 4096, .frames = 3, .assignment = 255, .si_max_block = 64 },
+        .{ .channels = 1, .bps = 16, .rate = 16000, .block = 0, .frames = 6, .si_max_block = 0 },
+        .{ .channels = 2, .bps = 24, .rate = 48000, .block = 1152, .frames = 4, .assignment = 255, .si_bps = 16 },
+        .{ .channels = 2, .bps = 16, .rate = 44100, .block = 576, .frames = 4, .assignment = 10, .si_bps = 28 },
+        .{ .channels = 1, .bps = 20, .rate = 16000, .block = 1024, .frames = 3, .si_bps = 12 },
+        // a side channel with all but one bit wasted: its 32-bit shift
+        .{ .channels = 2, .bps = 16, .rate = 16000, .block = 512, .frames = 6, .assignment = 8, .side_wasted_full = true },
+        .{ .channels = 2, .bps = 16, .rate = 16000, .block = 512, .frames = 6, .assignment = 9, .side_wasted_full = true },
+        .{ .channels = 2, .bps = 28, .rate = 16000, .block = 512, .frames = 6, .assignment = 255, .side_wasted_full = true },
+        // the sync search over 0xFF bytes
+        .{ .channels = 1, .bps = 16, .rate = 16000, .block = 576, .frames = 8, .junk_ff = true },
+        .{ .channels = 2, .bps = 24, .rate = 48000, .block = 0, .frames = 8, .assignment = 255, .junk_ff = true },
+        // metadata v0.13.4 refuses, then decodes past
+        .{ .channels = 1, .bps = 16, .rate = 16000, .block = 1024, .frames = 3, .meta = .invalid_type },
+        .{ .channels = 2, .bps = 16, .rate = 16000, .block = 1024, .frames = 3, .assignment = 255, .meta = .bad_seektable },
+        .{ .channels = 1, .bps = 16, .rate = 16000, .block = 1024, .frames = 3, .meta = .short_vorbis },
+        .{ .channels = 1, .bps = 24, .rate = 22050, .block = 2048, .frames = 3, .meta = .overrun },
+    };
+    try synthFlacSpecs(gpa, list, prng.random(), &specs_v0134, specs.len);
+}
+
+fn synthFlacSpecs(gpa: std.mem.Allocator, list: *std.ArrayList(File), rnd: std.Random, specs: []const FlacSpec, first: usize) !void {
+    var name_buf: [160]u8 = undefined;
+    for (specs, first..) |sp, idx| {
         var native = flacStream(gpa, rnd, sp);
         defer native.deinit(gpa);
         var b: Builder = .{ .gpa = gpa };

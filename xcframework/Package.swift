@@ -11,7 +11,7 @@ import PackageDescription
 
 let package = Package(
     name: "llama",
-    platforms: [.iOS("16.4"), .macOS("13.3"), .tvOS("16.4"), .visionOS("1.0")],
+    platforms: [.iOS("26.0"), .macOS("26.0"), .tvOS("26.0"), .visionOS("26.0")],
     products: [
         .library(name: "llama", targets: ["llama"]),
     ],

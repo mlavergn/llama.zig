@@ -49,3 +49,12 @@ $VOCAB/ggml-vocab-llama-spm.gguf vs
 # --dry-run: what a failed merge leaves on disk is whatever each side's stream
 # had flushed, upstream's std::ofstream dropping its buffer at exit()
 !fail --merge --dry-run $DATA/trunc-merge-00001-of-00001.gguf tm.gguf
+
+# v0.9.0: every split must be the next of the first one's set, and the set
+# must hold split.tensors.count tensors -- each used to merge regardless
+!fail --merge $DATA/cnt-00001-of-00002.gguf cnt.gguf
+!fail --merge $DATA/no-00001-of-00002.gguf no.gguf
+!fail --merge $DATA/tc-00001-of-00002.gguf tc.gguf
+!fail --merge --dry-run $DATA/tc-00001-of-00002.gguf tc-dry.gguf
+--merge $DATA/lm-00001-of-00002.gguf lm.gguf
+--merge $DATA/l3-00001-of-00003.gguf l3.gguf

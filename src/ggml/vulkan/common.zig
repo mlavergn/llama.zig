@@ -6,13 +6,14 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` and
-//! `llama.cpp/ggml/include/ggml-vulkan.h` at v0.8.0 (`8642541b2`). The C++
+//! `llama.cpp/ggml/include/ggml-vulkan.h` at v0.9.0 (`cd959bae9`). The C++
 //! is written against `vulkan.hpp`, a header-only C++ wrapper over the C API
 //! in `vulkan_core.h`; what it adds that changes behaviour is reproduced here
 //! -- the dispatcher, exceptions on a failed `VkResult`, and the
 //! `VK_INCOMPLETE` retry of every `enumerate*` -- and nothing else.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 
 /// The Vulkan C API, `vulkan_core.h` at the pinned SDK (PLAN.md, Decision
@@ -144,6 +145,10 @@ pub const Dispatch = struct {
     vkCreateSemaphore: vk.PFN_vkCreateSemaphore = null,
     vkDestroySemaphore: vk.PFN_vkDestroySemaphore = null,
     vkWaitSemaphores: vk.PFN_vkWaitSemaphores = null,
+    vkSignalSemaphore: vk.PFN_vkSignalSemaphore = null,
+    vkGetSemaphoreCounterValue: vk.PFN_vkGetSemaphoreCounterValue = null,
+    vkGetDeviceProcAddr: vk.PFN_vkGetDeviceProcAddr = null,
+    vkGetPhysicalDeviceExternalSemaphoreProperties: vk.PFN_vkGetPhysicalDeviceExternalSemaphoreProperties = null,
     vkCreateEvent: vk.PFN_vkCreateEvent = null,
     vkDestroyEvent: vk.PFN_vkDestroyEvent = null,
     vkGetEventStatus: vk.PFN_vkGetEventStatus = null,
@@ -360,6 +365,18 @@ pub fn structure(comptime T: type, s_type: vk.VkStructureType) T {
     var s = std.mem.zeroes(T);
     s.sType = s_type;
     return s;
+}
+
+/// Ports `YIELD` (ggml-vulkan-types.h:82 @cd959bae9), the clang arm on ARM,
+/// `__yield()`; on x86 the clang arm is `_mm_pause()` -- `zig c++` is clang
+/// on Windows too, so `YieldProcessor()` is never compiled -- and elsewhere
+/// it is empty.
+pub inline fn yield() void {
+    switch (builtin.cpu.arch) {
+        .x86_64, .x86 => asm volatile ("pause"),
+        .aarch64, .aarch64_be, .arm, .armeb, .thumb, .thumbeb => asm volatile ("yield"),
+        else => {},
+    }
 }
 
 /// Whether the environment variable `var_name` is set: the C++'s

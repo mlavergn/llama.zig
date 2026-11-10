@@ -4,8 +4,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` and
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.8.0
-//! (`8642541b2`). Upstream split `ggml-vulkan.cpp` into those files at
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.9.0
+//! (`cd959bae9`). Upstream split `ggml-vulkan.cpp` into those files at
 //! v0.5.0.
 
 const std = @import("std");
@@ -838,7 +838,7 @@ fn topkMoe(ctx: *BackendCtx, cgraph: *const CGraph, i: c_int, f: *Fusion, ops: [
     return true;
 }
 
-/// Ports `ggml_backend_vk_graph_compute` (ggml-vulkan.cpp:14361 @8642541b2):
+/// Ports `ggml_backend_vk_graph_compute` (ggml-vulkan.cpp:14387 @cd959bae9):
 /// records the graph node by node, fusing where it can, and submits in
 /// batches sized by node count and estimated flops so the GPU starts while
 /// the rest is recorded.
@@ -911,7 +911,13 @@ pub fn graphCompute(backend: c.ggml_backend_t, cgraph_c: ?*c.ggml_cgraph) callco
             flops_cap = 2_000_000_000 * @as(u64, dev.shader_core_count);
         }
     }
-    var flops_per_submit: u64 = @min(flops_cap, ctx.last_total_flops / 40);
+    // small graphs gain nothing from splitting, each submit costs CPU time
+    var flops_per_submit: u64 = if (ctx.last_total_flops < 1_000_000_000) 0 else blk: {
+        // `std::clamp(v, lo, hi)`, as libc++ evaluates it.
+        const v = ctx.last_total_flops / 40;
+        const lo = @min(@as(u64, 100_000_000), flops_cap);
+        break :blk if (v < lo) lo else if (flops_cap < v) flops_cap else v;
+    };
 
     const SubmitAfter = struct {
         ctx: *BackendCtx,

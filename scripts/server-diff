@@ -485,7 +485,7 @@ def interleaves(text, lines):
     """Whether `text` is some interleaving of the writes `lines` were made
     of: each common_log line as its three fprintf calls, the masked
     timestamp, the level and the message (log.cpp:128, 138, 155
-    @8642541b2), and each other line as one write, both sequences kept in
+    @cd959bae9), and each other line as one write, both sequences kept in
     order."""
     log, direct = [], []
     for l in lines:

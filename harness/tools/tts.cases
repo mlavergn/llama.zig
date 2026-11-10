@@ -65,7 +65,21 @@
 -m $MM/text-qwen3-soprano.gguf -mm $MM/soprano.gguf -p "cpu" -n 4 --seed 3 --no-mmproj-offload -ngl 0
 !fail -m $MM/text-qwen3-soprano.gguf -mm $MM/soprano.gguf -p "speaker" -n 6 --seed 2 --tts-speaker-file $DATA/tone16k.wav
 -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -p "hello" -n 8 --seed 3
--m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -p "bonjour" -n 6 --seed 4 --tts-lang fr --tts-voice alice -o voice.wav
+# v0.9.0: LFM3-Audio has predefined voices now, and "alice" is not one of them
+!fail -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -p "bonjour" -n 6 --seed 4 --tts-lang fr --tts-voice alice -o voice.wav
+-m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -p "bonjour" -n 6 --seed 4 --tts-lang fr --tts-voice Male -o voice.wav
 -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -p "speaker" -n 4 --seed 5 --tts-speaker-file $DATA/tone16k.wav
 -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -p "cpu" -n 4 --seed 3 --no-mmproj-offload -ngl 0
 -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen-eos.gguf -p "ends" -n 20 --seed 6
+
+# v0.9.0: predefined voices (pocket-tts and Chatterbox carry voice.alba and
+# voice.Bob): the first by default, with a warning; one by name, any case; an
+# unknown name lists them; a voice and a speaker file together are refused.
+# n_parallel is doubled and the KV cache unified for every model.
+-m $MM/text-pockettts.gguf -mm $MM/pockettts.gguf -p "a named voice" -n 6 --seed 2 --tts-voice alba -o alba.wav
+-m $MM/text-pockettts.gguf -mm $MM/pockettts.gguf -p "a named voice" -n 6 --seed 2 --tts-voice BOB -o bob.wav
+!fail -m $MM/text-pockettts.gguf -mm $MM/pockettts.gguf -p "x" -n 4 --seed 2 --tts-voice nobody
+!fail -m $MM/text-pockettts.gguf -mm $MM/pockettts.gguf -p "x" -n 4 --seed 2 --tts-voice alba --tts-speaker-file $DATA/tone16k.wav
+-m $MM/text-qwen3-cbx.gguf -mm $MM/chatterbox.gguf -p "hello" -n 6 --seed 3 -o cbx.wav
+-m $MM/text-qwen3-cbx.gguf -mm $MM/chatterbox.gguf -p "hello" -n 6 --seed 3 --tts-voice alba -o cbx-alba.wav
+-m $MM/text-qwen3-cbx.gguf -mm $MM/chatterbox-mtl.gguf -p "hello" -n 6 --seed 3 --tts-voice alba -o cbx-mtl.wav

@@ -593,6 +593,71 @@ def v062_cases():
     return c
 
 
+def chunks(n, ext=b"", zeros=0, data=b"a"):
+    """n one-byte chunks (`data`), each size line padded with `zeros` leading
+    zeros and followed by `ext`, then the last chunk."""
+    one = b"0" * zeros + b"%x" % len(data) + ext + b"\r\n" + data + b"\r\n"
+    return one * n + b"0\r\n\r\n"
+
+
+# cpp-httplib 0.64: what a request may no longer do -- a transfer coding but
+# a lone "chunked" is a 501, a Range on anything but GET and HEAD is not
+# read, an unread body is drained only up to 256 KiB, a request without a
+# length never has a body, and the bytes around a chunk's data are bounded
+def v064_cases():
+    c = []
+    hz = req("GET /health HTTP/1.1")
+    # RFC 9112 6.1: a lone "chunked", in any case, is the only coding
+    c.append(simple("te-chunked-mixed-case", req("POST /echo HTTP/1.1", "Transfer-Encoding: ChUnKeD", body=b"2\r\nhi\r\n0\r\n\r\n"),
+                    ("send", hz), ("resp",)))
+    c.append(simple("te-chunked-twice-lines", req("POST /echo HTTP/1.1", "Transfer-Encoding: chunked", "Transfer-Encoding: chunked",
+                                                  body=b"2\r\nhi\r\n0\r\n\r\n"), ("send", hz), ("resp",)))
+    c.append(simple("te-chunked-twice-list", req("POST /echo HTTP/1.1", "Transfer-Encoding: chunked, chunked", body=b"2\r\nhi\r\n0\r\n\r\n"),
+                    ("send", hz), ("resp",)))
+    c.append(simple("te-gzip-chunked", req("POST /echo HTTP/1.1", "Transfer-Encoding: gzip, chunked", body=b"2\r\nhi\r\n0\r\n\r\n")))
+    c.append(simple("te-identity-chunked-get", req("GET /health HTTP/1.1", "Transfer-Encoding: identity,chunked", body=b"0\r\n\r\n")))
+    c.append(simple("te-chunked-space", req("POST /echo HTTP/1.1", "Transfer-Encoding:  chunked ", body=b"2\r\nhi\r\n0\r\n\r\n")))
+    c.append(simple("te-chunked-and-cl-501", req("POST /echo HTTP/1.1", "Transfer-Encoding: x, chunked", "Content-Length: 0",
+                                                 body=b"0\r\n\r\n")))
+    c.append(simple("te-websocket", ws_upgrade("/ws/a", "Transfer-Encoding: deflate, chunked")))
+    # RFC 9110 14.2: a Range is read for GET and HEAD only
+    c.append(simple("range-post-bad", post("/echo", b"0123456789", "Range: items=0-1", ct="text/plain")))
+    c.append(simple("range-post-ok", post("/echo", b"0123456789", "Range: bytes=0-1", ct="text/plain")))
+    c.append(simple("range-delete-bad", req("DELETE /echo HTTP/1.1", "Range: bytes=9-1")))
+    c.append(simple("range-head-bad", req("HEAD /echo HTTP/1.1", "Range: bytes=9-1")))
+    c.append(simple("range-get-bad-still", req("GET /echo HTTP/1.1", "Range: bytes=9-1")))
+    # an unread body is skipped up to CPPHTTPLIB_UNREAD_PAYLOAD_MAX_LENGTH: the
+    # middleware answers OPTIONS before routing reads any body
+    limit = 256 * 1024
+    for name, n in (("at-limit", limit), ("over-limit", limit + 1), ("small", 3)):
+        c.append(("unread-body-" + name, [("send", req("OPTIONS /echo HTTP/1.1", "Content-Length: %d" % n, body=b"u" * n)), ("resp",),
+                                          ("send", hz), ("resp",)]))
+        c.append(("unread-chunked-" + name, [("send", req("OPTIONS /echo HTTP/1.1", "Transfer-Encoding: chunked",
+                                                          body=b"%x\r\n" % n + b"c" * n + b"\r\n0\r\n\r\n")), ("resp",),
+                                             ("send", hz), ("resp",)]))
+    c.append(("unread-chunks-over-limit", [("send", req("OPTIONS /echo HTTP/1.1", "Transfer-Encoding: chunked",
+                                                        body=(b"8000\r\n" + b"k" * 0x8000 + b"\r\n") * 8 + b"1\r\nk\r\n0\r\n\r\n")),
+                                           ("resp",), ("send", hz), ("resp",)]))
+    c.append(("unread-body-404-over", [("send", req("POST /nope HTTP/1.1", "Content-Length: %d" % (limit + 1), body=b"u" * (limit + 1))),
+                                       ("resp",), ("send", hz), ("resp",)]))
+    # RFC 9112 6: no length, no body, whether or not the connection persists
+    c.append(simple("nolength-http10", b"POST /echo HTTP/1.0\r\n" + H + b"\r\nstray-bytes"))
+    c.append(simple("nolength-close-big", req("POST /echo HTTP/1.1", "Connection: close", body=b"z" * 70000)))
+    # the bytes around a chunk's data: 16 a chunk and twice its data are
+    # free, past that they add up to one header field (8192)
+    c.append(simple("chunk-overhead-170", req("POST /echo HTTP/1.1", "Transfer-Encoding: chunked", "Content-Type: text/plain",
+                                              body=chunks(170, ext=b";" + b"x" * 60)), ("send", hz), ("resp",)))
+    c.append(simple("chunk-overhead-171", req("POST /echo HTTP/1.1", "Transfer-Encoding: chunked", "Content-Type: text/plain",
+                                              body=chunks(171, ext=b";" + b"x" * 60)), ("send", hz), ("resp",)))
+    c.append(simple("chunk-overhead-zeros", req("POST /echo HTTP/1.1", "Transfer-Encoding: chunked", "Content-Type: text/plain",
+                                                body=chunks(171, zeros=61))))
+    c.append(simple("chunk-overhead-big-data", req("POST /echo HTTP/1.1", "Transfer-Encoding: chunked", "Content-Type: text/plain",
+                                                   body=chunks(400, ext=b";" + b"x" * 60, data=b"d" * 40))))
+    c.append(simple("chunk-overhead-unread", req("GET /health HTTP/1.1", "Transfer-Encoding: chunked", body=chunks(171, ext=b";" + b"x" * 60)),
+                    ("send", hz), ("resp",)))
+    return c
+
+
 WS_KEY = "dGhlIHNhbXBsZSBub25jZQ=="
 
 
@@ -620,6 +685,16 @@ def ws_key_cases():
     # middleware runs before the switch
     c.append(simple("ws-nokey", ws_upgrade("/ws/a")))
     c.append(simple("ws-key", ws_upgrade("/ws/a", "Authorization: Bearer k2"), ("wsframe",), ("send", ws_frame(8, b"")), ("wsframe",)))
+    # cpp-httplib 0.64: an upgrade answered before it, with its body unread,
+    # closes the connection, which would read that body as the next request
+    hz = req("GET /health HTTP/1.1")
+    c.append(simple("ws-nokey-body", ws_upgrade("/ws/a", "Content-Length: 4") + b"abcd", ("send", hz), ("resp",)))
+    c.append(simple("ws-nokey-body-request", ws_upgrade("/ws/a", "Content-Length: %d" % len(hz)) + hz, ("resp",)))
+    c.append(simple("ws-nokey-chunked", ws_upgrade("/ws/a", "Transfer-Encoding: chunked") + b"0\r\n\r\n", ("send", hz), ("resp",)))
+    c.append(simple("ws-nokey-cl0", ws_upgrade("/ws/a", "Content-Length: 0"), ("send", hz), ("resp",)))
+    c.append(simple("ws-nokey-nobody", ws_upgrade("/ws/a"), ("send", hz), ("resp",)))
+    c.append(simple("ws-noroute-body", ws_upgrade("/nope", "Authorization: Bearer k2", "Content-Length: 4") + b"abcd",
+                    ("send", hz), ("resp",)))
     return c
 
 
@@ -701,6 +776,9 @@ def notready_cases():
     c.append(simple("options", req("OPTIONS /echo HTTP/1.1")))
     c.append(simple("quit-refused", req("GET /quit HTTP/1.1")))
     c.append(simple("bad-line", req("BREW / HTTP/1.1")))
+    # cpp-httplib 0.64: the 503 an upgrade gets keeps its body unread
+    c.append(simple("ws-body", ws_upgrade("/ws/a", "Content-Length: 4") + b"abcd", ("send", req("GET /health HTTP/1.1")), ("resp",)))
+    c.append(simple("ws-nobody", ws_upgrade("/ws/a"), ("send", req("GET /health HTTP/1.1")), ("resp",)))
     return c
 
 
@@ -766,6 +844,7 @@ def unix_cases():
 CONFIGS = [
     ("default", {}, base_cases),
     ("v062", {}, v062_cases),
+    ("v064", {}, v064_cases),
     ("apikey", {}, key_cases),
     ("prefix", {}, prefix_cases),
     ("auto", {}, small_cases),

@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/log.cpp` and the macros of `common/log.h` (v0.8.0,
-//! `8642541b2`), and `tty_can_use_colors`, `tty_enable_ansi` and
+//! Ports `llama.cpp/common/log.cpp` and the macros of `common/log.h` (v0.9.0,
+//! `cd959bae9`), and `tty_can_use_colors`, `tty_enable_ansi` and
 //! `common_is_tty` from `common/common.cpp`. Each declaration names what it
 //! ports and the line it began at.
 //!

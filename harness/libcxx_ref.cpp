@@ -25,7 +25,7 @@ struct token_data {
 
 extern "C" {
 
-// llama-sampler.cpp:137 @8642541b2 -- the comparator every candidate sort uses.
+// llama-sampler.cpp:137 @cd959bae9 -- the comparator every candidate sort uses.
 void ref_sort_td(token_data * d, size_t n) {
     std::sort(d, d + n, [](const token_data & a, const token_data & b) { return a.logit > b.logit; });
 }
@@ -34,7 +34,7 @@ void ref_partial_sort_td(token_data * d, size_t n, size_t k) {
     std::partial_sort(d, d + k, d + n, [](const token_data & a, const token_data & b) { return a.logit > b.logit; });
 }
 
-// llama-sampler.cpp:1945 @8642541b2 -- typical's index sort.
+// llama-sampler.cpp:1945 @cd959bae9 -- typical's index sort.
 void ref_sort_idx(size_t * idx, size_t n, const float * scores) {
     std::sort(idx, idx + n, [&](size_t a, size_t b) { return scores[a] < scores[b]; });
 }
@@ -63,7 +63,7 @@ void ref_uniform_f32(uint32_t seed, float * out, size_t n) {
     for (size_t i = 0; i < n; i++) out[i] = dist(g);
 }
 
-// llama-sampler.cpp:218 @8642541b2 -- a fresh distribution per draw, over
+// llama-sampler.cpp:218 @cd959bae9 -- a fresh distribution per draw, over
 // the `p` fields, as llama_sample_dist builds it.
 void ref_discrete(const token_data * d, size_t n, uint32_t seed, int draws, int * out) {
     struct probs_iterator {
@@ -122,7 +122,7 @@ struct pq_item {
     int   left;
 };
 
-// llama-vocab.cpp:93 @8642541b2 -- llm_bigram_spm::comparator.
+// llama-vocab.cpp:93 @cd959bae9 -- llm_bigram_spm::comparator.
 struct pq_less {
     bool operator()(const pq_item & l, const pq_item & r) const {
         return (l.score < r.score) || (l.score == r.score && l.left > r.left);

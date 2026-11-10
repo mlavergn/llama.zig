@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` at v0.8.0
-//! (`8642541b2`): `ggml_gemv_q2_K_8x8_q8_K` and `ggml_gemm_q2_K_8x8_q8_K`,
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` at v0.9.0
+//! (`cd959bae9`): `ggml_gemv_q2_K_8x8_q8_K` and `ggml_gemm_q2_K_8x8_q8_K`,
 //! their `__AVX2__` arms, and the gemm's `__AVX512BW__ && __AVX512DQ__` arm,
 //! 1,480 lines of C that are the same body at 512 bits over two blocks
 //! (`wide.zig`).

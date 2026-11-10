@@ -11,7 +11,7 @@
 //! - `llama.cpp/ggml/src/ggml-cpu/common.h`    — the tile sizes
 //! - `llama.cpp/ggml/src/ggml-impl.h`          — `ggml_up`
 //!
-//! all at v0.8.0 (`8642541b2`). Each declaration below names the C++ it
+//! all at v0.9.0 (`cd959bae9`). Each declaration below names the C++ it
 //! replaces and the line it began at.
 //!
 //! # Three paths through `flash_attn_ext`
@@ -201,7 +201,11 @@ fn simdGemm(C: [*]f32, A: [*]const f32, B: [*]const f32, M: usize, K: usize, N: 
 // flash_attn_ext
 
 /// Ports `ggml_compute_forward_flash_attn_ext_f16_one_chunk`
-/// (ops.cpp:8818 @8642541b2).
+/// (ops.cpp:8834 @cd959bae9).
+///
+/// With `kv_rows` (`src[5]`, from `ggml_flash_attn_ext_rows`) the loop runs
+/// over the mask columns, and column `ic` of slice `iq3` reads K/V row
+/// `kv_rows[ic, iq3]`; a negative row is padding and is skipped outright.
 ///
 /// Parameters:
 /// - `ir0`, `ir1`: the query rows to compute.
@@ -223,6 +227,7 @@ fn oneChunk(
     const v = impl.one(Tensor, dst.src[2]);
     const mask: ?*Tensor = dst.src[3];
     const sinks: ?*Tensor = dst.src[4];
+    const kv_rows: ?*Tensor = dst.src[5];
 
     const neq1 = q.ne[1];
     const neq2 = q.ne[2];
@@ -307,6 +312,8 @@ fn oneChunk(
         const pq = at(f32, q.data, off(iq1, nbq1) + off(iq2, nbq2) + off(iq3, nbq3));
         q_to_vec_dot.?(pq, Q_q, DK);
 
+        const rows: ?[*]const i32 = if (kv_rows) |kr| at(i32, kr.data, off(iq3, kr.nb[1])) else null;
+
         // online softmax / attention
         // loop over n_kv and n_head_kv
         // ref: https://arxiv.org/pdf/2112.05682.pdf
@@ -318,9 +325,14 @@ fn oneChunk(
                 continue;
             }
 
+            const ik1: i64 = if (rows) |r| r[@intCast(ic)] else ic;
+            if (ik1 < 0) {
+                continue;
+            }
+
             var s: f32 = undefined; // KQ value
 
-            const k_data = at(u8, k.data, off(ic, nbk1) + off(ik2, nbk2) + off(ik3, nbk3));
+            const k_data = at(u8, k.data, off(ik1, nbk1) + off(ik2, nbk2) + off(ik3, nbk3));
             kq_vec_dot.?(@intCast(DK), &s, 0, k_data, 0, Q_q, 0, 1);
 
             s = s * ap.scale; // scale KQ value
@@ -336,7 +348,7 @@ fn oneChunk(
             var ms: f32 = 1.0; // upon new higher max val, scale VKQ and KQ sum with this value
             var vs: f32 = 1.0; // post-softmax KQ value, expf(s - M)
 
-            const v_data = at(u8, v.data, off(ic, nbv1) + off(iv2, nbv2) + off(iv3, nbv3));
+            const v_data = at(u8, v.data, off(ik1, nbv1) + off(iv2, nbv2) + off(iv3, nbv3));
 
             if (v.type == c.GGML_TYPE_F16) {
                 if (s > M) {
@@ -428,7 +440,23 @@ fn oneChunk(
     }
 }
 
-/// Ports `ggml_compute_forward_flash_attn_ext_tiled` (ops.cpp:9056 @8642541b2).
+/// Ports the `kv_row` lambda (ops.cpp:9170 @cd959bae9) of the tiled flash
+/// attention kernel: the K/V row for mask column `i`, padding
+/// (negative) rows clamped to row 0, or `i` itself without `kv_rows`.
+const KvRow = struct {
+    rows: ?[*]const i32,
+
+    fn at(self: KvRow, i: i64) i64 {
+        const r = self.rows orelse return i;
+        return @max(r[@intCast(i)], 0);
+    }
+};
+
+/// Ports `ggml_compute_forward_flash_attn_ext_tiled` (ops.cpp:9080 @cd959bae9).
+///
+/// With `kv_rows` the tile loop runs over the mask columns and reads each K/V
+/// row through `kv_rows`; a padding row (negative) is masked to `-inf`, so the
+/// C reads row 0 for it.
 fn tiled(params: *const ComputeParams, dst: *Tensor, ir0: i64, ir1: i64) void {
     const q = impl.one(Tensor, dst.src[0]);
     const k = impl.one(Tensor, dst.src[1]);
@@ -477,12 +505,20 @@ fn tiled(params: *const ComputeParams, dst: *Tensor, ir0: i64, ir1: i64) void {
     const Q_TILE_SZ = q_tile_sz;
     const KV_TILE_SZ = kv_tile_sz;
 
+    // with kv_rows the loop runs over the mask columns and reads K/V rows through kv_rows
+    const kv_rows: ?*Tensor = dst.src[5];
+    const n_kv_cols: i64 = if (kv_rows) |kr| kr.ne[0] else nek1;
+
     var ir: i64 = ir0;
     while (ir < ir1) {
         // q indices for the start of this tile
         const iq3 = @divTrunc(ir, neq2 * neq1);
         const iq2 = @divTrunc(ir - iq3 * neq2 * neq1, neq1);
         const iq1 = ir - iq3 * neq2 * neq1 - iq2 * neq1;
+
+        // padding rows are masked, read row 0 for them
+        const rows: ?[*]const i32 = if (kv_rows) |kr| at(i32, kr.data, off(iq3, kr.nb[1])) else null;
+        const kv_row = KvRow{ .rows = rows };
 
         // Number of valid rows in this tile:
         // - limited by tile size (Q_TILE_SZ)
@@ -546,8 +582,8 @@ fn tiled(params: *const ComputeParams, dst: *Tensor, ir0: i64, ir1: i64) void {
         @memset(V32[0 .. KV_TILE_SZ * dv], 0);
 
         var ic: i64 = 0;
-        while (ic < nek1) : (ic += @intCast(KV_TILE_SZ)) {
-            const kv_tile: usize = @intCast(@min(@as(i64, KV_TILE_SZ), nek1 - ic));
+        while (ic < n_kv_cols) : (ic += @intCast(KV_TILE_SZ)) {
+            const kv_tile: usize = @intCast(@min(@as(i64, KV_TILE_SZ), n_kv_cols - ic));
 
             // skip the tile entirely if all the masks are -inf
             if (mask) |m| {
@@ -574,7 +610,7 @@ fn tiled(params: *const ComputeParams, dst: *Tensor, ir0: i64, ir1: i64) void {
             // Pack K tile transposed: K_f32[dk][kv] so KV_TILE is contiguous (SIMD dim)
             // Zero-pad the last tile so the GEMM always operates on KV_TILE_SZ columns
             for (0..kv_tile) |tk| {
-                const k_off = off(ic + @as(i64, @intCast(tk)), nbk1) + off(ik2, nbk2) + off(ik3, nbk3);
+                const k_off = off(kv_row.at(ic + @as(i64, @intCast(tk))), nbk1) + off(ik2, nbk2) + off(ik3, nbk3);
                 if (kv_type == c.GGML_TYPE_F16) {
                     const k_f16 = at(c.ggml_fp16_t, k.data, k_off);
                     for (0..dk) |d| {
@@ -643,7 +679,7 @@ fn tiled(params: *const ComputeParams, dst: *Tensor, ir0: i64, ir1: i64) void {
             // V accumulation: VKQ32 += softmax(KQ) * V
             // Pack V tile to contiguous F32, zero-padded
             for (0..kv_tile) |tk| {
-                const v_off = off(ic + @as(i64, @intCast(tk)), nbv1) + off(iv2, nbv2) + off(iv3, nbv3);
+                const v_off = off(kv_row.at(ic + @as(i64, @intCast(tk))), nbv1) + off(iv2, nbv2) + off(iv3, nbv3);
                 if (kv_type == c.GGML_TYPE_F16) {
                     convert.ggml_cpu_fp16_to_fp32(at(c.ggml_fp16_t, v.data, v_off), V32 + tk * dv, DV);
                 } else {
@@ -774,7 +810,7 @@ fn reducePartials(params: *const ComputeParams, dst: *Tensor, n_chunks: i64, chu
     }
 }
 
-/// Ports `ggml_compute_forward_flash_attn_ext_f16` (ops.cpp:9416 @8642541b2),
+/// Ports `ggml_compute_forward_flash_attn_ext_f16` (ops.cpp:9448 @cd959bae9),
 /// the `GGML_SIMD` arm without SVE for the tiled-path guard, which since
 /// v0.6.0 x86 skips.
 fn flashAttnExtF16(params: *const ComputeParams, dst: *Tensor) void {
@@ -800,8 +836,12 @@ fn flashAttnExtF16(params: *const ComputeParams, dst: *Tensor) void {
     // When use_ref is set, force the vec-only reference implementation (no tiling, no KV-chunking)
     const use_ref = params.use_ref;
 
+    // with kv_rows the loops run over the mask columns, the split KV path does not support it
+    const kv_rows: ?*Tensor = dst.src[5];
+    const n_kv_cols: i64 = if (kv_rows) |kr| kr.ne[0] else nek1;
+
     const kv_is_f32_or_f16 = (k.type == c.GGML_TYPE_F32 or k.type == c.GGML_TYPE_F16);
-    const use_split_kv_path = !use_ref and (neq1 == 1 and neq3 == 1) and kv_is_f32_or_f16 and (k.type == v.type) and q.type == c.GGML_TYPE_F32 and nek1 >= 512;
+    const use_split_kv_path = !use_ref and kv_rows == null and (neq1 == 1 and neq3 == 1) and kv_is_f32_or_f16 and (k.type == v.type) and q.type == c.GGML_TYPE_F32 and nek1 >= 512;
 
     if (use_split_kv_path) {
         const chunk_size = @divTrunc(nek1 + nth - 1, nth);
@@ -878,7 +918,7 @@ fn flashAttnExtF16(params: *const ComputeParams, dst: *Tensor) void {
             if (use_tiled) {
                 tiled(params, dst, ir0, ir1);
             } else {
-                oneChunk(params, dst, ir0, ir1, 0, nek1, null, 0);
+                oneChunk(params, dst, ir0, ir1, 0, n_kv_cols, null, 0);
             }
 
             current_chunk = threading.ggml_threadpool_chunk_add(tp, 1);

@@ -6,7 +6,7 @@
 //! Ports `nlohmann::detail::exception::name`, `parse_error::create` and its
 //! `position_string` from `llama.cpp/vendor/nlohmann/json.hpp`, and the
 //! wrapping of `common_json`'s `guard` from `llama.cpp/common/json.cpp`
-//! (llama.cpp v0.8.0, `8642541b2`). Each declaration names what it ports
+//! (llama.cpp v0.9.0, `cd959bae9`). Each declaration names what it ports
 //! and the line it began at.
 //!
 //! # Why the message lives beside the error

@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/llm-jp-harmony.cpp` (llama.cpp v0.8.0,
-//! `8642541b2`), new at v0.6.0. The parser is built in the order clang
+//! Ports `llama.cpp/common/parsers/llm-jp-harmony.cpp` (llama.cpp v0.9.0,
+//! `cd959bae9`), new at v0.6.0. The parser is built in the order clang
 //! evaluates the C++ expressions, left to right, since a parser's id is its
 //! position.
 

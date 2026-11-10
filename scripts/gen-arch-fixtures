@@ -28,7 +28,9 @@
 # and clef, which the recipe skips and the user-data path cannot build, and a
 # ModernBERT decision model (since v0.6.0), vllm-decision2 and an LFM2
 # decision model (since v0.7.0), and Voxtral Realtime's adaptive norm, the
-# Qwen4exp merged weights and the DSpark draft of DeepSeek-V4.1 (since v0.8.0).
+# Qwen4exp merged weights and the DSpark draft of DeepSeek-V4.1 (since v0.8.0),
+# and Mistral Large 4's DSpark draft, with and without its RNN Markov head
+# (since v0.9.0).
 #
 # Since v0.7.0 the architectures with an MTP (NextN) head also get a fixture
 # with one NextN block, `--variant mtp`, in `<out-dir>/mtp/`: the C++ loads a
@@ -91,8 +93,10 @@ if [ "$rc" -ne 0 ] || [ "$n" -eq 0 ]; then
     tail -20 "$tmp/run.log" >&2
     exit 1
 fi
-# The architectures `-o` skipped, and the four its loops skip silently.
-extra=$( { grep 'unsupported, skipping' "$tmp/run.log" | sed 's/^save_models: \([^ ]*\) model.*/\1/'; printf '%s\n' gemma4 gemma4-assistant; } \
+# The architectures `-o` skipped, and the ones its loops skip silently: the
+# Gemma 4 assistant (eagle3 and DFlash are arch_fixtures_draft's). Since
+# v0.9.0 `-o` writes Gemma 4 itself.
+extra=$( { grep 'unsupported, skipping' "$tmp/run.log" | sed 's/^save_models: \([^ ]*\) model.*/\1/'; printf '%s\n' gemma4-assistant; } \
          | grep -v -x -e clip -e gptj -e graniteswitch -e eagle3 -e dflash -e clef -e vllm-decision2 | sort -u )
 : > "$tmp/extra.log"
 for a in $extra; do
@@ -132,7 +136,7 @@ for a in qwen35 qwen35moe qwen3next deepseek2 deepseek32 glm-dsa glm4moe bailing
         || [ "$?" -le 1 ] || echo "failed $a (mtp): the C++ aborted" >> "$tmp/extra.log"
 done
 # The gated delta nets with two value heads per key head (see arch_fixtures_extra.cpp).
-for a in qwen35 qwen35moe qwen3next; do
+for a in qwen35 qwen35moe qwen3next clover_moe; do
     "$tmp/extra" "$OUT" "$SEED" --variant gdnrep2 "$a" >> "$tmp/extra.log" 2>&1 \
         || [ "$?" -le 1 ] || echo "failed $a (gdnrep2): the C++ aborted" >> "$tmp/extra.log"
 done

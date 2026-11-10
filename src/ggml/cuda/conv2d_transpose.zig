@@ -4,8 +4,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/conv2d-transpose.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/conv2d-transpose.cuh` at v0.8.0
-//! (`8642541b2`). The kernel, `conv2d_transpose_kernel`, stays CUDA.
+//! `llama.cpp/ggml/src/ggml-cuda/conv2d-transpose.cuh` at v0.9.0
+//! (`cd959bae9`). The kernel, `conv2d_transpose_kernel`, stays CUDA.
 
 const std = @import("std");
 const impl = @import("../impl.zig");

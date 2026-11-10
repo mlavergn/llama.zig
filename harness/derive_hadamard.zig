@@ -12,7 +12,7 @@ const c = harness_root.impl.c;
 const gpa = std.heap.c_allocator;
 
 /// The weight kinds `load_hparams_hadamard` accepts as folded
-/// (llama-model.cpp:2071 @8642541b2).
+/// (llama-model.cpp:2145 @cd959bae9).
 const foldable_kinds = [_][]const u8{
     "attn_q",           "attn_k",         "attn_v",       "attn_qkv",       "attn_gate",   "attn_output",
     "ffn_gate",         "ffn_up",         "ffn_down",     "ffn_gate_exps",  "ffn_up_exps", "ffn_down_exps",

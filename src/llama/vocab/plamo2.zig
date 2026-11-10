@@ -6,7 +6,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.8.0 (`8642541b2`).
+//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.9.0 (`cd959bae9`).
 //!
 //! The C++ builds its table from `std::unordered_map`s, but iterates only
 //! one of them, and only to collect its keys, which it then sorts by their

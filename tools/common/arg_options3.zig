@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ports that stretch of `common_params_parser_init` (arg.cpp:1344 @cd959bae9)
-//! from `llama.cpp/common/arg.cpp` (v0.8.0, `8642541b2`), as
+//! from `llama.cpp/common/arg.cpp` (v0.9.0, `cd959bae9`), as
 //! `arg_options.zig` describes, with the helpers its handlers call:
 //! `common_reasoning_format_from_name` from `llama.cpp/common/chat.cpp`,
 //! `fs_is_directory` from `llama.cpp/common/common.cpp`, and libc++'s

@@ -10,7 +10,7 @@
 //! - `llama.cpp/src/llama-context.cpp` -- the seven `llama_io_*` stream
 //!   classes, and `llama_context`'s `state_*` and `state_seq_*` methods
 //!
-//! All at v0.8.0 (`8642541b2`).
+//! All at v0.9.0 (`cd959bae9`).
 //!
 //! # Destructors
 //!
@@ -121,10 +121,46 @@ pub const MemStorage = struct {
 
 const TensorIo = struct {
     tensor: *Tensor,
-    ptr: [*]u8,
+    /// The offset of the tensor's bytes in the host buffer.
+    data_offset: usize,
     size: usize,
     offset: usize,
 };
+
+/// The four parallel arrays `ggml_backend_tensor_get_n` and `_set_n` take.
+const TensorIoArrays = struct {
+    tensors: std.ArrayList(*Tensor) = .empty,
+    offsets: std.ArrayList(usize) = .empty,
+    sizes: std.ArrayList(usize) = .empty,
+    data_offsets: std.ArrayList(usize) = .empty,
+
+    fn init(infos: []const TensorIo) TensorIoArrays {
+        var self: TensorIoArrays = .{};
+        self.tensors.ensureTotalCapacity(allocator, infos.len) catch oom();
+        self.offsets.ensureTotalCapacity(allocator, infos.len) catch oom();
+        self.sizes.ensureTotalCapacity(allocator, infos.len) catch oom();
+        self.data_offsets.ensureTotalCapacity(allocator, infos.len) catch oom();
+        for (infos) |info| {
+            self.tensors.appendAssumeCapacity(info.tensor);
+            self.offsets.appendAssumeCapacity(info.offset);
+            self.sizes.appendAssumeCapacity(info.size);
+            self.data_offsets.appendAssumeCapacity(info.data_offset);
+        }
+        return self;
+    }
+
+    fn deinit(self: *TensorIoArrays) void {
+        self.tensors.deinit(allocator);
+        self.offsets.deinit(allocator);
+        self.sizes.deinit(allocator);
+        self.data_offsets.deinit(allocator);
+    }
+};
+
+/// `ggml_backend_tensor_copy_n` over two lists of tensors.
+fn tensorCopyN(srcs: []const *Tensor, dsts: []const *Tensor) void {
+    c.ggml_backend_tensor_copy_n(@ptrCast(srcs.ptr), @ptrCast(dsts.ptr), srcs.len);
+}
 
 /// Ports `llama_io_write_dummy` (llama-context.cpp:3100 @cd959bae9): counts
 /// what would be written.
@@ -150,8 +186,9 @@ const WriteDummy = struct {
     }
 };
 
-/// Ports `llama_io_write_host` (llama-context.cpp:2926 @8642541b2): into a
-/// host buffer, the tensors read back when the stream finishes.
+/// Ports `llama_io_write_host` (llama-context.cpp:3126 @cd959bae9): into a
+/// host buffer, the tensors read back in one batch when the stream
+/// finishes.
 const WriteHost = struct {
     ptr: [*]u8,
     buf_size: usize,
@@ -162,10 +199,20 @@ const WriteHost = struct {
         return .{ .ptr = self, .vtable = &.{ .write = write, .writeTensor = writeTensor, .nBytes = nBytes } };
     }
 
-    /// The destructor of `llama_io_write_host` (llama-context.cpp:2931 @8642541b2).
+    /// The destructor of `llama_io_write_host` (llama-context.cpp:3131 @cd959bae9).
     fn finish(self: *WriteHost) void {
-        for (self.winfos.items) |w| c.ggml_backend_tensor_get(w.tensor, w.ptr, w.offset, w.size);
-        self.winfos.deinit(allocator);
+        defer self.winfos.deinit(allocator);
+        if (self.winfos.items.len == 0) {
+            return;
+        }
+
+        // Every write advances `ptr` and `size_written` alike.
+        const base_ptr = self.ptr - self.size_written;
+
+        var arrays = TensorIoArrays.init(self.winfos.items);
+        defer arrays.deinit();
+
+        c.ggml_backend_tensor_get_n(@ptrCast(arrays.tensors.items.ptr), base_ptr, arrays.offsets.items.ptr, arrays.sizes.items.ptr, arrays.data_offsets.items.ptr, self.winfos.items.len);
     }
 
     fn write(p: *anyopaque, src: []const u8, exc: *Exception) Thrown!void {
@@ -179,7 +226,7 @@ const WriteHost = struct {
     fn writeTensor(p: *anyopaque, tensor: *const Tensor, offset: usize, size: usize, exc: *Exception) Thrown!void {
         const self: *WriteHost = @ptrCast(@alignCast(p));
         if (size > self.buf_size) return endOfBuffer(exc);
-        self.winfos.append(allocator, .{ .tensor = @constCast(tensor), .ptr = self.ptr, .size = size, .offset = offset }) catch oom();
+        self.winfos.append(allocator, .{ .tensor = @constCast(tensor), .data_offset = self.size_written, .size = size, .offset = offset }) catch oom();
         self.ptr += size;
         self.size_written += size;
         self.buf_size -= size;
@@ -190,9 +237,9 @@ const WriteHost = struct {
     }
 };
 
-/// Ports `llama_io_read_host` (llama-context.cpp:2979 @8642541b2): from a
-/// host buffer, the tensors written when the stream finishes, unless a
-/// failed restore discarded them.
+/// Ports `llama_io_read_host` (llama-context.cpp:3198 @cd959bae9): from a
+/// host buffer, the tensors written in one batch when the stream finishes,
+/// unless a failed restore discarded them.
 const ReadHost = struct {
     ptr: [*]const u8,
     buf_size: usize,
@@ -209,10 +256,20 @@ const ReadHost = struct {
         self.rinfos.clearRetainingCapacity();
     }
 
-    /// The destructor of `llama_io_read_host` (llama-context.cpp:2983 @8642541b2).
+    /// The destructor of `llama_io_read_host` (llama-context.cpp:3202 @cd959bae9).
     fn finish(self: *ReadHost) void {
-        for (self.rinfos.items) |r| c.ggml_backend_tensor_set(r.tensor, r.ptr, r.offset, r.size);
-        self.rinfos.deinit(allocator);
+        defer self.rinfos.deinit(allocator);
+        if (self.rinfos.items.len == 0) {
+            return;
+        }
+
+        // Every read advances `ptr` and `size_read` alike.
+        const base_ptr = self.ptr - self.size_read;
+
+        var arrays = TensorIoArrays.init(self.rinfos.items);
+        defer arrays.deinit();
+
+        c.ggml_backend_tensor_set_n(@ptrCast(arrays.tensors.items.ptr), base_ptr, arrays.offsets.items.ptr, arrays.sizes.items.ptr, arrays.data_offsets.items.ptr, self.rinfos.items.len);
     }
 
     fn read(p: *anyopaque, dst: []u8, exc: *Exception) Thrown!void {
@@ -226,7 +283,7 @@ const ReadHost = struct {
     fn readTensor(p: *anyopaque, tensor: *Tensor, offset: usize, size: usize, exc: *Exception) Thrown!void {
         const self: *ReadHost = @ptrCast(@alignCast(p));
         if (size > self.buf_size) return endOfBuffer(exc);
-        self.rinfos.append(allocator, .{ .tensor = tensor, .ptr = @constCast(self.ptr), .size = size, .offset = offset }) catch oom();
+        self.rinfos.append(allocator, .{ .tensor = tensor, .data_offset = self.size_read, .size = size, .offset = offset }) catch oom();
         self.ptr += size;
         self.size_read += size;
         self.buf_size -= size;
@@ -297,7 +354,7 @@ const ReadFile = struct {
     }
 };
 
-/// Ports `llama_io_write_device` (llama-context.cpp:3085 @8642541b2): the
+/// Ports `llama_io_write_device` (llama-context.cpp:3322 @cd959bae9): the
 /// metadata into a host buffer, the tensors copied into buffers kept on
 /// their own device for the sequence.
 const WriteDevice = struct {
@@ -311,7 +368,7 @@ const WriteDevice = struct {
         return .{ .ptr = self, .vtable = &.{ .write = write, .writeTensor = writeTensor, .nBytes = nBytes } };
     }
 
-    /// The destructor of `llama_io_write_device` (llama-context.cpp:3090 @8642541b2): lay out one
+    /// The destructor of `llama_io_write_device` (llama-context.cpp:3327 @cd959bae9): lay out one
     /// copy per tensor range, reuse the sequence's buffers where the
     /// layout is unchanged, then copy on the device.
     fn finish(self: *WriteDevice) void {
@@ -388,7 +445,7 @@ const WriteDevice = struct {
                 }
             }
 
-            for (mbuf_cur.org.items, mbuf_cur.cpy.items) |org, cpy| c.ggml_backend_tensor_copy(org, cpy);
+            tensorCopyN(mbuf_cur.org.items, mbuf_cur.cpy.items);
         }
     }
 
@@ -402,7 +459,7 @@ const WriteDevice = struct {
     }
     fn writeTensor(p: *anyopaque, tensor: *const Tensor, offset: usize, size: usize, _: *Exception) Thrown!void {
         const self: *WriteDevice = @ptrCast(@alignCast(p));
-        self.winfos.append(allocator, .{ .tensor = @constCast(tensor), .ptr = self.ptr, .size = size, .offset = offset }) catch oom();
+        self.winfos.append(allocator, .{ .tensor = @constCast(tensor), .data_offset = self.size_written, .size = size, .offset = offset }) catch oom();
     }
     fn nBytes(p: *anyopaque) usize {
         const self: *WriteDevice = @ptrCast(@alignCast(p));
@@ -410,7 +467,7 @@ const WriteDevice = struct {
     }
 };
 
-/// Ports `llama_io_read_device` (llama-context.cpp:3217 @8642541b2): the
+/// Ports `llama_io_read_device` (llama-context.cpp:3454 @cd959bae9): the
 /// metadata from a host buffer, the tensors copied back from the
 /// sequence's device buffers.
 const ReadDevice = struct {
@@ -431,7 +488,7 @@ const ReadDevice = struct {
         self.buf_size = 0;
     }
 
-    /// The destructor of `llama_io_read_device` (llama-context.cpp:3222 @8642541b2).
+    /// The destructor of `llama_io_read_device` (llama-context.cpp:3459 @cd959bae9).
     fn finish(self: *ReadDevice) void {
         defer self.rinfos.deinit(allocator);
         var mbufs_new: MemoryBuffers = .{};
@@ -476,7 +533,7 @@ const ReadDevice = struct {
                 }
                 if (same_chunking) {
                     // Copy one to one by index.
-                    for (0..mbuf_cur.org.items.len) |i| c.ggml_backend_tensor_copy(mbuf_cur.cpy.items[i], e.mbuf.org.items[i]);
+                    tensorCopyN(mbuf_cur.cpy.items, e.mbuf.org.items[0..mbuf_cur.cpy.items.len]);
                     continue;
                 }
             }
@@ -498,6 +555,13 @@ const ReadDevice = struct {
             var src_base: usize = 0;
             var dst_base: usize = 0;
 
+            var chunk_srcs: std.ArrayList(*Tensor) = .empty;
+            defer chunk_srcs.deinit(allocator);
+            var chunk_dsts: std.ArrayList(*Tensor) = .empty;
+            defer chunk_dsts.deinit(allocator);
+            chunk_srcs.ensureTotalCapacity(allocator, mbuf_cur.cpy.items.len + e.mbuf.org.items.len) catch oom();
+            chunk_dsts.ensureTotalCapacity(allocator, mbuf_cur.cpy.items.len + e.mbuf.org.items.len) catch oom();
+
             while (src_pos < total) {
                 const src_t = mbuf_cur.cpy.items[src_j];
                 const dst_t = e.mbuf.org.items[dst_i];
@@ -518,7 +582,8 @@ const ReadDevice = struct {
                 const dst_v = c.ggml_view_1d(ctx_scratch, dst_t, n_el, dst_off);
                 _ = c.ggml_backend_view_init(dst_v);
 
-                c.ggml_backend_tensor_copy(src_v, dst_v);
+                chunk_srcs.append(allocator, src_v) catch oom();
+                chunk_dsts.append(allocator, dst_v) catch oom();
 
                 src_pos += n_copy;
                 dst_pos += n_copy;
@@ -538,6 +603,8 @@ const ReadDevice = struct {
             for (mbuf_cur.cpy.items[src_j..]) |t| impl.assert(c.ggml_nbytes(t) == 0, "llama-context.cpp", 3583, "ggml_nbytes(mbuf_cur.cpy[i]) == 0");
             for (e.mbuf.org.items[dst_i..]) |t| impl.assert(c.ggml_nbytes(t) == 0, "llama-context.cpp", 3586, "ggml_nbytes(mbuf.org[i]) == 0");
 
+            tensorCopyN(chunk_srcs.items, chunk_dsts.items);
+
             c.ggml_free(ctx_scratch);
         }
 
@@ -554,7 +621,7 @@ const ReadDevice = struct {
     }
     fn readTensor(p: *anyopaque, tensor: *Tensor, offset: usize, size: usize, _: *Exception) Thrown!void {
         const self: *ReadDevice = @ptrCast(@alignCast(p));
-        self.rinfos.append(allocator, .{ .tensor = tensor, .ptr = @constCast(self.ptr), .size = size, .offset = offset }) catch oom();
+        self.rinfos.append(allocator, .{ .tensor = tensor, .data_offset = self.size_read, .size = size, .offset = offset }) catch oom();
     }
     fn nBytes(p: *anyopaque) usize {
         const self: *ReadDevice = @ptrCast(@alignCast(p));

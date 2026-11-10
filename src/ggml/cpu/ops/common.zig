@@ -8,7 +8,7 @@
 //! - `llama.cpp/ggml/src/ggml-cpu/common.h` — `type_conversion_table` and
 //!   `get_thread_range`
 //!
-//! at v0.8.0 (`8642541b2`).
+//! at v0.9.0 (`cd959bae9`).
 //!
 //! `cpu/binary_ops.zig` and `cpu/unary_ops.zig` each carry their own copy of
 //! these two, because each states its own provenance and the C has them in a
@@ -90,10 +90,12 @@ pub inline fn barrier(params: *const ComputeParams) void {
 }
 
 /// Ports the `to_f32` half of `type_conversion_table`
-/// (ggml-cpu/common.h:56 @cd959bae9).
+/// (ggml-cpu/common.h:56 @cd959bae9), with `f8_e4m3_to_f32`
+/// (ggml-cpu/common.h:46 @cd959bae9) for `ggml_fp8_e4m3_t`.
 ///
 /// Parameters:
-/// - `T`: the element type, one of `f32`, `ggml_fp16_t`, `ggml_bf16_t`, `i32`.
+/// - `T`: the element type, one of `f32`, `ggml_fp16_t`, `ggml_bf16_t`,
+///   `ggml_fp8_e4m3_t`, `i32`.
 /// - `v`: the value to widen.
 ///
 /// Return: `v` as an `f32`.
@@ -102,13 +104,15 @@ pub inline fn toF32(comptime T: type, v: T) f32 {
         f32 => v,
         c.ggml_fp16_t => impl.fp16ToFp32(v),
         c.ggml_bf16_t => impl.bf16ToFp32(v.bits),
+        c.ggml_fp8_e4m3_t => impl.f8E4m3ToFp32(v.bits),
         i32 => @floatFromInt(v),
         else => @compileError("no conversion for " ++ @typeName(T)),
     };
 }
 
 /// Ports the `from_f32` half of `type_conversion_table`
-/// (ggml-cpu/common.h:56 @cd959bae9).
+/// (ggml-cpu/common.h:56 @cd959bae9), with `f32_to_f8_e4m3`
+/// (ggml-cpu/common.h:50 @cd959bae9) for `ggml_fp8_e4m3_t`.
 ///
 /// Parameters:
 /// - `T`: the element type to produce.
@@ -120,6 +124,7 @@ pub inline fn fromF32(comptime T: type, v: f32) T {
         f32 => v,
         c.ggml_fp16_t => convert.cpuFp32ToFp16(v),
         c.ggml_bf16_t => .{ .bits = impl.fp32ToBf16(v) },
+        c.ggml_fp8_e4m3_t => .{ .bits = impl.fp32ToF8E4m3(v) },
         // `f32_to_i32` is a C cast, which truncates toward zero and is
         // undefined out of range; `@intFromFloat` would panic instead, so the
         // saturating form is the one that matches.

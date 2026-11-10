@@ -29,6 +29,7 @@ pub const ops_matmul_id = @import("ops_matmul_id.zig");
 pub const ops_flash_attn = @import("ops_flash_attn.zig");
 pub const op_pipeline = @import("op_pipeline.zig");
 pub const supports = @import("supports.zig");
+pub const comm = @import("comm.zig");
 
 comptime {
     // `backend.zig` exports `ggml-vulkan.h`.

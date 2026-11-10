@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! **Not a port of a file.** Each function here reproduces one ACLE intrinsic
-//! that `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.8.0, `8642541b2`)
+//! that `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.9.0, `cd959bae9`)
 //! calls, and is named after it. The semantics come from the ARM C Language
 //! Extensions; where Zig's obvious equivalent differs, the difference is
 //! documented and the ARM behaviour is what is implemented.

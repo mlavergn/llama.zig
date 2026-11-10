@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/dotsocr.cpp` at v0.8.0 (`8642541b2`).
+//! Ports `llama.cpp/tools/mtmd/models/dotsocr.cpp` at v0.9.0 (`cd959bae9`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -13,7 +13,7 @@ const model_mod = @import("../model.zig");
 const c = impl.c;
 
 /// The `add_pos` lambda of a 4-section vision M-RoPE (dotsocr.cpp:14,
-/// paddleocr.cpp:13 @8642541b2): `ggml_rope_multi` over the `positions`
+/// paddleocr.cpp:16 @cd959bae9): `ggml_rope_multi` over the `positions`
 /// input, a quarter of the head per section.
 pub const MropeVision = struct {
     positions: graph.T,

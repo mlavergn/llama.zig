@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/common/fit.cpp` and `llama.cpp/common/fit.h`
-//! (v0.8.0, `8642541b2`), the whole file, and from the two structs of
+//! (v0.9.0, `cd959bae9`), the whole file, and from the two structs of
 //! `llama.cpp/src/llama-ext.h` it measures with.
 //!
 //! # Why the CLI needs it

@@ -1242,6 +1242,7 @@ pub fn main(init: std.process.Init) !void {
         .{ .name = "synthetic-pre-soprano", .path = derive(dir, gpt2, "pre-soprano", edits.preSoprano) },
         .{ .name = "synthetic-pre-soprano-no-eos", .path = derive(dir, gpt2, "pre-soprano-no-eos", edits.preSopranoNoEos) },
         .{ .name = "synthetic-pre-tekken", .path = derive(dir, gpt2, "pre-tekken", edits.pre("tekken")) },
+        .{ .name = "synthetic-pre-tekken-num3", .path = derive(dir, gpt2, "pre-tekken-num3", edits.pre("tekken-num3")) },
         .{ .name = "synthetic-pre-pixtral", .path = derive(dir, gpt2, "pre-pixtral", edits.preWhole("pixtral")) },
         .{ .name = "synthetic-pre-gpt-4o", .path = derive(dir, gpt2, "pre-gpt-4o", edits.pre("gpt-4o")) },
         .{ .name = "synthetic-pre-minimax-m2", .path = derive(dir, gpt2, "pre-minimax-m2", edits.pre("minimax-m2")) },

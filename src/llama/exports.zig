@@ -21,6 +21,7 @@ const ext_only = [_][]const u8{
     "llama_arch_supports_mixed_batch",
     "llama_arch_supports_save",
     "llama_arch_supports_sm_tensor",
+    "llama_batch_ext_add_embd_row",
     "llama_batch_ext_set_decision_order",
     "llama_get_ctx_other",
     "llama_get_embeddings_layer_inp",
@@ -40,8 +41,10 @@ const ext_only = [_][]const u8{
     "llama_model_target_layer_ids",
     "llama_model_target_layer_ids_n",
     "llama_set_embeddings_layer_inp",
+    "llama_set_embeddings_layer_inp_dev",
     "llama_set_embeddings_nextn",
     "llama_set_nextn_layer_offset",
+    "llama_supports_embd_row",
 };
 
 fn isExtOnly(name: []const u8) bool {

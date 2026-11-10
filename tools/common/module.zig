@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Barrel for `tools/common/`. `build_info.zig` ports
-//! `llama.cpp/common/build-info.cpp.in` (v0.8.0, `8642541b2`) as
+//! `llama.cpp/common/build-info.cpp.in` (v0.9.0, `cd959bae9`) as
 //! `llama.cpp.zmake` fills it in; the rest says what it ports where it does.
 //!
 //! # One import of the headers

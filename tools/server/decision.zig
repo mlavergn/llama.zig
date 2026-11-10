@@ -6,8 +6,8 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/server/server-decision.cpp` and
-//! `llama.cpp/tools/server/server-decision.h` (llama.cpp v0.8.0,
-//! `8642541b2`) whole: `server_decision_question_type`,
+//! `llama.cpp/tools/server/server-decision.h` (llama.cpp v0.9.0,
+//! `cd959bae9`) whole: `server_decision_question_type`,
 //! `server_decision_option`, `server_decision_question`,
 //! `server_decision_context` and `server_decision_group_tasks`, with the
 //! file's static helpers. Each declaration names what it ports and the line
@@ -2378,9 +2378,10 @@ const clef_mark_option = "<<clef:option>>";
 // shared prompt prefix
 
 /// Ports `server_decision_group_tasks` (server-decision.cpp:1753
-/// @8642541b2): group the tasks so that the common prefix of their prompts
+/// @cd959bae9): group the tasks so that the common prefix of their prompts
 /// is evaluated only once; each group is one parent and its children, it
-/// takes at most `n_slots` slots. The order of the tasks is preserved.
+/// takes at most `n_slots` slots. The prefix stops short of the first
+/// position any of them reads (`pos_first`). The order of the tasks is preserved.
 ///
 /// Parameters:
 /// - `tasks`: moved from; every element is left empty.
@@ -2403,7 +2404,11 @@ pub fn groupTasks(gpa: Allocator, tasks: []Task, n_slots_in: usize) Error!std.Ar
         var n_shared: usize = parent.tokens.size() -% 1;
         for (i + 1..end) |j| {
             n_shared = @min(n_shared, try parent.tokens.getCommonPrefix(&tasks[j].tokens));
-            n_shared = @min(n_shared, tasks[j].tokens.size() -% 1);
+            // nor may the shared prefix reach a position either task reads; the
+            // C's `(size_t)` makes a -1 (none) the largest value
+            const parent_first: usize = @bitCast(@as(isize, parent.decision.posFirst()));
+            const task_first: usize = @bitCast(@as(isize, tasks[j].decision.posFirst()));
+            n_shared = @min(n_shared, tasks[j].tokens.size() -% 1, parent_first, task_first);
         }
 
         if (end - i < 2 or n_shared == 0) {

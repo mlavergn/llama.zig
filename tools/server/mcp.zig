@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/server/server-mcp.cpp` and
-//! `llama.cpp/tools/server/server-mcp.h` (llama.cpp v0.8.0, `8642541b2`):
+//! `llama.cpp/tools/server/server-mcp.h` (llama.cpp v0.9.0, `cd959bae9`):
 //! `server_mcp_server_config`, `server_mcp_tool_def`,
 //! `server_mcp_transport`, `server_mcp_stdio` and `server_mcp`, with the
 //! file's static helpers. Each declaration names what it ports and the line
@@ -404,7 +404,7 @@ pub const Transport = struct {
     }
 
     /// Drops a reference; the last runs the destructor
-    /// (`~server_mcp_stdio`, server-mcp.cpp:448 @8642541b2): the pumps
+    /// (`~server_mcp_stdio`, server-mcp.cpp:448 @cd959bae9): the pumps
     /// joined, the child reaped.
     pub fn release(self: *Transport) void {
         if (self.refs.fetchSub(1, .seq_cst) != 1) return;

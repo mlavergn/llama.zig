@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/mistral4.cpp` at v0.8.0 (`8642541b2`):
+//! Ported from `llama.cpp/src/models/mistral4.cpp` at v0.9.0 (`cd959bae9`):
 //! `llama_model_mistral4`'s `build_arch_graph`. The class derives from
 //! `llama_model_deepseek2` and reuses its `load_arch_hparams`,
 //! `load_arch_tensors` and `graph`, which `deepseek2.zig` holds.

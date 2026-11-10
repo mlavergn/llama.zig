@@ -8,7 +8,7 @@
 //! - `llama.cpp/src/unicode.h`
 //! - `llama.cpp/src/unicode-data.h`
 //!
-//! All at v0.8.0 (`8642541b2`). The tables of `llama.cpp/src/unicode-data.cpp`
+//! All at v0.9.0 (`cd959bae9`). The tables of `llama.cpp/src/unicode-data.cpp`
 //! are generated into `unicode_data.zig` by `scripts/gen-unicode-data`.
 //!
 //! # Contract

@@ -169,12 +169,80 @@ binary_identity() {
     done
 }
 
+# The minimum OS a platform's slices carry where it is not upstream's, from
+# COMPAT_MINOS ("ios:26.0 macos:26.0", keyed by the xcframework's
+# SupportedPlatform), or nothing where it is upstream's.
+compat_minos() {
+    local plat="$1" kv
+    for kv in ${COMPAT_MINOS:-}; do
+        [ "${kv%%:*}" = "$plat" ] && { echo "${kv#*:}"; return; }
+    done
+}
+
+# Upstream's bundle Info.plist with its minimum OS replaced by `want`: the
+# MinimumOSVersion string and the DTSDKName bundle.sh derives from it
+# (`iphoneos16.4`). Every other byte is left as upstream wrote it.
+plist_with_minos() {
+    python3 - "$1" "$2" << 'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+want = sys.argv[2]
+m = re.search(r"(<key>MinimumOSVersion</key>\s*<string>)([^<]*)(</string>)", text)
+if not m:
+    sys.exit(f"compat: {sys.argv[1]}: no MinimumOSVersion")
+old = m.group(2)
+text = text[:m.start(2)] + want + text[m.end(2):]
+text = re.sub(r"(<key>DTSDKName</key>\s*<string>[a-z]+)" + re.escape(old) + "(</string>)", r"\g<1>" + want + r"\g<2>", text, count=1)
+sys.stdout.write(text)
+PY
+}
+
+# `binary_identity` lines of ours and upstream's with the minimum OS taken
+# out of the comparison: ours must carry `want` in every architecture, and
+# where upstream's SDK field is its minimum (a device binary `vtool`
+# re-marked with the minimum as both), ours must carry `want` there too.
+# Prints ours, a `--` line and upstream's, normalized; or, on stdout, why
+# ours fails (the caller captures stdout only).
+identity_with_minos() {
+    python3 - "$1" "$2" "$3" << 'PY'
+import sys
+want, ours, ups = sys.argv[1], sys.argv[2].splitlines(), sys.argv[3].splitlines()
+def fields(line):
+    head, _, rest = line.partition(": ")
+    return head, dict(kv.split("=", 1) for kv in rest.split())
+def show(head, f):
+    return head + ": " + " ".join(f"{k}={v}" for k, v in f.items()) + " "
+out_o, out_u = [], []
+for lo, lu in zip(ours, ups):
+    ho, fo = fields(lo)
+    hu, fu = fields(lu)
+    if fo.get("minos") != want:
+        print(f"{ho} of ours is minos {fo.get('minos')}, not {want}")
+        sys.exit(1)
+    if "sdk" in fu and fu.get("sdk") == fu.get("minos"):
+        if fo.get("sdk") != want:
+            print(f"{ho} of ours is sdk {fo.get('sdk')}, not the minimum {want} vtool writes")
+            sys.exit(1)
+        fo["sdk"] = fu["sdk"] = "*"
+    fo["minos"] = fu["minos"] = "*"
+    out_o.append(show(ho, fo)); out_u.append(show(hu, fu))
+out_o += ours[len(ups):]; out_u += ups[len(ours):]
+print("\n".join(out_o) + "\n--\n" + "\n".join(out_u))
+PY
+}
+
 # Ours against upstream's: the same libraries; in every slice the same files
 # and links, and every file but the binary byte-identical; each binary the
 # same architectures, type, install name, platform, minimum OS and SDK, with
 # no dependency upstream's lacks; and every function the shipped headers
 # declare that upstream's binary exports, exported by ours too -- per slice,
 # per architecture.
+#
+# Since v0.9.0 every slice carries a higher minimum OS than upstream's
+# (26.0; COMPAT_MINOS). Every binary of ours must carry exactly that minimum
+# (`identity_with_minos`), and the bundle Info.plist must be upstream's with
+# that minimum written in (`plist_with_minos`); the rest is compared as
+# before.
 gate_compat() {
     local ours="$1" up="$2" lib o u f
     [ -d "$ours" ] && [ -d "$up" ] || fail "compat: missing $ours or $up"
@@ -191,15 +259,29 @@ gate_compat() {
         local bin
         bin="$(plutil -extract AvailableLibraries json -o - "$up/Info.plist" \
             | python3 -c 'import json,sys; print([l["BinaryPath"] for l in json.load(sys.stdin) if l["LibraryIdentifier"]==sys.argv[1]][0])' "$lib")"
+        local plat want
+        plat="$(plutil -extract AvailableLibraries json -o - "$up/Info.plist" \
+            | python3 -c 'import json,sys; print([l["SupportedPlatform"] for l in json.load(sys.stdin) if l["LibraryIdentifier"]==sys.argv[1]][0])' "$lib")"
+        want="$(compat_minos "$plat")"
         while read -r f; do
             [ "$f" = "./${bin#llama.framework/}" ] && continue
-            cmp -s "$ofw/$f" "$ufw/$f" || fail "compat: $lib: $f is not upstream's"
+            if [ -n "$want" ] && [ "$(basename "$f")" = Info.plist ]; then
+                plist_with_minos "$ufw/$f" "$want" | cmp -s "$ofw/$f" - \
+                    || fail "compat: $lib: $f is not upstream's with minimum OS $want"
+            else
+                cmp -s "$ofw/$f" "$ufw/$f" || fail "compat: $lib: $f is not upstream's"
+            fi
             nfiles=$((nfiles + 1))
         done < <(cd "$ufw" && find . -type f | LC_ALL=C sort)
         [ -d "$ours/$lib/dSYMs/llama.dSYM" ] || fail "compat: $lib: no dSYMs/llama.dSYM"
 
         local ob="$ours/$lib/$bin" ub="$up/$lib/$bin"
         o="$(binary_identity "$ob")"; u="$(binary_identity "$ub")"
+        if [ -n "$want" ]; then
+            local norm
+            norm="$(identity_with_minos "$want" "$o" "$u")" || fail "compat: $lib: $norm"
+            o="${norm%%$'\n--\n'*}"; u="${norm#*$'\n--\n'}"
+        fi
         [ "$o" = "$u" ] || fail "compat: $lib: binary identity differs:$(diff <(echo "$u") <(echo "$o") | grep '^[<>]' | tr '\n' ' ')"
         local odeps udeps extra
         odeps="$(otool -L "$ob" | grep -v ':$' | awk '{print $1}' | grep -v '^@rpath/llama' | sort -u)"

@@ -6,8 +6,8 @@
 //! Ports `ws::WebSocket`, `ws::WebSocketClient`, `ws::impl`,
 //! `detail::write_websocket_frame` and the handshake helpers from
 //! `llama.cpp/vendor/cpp-httplib/httplib.cpp` and
-//! `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib 0.62.0, vendored at
-//! v0.8.0, `8642541b2`). Each declaration names what it ports and the line it
+//! `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib 0.64.0, vendored at
+//! v0.9.0, `cd959bae9`). Each declaration names what it ports and the line it
 //! began at.
 //!
 //! # What is not here
@@ -219,8 +219,9 @@ fn readWebsocketFrame(a: std.mem.Allocator, strm: *SocketStream, opcode: *Opcode
     return .ok;
 }
 
-/// Ports `write_websocket_frame` (httplib.cpp:920 @8642541b2): the header,
-/// and the payload, masked in chunks when `mask` is set.
+/// Ports `write_websocket_frame` (httplib.cpp:926 @cd959bae9): the header,
+/// and the payload, masked in chunks when `mask` is set, each piece written
+/// whole (`write_data`), however many writes it takes.
 fn writeWebsocketFrame(strm: *SocketStream, opcode: Opcode, data: []const u8, fin: bool, mask: bool) bool {
     // First byte: FIN + opcode
     var header: [2]u8 = undefined;
@@ -231,27 +232,27 @@ fn writeWebsocketFrame(strm: *SocketStream, opcode: Opcode, data: []const u8, fi
     if (len < 126) {
         header[1] = @intCast(len);
         if (mask) header[1] |= 0x80;
-        if (strm.write(&header) < 0) return false;
+        if (!message.writeData(strm, &header)) return false;
     } else if (len <= 0xFFFF) {
         header[1] = 126;
         if (mask) header[1] |= 0x80;
-        if (strm.write(&header) < 0) return false;
+        if (!message.writeData(strm, &header)) return false;
         const ext: [2]u8 = .{ @intCast((len >> 8) & 0xFF), @intCast(len & 0xFF) };
-        if (strm.write(&ext) < 0) return false;
+        if (!message.writeData(strm, &ext)) return false;
     } else {
         header[1] = 127;
         if (mask) header[1] |= 0x80;
-        if (strm.write(&header) < 0) return false;
+        if (!message.writeData(strm, &header)) return false;
         var ext: [8]u8 = undefined;
         std.mem.writeInt(u64, &ext, len, .big);
-        if (strm.write(&ext) < 0) return false;
+        if (!message.writeData(strm, &ext)) return false;
     }
 
     if (mask) {
         // Generate random mask key
         var mask_key: [4]u8 = undefined;
         fillRandomBytes(&mask_key);
-        if (strm.write(&mask_key) < 0) return false;
+        if (!message.writeData(strm, &mask_key)) return false;
 
         // Write masked payload in chunks
         const chunk_size = 4096;
@@ -260,10 +261,10 @@ fn writeWebsocketFrame(strm: *SocketStream, opcode: Opcode, data: []const u8, fi
         while (offset < len) : (offset += chunk_size) {
             const n = @min(chunk_size, len - offset);
             for (0..n) |i| buf[i] = data[offset + i] ^ mask_key[(offset + i) % 4];
-            if (strm.write(buf[0..n]) < 0) return false;
+            if (!message.writeData(strm, buf[0..n])) return false;
         }
     } else if (len > 0) {
-        if (strm.write(data) < 0) return false;
+        if (!message.writeData(strm, data)) return false;
     }
 
     return true;
@@ -537,7 +538,10 @@ pub const WebSocket = struct {
     }
 };
 
-/// Ports `WebSocketClient` (httplib.h:4671 @8642541b2) over a `ws://` URL.
+/// Ports `WebSocketClient` (httplib.h:4724 @cd959bae9) over a `ws://` URL.
+/// The router sets no credentials, address maps or proxy on it, so 0.64.0's
+/// `set_basic_auth`, `set_bearer_token_auth` and the direct and tunnel
+/// hostname maps are not members.
 pub const WebSocketClient = struct {
     a: std.mem.Allocator,
     host: []const u8 = "",
@@ -551,7 +555,7 @@ pub const WebSocketClient = struct {
 
     const client = @import("client.zig");
 
-    /// Ports `WebSocketClient` (httplib.cpp:18685 @8642541b2), the
+    /// Ports `WebSocketClient` (httplib.cpp:18900 @cd959bae9), the
     /// constructor: a scheme other than `ws` throws in the C, which no
     /// caller here reaches; this leaves the client invalid.
     pub fn init(a: std.mem.Allocator, scheme_host_port_path: []const u8, headers: Headers) WebSocketClient {
@@ -629,7 +633,7 @@ pub const WebSocketClient = struct {
 
         // The handshakes belong to establishing the connection, so an unset read
         // timeout leaves them bounded by the connection timeout instead of forever
-        // (`handshake_timeout`, httplib.cpp:18790 @8642541b2): the C's stream
+        // (`handshake_timeout`, httplib.cpp:19004 @cd959bae9): the C's stream
         // waits unbounded for these reads all the same.
         if (!try self.performHandshake(strm)) {
             self.shutdownAndClose();
@@ -644,7 +648,8 @@ pub const WebSocketClient = struct {
 
     /// Ports `perform_websocket_handshake` (httplib.cpp:5772 @cd959bae9) and
     /// `read_websocket_upgrade_response` (httplib.cpp:3705 @cd959bae9), with
-    /// `prepare_default_headers` (httplib.cpp:18850 @8642541b2) before them.
+    /// `prepare_default_headers` (httplib.cpp:19065 @cd959bae9) before them,
+    /// whose `add_authorization_header` adds nothing with no credentials set.
     fn performHandshake(self: *WebSocketClient, strm: *SocketStream) error{OutOfMemory}!bool {
         const a = self.a;
         var arena = std.heap.ArenaAllocator.init(a);

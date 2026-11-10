@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (v0.8.0,
-//! `8642541b2`), the `__AVX2__` arms. Each function names the C it replaces
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (v0.9.0,
+//! `cd959bae9`), the `__AVX2__` arms. Each function names the C it replaces
 //! and the line it began at.
 //!
 //! # Which scalar tails are live

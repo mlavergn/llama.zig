@@ -7,7 +7,7 @@
 //! `common_init_sampler_from_model`, `common_control_vector_load`,
 //! `common_set_adapter_lora`, `common_threadpools::init`,
 //! `ggml_threadpool_params_from_cpu_params` and `set_process_priority` from
-//! `llama.cpp/common/common.cpp` (v0.8.0, `8642541b2`). Each declaration
+//! `llama.cpp/common/common.cpp` (v0.9.0, `cd959bae9`). Each declaration
 //! names what it ports and the line it began at.
 //!
 //! # The sampler, for the tools
@@ -240,8 +240,8 @@ pub fn setProcessPriority(prio: c.ggml_sched_priority) bool {
 /// Ports `common_control_vector_data` (common/common.h:1228 @cd959bae9).
 const ControlVectorData = struct { n_embd: i32, data: std.ArrayList(f32) };
 
-/// Ports `common_control_vector_load_one` (common/common.cpp:1998 @8642541b2).
-fn controlVectorLoadOne(a: std.mem.Allocator, info: params_mod.ControlVectorLoadInfo) !ControlVectorData {
+/// Ports `common_control_vector_load_one` (common/common.cpp:2009 @cd959bae9).
+fn controlVectorLoadOne(a: std.mem.Allocator, info: params_mod.ControlVectorLoadInfo, n_layer: i32) !ControlVectorData {
     const func = "common_control_vector_load_one";
     var result: ControlVectorData = .{ .n_embd = -1, .data = .empty };
 
@@ -276,6 +276,10 @@ fn controlVectorLoadOne(a: std.mem.Allocator, info: params_mod.ControlVectorLoad
             comErr(func, "invalid (zero) direction tensor layer index in %s\n", .{info.fname.ptr});
             result.n_embd = -1;
             break;
+        } else if (layer_idx > n_layer) {
+            comErr(func, "direction tensor layer index %d exceeds the model layer count %d in %s\n", .{ layer_idx, n_layer, info.fname.ptr });
+            result.n_embd = -1;
+            break;
         }
 
         const tensor = c.ggml_get_tensor(ctx, name.ptr);
@@ -299,11 +303,11 @@ fn controlVectorLoadOne(a: std.mem.Allocator, info: params_mod.ControlVectorLoad
         }
 
         // extend if necessary - do not store data for layer 0 (it's not used)
-        const need: usize = @intCast(result.n_embd * layer_idx);
+        const need: usize = @as(usize, @intCast(result.n_embd)) * @as(usize, @intCast(layer_idx));
         if (result.data.items.len < need) try result.data.appendNTimes(a, 0.0, need - result.data.items.len);
 
         const src: [*]const f32 = @ptrCast(@alignCast(tensor.*.data));
-        const dst = result.data.items[@intCast(result.n_embd * (layer_idx - 1))..]; // layer 1 at [0]
+        const dst = result.data.items[@as(usize, @intCast(result.n_embd)) * @as(usize, @intCast(layer_idx - 1)) ..]; // layer 1 at [0]
         for (0..@intCast(result.n_embd)) |j| {
             // allows multiple directions for same layer in same file
             dst[j] = @mulAdd(f32, src[j], info.strength, dst[j]);
@@ -320,13 +324,14 @@ fn controlVectorLoadOne(a: std.mem.Allocator, info: params_mod.ControlVectorLoad
     return result;
 }
 
-/// Ports `common_control_vector_load` (common/common.cpp:2083 @8642541b2).
-fn controlVectorLoad(a: std.mem.Allocator, infos: []const params_mod.ControlVectorLoadInfo) !ControlVectorData {
+/// Ports `common_control_vector_load` (common/common.cpp:2098 @cd959bae9):
+/// direction layer indices must be in `[1, n_layer]`.
+fn controlVectorLoad(a: std.mem.Allocator, infos: []const params_mod.ControlVectorLoadInfo, n_layer: i32) !ControlVectorData {
     const func = "common_control_vector_load";
     var result: ControlVectorData = .{ .n_embd = -1, .data = .empty };
 
     for (infos) |info| {
-        const cur = try controlVectorLoadOne(a, info);
+        const cur = try controlVectorLoadOne(a, info, n_layer);
 
         if (cur.n_embd == -1) {
             result.n_embd = -1;
@@ -589,7 +594,7 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
 
 const io_ = @import("io.zig");
 
-/// Ports `common_init_from_params` (common/common.cpp:1446 @8642541b2).
+/// Ports `common_init_from_params` (common/common.cpp:1457 @cd959bae9).
 ///
 /// Return: the model and context, either null where loading failed, having
 /// logged why. The caller owns the result.
@@ -622,7 +627,7 @@ pub fn initFromParams(gpa: std.mem.Allocator, p: *Params, model_only: bool) !Ini
         if (p.control_vector_layer_start <= 0) p.control_vector_layer_start = 1;
         if (p.control_vector_layer_end <= 0) p.control_vector_layer_end = c.llama_model_n_layer(model);
 
-        const cvec = try controlVectorLoad(p.arena, p.control_vectors.items);
+        const cvec = try controlVectorLoad(p.arena, p.control_vectors.items, c.llama_model_n_layer(model));
         if (cvec.n_embd == -1) return res;
 
         const err = c.llama_set_adapter_cvec(lctx, cvec.data.items.ptr, cvec.data.items.len, cvec.n_embd, p.control_vector_layer_start, p.control_vector_layer_end);

@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/lfm2moe.cpp` at v0.8.0 (`8642541b2`):
+//! Ported from `llama.cpp/src/models/lfm2moe.cpp` at v0.9.0 (`cd959bae9`):
 //! `llama_model_lfm2moe`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`. Its `graph` is `llama_model_lfm2`'s, in `lfm2.zig`.
 

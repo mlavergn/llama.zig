@@ -5,8 +5,8 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/server/server-stream.cpp` and
-//! `llama.cpp/tools/server/server-stream.h` (llama.cpp v0.8.0,
-//! `8642541b2`). Each declaration names what it ports and the line it began
+//! `llama.cpp/tools/server/server-stream.h` (llama.cpp v0.9.0,
+//! `cd959bae9`). Each declaration names what it ports and the line it began
 //! at.
 //!
 //! # Shapes

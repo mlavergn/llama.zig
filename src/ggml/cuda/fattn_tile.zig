@@ -4,8 +4,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/fattn-tile.cu` and the host
-//! half of `llama.cpp/ggml/src/ggml-cuda/fattn-tile.cuh` at v0.8.0
-//! (`8642541b2`), the non-HIP arms. The configuration tables are generated
+//! half of `llama.cpp/ggml/src/ggml-cuda/fattn-tile.cuh` at v0.9.0
+//! (`cd959bae9`), the non-HIP arms. The configuration tables are generated
 //! into `fattn_config_table.zig` by `scripts/gen-fattn-config`. The kernel
 //! stays CUDA, one instantiation set per head size in
 //! `template-instances/fattn-tile-instance-dkq<DKQ>-dv<DV>.cu`, which every

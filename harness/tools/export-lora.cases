@@ -26,3 +26,6 @@
 # v0.8.0: a truncated input is an error, where the tool used to merge what the buffer held
 !fail -m $FIX/qwen3-dense.gguf --lora $DATA/qwen3-dense/trunc.gguf -o e9.gguf
 !fail -m $DATA/qwen3-dense/trunc-base.gguf --lora $DATA/qwen3-dense/good.gguf -o e10.gguf
+# v0.9.0: BF16 base tensors stay BF16 in the merged file
+-m $DATA/qwen3-dense-bf16.gguf --lora $DATA/qwen3-dense/good.gguf -o merged-bf16.gguf
+-m $DATA/qwen3-dense-bf16.gguf --lora $DATA/qwen3-dense/good-f16.gguf -o merged-bf16-f16.gguf -t 2

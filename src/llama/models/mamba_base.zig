@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/mamba-base.cpp` at v0.8.0
-//! (`8642541b2`): every member of `llm_build_mamba_base`.
+//! Ported from `llama.cpp/src/models/mamba-base.cpp` at v0.9.0
+//! (`cd959bae9`): every member of `llm_build_mamba_base`.
 //!
 //! The C++ makes these members of a subclass of `llm_graph_context`; here
 //! they are functions over the builder.
@@ -175,7 +175,7 @@ pub fn buildMambaLayer(b: *const Builder, inp: *const graph.InpRs, cur_: *Tensor
 }
 
 /// Ports `llm_build_mamba_base`'s `build_mamba2_layer` (models/mamba-base.cpp:153
-/// @8642541b2): a Mamba-2 block over the recurrent states, with rollback
+/// @cd959bae9): a Mamba-2 block over the recurrent states, with rollback
 /// snapshots when the context keeps them.
 ///
 /// Return: `{n_embd, n_tokens}`.
@@ -294,7 +294,11 @@ pub fn buildMamba2Layer(b: *const Builder, inp: *const graph.InpRs, cur_: *Tenso
         // The grouped RMS norm.
         if (layer.ssm_norm != null) {
             y = c.ggml_reshape_4d(ctx, y, @divTrunc(d_inner, n_group), n_group, n_seq_tokens, n_seqs);
-            y = b.buildNorm(y, layer.ssm_norm, null, .rms, il);
+            if (b.hparams.ssm_norm_eps > 0.0) {
+                y = c.ggml_mul(ctx, c.ggml_rms_norm(ctx, y, b.hparams.ssm_norm_eps), layer.ssm_norm);
+            } else {
+                y = b.buildNorm(y, layer.ssm_norm, null, .rms, il);
+            }
         }
 
         y = c.ggml_reshape_2d(ctx, y, d_inner, n_seq_tokens * n_seqs);

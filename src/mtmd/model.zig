@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/clip-model.h` at v0.8.0 (`8642541b2`), field
+//! Ports `llama.cpp/tools/mtmd/clip-model.h` at v0.9.0 (`cd959bae9`), field
 //! for field. The tensor-pointer fields were extracted from the header
 //! mechanically, in the header's order, so a struct here reads against the
 //! C++ line by line; the rest is written by hand. Each declaration names
@@ -62,7 +62,7 @@ pub const PadStyle = enum(c_int) {
 /// `std::unordered_set<int32_t>`, as far as the C++ uses it: membership.
 pub const IntSet = std.AutoHashMapUnmanaged(i32, void);
 
-/// Ports `clip_hparams` (clip-model.h:52 @8642541b2).
+/// Ports `clip_hparams` (clip-model.h:53 @cd959bae9).
 pub const Hparams = struct {
     image_size: i32 = 0,
     patch_size: i32 = 0,
@@ -170,6 +170,12 @@ pub const Hparams = struct {
     // parakeet
     mel_filters: std.ArrayList(f32) = .empty,
     window: std.ArrayList(f32) = .empty,
+
+    // nemotron transcribe
+    audio_rope_dims: i32 = 0,
+    spk_n_embd: i32 = 0,
+    spk_n_layer: i32 = 0,
+    spk_n_head: i32 = 0,
 
     // mimo-audio-tokenizer: residual vector quantizer
     rvq_num_quantizers: i32 = 0,
@@ -298,7 +304,7 @@ pub const Hparams = struct {
     }
 };
 
-/// Ports `clip_layer` (clip-model.h:273 @8642541b2).
+/// Ports `clip_layer` (clip-model.h:280 @cd959bae9).
 pub const Layer = struct {
     // layernorm 1 (or layer input norm, or pre-attention norm)
     ln_1_w: ?*c.ggml_tensor = null,
@@ -317,6 +323,8 @@ pub const Layer = struct {
     attn_sinks: ?*c.ggml_tensor = null,
     k_norm: ?*c.ggml_tensor = null,
     q_norm: ?*c.ggml_tensor = null,
+    k_norm_b: ?*c.ggml_tensor = null,
+    q_norm_b: ?*c.ggml_tensor = null,
     // lfm3: per-head sigmoid gate on the attention output
     attn_gate_w: ?*c.ggml_tensor = null,
     attn_post_norm_w: ?*c.ggml_tensor = null,
@@ -614,6 +622,252 @@ pub const Code2Wav = struct {
     dac_post_conv_b: ?*c.ggml_tensor = null,
 };
 
+/// Ports `clip_chatterbox` (clip-model.h:615 @cd959bae9): chatterbox's
+/// flow encoder, CFM estimator, HiFT vocoder, S3 tokenizer and CAMPPlus
+/// speaker encoder.
+pub const Chatterbox = struct {
+    /// Ports `enc_layer` (clip-model.h:617 @cd959bae9), a member of `clip_chatterbox`:
+    /// an espnet rel-pos conformer layer of the flow encoder.
+    pub const EncLayer = struct {
+        norm_mha_w: ?*c.ggml_tensor = null,
+        norm_mha_b: ?*c.ggml_tensor = null,
+        attn_q_w: ?*c.ggml_tensor = null,
+        attn_q_b: ?*c.ggml_tensor = null,
+        attn_k_w: ?*c.ggml_tensor = null,
+        attn_k_b: ?*c.ggml_tensor = null,
+        attn_v_w: ?*c.ggml_tensor = null,
+        attn_v_b: ?*c.ggml_tensor = null,
+        attn_pos_w: ?*c.ggml_tensor = null, // linear_pos, no bias
+        attn_pos_bias_u: ?*c.ggml_tensor = null,
+        attn_pos_bias_v: ?*c.ggml_tensor = null,
+        attn_out_w: ?*c.ggml_tensor = null,
+        attn_out_b: ?*c.ggml_tensor = null,
+        norm_ff_w: ?*c.ggml_tensor = null,
+        norm_ff_b: ?*c.ggml_tensor = null,
+        ffn_1_w: ?*c.ggml_tensor = null,
+        ffn_1_b: ?*c.ggml_tensor = null,
+        ffn_2_w: ?*c.ggml_tensor = null,
+        ffn_2_b: ?*c.ggml_tensor = null,
+    };
+
+    /// Ports `causal_block` (clip-model.h:640 @cd959bae9), a member of `clip_chatterbox`:
+    /// conv k3 left padded + layer norm.
+    pub const CausalBlock = struct {
+        conv_w: ?*c.ggml_tensor = null,
+        conv_b: ?*c.ggml_tensor = null,
+        norm_w: ?*c.ggml_tensor = null,
+        norm_b: ?*c.ggml_tensor = null,
+    };
+
+    /// Ports `resnet` (clip-model.h:648 @cd959bae9), a member of `clip_chatterbox`:
+    /// a time conditioned resnet of the estimator.
+    pub const Resnet = struct {
+        block1: CausalBlock = .{},
+        block2: CausalBlock = .{},
+        mlp_w: ?*c.ggml_tensor = null, // time projection (mlp.1)
+        mlp_b: ?*c.ggml_tensor = null,
+        res_conv_w: ?*c.ggml_tensor = null,
+        res_conv_b: ?*c.ggml_tensor = null,
+    };
+
+    /// Ports `tfm_block` (clip-model.h:658 @cd959bae9), a member of `clip_chatterbox`:
+    /// a diffusers style transformer block of the estimator.
+    pub const TfmBlock = struct {
+        norm1_w: ?*c.ggml_tensor = null,
+        norm1_b: ?*c.ggml_tensor = null,
+        attn_q_w: ?*c.ggml_tensor = null, // no bias on qkv
+        attn_k_w: ?*c.ggml_tensor = null,
+        attn_v_w: ?*c.ggml_tensor = null,
+        attn_out_w: ?*c.ggml_tensor = null, // to_out.0
+        attn_out_b: ?*c.ggml_tensor = null,
+        norm3_w: ?*c.ggml_tensor = null,
+        norm3_b: ?*c.ggml_tensor = null,
+        ff_in_w: ?*c.ggml_tensor = null, // ff.net.0.proj
+        ff_in_b: ?*c.ggml_tensor = null,
+        ff_out_w: ?*c.ggml_tensor = null, // ff.net.2
+        ff_out_b: ?*c.ggml_tensor = null,
+    };
+
+    /// Ports `est_stage` (clip-model.h:675 @cd959bae9), a member of `clip_chatterbox`:
+    /// resnet, transformer stack, boundary causal conv (null on mid stages).
+    pub const EstStage = struct {
+        res: Resnet = .{},
+        tfm: std.ArrayList(TfmBlock) = .empty,
+        conv_w: ?*c.ggml_tensor = null,
+        conv_b: ?*c.ggml_tensor = null,
+    };
+
+    /// Ports `hift_res_unit` (clip-model.h:683 @cd959bae9), a member of `clip_chatterbox`:
+    /// a snake resblock unit of the hift vocoder.
+    pub const HiftResUnit = struct {
+        act1_alpha: ?*c.ggml_tensor = null,
+        act2_alpha: ?*c.ggml_tensor = null,
+        conv1_w: ?*c.ggml_tensor = null,
+        conv1_b: ?*c.ggml_tensor = null,
+        conv2_w: ?*c.ggml_tensor = null,
+        conv2_b: ?*c.ggml_tensor = null,
+    };
+
+    /// Ports `hift_res` (clip-model.h:691 @cd959bae9), a member of `clip_chatterbox`.
+    pub const HiftRes = struct {
+        units: std.ArrayList(HiftResUnit) = .empty, // dilations 1/3/5 on conv1
+    };
+
+    /// Ports `hift_up` (clip-model.h:696 @cd959bae9), a member of `clip_chatterbox`:
+    /// conv transpose, source injection, 3 resblocks.
+    pub const HiftUp = struct {
+        up_w: ?*c.ggml_tensor = null,
+        up_b: ?*c.ggml_tensor = null,
+        source_down_w: ?*c.ggml_tensor = null,
+        source_down_b: ?*c.ggml_tensor = null,
+        source_res: HiftRes = .{},
+        res_0: HiftRes = .{},
+        res_1: HiftRes = .{},
+        res_2: HiftRes = .{},
+    };
+
+    /// Ports `f0_conv` (clip-model.h:708 @cd959bae9), a member of `clip_chatterbox`.
+    pub const F0Conv = struct {
+        w: ?*c.ggml_tensor = null,
+        b: ?*c.ggml_tensor = null,
+    };
+
+    /// Ports `s3tok_block` (clip-model.h:714 @cd959bae9), a member of `clip_chatterbox`:
+    /// neox rope on q/k, fsmn memory on v.
+    pub const S3tokBlock = struct {
+        attn_ln_w: ?*c.ggml_tensor = null,
+        attn_ln_b: ?*c.ggml_tensor = null,
+        attn_q_w: ?*c.ggml_tensor = null,
+        attn_q_b: ?*c.ggml_tensor = null,
+        attn_k_w: ?*c.ggml_tensor = null, // no bias
+        attn_v_w: ?*c.ggml_tensor = null,
+        attn_v_b: ?*c.ggml_tensor = null,
+        fsmn_w: ?*c.ggml_tensor = null,
+        attn_out_w: ?*c.ggml_tensor = null,
+        attn_out_b: ?*c.ggml_tensor = null,
+        mlp_ln_w: ?*c.ggml_tensor = null,
+        mlp_ln_b: ?*c.ggml_tensor = null,
+        mlp_in_w: ?*c.ggml_tensor = null,
+        mlp_in_b: ?*c.ggml_tensor = null,
+        mlp_out_w: ?*c.ggml_tensor = null,
+        mlp_out_b: ?*c.ggml_tensor = null,
+    };
+
+    /// Ports `bn` (clip-model.h:734 @cd959bae9), a member of `clip_chatterbox`: a folded
+    /// batchnorm (w/b stay null on the affine free variant).
+    pub const Bn = struct {
+        mean: ?*c.ggml_tensor = null,
+        @"var": ?*c.ggml_tensor = null,
+        w: ?*c.ggml_tensor = null,
+        b: ?*c.ggml_tensor = null,
+    };
+
+    /// Ports `spk_res2d` (clip-model.h:742 @cd959bae9), a member of `clip_chatterbox`: the
+    /// shortcut is null on stride 1 blocks.
+    pub const SpkRes2d = struct {
+        conv1_w: ?*c.ggml_tensor = null,
+        bn1: Bn = .{},
+        conv2_w: ?*c.ggml_tensor = null,
+        bn2: Bn = .{},
+        shortcut_w: ?*c.ggml_tensor = null,
+        shortcut_bn: Bn = .{},
+    };
+
+    /// Ports `spk_cam_layer` (clip-model.h:752 @cd959bae9), a member of `clip_chatterbox`.
+    pub const SpkCamLayer = struct {
+        nl1_bn: Bn = .{},
+        linear1_w: ?*c.ggml_tensor = null,
+        nl2_bn: Bn = .{},
+        local_w: ?*c.ggml_tensor = null, // cam_layer.linear_local
+        ctx1_w: ?*c.ggml_tensor = null, // cam_layer.linear1
+        ctx1_b: ?*c.ggml_tensor = null,
+        ctx2_w: ?*c.ggml_tensor = null, // cam_layer.linear2
+        ctx2_b: ?*c.ggml_tensor = null,
+    };
+
+    /// Ports `spk_cam_block` (clip-model.h:762 @cd959bae9), a member of `clip_chatterbox`.
+    pub const SpkCamBlock = struct {
+        layers: std.ArrayList(SpkCamLayer) = .empty,
+        transit_bn: Bn = .{},
+        transit_w: ?*c.ggml_tensor = null,
+    };
+
+    // flow encoder
+    input_embedding_w: ?*c.ggml_tensor = null, // flow.input_embedding
+    embed_linear_w: ?*c.ggml_tensor = null, // fenc.embed.out.0
+    embed_linear_b: ?*c.ggml_tensor = null,
+    embed_norm_w: ?*c.ggml_tensor = null, // fenc.embed.out.1
+    embed_norm_b: ?*c.ggml_tensor = null,
+    pre_conv1_w: ?*c.ggml_tensor = null, // pre_lookahead_layer
+    pre_conv1_b: ?*c.ggml_tensor = null,
+    pre_conv2_w: ?*c.ggml_tensor = null,
+    pre_conv2_b: ?*c.ggml_tensor = null,
+    enc: std.ArrayList(EncLayer) = .empty,
+    up_conv_w: ?*c.ggml_tensor = null, // fenc.up_layer.conv
+    up_conv_b: ?*c.ggml_tensor = null,
+    up_embed_linear_w: ?*c.ggml_tensor = null, // fenc.up_embed.out.0
+    up_embed_linear_b: ?*c.ggml_tensor = null,
+    up_embed_norm_w: ?*c.ggml_tensor = null, // fenc.up_embed.out.1
+    up_embed_norm_b: ?*c.ggml_tensor = null,
+    up_enc: std.ArrayList(EncLayer) = .empty,
+    after_norm_w: ?*c.ggml_tensor = null,
+    after_norm_b: ?*c.ggml_tensor = null,
+    encoder_proj_w: ?*c.ggml_tensor = null, // flow.encoder_proj
+    encoder_proj_b: ?*c.ggml_tensor = null,
+
+    // cfm estimator
+    time_mlp_1_w: ?*c.ggml_tensor = null,
+    time_mlp_1_b: ?*c.ggml_tensor = null,
+    time_mlp_2_w: ?*c.ggml_tensor = null,
+    time_mlp_2_b: ?*c.ggml_tensor = null,
+    time_embed_mixer_w: ?*c.ggml_tensor = null, // meanflow variant only
+    est_down: EstStage = .{},
+    est_mid: std.ArrayList(EstStage) = .empty,
+    est_up: EstStage = .{},
+    est_final_block: CausalBlock = .{},
+    est_final_proj_w: ?*c.ggml_tensor = null,
+    est_final_proj_b: ?*c.ggml_tensor = null,
+
+    // hift vocoder
+    hift_pre_w: ?*c.ggml_tensor = null,
+    hift_pre_b: ?*c.ggml_tensor = null,
+    hift_ups: std.ArrayList(HiftUp) = .empty,
+    hift_post_w: ?*c.ggml_tensor = null,
+    hift_post_b: ?*c.ggml_tensor = null,
+    f0_condnet: std.ArrayList(F0Conv) = .empty,
+    f0_classifier_w: ?*c.ggml_tensor = null,
+    f0_classifier_b: ?*c.ggml_tensor = null,
+
+    // s3 tokenizer
+    s3tok_conv1_w: ?*c.ggml_tensor = null,
+    s3tok_conv1_b: ?*c.ggml_tensor = null,
+    s3tok_conv2_w: ?*c.ggml_tensor = null,
+    s3tok_conv2_b: ?*c.ggml_tensor = null,
+    s3tok_blocks: std.ArrayList(S3tokBlock) = .empty,
+    s3tok_down_w: ?*c.ggml_tensor = null, // quantizer._codebook.project_down
+    s3tok_down_b: ?*c.ggml_tensor = null,
+
+    // CAMPPlus speaker encoder
+    spk_conv1_w: ?*c.ggml_tensor = null,
+    spk_bn1: Bn = .{},
+    spk_layer1_0: SpkRes2d = .{},
+    spk_layer1_1: SpkRes2d = .{},
+    spk_layer2_0: SpkRes2d = .{},
+    spk_layer2_1: SpkRes2d = .{},
+    spk_conv2_w: ?*c.ggml_tensor = null,
+    spk_bn2: Bn = .{},
+    spk_tdnn_w: ?*c.ggml_tensor = null,
+    spk_tdnn_bn: Bn = .{},
+    spk_block1: SpkCamBlock = .{},
+    spk_block2: SpkCamBlock = .{},
+    spk_block3: SpkCamBlock = .{},
+    spk_out_bn: Bn = .{},
+    spk_dense_w: ?*c.ggml_tensor = null,
+    spk_dense_bn: Bn = .{},
+    spk_affine_w: ?*c.ggml_tensor = null,
+    spk_affine_b: ?*c.ggml_tensor = null,
+};
+
 /// Ports `clip_vocos` (clip-model.h:844 @cd959bae9): soprano's Vocos decoder.
 pub const Vocos = struct {
     input_w: ?*c.ggml_tensor = null,
@@ -644,7 +898,7 @@ pub const AudioPatch = struct {
     norm_w: ?*c.ggml_tensor = null,
 };
 
-/// Ports `clip_model` (clip-model.h:618 @8642541b2).
+/// Ports `clip_model` (clip-model.h:856 @cd959bae9).
 pub const Model = struct {
     modality: impl.Modality = .vision,
     proj_type: names.ProjectorType = .mlp,
@@ -669,11 +923,41 @@ pub const Model = struct {
     // pocket-tts: flow-matching decoder, backbone hidden state -> next latent
     flow: FlowNet = .{},
     gen_tfm_layers: std.ArrayList(Layer) = .empty, // mimi decoder_transformer
+
+    // chatterbox flow encoder, cfm estimator, hift vocoder, s3 tokenizer and CAMPPlus speaker encoder
+    cbx: Chatterbox = .{},
+
+    // chatterbox tensors read on the host, see clip_cbx_read_tensor(); keys owned
+    cbx_tensors: std.StringHashMapUnmanaged(?*c.ggml_tensor) = .empty,
+    // predefined voices, no rows if the voice is named in the prompt (lfm3a)
+    gen_voices: impl.GenVoiceMap = .{},
     // soprano: Vocos decoder, hidden states -> STFT coefficients
     vocos: Vocos = .{},
 
     n_sam_layers: i32 = 12, // used by deepseek-ocr sam encoder
     sam_layers: std.ArrayList(Layer) = .empty,
+
+    // nemotron transcribe: speaker expert, Sortformer head, fusion
+    spk_layers: std.ArrayList(Layer) = .empty,
+    spk_inp_proj_w: ?*c.ggml_tensor = null,
+    spk_pre_ln_w: ?*c.ggml_tensor = null,
+    spk_pre_ln_b: ?*c.ggml_tensor = null,
+    spk_post_ln_w: ?*c.ggml_tensor = null,
+    spk_post_ln_b: ?*c.ggml_tensor = null,
+    spk_head_proj_w: ?*c.ggml_tensor = null,
+    spk_head_proj_b: ?*c.ggml_tensor = null,
+    spk_head_up_w: ?*c.ggml_tensor = null,
+    spk_head_up_b: ?*c.ggml_tensor = null,
+    spk_head_fc1_w: ?*c.ggml_tensor = null,
+    spk_head_fc1_b: ?*c.ggml_tensor = null,
+    spk_head_fc2_w: ?*c.ggml_tensor = null,
+    spk_head_fc2_b: ?*c.ggml_tensor = null,
+    fusion_asr_norm_w: ?*c.ggml_tensor = null,
+    fusion_asr_norm_b: ?*c.ggml_tensor = null,
+    fusion_spk_norm_w: ?*c.ggml_tensor = null,
+    fusion_spk_norm_b: ?*c.ggml_tensor = null,
+    fusion_spk_kernel: ?*c.ggml_tensor = null,
+    spk_sil_emb: std.ArrayList(f32) = .empty,
 
     // lfm2 audio
     pre_encode_conv_X_w: [7]?*c.ggml_tensor = @splat(null),

@@ -8,7 +8,7 @@
 //! - `llama.cpp/ggml/src/ggml-cpu/traits.cpp` — the two entry points
 //! - `llama.cpp/ggml/src/ggml-cpu/traits.h`   — the two abstract classes
 //!
-//! both at v0.8.0 (`8642541b2`).
+//! both at v0.9.0 (`cd959bae9`).
 //!
 //! # Why this file forces a four-way port
 //!

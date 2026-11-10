@@ -6,7 +6,7 @@
 //!
 //! Ports `common_chat_prompt_part` and `common_chat_prompt` from
 //! `llama.cpp/common/chat.h` and the members of the latter from
-//! `llama.cpp/common/chat.cpp` (llama.cpp v0.8.0, `8642541b2`). Each
+//! `llama.cpp/common/chat.cpp` (llama.cpp v0.9.0, `cd959bae9`). Each
 //! declaration names what it ports and the line it began at.
 //!
 //! # Ownership

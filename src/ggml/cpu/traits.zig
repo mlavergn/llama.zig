@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.8.0, `8642541b2`),
-//! the section beginning at line 214. Each declaration names the C it replaces
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.9.0, `cd959bae9`),
+//! the section beginning at line 218. Each declaration names the C it replaces
 //! and the line it began at.
 //!
 //! # The kernels are still C
@@ -63,6 +63,7 @@ const quants = struct {
     extern fn quantize_row_q8_1(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
     extern fn quantize_row_mxfp4(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
     extern fn quantize_row_nvfp4(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
+    extern fn quantize_row_f8_e4m3(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
     extern fn quantize_row_q2_K(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
     extern fn quantize_row_q3_K(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
     extern fn quantize_row_q4_K(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
@@ -83,6 +84,7 @@ const quants = struct {
     extern fn ggml_vec_dot_q8_0_q8_0(n: c_int, s: [*c]f32, bs: usize, vx: ?*const anyopaque, bx: usize, vy: ?*const anyopaque, by: usize, nrc: c_int) void;
     extern fn ggml_vec_dot_mxfp4_q8_0(n: c_int, s: [*c]f32, bs: usize, vx: ?*const anyopaque, bx: usize, vy: ?*const anyopaque, by: usize, nrc: c_int) void;
     extern fn ggml_vec_dot_nvfp4_q8_0(n: c_int, s: [*c]f32, bs: usize, vx: ?*const anyopaque, bx: usize, vy: ?*const anyopaque, by: usize, nrc: c_int) void;
+    extern fn ggml_vec_dot_f8_e4m3_f32(n: c_int, s: [*c]f32, bs: usize, vx: ?*const anyopaque, bx: usize, vy: ?*const anyopaque, by: usize, nrc: c_int) void;
     extern fn ggml_vec_dot_q2_K_q8_K(n: c_int, s: [*c]f32, bs: usize, vx: ?*const anyopaque, bx: usize, vy: ?*const anyopaque, by: usize, nrc: c_int) void;
     extern fn ggml_vec_dot_q3_K_q8_K(n: c_int, s: [*c]f32, bs: usize, vx: ?*const anyopaque, bx: usize, vy: ?*const anyopaque, by: usize, nrc: c_int) void;
     extern fn ggml_vec_dot_q4_K_q8_K(n: c_int, s: [*c]f32, bs: usize, vx: ?*const anyopaque, bx: usize, vy: ?*const anyopaque, by: usize, nrc: c_int) void;
@@ -142,7 +144,7 @@ fn entry(
     };
 }
 
-/// Ports `type_traits_cpu` (ggml-cpu.c:215 @8642541b2).
+/// Ports `type_traits_cpu` (ggml-cpu.c:218 @cd959bae9).
 ///
 /// Read directly by `mul_mat`, `mul_mat_id` and `ggml_graph_plan` as well as
 /// through `ggml_get_type_traits_cpu`, so it is `pub` rather than file-local.
@@ -167,6 +169,7 @@ pub const table: [c.GGML_TYPE_COUNT]Traits = blk: {
 
     t[c.GGML_TYPE_MXFP4] = entry(&quants.quantize_row_mxfp4, &quants.ggml_vec_dot_mxfp4_q8_0, c.GGML_TYPE_Q8_0, 1);
     t[c.GGML_TYPE_NVFP4] = entry(&quants.quantize_row_nvfp4, &quants.ggml_vec_dot_nvfp4_q8_0, c.GGML_TYPE_Q8_0, 1);
+    t[c.GGML_TYPE_F8_E4M3] = entry(&quants.quantize_row_f8_e4m3, &quants.ggml_vec_dot_f8_e4m3_f32, c.GGML_TYPE_F32, 1);
 
     t[c.GGML_TYPE_Q2_K] = entry(&quants.quantize_row_q2_K, &quants.ggml_vec_dot_q2_K_q8_K, c.GGML_TYPE_Q8_K, 1);
     t[c.GGML_TYPE_Q3_K] = entry(&quants.quantize_row_q3_K, &quants.ggml_vec_dot_q3_K_q8_K, c.GGML_TYPE_Q8_K, 1);

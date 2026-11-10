@@ -3,17 +3,18 @@
 // llama.cpp/tools/mtmd/mtmd-helper.cpp gives them, in a C++17 unit as the
 // helper is (C++ is what makes stb's `pow(float, float)` call `powf`).
 //
-// Two departures, both about memory the C leaves uninitialized and the
+// Three departures, all about memory the C leaves uninitialized and the
 // port zeroes (src/mtmd/vendor/stb_image.zig, "As mtmd-helper.cpp compiles
 // it"), and neither reachable on a well-formed file:
 //
 // - STBI_MALLOC is calloc. stb_image mallocs the JPEG component planes
 //   and a TGA's pixels without filling them, and a corrupt file can leave
 //   parts unwritten.
-// - MA_MALLOC is calloc too. dr_flac's decoded-samples buffer persists
-//   across frames, and a corrupt subframe that fails to decode leaves part
-//   of it as it was -- from the start, uninitialized -- in a frame whose
-//   CRC can still match by chance.
+// - MA_MALLOC is calloc too. Through dr_flac v0.13.3 the decoded-samples
+//   buffer persisted across frames and a corrupt subframe could leave part
+//   of it unwritten in a frame whose CRC still matched; since v0.13.4
+//   (miniaudio v0.11.26) a failed subframe fails its frame and partitions
+//   must divide the block, so this no longer shows, but costs nothing.
 // - Each load runs on a zeroed stack (`scrub_stack`). `stbi__bmp_load`'s
 //   palette is an uninitialized local a corrupt index can read past, and so
 //   is the flat HDR loop's `rgbe` when a read comes up short.

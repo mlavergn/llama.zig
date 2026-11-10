@@ -5,7 +5,7 @@
 //!
 //! Ports `ThreadPool` from `llama.cpp/vendor/cpp-httplib/httplib.cpp` and
 //! its declaration in `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib
-//! 0.62.0, vendored at v0.8.0, `8642541b2`). Each declaration names what it
+//! 0.64.0, vendored at v0.9.0, `cd959bae9`). Each declaration names what it
 //! ports and the line it began at.
 //!
 //! # pthreads, as the C's are

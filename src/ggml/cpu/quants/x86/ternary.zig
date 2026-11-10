@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (v0.8.0,
-//! `8642541b2`), the `__AVX2__` arms at lines 1376 and 1508. Each function
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` (v0.9.0,
+//! `cd959bae9`), the `__AVX2__` arms at lines 1376 and 1508. Each function
 //! names the C it replaces and the line it began at.
 //!
 //! # Unfused, unlike the rest of the file

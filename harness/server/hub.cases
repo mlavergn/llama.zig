@@ -48,6 +48,16 @@ GET /props
 # percent-decoded first
 !server -m $CWD/dl/tiny5e.gguf -mu $MOCK/redirect-esc/tiny5.gguf -c 256 -np 1
 !mocklog
+# cpp-httplib 0.64: a 300 or a 305 is a final response, a 307 and a 308 are
+# followed; an absolute-path Location loses its dot segments
+!server -m $CWD/dl/rd1.gguf -mu $MOCK/redir300/rd1.gguf -c 256 -np 1
+!mocklog
+!server -m $CWD/dl/rd2.gguf -mu $MOCK/redir305/rd2.gguf -c 256 -np 1
+!mocklog
+!server -m $CWD/dl/rd3.gguf -mu $MOCK/redir308/rd3.gguf -c 256 -np 1
+!mocklog
+!server -m $CWD/dl/rd4.gguf -mu $MOCK/redirect-dots/rd4.gguf -c 256 -np 1
+!mocklog
 !server -m $CWD/dl/tiny4.gguf -mu $MOCK/noranges/tiny4.gguf -c 256 -np 1
 !mocklog
 !server -m $CWD/dl/parts-00001-of-00002.gguf -mu $MOCK/files/parts-00001-of-00002.gguf -c 256 -np 1
@@ -154,6 +164,16 @@ GET /props
 !server -hf test/nested -c 256 -np 1
 !mocklog
 !server -hf test/tiny:Q5_0 -c 256 -np 1
+# v0.9.0: the tag as a whole token
+!server -hf test/floats:F16 -c 256 -np 1 -lv 4
+!fulllog
+GET /props
+!mocklog
+!server -hf test/floats:bf16 -c 256 -np 1 -lv 4
+!fulllog
+GET /props
+!mocklog
+!server -hf test/floats:16 -c 256 -np 1
 !server -hf test/tiny -hff nope.gguf -c 256 -np 1
 !server -hf test/empty -c 256 -np 1
 !server -hf test/nope -c 256 -np 1

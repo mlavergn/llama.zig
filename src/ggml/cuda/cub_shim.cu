@@ -7,7 +7,7 @@
 // file is the only CUDA host code the port writes in C++. It wraps exactly
 // the calls upstream makes and nothing else:
 //
-// - `llama.cpp/ggml/src/ggml-cuda/argsort.cu` (v0.8.0, `8642541b2`),
+// - `llama.cpp/ggml/src/ggml-cuda/argsort.cu` (v0.9.0, `cd959bae9`),
 //   `argsort_f32_i32_cuda_cub` (argsort.cu:45): `DeviceRadixSort`,
 //   `DeviceSegmentedRadixSort` and `DeviceSegmentedSort`, `SortPairs` and
 //   `SortPairsDescending`, each called once to size the temporary storage

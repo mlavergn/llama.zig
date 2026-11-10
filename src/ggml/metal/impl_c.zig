@@ -4,8 +4,8 @@
 //! # Provenance
 //!
 //! Mirrors the `FC_*`, `OP_*`, `N_*` and `SZ_*` `#define`s of
-//! `llama.cpp/ggml/src/ggml-metal/ggml-metal-impl.h` at v0.8.0
-//! (`8642541b2`), and since v0.6.0 its two `GGML_METAL_FWHT_*`.
+//! `llama.cpp/ggml/src/ggml-metal/ggml-metal-impl.h` at v0.9.0
+//! (`cd959bae9`), and since v0.6.0 its two `GGML_METAL_FWHT_*`.
 //!
 //! # Hand-declared, generated, and checked
 //!

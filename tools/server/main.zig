@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `main` (tools/server/main.cpp:3 @cd959bae9) from
-//! `llama.cpp/tools/server/main.cpp` (v0.8.0, `8642541b2`).
+//! `llama.cpp/tools/server/main.cpp` (v0.9.0, `cd959bae9`).
 
 const std = @import("std");
 const server = @import("server.zig");

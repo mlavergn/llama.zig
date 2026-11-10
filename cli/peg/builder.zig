@@ -7,7 +7,7 @@
 //! Ports `common_peg_parser_builder`, the operators of `common_peg_parser`,
 //! `parse_char_classes` and its helpers, `rule_name` and `build_peg_parser`
 //! from `llama.cpp/common/peg-parser.h` and `llama.cpp/common/peg-parser.cpp`
-//! (llama.cpp v0.8.0, `8642541b2`). Each declaration names what it ports and
+//! (llama.cpp v0.9.0, `cd959bae9`). Each declaration names what it ports and
 //! the line it began at.
 //!
 //! # Shape

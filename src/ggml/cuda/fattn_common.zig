@@ -6,7 +6,7 @@
 //! # Provenance
 //!
 //! Ported from the host half of
-//! `llama.cpp/ggml/src/ggml-cuda/fattn-common.cuh` at v0.8.0 (`8642541b2`),
+//! `llama.cpp/ggml/src/ggml-cuda/fattn-common.cuh` at v0.9.0 (`cd959bae9`),
 //! plus `amd_mfma_available` and `amd_wmma_available` from
 //! `llama.cpp/ggml/src/ggml-cuda/common.cuh`. The kernels --
 //! `flash_attn_mask_to_KV_max`, `flash_attn_stream_k_fixup_uniform`,
@@ -68,6 +68,8 @@ const cc_rdna1 = common.cc.offset_amd + 0x1010;
 const cc_rdna3 = common.cc.offset_amd + 0x1100;
 /// `GGML_CUDA_CC_RDNA3_5` (common.cuh:84 @cd959bae9).
 const cc_rdna3_5 = common.cc.offset_amd + 0x1150;
+/// `GGML_CUDA_CC_RDNA4_M` (common.cuh:85 @cd959bae9), gfx117X, new at v0.9.0.
+const cc_rdna4_m = common.cc.offset_amd + 0x1170;
 /// `GGML_CUDA_CC_RDNA4` (common.cuh:86 @cd959bae9).
 const cc_rdna4 = common.cc.offset_amd + 0x1200;
 
@@ -85,13 +87,14 @@ pub fn amdMfmaAvailable(x: c_int) bool {
     return !isGcnApu(x) and x >= cc_cdna1 and x < cc_rdna1;
 }
 
-/// Ports `amd_wmma_available` (common.cuh:357 @8642541b2):
-/// `GGML_CUDA_CC_IS_RDNA4(cc) || GGML_CUDA_CC_IS_RDNA3(cc)`. False for every
-/// CUDA compute capability.
+/// Ports `amd_wmma_available` (common.cuh:367 @cd959bae9):
+/// `GGML_CUDA_CC_IS_RDNA3(cc) || GGML_CUDA_CC_IS_RDNA4_M(cc) ||
+/// GGML_CUDA_CC_IS_RDNA4(cc)`. False for every CUDA compute capability.
 pub fn amdWmmaAvailable(x: c_int) bool {
     const rdna3_0 = x >= cc_rdna3 and x < cc_rdna3_5;
-    const rdna3_5 = x >= cc_rdna3_5 and x < cc_rdna4;
-    return x >= cc_rdna4 or (rdna3_0 or rdna3_5);
+    const rdna3_5 = x >= cc_rdna3_5 and x < cc_rdna4_m;
+    const rdna4_m = x >= cc_rdna4_m and x < cc_rdna4;
+    return (rdna3_0 or rdna3_5) or rdna4_m or x >= cc_rdna4;
 }
 
 // -----------------------------------------------------------------------------
@@ -245,7 +248,7 @@ fn shouldUseStreamK(prefer_whole_tiles: bool, cc: c_int, ntiles_dst: c_int, max_
     return tiles_efficiency_percent < 75;
 }
 
-/// Ports `launch_fattn` (fattn-common.cuh:981 @8642541b2).
+/// Ports `launch_fattn` (fattn-common.cuh:982 @cd959bae9).
 ///
 /// Parameters:
 /// - `library`: the translation unit the calling case is instantiated in;
@@ -272,6 +275,11 @@ pub fn launchFattn(
 
     const mask: ?*const Tensor = dst.src[3];
     const sinks: ?*const Tensor = dst.src[4];
+    const kv_rows: ?*const Tensor = dst.src[5];
+
+    // with kv_rows the kernel iterates over the mask columns and reads K/V rows through kv_rows
+    const n_kv_cols: i64 = if (kv_rows) |r| r.ne[0] else K.ne[1];
+    impl.assert(kv_rows == null or !a.use_sparse, "!kv_rows || !use_sparse");
 
     const KQV = dst;
 
@@ -395,8 +403,8 @@ pub fn launchFattn(
 
     // Optional optimization where the mask is scanned to determine whether part of the calculation can be skipped.
     // Only worth the overhead if there is at lease one FATTN_KQ_STRIDE x FATTN_KQ_STRIDE square to be skipped or
-    //     multiple sequences of possibly different lengths.
-    const scan_mask = !a.use_sparse and mask != null and @rem(K.ne[1], kq_stride) == 0 and (Q.ne[1] >= 1024 or Q.ne[3] > 1);
+    //     multiple sequences of possibly different lengths, or kv_rows lists that end with padding.
+    const scan_mask = !a.use_sparse and mask != null and @rem(n_kv_cols, kq_stride) == 0 and (Q.ne[1] >= 1024 or Q.ne[3] > 1 or kv_rows != null);
     if (scan_mask) {
         const m = mask.?;
         const s31 = i64Of(m.nb[1] / sizeof_half2);
@@ -406,7 +414,7 @@ pub fn launchFattn(
         const block_dim_KV_max: kernels.Dim3 = .{ .x = kq_stride / 2, .y = 1, .z = 1 };
 
         const ne_KV_max: c_int = @bitCast(blocks_num_KV_max.x *% blocks_num_KV_max.y);
-        const iter_k: c_int = i32Of(@divTrunc(K.ne[1], kq_stride));
+        const iter_k: c_int = i32Of(@divTrunc(n_kv_cols, kq_stride));
 
         _ = KV_max.alloc(@intCast(ne_KV_max));
         kernels.launchPdl(kernels.get(library, kernels.tmpl("flash_attn_mask_to_KV_max", &.{kernels.int(ncols1)})), .{
@@ -417,13 +425,19 @@ pub fn launchFattn(
         }, .{ @as(?*const anyopaque, m.data), @as(?[*]c_int, KV_max.ptr), iter_k, s31, s33 });
     }
 
+    // K/V are shared by all slices when read through kv_rows
+    if (kv_rows != null) {
+        nb13 = 0;
+        nb23 = 0;
+    }
+
     const block_dim: kernels.Dim3 = .{ .x = u32Of(a.warp_size), .y = u32Of(a.nwarps), .z = 1 };
     var max_blocks_per_sm: c_int = 1; // Max. number of active blocks limited by occupancy.
     max_blocks_per_sm = occupancyMaxActiveBlocksPerMultiprocessor(a.kernel, @bitCast(block_dim.x *% block_dim.y *% block_dim.z), a.nbytes_shared);
     impl.assert(max_blocks_per_sm > 0, "max_blocks_per_sm > 0");
     var parallel_blocks: c_int = max_blocks_per_sm;
 
-    const n_kv: i64 = if (a.use_sparse) n_kv_max else K.ne[1];
+    const n_kv: i64 = if (a.use_sparse) n_kv_max else n_kv_cols;
     const ntiles_KV: c_int = i32Of(@divTrunc(n_kv + a.nbatch_fa - 1, a.nbatch_fa)); // Max. number of parallel blocks limited by KV cache length.
 
     var blocks_num: kernels.Dim3 = .{};
@@ -528,6 +542,7 @@ pub fn launchFattn(
         if (mask) |m| @as([*c]const u8, @ptrCast(m.data)) else @as([*c]const u8, null),
         if (sinks) |s| @as([*c]const u8, @ptrCast(s.data)) else @as([*c]const u8, null),
         @as(?[*]c_int, KV_max.ptr),
+        if (kv_rows) |r| @as(?[*]const c_int, @ptrCast(@alignCast(r.data))) else @as(?[*]const c_int, null),
         dst_main,
         @as(?[*]Float2, dst_tmp_meta.ptr),
         scale,

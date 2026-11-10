@@ -7,7 +7,7 @@
 //! `llama.cpp/tools/server/server-schema.h` (namespace `server_schema`),
 //! and `common_sampler_types_from_names` and
 //! `common_sampler_types_from_chars` from `llama.cpp/common/sampling.cpp`
-//! (llama.cpp v0.8.0, `8642541b2`). Each declaration names what it ports and
+//! (llama.cpp v0.9.0, `cd959bae9`). Each declaration names what it ports and
 //! the line it began at.
 //!
 //! # The field classes

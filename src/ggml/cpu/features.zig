@@ -3,9 +3,9 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.8.0, `8642541b2`),
-//! the arch-feature state at line 88, the predicates at line 3599, and
-//! `ggml_cpu_init` at line 3823. Each declaration names the C it replaces and
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.9.0, `cd959bae9`),
+//! the arch-feature state at line 92, the predicates at line 3660, and
+//! `ggml_cpu_init` at line 3884. Each declaration names the C it replaces and
 //! the line it began at.
 //!
 //! # These are compile-time answers, not runtime probes
@@ -158,12 +158,12 @@ pub export fn ggml_cpu_has_wasm_simd() c_int {
     return 0;
 }
 
-/// Ports `ggml_cpu_has_riscv_v` (ggml-cpu.c:3739 @8642541b2).
+/// Ports `ggml_cpu_has_riscv_v` (ggml-cpu.c:3748 @cd959bae9).
 pub export fn ggml_cpu_has_riscv_v() c_int {
     return 0;
 }
 
-/// Ports `ggml_cpu_get_rvv_vlen` (ggml-cpu.c:3747 @8642541b2).
+/// Ports `ggml_cpu_get_rvv_vlen` (ggml-cpu.c:3756 @cd959bae9).
 pub export fn ggml_cpu_get_rvv_vlen() c_int {
     return 0;
 }
@@ -274,7 +274,7 @@ var is_first_call = true;
 extern fn ggml_time_us() i64;
 extern fn atoi(str: [*:0]const u8) c_int;
 
-/// Ports `ggml_cpu_init` (ggml-cpu.c:3875 @8642541b2).
+/// Ports `ggml_cpu_init` (ggml-cpu.c:3884 @cd959bae9).
 ///
 /// Fills the lookup tables and reads `GGML_CPU_DISABLE_FUSION`, once per
 /// process. `ggml_graph_compute` calls it on every graph, so the guard is what

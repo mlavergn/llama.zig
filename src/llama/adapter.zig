@@ -13,7 +13,7 @@
 //!   and `llama_adapter_lora_free`
 //! - `llama.cpp/src/llama-model.cpp` -- the LoRA half of `~llama_model`
 //!
-//! All at v0.8.0 (`8642541b2`). The C entry points are `api/adapter.zig`'s;
+//! All at v0.9.0 (`cd959bae9`). The C entry points are `api/adapter.zig`'s;
 //! the context's setters are `context.zig`'s.
 //!
 //! # The order the C++ leaves to libc++

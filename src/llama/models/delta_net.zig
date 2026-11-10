@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/delta-net-base.cpp` at v0.8.0
-//! (`8642541b2`): `get_slice_2d` and every member of
+//! Ported from `llama.cpp/src/models/delta-net-base.cpp` at v0.9.0
+//! (`cd959bae9`): `get_slice_2d` and every member of
 //! `llm_build_delta_net_base`. Also from `llama.cpp/src/models/models.h`:
 //! `build_gdn_l2_norm`.
 //!
@@ -383,7 +383,7 @@ pub fn buildDeltaNet(self: *const Builder, q: *Tensor, k: *Tensor, v: *Tensor, g
 }
 
 /// Ports `llm_build_delta_net_base`'s `build_conv_state` (delta-net-base.cpp:446
-/// @8642541b2): the convolution's input with the saved state in front, and
+/// @cd959bae9): the convolution's input with the saved state in front, and
 /// the state written back.
 pub fn buildConvState(self: *const Builder, inp: *const graph.InpRs, conv_states_all: *Tensor, qkv_mixed_: *Tensor, conv_kernel_size: i64, conv_channels: i64, il: c_int) *Tensor {
     const ctx = self.ctx0;
@@ -419,14 +419,29 @@ pub fn buildConvState(self: *const Builder, inp: *const graph.InpRs, conv_states
         // [TAG_RECURRENT_ROLLBACK_SPLITS]: the last n_rs_seq + 1 tokens of
         // a sequence are in the same ubatch, as split_equal guarantees.
         const K: i64 = @as(i64, self.cparams.n_rs_seq) + 1;
-        var t: i64 = 1;
-        while (t <= K) : (t += 1) {
-            const s_idx = @max(0, conv_input.*.ne[0] - conv_states.*.ne[0] - K + t);
-            const s_slot = K - t;
-            const conv_state_last = c.ggml_view_3d(ctx, conv_input, conv_kernel_size - 1, conv_channels, n_seqs, conv_input.*.nb[1], conv_input.*.nb[2], c.ggml_row_size(conv_input.*.type, s_idx));
-            const conv_state_update = c.ggml_view_2d(ctx, conv_states_all, row_count, n_seqs, conv_states_all.nb[1], @as(usize, @intCast(s_slot * mem_size + kv_head)) * row_size);
-            c.ggml_build_forward_expand(self.gf, c.ggml_cpy(ctx, conv_state_last, conv_state_update));
+        const n: i64 = conv_input.*.ne[0] - conv_states.*.ne[0]; // n_seq_tokens
+        const Kw: i64 = @min(n + 1, K); // the windows that exist in this ubatch
+
+        // {Kw-1, ..., 0}, filled on the host and shared by every layer of
+        // the graph. The input is the graph's, which the C++ reaches through
+        // a non-const pointer.
+        const inp_mut = @constCast(inp);
+        if (inp_mut.s_slot_rev == null) {
+            inp_mut.s_slot_rev = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, Kw);
+            c.ggml_set_input(inp_mut.s_slot_rev);
+            _ = c.ggml_set_name(inp_mut.s_slot_rev, "rs_s_slot_rev");
         }
+
+        // Window w starts at column n - (Kw - 1) + w (ascending time) and is
+        // rollback slot Kw - 1 - w. Slots reaching back past this ubatch are
+        // left unwritten, like the SSM snapshots in build_recurrent_attn.
+        // Consecutive windows start one element apart, so they overlap.
+        const windows = c.ggml_view_4d(ctx, conv_input, conv_kernel_size - 1, Kw, conv_channels, n_seqs, c.ggml_element_size(conv_input), conv_input.*.nb[1], conv_input.*.nb[2], c.ggml_row_size(conv_input.*.type, n - (Kw - 1)));
+
+        // A [d-1, slot, channel, seq] view of the cells of this ubatch.
+        const slots = c.ggml_view_4d(ctx, conv_states_all, conv_kernel_size - 1, K, conv_channels, n_seqs, @as(usize, @intCast(mem_size)) * row_size, c.ggml_row_size(conv_states_all.type, conv_kernel_size - 1), conv_states_all.nb[1], @as(usize, @intCast(kv_head)) * row_size);
+
+        c.ggml_build_forward_expand(self.gf, c.ggml_set_rows(ctx, slots, windows, inp_mut.s_slot_rev));
     }
     return conv_input;
 }

@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/fit-params/fit-params.cpp` at v0.8.0
-//! (`8642541b2`). The fitting itself is `cli/fit.zig`, the port of
+//! Ported from `llama.cpp/tools/fit-params/fit-params.cpp` at v0.9.0
+//! (`cd959bae9`). The fitting itself is `cli/fit.zig`, the port of
 //! `common/fit.cpp` gated by `make fit-diff`; this is the command line
 //! around it.
 

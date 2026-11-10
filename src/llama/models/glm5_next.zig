@@ -14,8 +14,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/glm5-next.cpp` at v0.8.0
-//! (`8642541b2`), with its declaration in `llama.cpp/src/models/models.h`:
+//! Ported from `llama.cpp/src/models/glm5-next.cpp` at v0.9.0
+//! (`cd959bae9`), with its declaration in `llama.cpp/src/models/models.h`:
 //! `llama_model_glm5_next`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, `glm5_conv1d`, the `llm_graph_input_kpool` input,
 //! the view and affine helpers, and its `graph` with `build_inp_kpool`, the
@@ -1174,7 +1174,7 @@ const Graph = struct {
     };
 
     /// Ports `llama_model_glm5_next::graph`'s `build_dsa_layer`
-    /// (models/glm5-next.cpp:1046 @8642541b2): nope-only MLA, attending
+    /// (models/glm5-next.cpp:1046 @cd959bae9): nope-only MLA, attending
     /// sparsely over the indexer's selection.
     fn buildDsaLayer(self: *const Graph, cur: *Tensor, layer: *const Layer, mctx_hyb: *const HybridIdxContext, inp_attn: *graph.InpAttnK, inp_kpool: *InpKpool, prev_sel: ?*Tensor, il: c_int) DsaOut {
         const b = self.b;
@@ -1234,7 +1234,7 @@ const Graph = struct {
 
         b.cb(sel, "kq_mask_dsa", il);
 
-        var out = b.buildAttnMha(q_absorbed, k, v, null, sel, null, layer.wv_b, inp_kpool.n_sel, kq_scale, il);
+        var out = b.buildAttnMha(q_absorbed, k, v, null, sel, null, null, layer.wv_b, inp_kpool.n_sel, kq_scale, il);
         b.cb(out, "kqv_out", il);
 
         out = c.ggml_mul_mat(ctx, layer.wo, out);

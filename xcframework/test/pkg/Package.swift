@@ -8,7 +8,7 @@ import PackageDescription
 
 let package = Package(
     name: "PkgTest",
-    platforms: [.iOS("16.4"), .macOS("13.3")],
+    platforms: [.iOS("26.0"), .macOS("26.0")],
     products: [
         .library(name: "PkgTest", targets: ["PkgTest"]),
     ],

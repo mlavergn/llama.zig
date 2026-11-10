@@ -5,8 +5,8 @@
 //! # Provenance
 //!
 //! Ports `server_http_proxy` from `llama.cpp/tools/server/server-models.cpp`
-//! and `llama.cpp/tools/server/server-models.h` (llama.cpp v0.8.0,
-//! `8642541b2`), with the helpers it calls: `to_lower_copy`,
+//! and `llama.cpp/tools/server/server-models.h` (llama.cpp v0.9.0,
+//! `cd959bae9`), with the helpers it calls: `to_lower_copy`,
 //! `should_strip_proxy_header`, `generate_multipart_boundary` and
 //! `build_multipart_body`. Each declaration names what it ports and the
 //! line it began at.

@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/getrows.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/getrows.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/getrows.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels -- `k_get_rows`, `k_get_rows_kq`, `k_get_rows_float`,
 //! `k_get_rows_float_vec`, `k_get_rows_back_float` -- stay CUDA.
 //!

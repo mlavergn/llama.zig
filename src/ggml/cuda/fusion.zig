@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.8.0
-//! (`8642541b2`): `ggml_cuda_should_fuse_rope_set_rows`,
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.9.0
+//! (`cd959bae9`): `ggml_cuda_should_fuse_rope_set_rows`,
 //! `ggml_cuda_should_fuse_rms_norm_mul_rope`, `ggml_cuda_try_gdn_cache_fusion`,
 //! `ggml_cuda_try_ssm_scan_cache_fusion`, `ggml_cuda_topk_moe_group_fusion`,
 //! `ggml_cuda_topk_moe_fusion`, `ggml_cuda_check_fusion_memory_ranges`,

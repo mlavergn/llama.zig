@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.8.0
-//! (`8642541b2`): `ggml_backend_cuda_device_supports_op`, the CUDA arms
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.9.0
+//! (`cd959bae9`): `ggml_backend_cuda_device_supports_op`, the CUDA arms
 //! (the `GGML_USE_MUSA` exclusions compile out; `GGML_CUDA_USE_CUB` is
 //! defined, so `ARGSORT` takes its CUB arm -- v0.6.0's shared-memory bound
 //! is the bitonic-only one -- and since v0.7.0 both it and `TOP_K`, which

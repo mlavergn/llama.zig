@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/upscale.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/upscale.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/upscale.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels -- `upscale_f32`, `upscale_f32_bilinear`,
 //! `upscale_f32_bilinear_antialias`, `upscale_f32_bicubic` -- stay CUDA.
 //!

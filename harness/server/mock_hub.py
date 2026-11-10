@@ -26,6 +26,8 @@ serves, from <root>:
     /noranges/<name>      Accept-Ranges: none
     /redirect/<name>      302 to /files/<name>
     /redirect-esc/<name>  the same, the name's first letter percent-encoded
+    /redir<code>/<name>   that status, with a Location to /files/<name>
+    /redirect-dots/<name> 302 to /x/../files/./<name>
     /flaky/<name>         the first GET sends half the body and closes;
                           later ones (a Range resume) are whole
     /trunc/<name>         every GET sends half the body and closes
@@ -198,6 +200,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send_file(data, etag='"' + parts[2] + '"')
         if kind == "noranges":
             return self.send_file(data, etag=etag, ranges=False)
+        # cpp-httplib 0.64: only 301, 302, 303, 307 and 308 are followed, and
+        # an absolute-path Location loses its dot segments
+        if kind.startswith("redir") and kind[5:].isdigit():
+            self.send_response(int(kind[5:]))
+            self.send_header("Location", "/files/" + name)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if kind == "redirect-dots":
+            self.send_response(302)
+            self.send_header("Location", "/x/../files/./" + name)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if kind in ("redirect", "redirect-esc"):
             self.send_response(302)
             # redirect-esc spells the name's first letter as %XX: since

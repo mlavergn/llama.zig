@@ -16,3 +16,5 @@ done
 # v0.8.0's read check: an adapter and a base model missing their last 4 KiB
 head -c "$(($(wc -c <"$DATA/qwen3-dense/good.gguf") - 4096))" "$DATA/qwen3-dense/good.gguf" >"$DATA/qwen3-dense/trunc.gguf"
 head -c "$(($(wc -c <"$ROOT/zig-out/arch-fixtures/qwen3-dense.gguf") - 4096))" "$ROOT/zig-out/arch-fixtures/qwen3-dense.gguf" >"$DATA/qwen3-dense/trunc-base.gguf"
+# v0.9.0: a BF16 base tensor merges to BF16 where it used to become F16
+"$ROOT/zig-out/tools-ref/bin/llama-quantize" "$ROOT/zig-out/arch-fixtures/qwen3-dense.gguf" "$DATA/qwen3-dense-bf16.gguf" BF16 >/dev/null 2>&1

@@ -9,8 +9,8 @@
 //! `llama.cpp/tools/server/server-task.cpp` and
 //! `llama.cpp/tools/server/server-task.h`, and
 //! `server_chat_msg_diff_to_json_oaicompat` from
-//! `llama.cpp/tools/server/server-chat.cpp` (llama.cpp v0.8.0,
-//! `8642541b2`). Each declaration names what it ports and the line it
+//! `llama.cpp/tools/server/server-chat.cpp` (llama.cpp v0.9.0,
+//! `cd959bae9`). Each declaration names what it ports and the line it
 //! began at.
 //!
 //! # One type for the class hierarchy

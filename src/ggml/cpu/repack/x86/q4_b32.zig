@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` at v0.8.0
-//! (`8642541b2`): the templates `gemv_q4_b32_8x8_q8_0_lut_avx` and
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` at v0.9.0
+//! (`cd959bae9`): the templates `gemv_q4_b32_8x8_q8_0_lut_avx` and
 //! `gemm_q4_b32_8x8_q8_0_lut_avx` and the six entry points that instantiate
 //! them. Each declaration names the C++ it replaces and the line it began
 //! at. The gemm's `__AVX512BW__ && __AVX512DQ__` arm is the same body at

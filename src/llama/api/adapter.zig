@@ -10,7 +10,7 @@
 //! - `llama.cpp/src/llama-context.cpp` -- `llama_set_adapters_lora` and
 //!   `llama_set_adapter_cvec`
 //!
-//! All at v0.8.0 (`8642541b2`).
+//! All at v0.9.0 (`cd959bae9`).
 //!
 //! Each function has the C signature and is `pub`, not `export`: the
 //! in-process harnesses call these beside the C++ that defines the same

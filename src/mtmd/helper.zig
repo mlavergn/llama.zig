@@ -5,7 +5,7 @@
 //!
 //! Ports `llama.cpp/tools/mtmd/mtmd-helper.cpp` and
 //! `llama.cpp/tools/mtmd/mtmd-helper-common.h`, plus the C types of
-//! `llama.cpp/tools/mtmd/mtmd-helper.h`, at v0.8.0 (`8642541b2`). Each
+//! `llama.cpp/tools/mtmd/mtmd-helper.h`, at v0.9.0 (`cd959bae9`). Each
 //! declaration names what it ports and the line it began at.
 //!
 //! # The build ported
@@ -726,7 +726,7 @@ pub fn mtmd_helper_video_init_from_buf(mctx: ?*const Context, buf: ?[*]const u8,
     return null;
 }
 
-/// Ports `mtmd_helper_video_free` (mtmd-helper.cpp:1232 @8642541b2), its
+/// Ports `mtmd_helper_video_free` (mtmd-helper.cpp:1211 @cd959bae9), its
 /// `#else` arm.
 pub fn mtmd_helper_video_free(ctx: ?*anyopaque) callconv(.c) void {
     _ = ctx;

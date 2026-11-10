@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ports the launch helpers of `llama.cpp/ggml/src/ggml-cuda/common.cuh` at
-//! v0.8.0 (`8642541b2`): `ggml_cuda_kernel_launch`, `ggml_cuda_pdl_config`,
+//! v0.9.0 (`cd959bae9`): `ggml_cuda_kernel_launch`, `ggml_cuda_pdl_config`,
 //! `ggml_cuda_kernel_can_use_pdl` and `CUDA_SET_SHARED_MEMORY_LIMIT`. The
 //! lookup and the loader are not ports; they replace what `nvcc`'s host
 //! stubs and cudart's fatbin registration do for the C++ (PLAN.md,

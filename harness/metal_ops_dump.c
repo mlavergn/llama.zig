@@ -13,7 +13,9 @@
  * two-stage kernel can use. `make node-diff ARGS=--gpu` is exact but reaches
  * only what one decode reaches: nothing there calls TOP_K_MASK, POOL_1D or
  * a MUL_MAT_ID with `-1` ids. `make metal-diff` compares the vtables and
- * dispatches nothing. New at v0.8.0, for the encoders that release moved.
+ * dispatches nothing. New at v0.8.0, for the encoders that release moved;
+ * v0.9.0 added FLASH_ATTN_EXT over K/V row lists, the contiguous unary and
+ * binary kernels' and GLU's new threadgroup shapes, and MXFP4's `mul_mv`.
  *
  * What a line means
  * -----------------
@@ -83,6 +85,15 @@ static void fill_floats(struct ggml_tensor * t, float amp) {
         ggml_fp32_to_bf16_row(f, h, n);
         ggml_backend_tensor_set(t, h, 0, n * sizeof(ggml_bf16_t));
         free(h);
+    } else if (t->type == GGML_TYPE_MXFP4) {
+        /* an e8m0 exponent near 2^0, then sixteen bytes of e2m1 pairs */
+        const size_t bs = ggml_type_size(t->type);
+        const size_t nb = ggml_nbytes(t);
+        uint8_t * q = malloc(nb);
+        for (size_t i = 0; i < nb; i++) q[i] = (uint8_t) rnd();
+        for (size_t i = 0; i + bs <= nb; i += bs) q[i] = (uint8_t) (120 + rnd() % 8);
+        ggml_backend_tensor_set(t, q, 0, nb);
+        free(q);
     } else {
         /* q4_0 and q8_0 both open on an fp16 scale */
         const size_t bs = ggml_type_size(t->type);
@@ -466,6 +477,217 @@ static void scale_cases(void) {
     }
 }
 
+/* FLASH_ATTN_EXT over K/V row lists (`ggml_flash_attn_ext_rows`, v0.9.0):
+ * each stream attends to its own list of cache rows, `-1` entries padding
+ * with a `-inf` mask column. Every path the encoder has for it -- the vec
+ * kernel reading rows through the list, the half8x8 and tensor kernels over
+ * rows gathered into F16 scratch (quantized KV dequantized first), V a view
+ * of K on both -- and the gathered rows themselves, which sit in the hashed
+ * scratch. */
+struct far {
+    enum ggml_type kv;
+    int64_t dk, dv, n_batch, n_head, n_head_kv, ne3, n_cache, n_rows;
+    int vview, sinks;
+};
+
+static void fa_rows_case(struct far c, uint64_t seed) {
+    char label[160];
+    begin(seed);
+
+    struct ggml_tensor * q = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, c.dk, c.n_batch, c.n_head, c.ne3);
+    struct ggml_tensor * k = ggml_new_tensor_4d(ctx, c.kv, c.dk, c.n_cache, c.n_head_kv, 1);
+    struct ggml_tensor * v = c.vview
+        ? ggml_view_4d(ctx, k, c.dv, c.n_cache, c.n_head_kv, 1, k->nb[1], k->nb[2], k->nb[3], 0)
+        : ggml_new_tensor_4d(ctx, c.kv, c.dv, c.n_cache, c.n_head_kv, 1);
+    struct ggml_tensor * m  = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, c.n_rows, c.n_batch, 1, c.ne3);
+    struct ggml_tensor * kr = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, c.n_rows, c.ne3);
+    struct ggml_tensor * sk = c.sinks ? ggml_new_tensor_1d(ctx, GGML_TYPE_F32, c.n_head) : NULL;
+    struct ggml_tensor * out = ggml_flash_attn_ext_rows(ctx, q, k, v, m, kr, 1.0f/sqrtf((float) c.dk), 0.0f, 0.0f);
+    ggml_flash_attn_ext_add_sinks(out, sk);
+    alloc_all();
+
+    fill_floats(q, 1.0f);
+    fill_floats(k, 1.0f);
+    if (!c.vview) fill_floats(v, 1.0f);
+    if (sk) fill_floats(sk, 1.0f);
+
+    /* each stream's list: distinct rows, the last eighth padding */
+    const int64_t n_pad = c.n_rows / 8;
+    int32_t * rows = malloc(c.n_rows * c.ne3 * sizeof(int32_t));
+    for (int64_t s = 0; s < c.ne3; s++) {
+        for (int64_t i = 0; i < c.n_rows; i++) {
+            rows[s * c.n_rows + i] = i < c.n_rows - n_pad ? (int32_t) ((i * 7 + s * 13 + rnd() % 3) % c.n_cache) : -1;
+        }
+    }
+    fill_i32(kr, rows);
+
+    const int64_t nm = ggml_nelements(m);
+    float * mf = malloc(nm * sizeof(float));
+    for (int64_t s = 0; s < c.ne3; s++) {
+        for (int64_t b = 0; b < c.n_batch; b++) {
+            for (int64_t i = 0; i < c.n_rows; i++) {
+                const int64_t at = (s * c.n_batch + b) * c.n_rows + i;
+                mf[at] = rows[s * c.n_rows + i] < 0 || rnd() % 16 == 0 ? -INFINITY : 0.5f * frnd();
+            }
+        }
+    }
+    ggml_fp16_t * mh = malloc(nm * sizeof(ggml_fp16_t));
+    ggml_fp32_to_fp16_row(mf, mh, nm);
+    ggml_backend_tensor_set(m, mh, 0, nm * sizeof(ggml_fp16_t));
+    free(mh);
+    free(mf);
+    free(rows);
+
+    snprintf(label, sizeof label, "FA_ROWS %s dk=%lld dv=%lld b=%lld h=%lld/%lld ne3=%lld rows=%lld vview=%d sinks=%d",
+             ggml_type_name(c.kv), (long long) c.dk, (long long) c.dv, (long long) c.n_batch, (long long) c.n_head,
+             (long long) c.n_head_kv, (long long) c.ne3, (long long) c.n_rows, c.vview, c.sinks);
+    finish(label, out);
+}
+
+static void fa_rows_cases(void) {
+    const struct far cs[] = {
+        /* vec: one query, several, two streams; quantized KV read inline */
+        { GGML_TYPE_F16,  128, 128,  1,  8, 2, 1, 1000, 256, 0, 0 },
+        { GGML_TYPE_F16,  128, 128,  4,  8, 2, 2, 1000, 512, 0, 0 },
+        { GGML_TYPE_Q4_0,  64,  64,  1,  4, 4, 3,  700, 256, 0, 1 },
+        { GGML_TYPE_Q8_0, 128, 128,  2,  8, 1, 2, 2000, 768, 0, 0 },
+        { GGML_TYPE_F16,  576, 512,  1, 16, 1, 2,  900, 256, 1, 0 },
+        /* half8x8 over the gathered rows; quantized KV dequantized first */
+        { GGML_TYPE_F16,  128, 128, 32,  8, 2, 1, 1000, 256, 0, 0 },
+        { GGML_TYPE_F16,   64,  64, 24,  4, 4, 3,  600, 512, 0, 1 },
+        { GGML_TYPE_Q8_0, 128, 128, 20,  8, 2, 2, 1500, 256, 0, 0 },
+        { GGML_TYPE_Q4_0,  96,  96, 32,  4, 2, 1,  800, 256, 0, 0 },
+        { GGML_TYPE_Q5_0, 128,  96, 21,  4, 2, 1,  800, 256, 0, 0 },
+        { GGML_TYPE_F16,  576, 512, 24,  4, 1, 2,  700, 256, 1, 0 },
+        { GGML_TYPE_Q8_0, 576, 512, 24,  4, 1, 1,  700, 256, 1, 0 },
+        /* the tensor kernel over the gathered rows */
+        { GGML_TYPE_F16,  128, 128, 64, 16, 4, 2, 1200, 512, 0, 0 },
+        { GGML_TYPE_Q8_0, 128, 128, 33, 32, 8, 1, 1200, 256, 0, 1 },
+        { GGML_TYPE_F16,  576, 512, 32, 16, 1, 1,  700, 256, 1, 0 },
+    };
+    for (size_t i = 0; i < sizeof cs / sizeof *cs; i++) {
+        fa_rows_case(cs[i], 6000 + i);
+    }
+}
+
+/* The contiguous unary and binary kernels and GLU (v0.9.0): a threadgroup
+ * of up to 256 threads where there was one, and GLU's rows split over
+ * several threadgroups. Sizes either side of 256, of the vector width, and
+ * of the contiguous kernels' element limits (32768 for unary, 65536 for a
+ * one-row broadcast). */
+static void elementwise_cases(void) {
+    char label[128];
+    uint64_t seed = 7000;
+    const int64_t ne0s[] = { 1, 3, 4, 100, 255, 256, 257, 1000, 1024, 4099, 16384 };
+    const int64_t ne1s[] = { 1, 3 };
+
+    for (size_t a = 0; a < sizeof ne0s / sizeof *ne0s; a++) {
+        for (size_t b = 0; b < sizeof ne1s / sizeof *ne1s; b++) {
+            const int64_t ne0 = ne0s[a], ne1 = ne1s[b];
+            for (int u = 0; u < 3; u++) {
+                begin(seed++);
+                struct ggml_tensor * x = ggml_new_tensor_2d(ctx, u == 2 ? GGML_TYPE_F16 : GGML_TYPE_F32, ne0, ne1);
+                struct ggml_tensor * out = u == 0 ? ggml_gelu(ctx, x) : u == 1 ? ggml_neg(ctx, x) : ggml_silu(ctx, x);
+                alloc_all();
+                fill_floats(x, 3.0f);
+                snprintf(label, sizeof label, "UNARY %s %s ne=%lldx%lld", u == 0 ? "gelu" : u == 1 ? "neg" : "silu",
+                         ggml_type_name(x->type), (long long) ne0, (long long) ne1);
+                finish(label, out);
+            }
+
+            /* a one-row broadcast (the contiguous kernel), and a full one */
+            for (int bc = 0; bc < 2; bc++) {
+                for (int o = 0; o < 2; o++) {
+                    begin(seed++);
+                    struct ggml_tensor * x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne0, ne1);
+                    struct ggml_tensor * y = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, bc ? ne0 : ne0, bc ? 1 : ne1);
+                    struct ggml_tensor * out = o ? ggml_mul(ctx, x, y) : ggml_add(ctx, x, y);
+                    alloc_all();
+                    fill_floats(x, 1.0f);
+                    fill_floats(y, 1.0f);
+                    snprintf(label, sizeof label, "BIN %s bc=%d ne=%lldx%lld", o ? "mul" : "add", bc, (long long) ne0, (long long) ne1);
+                    finish(label, out);
+                }
+            }
+            /* a single-element src1 repeated over the row */
+            {
+                begin(seed++);
+                struct ggml_tensor * x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne0, ne1);
+                struct ggml_tensor * y = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1);
+                struct ggml_tensor * out = ggml_add(ctx, x, y);
+                alloc_all();
+                fill_floats(x, 1.0f);
+                fill_floats(y, 1.0f);
+                snprintf(label, sizeof label, "BIN add scalar ne=%lldx%lld", (long long) ne0, (long long) ne1);
+                finish(label, out);
+            }
+
+            /* GLU, fused (one tensor, halves swapped or not) and split */
+            for (int g = 0; g < 4; g++) {
+                begin(seed++);
+                struct ggml_tensor * out;
+                struct ggml_tensor * x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, g < 2 ? 2 * ne0 : ne0, ne1);
+                struct ggml_tensor * y = g >= 2 ? ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne0, ne1) : NULL;
+                if (g == 0)      out = ggml_swiglu(ctx, x);
+                else if (g == 1) out = ggml_geglu_swapped(ctx, x);
+                else if (g == 2) out = ggml_swiglu_split(ctx, x, y);
+                else             out = ggml_swiglu_oai(ctx, x, y, 1.702f, 7.0f);
+                alloc_all();
+                fill_floats(x, 2.0f);
+                if (y) fill_floats(y, 2.0f);
+                snprintf(label, sizeof label, "GLU %s ne=%lldx%lld",
+                         g == 0 ? "swiglu" : g == 1 ? "geglu_swapped" : g == 2 ? "swiglu_split" : "swiglu_oai",
+                         (long long) ne0, (long long) ne1);
+                finish(label, out);
+            }
+        }
+    }
+
+    /* GLU over many rows, so a row split shows across rows too */
+    for (int r = 0; r < 2; r++) {
+        begin(seed++);
+        struct ggml_tensor * x = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 2 * (r ? 6000 : 300), 7, 3);
+        struct ggml_tensor * out = ggml_swiglu(ctx, x);
+        alloc_all();
+        fill_floats(x, 2.0f);
+        snprintf(label, sizeof label, "GLU swiglu rows ne0=%d", r ? 6000 : 300);
+        finish(label, out);
+    }
+}
+
+/* MXFP4 `mul_mv` and `mul_mv_id` (v0.9.0 drops their shared memory). */
+static void mxfp4_cases(void) {
+    char label[128];
+    uint64_t seed = 8000;
+    const int64_t n_toks[] = { 1, 2, 5, 8 };
+    for (size_t i = 0; i < sizeof n_toks / sizeof *n_toks; i++) {
+        begin(seed++);
+        struct ggml_tensor * w = ggml_new_tensor_2d(ctx, GGML_TYPE_MXFP4, 256, 70);
+        struct ggml_tensor * x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 256, n_toks[i]);
+        struct ggml_tensor * out = ggml_mul_mat(ctx, w, x);
+        alloc_all();
+        fill_floats(w, 1.0f);
+        fill_floats(x, 1.0f);
+        snprintf(label, sizeof label, "MUL_MAT mxfp4 tokens=%lld", (long long) n_toks[i]);
+        finish(label, out);
+    }
+    for (int skip = 0; skip < 2; skip++) {
+        for (int n = 0; n < 2; n++) {
+            begin(seed++);
+            struct ggml_tensor * w = ggml_new_tensor_3d(ctx, GGML_TYPE_MXFP4, 256, 64, 8);
+            struct ggml_tensor * x = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 256, 2, n ? 2 : 1);
+            struct ggml_tensor * ids = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 2, n ? 2 : 1);
+            struct ggml_tensor * out = ggml_mul_mat_id(ctx, w, x, ids);
+            alloc_all();
+            fill_floats(w, 1.0f);
+            fill_floats(x, 1.0f);
+            fill_ids(ids, 8, skip);
+            snprintf(label, sizeof label, "MUL_MAT_ID mxfp4 tokens=%d skip=%d", n ? 2 : 1, skip);
+            finish(label, out);
+        }
+    }
+}
+
 int main(void) {
     backend = ggml_backend_metal_init();
     if (!backend) { fprintf(stderr, "no Metal backend\n"); return 1; }
@@ -475,6 +697,9 @@ int main(void) {
     pool_1d_cases();
     mul_mat_id_cases();
     scale_cases();
+    fa_rows_cases();
+    elementwise_cases();
+    mxfp4_cases();
 
     ggml_backend_free(backend);
     return 0;

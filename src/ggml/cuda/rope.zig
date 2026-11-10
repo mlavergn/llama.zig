@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/rope.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/rope.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/rope.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels -- `rope_norm`, `rope_neox`, `rope_multi`, `rope_vision`,
 //! `rms_norm_mul_rope_f32` -- stay CUDA.
 //!

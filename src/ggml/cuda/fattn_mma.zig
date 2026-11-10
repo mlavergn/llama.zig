@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from the host half of
-//! `llama.cpp/ggml/src/ggml-cuda/fattn-mma-f16.cuh` at v0.8.0 (`8642541b2`).
+//! `llama.cpp/ggml/src/ggml-cuda/fattn-mma-f16.cuh` at v0.9.0 (`cd959bae9`).
 //! v0.4.1's `fattn-swizzle.cuh` is gone since v0.5.0; its host half, the
 //! K/V tile stride, is `ggml_cuda_fattn_mma_get_swizzled` and, since
 //! v0.6.0, one inline line in `ggml_cuda_flash_attn_ext_mma_f16_case`.
@@ -174,14 +174,15 @@ fn kernel(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols1
     }));
 }
 
-/// Ports `ggml_cuda_flash_attn_ext_mma_f16_case` (fattn-mma-f16.cuh:2008 @8642541b2).
+/// Ports `ggml_cuda_flash_attn_ext_mma_f16_case` (fattn-mma-f16.cuh:2017 @cd959bae9).
 ///
 /// The C raises each kernel's dynamic shared-memory limit once per device
 /// behind a function-local `static bool[GGML_CUDA_MAX_DEVICES]`, one per
 /// instantiation, softcap and sparse branch; `kernels.setSharedMemoryLimit`
 /// keeps the same once-per-(device, kernel) flag. The C's sparse arm
 /// raises the limit under `!GGML_USE_MUSA` implicitly, being inside the
-/// `!GGML_USE_HIP && !GGML_USE_MUSA` block; neither is defined here.
+/// `!GGML_USE_MUSA` block (since v0.9.0 HIP compiles it too); MUSA is not
+/// defined here.
 pub fn mmaF16Case(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols1: comptime_int, comptime ncols2: comptime_int, ctx: *common.Context, dst: *Tensor) void {
     const KQV = dst;
     const id = common.getDevice();

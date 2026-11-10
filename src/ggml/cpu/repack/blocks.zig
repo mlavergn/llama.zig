@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Mirrors `llama.cpp/ggml/src/ggml-cpu/repack.h` at v0.8.0 (`8642541b2`).
+//! Mirrors `llama.cpp/ggml/src/ggml-cpu/repack.h` at v0.9.0 (`cd959bae9`).
 //!
 //! These are `extern struct` because the layout is the on-disk-equivalent
 //! contract the gemm kernels read; each carries a `comptime` size assertion

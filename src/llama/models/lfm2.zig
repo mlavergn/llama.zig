@@ -12,7 +12,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/lfm2.cpp` at v0.8.0 (`8642541b2`):
+//! Ported from `llama.cpp/src/models/lfm2.cpp` at v0.9.0 (`cd959bae9`):
 //! `llama_model_lfm2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `graph<iswa>` with the lambdas inside it, and
 //! the decision model's `N_DECISION_TYPES`, `lfm2_is_media`, the graph
@@ -327,7 +327,7 @@ fn isMedia(ubatch: *const Ubatch, i: usize) bool {
     return if (ubatch.isMixed()) ubatch.type[i] != 0 else ubatch.token == null;
 }
 
-/// Ports `llm_graph_input_attn_media` (models/lfm2.cpp:257 @8642541b2):
+/// Ports `llm_graph_input_attn_media` (models/lfm2.cpp:257 @cd959bae9):
 /// non-causal within a sequence, the media never reading the text, so that
 /// it is a function of the media alone; in the head, the text and the
 /// media each read only their own kind. The C++ derives from
@@ -354,7 +354,7 @@ const InpAttnMedia = struct {
     }
 
     /// Ports `llm_graph_input_attn_media`'s `set_input` (models/lfm2.cpp:262
-    /// @8642541b2).
+    /// @cd959bae9).
     pub fn setInput(self: *InpAttnMedia, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         const n_tokens: usize = ubatch.n_tokens;
@@ -363,8 +363,8 @@ const InpAttnMedia = struct {
         defer allocator.free(is_media);
         for (is_media, 0..) |*m, i| m.* = isMedia(ubatch, i);
 
-        const m = self.base.self_kq_mask.?;
-        impl.assert(c.ggml_backend_buffer_is_host(m.buffer), "models/lfm2.cpp", 284, "ggml_backend_buffer_is_host(self_kq_mask->buffer)");
+        const m = self.base.self_attn_mask.raw.?;
+        impl.assert(c.ggml_backend_buffer_is_host(m.buffer), "models/lfm2.cpp", 284, "ggml_backend_buffer_is_host(self_attn_mask.raw->buffer)");
         if (m.type == c.GGML_TYPE_F16) {
             self.fillMask(u16, @ptrCast(@alignCast(m.data)), ubatch, is_media, c.ggml_fp32_to_fp16(0.0), c.ggml_fp32_to_fp16(-std.math.inf(f32)));
         } else {
@@ -407,7 +407,7 @@ const InpConvMask = struct {
 };
 
 /// Ports the constructor of `llama_model_lfm2`'s `graph_decision`
-/// (models/lfm2.cpp:317 @8642541b2): the non-causal trunk without a
+/// (models/lfm2.cpp:317 @cd959bae9): the non-causal trunk without a
 /// memory, then the decision head. The trunk's short convolution is a
 /// centred three-tap one over the batch, a tap outside the sequence
 /// reading 0. `llama_model_lfm2` declares it as `graph_decision`
@@ -432,9 +432,8 @@ fn buildGraphDecision(model: *const Model, b: *const graph.Builder) void {
     for ([_]bool{ false, true }) |is_head| {
         const inp = allocator.create(InpAttnMedia) catch oom();
         inp.* = .{ .base = .{ .hparams = hp, .cparams = b.cparams.*, .debug = 0 }, .is_head = is_head };
-        inp.base.self_kq_mask = c.ggml_new_tensor_4d(ctx, type_mask, n_tokens, n_tokens, 1, 1);
-        c.ggml_set_input(inp.base.self_kq_mask);
-        inp.base.self_kq_mask_cnv = inp.base.self_kq_mask;
+        inp.base.self_attn_mask.raw = c.ggml_new_tensor_4d(ctx, type_mask, n_tokens, n_tokens, 1, 1);
+        c.ggml_set_input(inp.base.self_attn_mask.raw);
         inp_attn[@intFromBool(is_head)] = &b.res.addInput(InpAttnMedia, inp).base;
     }
 
@@ -503,7 +502,7 @@ fn buildGraphDecision(model: *const Model, b: *const graph.Builder) void {
         cur = c.ggml_add(ctx, cur, inpL);
 
         var ffn_out = b.buildNorm(cur, layer.ffn_norm, null, .rms, il);
-        ffn_out = b.buildFfn(ffn_out, layer.ffn_up, null, null, layer.ffn_gate, null, null, layer.ffn_down, null, null, null, .silu, .par, il);
+        ffn_out = b.buildFfn(ffn_out, layer.ffn_up, null, layer.ffn_up_s, layer.ffn_gate, null, layer.ffn_gate_s, layer.ffn_down, null, layer.ffn_down_s, null, .silu, .par, il);
 
         cur = c.ggml_add(ctx, cur, ffn_out);
         b.cb(cur, "l_out", il);

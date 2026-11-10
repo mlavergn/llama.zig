@@ -2,11 +2,12 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-batch.cpp` (v0.8.0, `8642541b2`):
+//! Ported from `llama.cpp/src/llama-batch.cpp` (v0.9.0, `cd959bae9`):
 //! `llama_batch_get_one`, `llama_batch_init` and `llama_batch_free`, the
 //! twelve `llama_batch_ext_*` functions of `llama.h`'s extended batch API,
-//! and `llama_batch_ext_set_decision_order`, which `llama-ext.h` declares
-//! with C++ linkage and `exports.zig` therefore leaves unexported. The
+//! and `llama_batch_ext_set_decision_order` and
+//! `llama_batch_ext_add_embd_row`, which `llama-ext.h` declares with C++
+//! linkage and `exports.zig` therefore leaves unexported. The
 //! bodies are `batch.zig`'s.
 //!
 //! Each function has the C signature and is `pub`, not `export`: the
@@ -82,6 +83,20 @@ pub fn llama_batch_ext_add_embd(b: ?*c.struct_llama_batch_ext, seq_id: c.llama_s
         return idx;
     }
     if (!self.setTokenEmbd(idx, embd)) {
+        return -2;
+    }
+    return idx;
+}
+
+/// Ports `llama_batch_ext_add_embd_row` (llama-batch.cpp:1431 @cd959bae9),
+/// which `llama-ext.h` declares with C++ linkage.
+pub fn llama_batch_ext_add_embd_row(b: ?*c.struct_llama_batch_ext, seq_id: c.llama_seq_id, row: i32) callconv(.c) i32 {
+    const self = batchOf(b);
+    const idx = self.addToken(seq_id);
+    if (idx < 0) {
+        return idx;
+    }
+    if (!self.setTokenEmbdRow(idx, row)) {
         return -2;
     }
     return idx;

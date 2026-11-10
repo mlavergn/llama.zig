@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `clip_ctx`, `clip_model_loader` and the free functions of
-//! `llama.cpp/tools/mtmd/clip.cpp` at v0.8.0 (`8642541b2`), apart from the
+//! `llama.cpp/tools/mtmd/clip.cpp` at v0.9.0 (`cd959bae9`), apart from the
 //! four per-projector switches, which live beside it:
 //!
 //! - `arms_hparams.zig` -- `load_hparams`'s model-specific switch
@@ -115,7 +115,7 @@ pub const DevSizeMap = struct {
     }
 };
 
-/// Ports `clip_enc_state` (clip-impl.h:476 @8642541b2): the sliding
+/// Ports `clip_enc_state` (clip-impl.h:488 @cd959bae9): the sliding
 /// window KV cache of a causal audio encoder, see `encStateInit`.
 pub const EncState = struct {
     n_ctx: i32 = 0, // ring slots: attention window + frames per call
@@ -132,8 +132,18 @@ pub const EncState = struct {
     // lfm3a: same order as list_lfm3a_state_slots(), F32 [ne0, ne1], updated in place
     slots: std.ArrayList(*c.ggml_tensor) = .empty,
 
+    // nemotron transcribe: the window's normalized log-mel, cache and FIFO rows in; its speaker rows and predictions out
+    mel_norm: std.ArrayList(f32) = .empty,
+    spk_prev: std.ArrayList(f32) = .empty,
+    spk_chunk: std.ArrayList(f32) = .empty,
+    spk_preds: std.ArrayList(f32) = .empty,
+
     /// The C++'s destructor, members in reverse order.
     fn destroy(self: *EncState) void {
+        self.spk_preds.deinit(gpa);
+        self.spk_chunk.deinit(gpa);
+        self.spk_prev.deinit(gpa);
+        self.mel_norm.deinit(gpa);
         self.slots.deinit(gpa);
         self.v.deinit(gpa);
         self.k.deinit(gpa);
@@ -163,7 +173,12 @@ pub const GenState = struct {
     }
 };
 
-/// Ports `clip_encode_params` (clip.h:100 @8642541b2).
+/// Ports `clip_gen_ref` (clip.h:105 @cd959bae9).
+pub const GenRef = impl.GenRef;
+/// Ports `clip_gen_voice` (clip.h:167 @cd959bae9).
+pub const GenVoice = impl.GenVoice;
+
+/// Ports `clip_encode_params` (clip.h:111 @cd959bae9).
 pub const EncodeParams = struct {
     n_threads: c_int = 1,
     imgs: ?*const impl.ImageF32Batch = null,
@@ -181,10 +196,20 @@ pub const EncodeParams = struct {
     temp: f32 = 0.0, // sampling temperature, noise scale for flow-matching decoders
     out_is_eos: ?*bool = null,
 
+    // TOKENIZE: speech embedding rows of the produced codes
+    out_code_embd: ?*std.ArrayList(f32) = null,
+
     // GEN_WAV
     codes: ?*const std.ArrayList(i32) = null, // this frame's 16 RVQ codes
     feats: ?*const std.ArrayList(f32) = null, // continuous counterpart of codes
     out_audio: ?*std.ArrayList(f32) = null, // decoded PCM samples, F32
+    ref: ?*const GenRef = null, // TTS reference conditioning of the voice
+    // TTS_VOCODE internal stage inputs
+    mel_in: ?*const std.ArrayList(f32) = null,
+    sstft_in: ?*const std.ArrayList(f32) = null,
+    vocode_n_mel: c_int = 0,
+    vocode_n_stft: c_int = 0,
+    out_spec: ?*std.ArrayList(f32) = null,
 
     // audio gen: state of one sequence, clip_encode() updates it in place
     gen_state: ?*GenState = null,
@@ -284,6 +309,11 @@ pub const Ctx = struct {
         self.mem_usage.deinit();
         self.mem_compute.deinit();
         self.model.hparams.deinit();
+        self.model.gen_voices.deinit();
+        var it = self.model.cbx_tensors.keyIterator();
+        while (it.next()) |k| gpa.free(k.*);
+        self.model.cbx_tensors.deinit(gpa);
+        self.model.spk_sil_emb.deinit(gpa);
         gpa.destroy(self);
     }
 
@@ -327,7 +357,7 @@ pub fn randomDevice() u32 {
 // -----------------------------------------------------------------------------
 // clip_model_loader
 
-/// Ports `clip_model_loader` (mtmd/clip.cpp:1265 @8642541b2).
+/// Ports `clip_model_loader` (mtmd/clip.cpp:1288 @cd959bae9).
 pub const Loader = struct {
     ctx_meta: ?*c.ggml_context = null,
     ctx_gguf: ?*c.gguf_context = null,
@@ -549,7 +579,7 @@ pub const Loader = struct {
         }
     }
 
-    /// Ports `load_hparams` (mtmd/clip.cpp:1351 @8642541b2), a member of `clip_model_loader`;
+    /// Ports `load_hparams` (mtmd/clip.cpp:1374 @cd959bae9), a member of `clip_model_loader`;
     /// the model-specific switch is `arms_hparams.load`.
     pub fn loadHparams(self: *Loader, model: *model_mod.Model, modality: impl.Modality) Error!void {
         const func = "load_hparams";
@@ -795,7 +825,7 @@ pub const Loader = struct {
         }
     }
 
-    /// Ports `load_tensors` (mtmd/clip.cpp:2478 @8642541b2), a member of `clip_model_loader`;
+    /// Ports `load_tensors` (mtmd/clip.cpp:2536 @cd959bae9), a member of `clip_model_loader`;
     /// the model-specific switch is `arms_tensors.load`.
     pub fn loadTensors(self: *Loader, ctx_clip: *Ctx) Error!void {
         const func = "load_tensors";
@@ -850,7 +880,8 @@ pub const Loader = struct {
         // lfm3vl
         model.lfm3vl_embedding_norm_w = try tl.getTensor(fmtKey2(&nb, names.TN_LFM3VL_EMBEDDING_NORM, prefix, "weight"), false);
 
-        const has_standard_layers = model.proj_type != .gemma3nv and model.proj_type != .qwen3tts_spkenc and model.proj_type != .pockettts_gen and model.proj_type != .soprano and model.proj_type != .muse_spark_audio;
+        const has_standard_layers = model.proj_type != .gemma3nv and model.proj_type != .qwen3tts_spkenc and model.proj_type != .pockettts_gen and model.proj_type != .soprano and model.proj_type != .muse_spark_audio and
+            model.proj_type != .chatterbox and model.proj_type != .chatterbox_spkenc;
 
         // layers
         const n_layers_to_load: usize = if (has_standard_layers) @intCast(hparams.n_layer) else 0;
@@ -1240,6 +1271,15 @@ pub const TensorLoader = struct {
         return result;
     }
 
+    /// `fin.seekg(tensor_offset.at(name), std::ios::beg); fin.read(dst, n)`,
+    /// as `load_tensors` reads a voice tensor: false if the read came up short. `at` throwing
+    /// `std::out_of_range` cannot happen for a tensor the file lists.
+    pub fn readTensorBytes(self: *TensorLoader, name: []const u8, dst: []u8) bool {
+        const off = self.tensor_offset.get(name) orelse impl.abortUncaught("std::out_of_range", "unordered_map::at: key not found");
+        if (fseeko(self.fin, @intCast(off), 0) != 0) return false;
+        return std.c.fread(dst.ptr, 1, dst.len, self.fin.?) == dst.len;
+    }
+
     /// The `get_scalar` lambda (mtmd/clip.cpp:2646 @cd959bae9).
     pub fn getScalar(self: *TensorLoader, name: [*:0]const u8, default_val: f32) Error!f32 {
         var v = try self.getVector(name);
@@ -1320,7 +1360,7 @@ pub fn fmtRt(buf: *[256]u8, fmt: [*:0]const u8, args: anytype) [*:0]const u8 {
 // -----------------------------------------------------------------------------
 // clip_init and the free functions
 
-/// Ports `clip_init` (mtmd/clip.cpp:4569 @8642541b2).
+/// Ports `clip_init` (mtmd/clip.cpp:5054 @cd959bae9).
 pub fn init(fname: [:0]const u8, ctx_params: ContextParams) InitResult {
     var res: InitResult = .{};
     initInner(fname, &ctx_params, &res) catch |e| {
@@ -1366,8 +1406,18 @@ fn initInner(fname: [:0]const u8, ctx_params: *const ContextParams, res: *InitRe
             res.ctx_gen_a.?.flash_attn_type = .disabled;
         }
         try loader.loadTensors(res.ctx_gen_a.?);
+        const cg = res.ctx_gen_a.?;
+        if (cg.model.proj_type == .chatterbox) {
+            // the classic cfm solver unrolls up to 10 steps x 2 cfg estimator evaluations in one graph
+            cg.max_nodes = 65536;
+            const sched = c.ggml_backend_sched_new(cg.backend_ptrs.items.ptr, cg.backend_buft.items.ptr, @intCast(cg.backend_ptrs.items.len), @intCast(cg.max_nodes), false, true);
+            // `sched.reset(new)`: the new scheduler is created before the old one is freed
+            if (cg.sched != null) c.ggml_backend_sched_free(cg.sched);
+            cg.sched = sched;
+            if (ctx_params.cb_eval != null) c.ggml_backend_sched_set_eval_callback(cg.sched, ctx_params.cb_eval, ctx_params.cb_eval_user_data);
+        }
         // TODO: fix warmup
-        try res.ctx_gen_a.?.buf_compute_meta.resize(gpa, @as(usize, @intCast(res.ctx_gen_a.?.max_nodes)) * c.ggml_tensor_overhead() + c.ggml_graph_overhead());
+        try cg.buf_compute_meta.resize(gpa, @as(usize, @intCast(cg.max_nodes)) * c.ggml_tensor_overhead() + c.ggml_graph_overhead_custom(@intCast(cg.max_nodes), false));
     }
 }
 
@@ -1429,7 +1479,7 @@ pub fn nOutputTokensY(ctx: *const Ctx, img: *const impl.ImageF32) c_int {
     return 1;
 }
 
-/// Ports `clip_n_output_tokens` (mtmd/clip.cpp:4726 @8642541b2): the
+/// Ports `clip_n_output_tokens` (mtmd/clip.cpp:5222 @cd959bae9): the
 /// per-projector body is `arms_inputs.nOutputTokens`.
 pub fn nOutputTokens(ctx: *const Ctx, img: *const impl.ImageF32) c_int {
     return arms_inputs.nOutputTokens(ctx, img);
@@ -1443,14 +1493,17 @@ pub fn imageEncode(ctx: *Ctx, n_threads: c_int, img: *const impl.ImageF32, out_v
     return imageBatchEncode(ctx, n_threads, &imgs, out_vec);
 }
 
-/// Ports `clip_image_batch_encode` (mtmd/clip.cpp:5072 @8642541b2).
+/// Ports `clip_image_batch_encode` (mtmd/clip.cpp:5574 @cd959bae9).
 pub fn imageBatchEncode(ctx: *Ctx, n_threads: c_int, imgs: *const impl.ImageF32Batch, out_batch_embd: *std.ArrayList(f32)) Error!bool {
     var params: EncodeParams = .{ .imgs = imgs, .n_threads = n_threads, .out_embd = out_batch_embd };
+    if (ctx.projType() == .nemotron_transcribe) {
+        return models.nemotron_transcribe.encodeWindows(ctx, &ctx.model, &params);
+    }
     return encode(ctx, &params);
 }
 
 /// What the input arms of `clip_encode` read and the helpers they call
-/// (mtmd/clip.cpp:5218 @8642541b2).
+/// (mtmd/clip.cpp:5753 @cd959bae9).
 pub const EncodeState = struct {
     ctx: *Ctx,
     params: *EncodeParams,
@@ -1644,6 +1697,32 @@ pub fn genStateReset(state: *GenState) void {
     if (state.buf != null) c.ggml_backend_buffer_clear(state.buf, 0);
 }
 
+/// Ports `clip_gen_get_voices` (mtmd/clip.cpp:5649 @cd959bae9).
+pub fn genGetVoices(ctx: *const Ctx) *const impl.GenVoiceMap {
+    return &ctx.model.gen_voices;
+}
+
+/// Ports `clip_cbx_read_tensor` (mtmd/clip.cpp:5727 @cd959bae9): reads a
+/// chatterbox tensor by name as F32, returns the element count (0 if not
+/// found); `out` may be null to query the size.
+pub fn cbxReadTensor(ctx: *Ctx, name: []const u8, out: ?[*]f32, n_max: usize) usize {
+    const t = (ctx.model.cbx_tensors.get(name) orelse return 0) orelse return 0;
+    const n: usize = @intCast(c.ggml_nelements(t));
+    const o = out orelse return n;
+    if (n_max < n) return 0;
+    if (t.type == c.GGML_TYPE_F32) {
+        c.ggml_backend_tensor_get(t, o, 0, n * @sizeOf(f32));
+    } else if (t.type == c.GGML_TYPE_F16) {
+        const tmp = gpa.alloc(c.ggml_fp16_t, n) catch impl.abortUncaught("std::bad_alloc", "std::bad_alloc");
+        defer gpa.free(tmp);
+        c.ggml_backend_tensor_get(t, tmp.ptr, 0, n * @sizeOf(c.ggml_fp16_t));
+        for (0..n) |i| o[i] = c.ggml_fp16_to_fp32(tmp[i]);
+    } else {
+        return 0;
+    }
+    return n;
+}
+
 /// Ports `clip_enc_state_init` (mtmd/clip.cpp:5653 @cd959bae9): the persistent state of
 /// a causal audio encoder, one per stream. `n_frames_max` is the maximum
 /// number of encoder frames per call.
@@ -1717,7 +1796,7 @@ pub fn encStateFree(state: ?*EncState) void {
     if (state) |s| s.destroy();
 }
 
-/// Ports `clip_encode` (mtmd/clip.cpp:5218 @8642541b2); the per-projector input
+/// Ports `clip_encode` (mtmd/clip.cpp:5753 @cd959bae9); the per-projector input
 /// switch is `arms_inputs.setInputs`.
 pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
     const func = "clip_encode";
@@ -1733,7 +1812,10 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
     // if buffers are not allocated, we need to do a warmup run to allocate them
     if (!ctx.is_allocated) try Loader.warmupBatch(ctx, imgs);
 
-    if (params.gen_process != .unknown and params.gen_state == null) {
+    const needs_gen_state = params.gen_process == .gen_code or
+        params.gen_process == .gen_wav or
+        params.gen_process == .tts;
+    if (needs_gen_state and params.gen_state == null) {
         impl.logErr("%s: audio gen requires a gen state\n", .{func});
         return false;
     }
@@ -1807,8 +1889,12 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
             }
         }
         st.setInputF32("inp_raw", inp_raw);
-    } else if (params.gen_process != .gen_wav and c.ggml_graph_get_tensor(gf, "inp_raw") != null) {
-        // audio input. GEN_WAV is not here: it takes codes or feats, set in the switch below.
+    } else if (params.gen_process != .gen_wav and
+        params.gen_process != .tts and
+        params.gen_process != .tts_vocode and
+        c.ggml_graph_get_tensor(gf, "inp_raw") != null)
+    {
+        // audio input. GEN_WAV and the chatterbox TTS stages are not here: they take codes or feats, set in the switch below.
         // a GEN_CODE graph may have no hidden-state input (lfm3a_gen feedback embedding)
         impl.ggmlAssert(imgs.entries.items.len == 1, "clip.cpp", 5951, "imgs.entries.size() == 1");
 
@@ -1871,6 +1957,12 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
     // for audio gen models
     //
 
+    // chatterbox's stages, each returns here: `CLIP_GEN_PROCESS_TOKENIZE`, `CLIP_GEN_PROCESS_TTS_VOCODE`,
+    // `CLIP_GEN_PROCESS_TTS` (mtmd/clip.cpp:7459, 7521, 7529 @cd959bae9)
+    if (ctx.projType() == .chatterbox and params.gen_process == .tokenize) return models.chatterbox_gen.encodeTokenizeOut(ctx, params, gf);
+    if (ctx.projType() == .chatterbox and params.gen_process == .tts_vocode) return models.chatterbox_gen.encodeVocodeOut(params, gf);
+    if (ctx.projType() == .chatterbox and params.gen_process == .tts) return models.chatterbox_gen.encodeTtsOut(ctx, params, gf);
+
     // optional outputs: a pipeline yields codes or feats, and not all have an eos head
     if (params.out_codes) |out_codes| {
         const codes = c.ggml_graph_get_tensor(gf, "out_codes");
@@ -1927,6 +2019,15 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
             impl.ggmlAssert(t != null, "clip.cpp", 7717, "t != nullptr");
             try copyGenStateOut(t, state_slots[i]);
         }
+    } else if (params.enc_state != null and model.proj_type == .nemotron_transcribe) {
+        const es = params.enc_state.?;
+        const chunk = c.ggml_graph_get_tensor(gf, "spk_chunk");
+        const preds = c.ggml_graph_get_tensor(gf, "spk_preds");
+        impl.ggmlAssert(chunk != null and preds != null, "clip.cpp", 7724, "chunk != nullptr && preds != nullptr");
+        try es.spk_chunk.resize(gpa, @intCast(c.ggml_nelements(chunk)));
+        try es.spk_preds.resize(gpa, @intCast(c.ggml_nelements(preds)));
+        c.ggml_backend_tensor_get(chunk, es.spk_chunk.items.ptr, 0, c.ggml_nbytes(chunk));
+        c.ggml_backend_tensor_get(preds, es.spk_preds.items.ptr, 0, c.ggml_nbytes(preds));
     } else if (params.enc_state) |es| {
         const tail = c.ggml_graph_get_tensor(gf, "out_stem_tail");
         impl.ggmlAssert(tail != null, "clip.cpp", 7732, "tail != nullptr");
@@ -2019,7 +2120,7 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
 
 extern fn sqrtf(x: f32) f32;
 
-/// Ports `clip_n_mmproj_embd` (mtmd/clip.cpp:6954 @8642541b2): the embedding
+/// Ports `clip_n_mmproj_embd` (mtmd/clip.cpp:7816 @cd959bae9): the embedding
 /// size of the projector's output, which must be the text model's; the
 /// per-projector body is `arms_tensors.nMmprojEmbd`.
 pub fn nMmprojEmbd(ctx: *const Ctx) c_int {

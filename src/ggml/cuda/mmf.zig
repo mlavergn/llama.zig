@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/mmf.cu` and the host half of
-//! `llama.cpp/ggml/src/ggml-cuda/mmf.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/mmf.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels, `mul_mat_f` and `mul_mat_f_ids`, stay CUDA, one set per column
 //! count in `template-instances/mmf-instance-ncols_<n>.cu`.
 

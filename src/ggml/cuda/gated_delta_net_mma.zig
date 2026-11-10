@@ -8,8 +8,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/gated-delta-net-mma.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/gated-delta-net-mma.cuh` at v0.8.0
-//! (`8642541b2`): the host side -- the argument struct, the per-device
+//! `llama.cpp/ggml/src/ggml-cuda/gated-delta-net-mma.cuh` at v0.9.0
+//! (`cd959bae9`): the host side -- the argument struct, the per-device
 //! shared-memory opt-in, the path choice and the launch -- on the CUDA arms
 //! (`GGML_USE_HIP` and `GGML_USE_MUSA` compile out). The kernel stays CUDA.
 //!

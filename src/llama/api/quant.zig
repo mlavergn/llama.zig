@@ -9,7 +9,7 @@
 //! - `llama.cpp/src/llama.cpp` -- `llama_model_save_to_file`, which lives
 //!   there rather than in `llama-model-saver.cpp`
 //!
-//! All at v0.8.0 (`8642541b2`). The work is `quant.zig`'s and
+//! All at v0.9.0 (`cd959bae9`). The work is `quant.zig`'s and
 //! `model_saver.zig`'s.
 //!
 //! Each function has the C signature and is `pub`, not `export`: the

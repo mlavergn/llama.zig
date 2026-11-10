@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.8.0, `8642541b2`), the section
+//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.9.0, `cd959bae9`), the section
 //! beginning at line 2027. Each function names the C function it replaces and
 //! the line it began at.
 //!
@@ -206,7 +206,7 @@ pub export fn ggml_acc_inplace(ctx: *Context, a: *Tensor, b: *Tensor, nb1: usize
 // -----------------------------------------------------------------------------
 // Elementwise binaries
 
-/// Ports `ggml_add_impl` (ggml.c:2091 @cd959bae9) and `ggml_sub_impl` (ggml.c:2247 @8642541b2).
+/// Ports `ggml_add_impl` (ggml.c:2091 @cd959bae9) and `ggml_sub_impl` (ggml.c:2261 @cd959bae9).
 ///
 /// The C keeps these as separate static helpers; both are `binaryOp` with a
 /// different op, and the wrappers above already go through it. They exist
@@ -748,7 +748,7 @@ pub export fn ggml_silu_back(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
 // other, and so halves that dimension. The `_split` forms take the two halves
 // as separate tensors instead, in which case the shape is unchanged.
 
-/// Ports `ggml_glu_impl` (ggml.c:2926 @8642541b2).
+/// Ports `ggml_glu_impl` (ggml.c:2940 @cd959bae9).
 fn gluImpl(ctx: *Context, a: *Tensor, b: ?*Tensor, op: c.enum_ggml_glu_op, swapped: bool) *Tensor {
     impl.assert(types.ggml_is_contiguous_1(a), "ggml_is_contiguous_1(a)");
 
@@ -764,7 +764,7 @@ fn gluImpl(ctx: *Context, a: *Tensor, b: ?*Tensor, op: c.enum_ggml_glu_op, swapp
     for (1..c.GGML_MAX_DIMS) |i| ne[i] = a.ne[i];
     const shape: [*]const i64 = if (b != null) &a.ne else &ne;
 
-    const result = context.newTensorImpl(ctx, a.type, c.GGML_MAX_DIMS, shape, null, 0);
+    const result = context.newTensorImpl(ctx, a.type, c.GGML_MAX_DIMS, shape, null, null, 0);
 
     impl.setOpParamsI32(result, 0, @intCast(op));
     impl.setOpParamsI32(result, 1, if (swapped) 1 else 0);
@@ -1476,7 +1476,7 @@ pub export fn ggml_cont_3d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, ne2: i
 // A reshape is a view with different extents, so it requires contiguous input
 // and costs nothing at run time. `cont_*` is the version that copies.
 
-/// Ports `ggml_reshape` (ggml.c:3742 @8642541b2).
+/// Ports `ggml_reshape` (ggml.c:3756 @cd959bae9).
 ///
 /// `b` supplies only the shape, and may itself be non-contiguous; it is not a
 /// source of the node.
@@ -1484,7 +1484,7 @@ pub export fn ggml_reshape(ctx: *Context, a: *Tensor, b: *Tensor) *Tensor {
     impl.assert(types.ggml_is_contiguous(a), "ggml_is_contiguous(a)");
     impl.assert(types.ggml_nelements(a) == types.ggml_nelements(b), "ggml_nelements(a) == ggml_nelements(b)");
 
-    const result = context.newTensorImpl(ctx, a.type, c.GGML_MAX_DIMS, &b.ne, a, 0);
+    const result = context.newTensorImpl(ctx, a.type, c.GGML_MAX_DIMS, &b.ne, null, a, 0);
     _ = context.ggml_format_name(result, "%s (reshaped)", &a.name);
 
     result.op = c.GGML_OP_RESHAPE;
@@ -1501,7 +1501,7 @@ fn reshapeWrapper(comptime n: usize) fn (*Context, *Tensor, [*]const i64) *Tenso
             for (0..n) |i| count *= ne[i];
             impl.assert(types.ggml_nelements(a) == count, "ggml_nelements(a) == product of ne");
 
-            const result = context.newTensorImpl(ctx, a.type, n, ne, a, 0);
+            const result = context.newTensorImpl(ctx, a.type, n, ne, null, a, 0);
             _ = context.ggml_format_name(result, "%s (reshaped)", &a.name);
 
             result.op = c.GGML_OP_RESHAPE;
@@ -1511,25 +1511,25 @@ fn reshapeWrapper(comptime n: usize) fn (*Context, *Tensor, [*]const i64) *Tenso
     }.f;
 }
 
-/// Ports `ggml_reshape_1d` (ggml.c:3759 @8642541b2).
+/// Ports `ggml_reshape_1d` (ggml.c:3773 @cd959bae9).
 pub export fn ggml_reshape_1d(ctx: *Context, a: *Tensor, ne0: i64) *Tensor {
     const ne = [_]i64{ne0};
     return reshapeWrapper(1)(ctx, a, &ne);
 }
 
-/// Ports `ggml_reshape_2d` (ggml.c:3776 @8642541b2).
+/// Ports `ggml_reshape_2d` (ggml.c:3790 @cd959bae9).
 pub export fn ggml_reshape_2d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64) *Tensor {
     const ne = [_]i64{ ne0, ne1 };
     return reshapeWrapper(2)(ctx, a, &ne);
 }
 
-/// Ports `ggml_reshape_3d` (ggml.c:3794 @8642541b2).
+/// Ports `ggml_reshape_3d` (ggml.c:3808 @cd959bae9).
 pub export fn ggml_reshape_3d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, ne2: i64) *Tensor {
     const ne = [_]i64{ ne0, ne1, ne2 };
     return reshapeWrapper(3)(ctx, a, &ne);
 }
 
-/// Ports `ggml_reshape_4d` (ggml.c:3813 @8642541b2).
+/// Ports `ggml_reshape_4d` (ggml.c:3827 @cd959bae9).
 pub export fn ggml_reshape_4d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, ne2: i64, ne3: i64) *Tensor {
     const ne = [_]i64{ ne0, ne1, ne2, ne3 };
     return reshapeWrapper(4)(ctx, a, &ne);
@@ -1541,12 +1541,15 @@ pub export fn ggml_reshape_4d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, ne2
 // Unlike `ggml_view_tensor`, which copies the source's strides, these take the
 // strides explicitly, so a view can stride over a subset of its source.
 
-/// Ports `ggml_view_impl` (ggml.c:3833 @8642541b2).
+/// Ports `ggml_view_impl` (ggml.c:3847 @cd959bae9).
 ///
 /// The byte offset goes into `op_params` as a `size_t`, not an i32, so views
 /// are not subject to the 2^30 limit `ggml_set` has.
-fn viewImpl(ctx: *Context, a: *Tensor, n_dims: c_int, ne: [*]const i64, offset: usize) *Tensor {
-    const result = context.newTensorImpl(ctx, a.type, n_dims, ne, a, offset);
+fn viewImpl(ctx: *Context, a: *Tensor, n_dims: c_int, ne: [*]const i64, nb: ?[*]const usize, offset: usize) *Tensor {
+    // a strided view counts its strides from elements that are contiguous along dim 0 of its source
+    impl.assert(nb == null or a.nb[0] == types.ggml_type_size(a.type), "nb == NULL || a->nb[0] == ggml_type_size(a->type)");
+
+    const result = context.newTensorImpl(ctx, a.type, n_dims, ne, nb, a, offset);
     _ = context.ggml_format_name(result, "%s (view)", &a.name);
 
     impl.setOpParamsValue(result, offset);
@@ -1556,43 +1559,35 @@ fn viewImpl(ctx: *Context, a: *Tensor, n_dims: c_int, ne: [*]const i64, offset: 
     return result;
 }
 
-/// Ports `ggml_view_1d` (ggml.c:3852 @8642541b2).
+/// Ports `ggml_view_1d` (ggml.c:3870 @cd959bae9).
 pub export fn ggml_view_1d(ctx: *Context, a: *Tensor, ne0: i64, offset: usize) *Tensor {
     const ne = [_]i64{ne0};
-    return viewImpl(ctx, a, 1, &ne, offset);
+    return viewImpl(ctx, a, 1, &ne, null, offset);
 }
 
-/// Ports `ggml_view_2d` (ggml.c:3864 @8642541b2).
+/// Ports `ggml_view_2d` (ggml.c:3882 @cd959bae9).
 ///
 /// Only `nb1` is given; the higher strides follow from it, which is what makes
 /// this a plain 2-D window rather than an arbitrary layout.
 pub export fn ggml_view_2d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, nb1: usize, offset: usize) *Tensor {
     const ne = [_]i64{ ne0, ne1 };
-    const result = viewImpl(ctx, a, 2, &ne, offset);
-    result.nb[1] = nb1;
-    result.nb[2] = result.nb[1] * @as(usize, @intCast(ne1));
-    result.nb[3] = result.nb[2];
-    return result;
+    const n1: usize = @bitCast(ne1);
+    const nb = [_]usize{ types.ggml_type_size(a.type), nb1, nb1 *% n1, nb1 *% n1 };
+    return viewImpl(ctx, a, 2, &ne, &nb, offset);
 }
 
-/// Ports `ggml_view_3d` (ggml.c:3884 @8642541b2).
+/// Ports `ggml_view_3d` (ggml.c:3899 @cd959bae9).
 pub export fn ggml_view_3d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, ne2: i64, nb1: usize, nb2: usize, offset: usize) *Tensor {
     const ne = [_]i64{ ne0, ne1, ne2 };
-    const result = viewImpl(ctx, a, 3, &ne, offset);
-    result.nb[1] = nb1;
-    result.nb[2] = nb2;
-    result.nb[3] = result.nb[2] * @as(usize, @intCast(ne2));
-    return result;
+    const nb = [_]usize{ types.ggml_type_size(a.type), nb1, nb2, nb2 *% @as(usize, @bitCast(ne2)) };
+    return viewImpl(ctx, a, 3, &ne, &nb, offset);
 }
 
-/// Ports `ggml_view_4d` (ggml.c:3906 @8642541b2).
+/// Ports `ggml_view_4d` (ggml.c:3918 @cd959bae9).
 pub export fn ggml_view_4d(ctx: *Context, a: *Tensor, ne0: i64, ne1: i64, ne2: i64, ne3: i64, nb1: usize, nb2: usize, nb3: usize, offset: usize) *Tensor {
     const ne = [_]i64{ ne0, ne1, ne2, ne3 };
-    const result = viewImpl(ctx, a, 4, &ne, offset);
-    result.nb[1] = nb1;
-    result.nb[2] = nb2;
-    result.nb[3] = nb3;
-    return result;
+    const nb = [_]usize{ types.ggml_type_size(a.type), nb1, nb2, nb3 };
+    return viewImpl(ctx, a, 4, &ne, &nb, offset);
 }
 
 // -----------------------------------------------------------------------------
@@ -3784,16 +3779,16 @@ pub export fn ggml_timestep_embedding(ctx: *Context, timesteps: *Tensor, dim: c_
     return result;
 }
 
-/// Ports `ggml_roll` (ggml.c:5374 @8642541b2).
+/// Ports `ggml_roll` (ggml.c:5383 @cd959bae9).
 ///
 /// Circular shift along each dimension. Requires a contiguous first dimension,
-/// and each shift must be smaller than the dimension it moves.
+/// and each shift must be smaller in magnitude than the dimension it moves.
 pub export fn ggml_roll(ctx: *Context, a: *Tensor, shift0: c_int, shift1: c_int, shift2: c_int, shift3: c_int) *Tensor {
     impl.assert(a.nb[0] == types.ggml_type_size(a.type), "a->nb[0] == ggml_type_size(a->type)");
 
     const shifts = [_]c_int{ shift0, shift1, shift2, shift3 };
     for (shifts, 0..) |shift, i| {
-        impl.assert(@abs(shift) < a.ne[i], "abs(shift) < a->ne[i]");
+        impl.assert(shift > -a.ne[i] and shift < a.ne[i], "shift > -a->ne[i] && shift < a->ne[i]");
     }
 
     const result = context.ggml_dup_tensor(ctx, a);
@@ -4037,7 +4032,7 @@ pub export fn ggml_set_zero(tensor: *Tensor) *Tensor {
 // One node standing in for the whole scaled-dot-product attention block, so a
 // backend can fuse it and never materialise the [n_kv, n_q] score matrix.
 
-/// Ports `ggml_flash_attn_ext` (ggml.c:5550 @8642541b2).
+/// Ports `ggml_flash_attn_ext_impl` (ggml.c:5559 @cd959bae9).
 ///
 /// The result is the attention output already permuted to `(0, 2, 1, 3)`:
 /// `[head_dim, n_head, n_tokens, n_batch]`. That transposition is folded in
@@ -4047,26 +4042,38 @@ pub export fn ggml_set_zero(tensor: *Tensor) *Tensor {
 /// Parameters:
 /// - `q`, `k`, `v`: query, key, and value.
 /// - `mask`: optional f16 additive mask, which must be contiguous.
+/// - `kv_rows`: optional I32 `[n_kv, ne3]` row map into `k` and `v`, which are
+///   then shared by every `q` slice; goes in `src[5]`.
 /// - `scale`: multiplies the scores before the softmax.
 /// - `max_bias`: ALiBi slope ceiling; zero disables it, and any non-zero value
 ///   requires a mask.
 /// - `logit_softcap`: tanh soft-cap on the scores; zero disables it.
 ///
 /// Return: a new f32 tensor owned by `ctx`.
-pub export fn ggml_flash_attn_ext(
+fn flashAttnExtImpl(
     ctx: *Context,
     q: *Tensor,
     k: *Tensor,
     v: *Tensor,
     mask: ?*Tensor,
+    kv_rows: ?*Tensor,
     scale: f32,
     max_bias: f32,
     logit_softcap: f32,
 ) *Tensor {
     impl.assert(canMulMat(k, q), "ggml_can_mul_mat(k, q)");
 
-    impl.assert(q.ne[3] == k.ne[3], "q->ne[3] == k->ne[3]");
-    impl.assert(q.ne[3] == v.ne[3], "q->ne[3] == v->ne[3]");
+    if (kv_rows) |rows| {
+        // k and v are shared by all q slices, kv_rows picks the rows of each slice
+        impl.assert(mask != null and mask.?.ne[0] == rows.ne[0], "mask && mask->ne[0] == kv_rows->ne[0]");
+        impl.assert(rows.type == c.GGML_TYPE_I32 and types.ggml_is_contiguous(rows), "kv_rows->type == GGML_TYPE_I32 && ggml_is_contiguous(kv_rows)");
+        impl.assert(rows.ne[1] == q.ne[3] and rows.ne[2] == 1 and rows.ne[3] == 1, "kv_rows->ne[1] == q->ne[3] && kv_rows->ne[2] == 1 && kv_rows->ne[3] == 1");
+        impl.assert(k.ne[3] == 1, "k->ne[3] == 1");
+        impl.assert(v.ne[3] == 1, "v->ne[3] == 1");
+    } else {
+        impl.assert(q.ne[3] == k.ne[3], "q->ne[3] == k->ne[3]");
+        impl.assert(q.ne[3] == v.ne[3], "q->ne[3] == v->ne[3]");
+    }
 
     if (mask) |m| {
         impl.assert(m.type == c.GGML_TYPE_F16, "mask->type == GGML_TYPE_F16");
@@ -4090,8 +4097,44 @@ pub export fn ggml_flash_attn_ext(
     result.src[1] = k;
     result.src[2] = v;
     result.src[3] = mask;
+    result.src[5] = kv_rows;
 
     return result;
+}
+
+/// Ports `ggml_flash_attn_ext` (ggml.c:5614 @cd959bae9).
+///
+/// `flashAttnExtImpl` without a row map.
+pub export fn ggml_flash_attn_ext(
+    ctx: *Context,
+    q: *Tensor,
+    k: *Tensor,
+    v: *Tensor,
+    mask: ?*Tensor,
+    scale: f32,
+    max_bias: f32,
+    logit_softcap: f32,
+) *Tensor {
+    return flashAttnExtImpl(ctx, q, k, v, mask, null, scale, max_bias, logit_softcap);
+}
+
+/// Ports `ggml_flash_attn_ext_rows` (ggml.c:5626 @cd959bae9).
+///
+/// `flashAttnExtImpl` with a row map: each `q` slice attends to its own list
+/// of rows of the shared `k` and `v`. Negative rows are padding, and their
+/// mask entries must be `-inf`.
+pub export fn ggml_flash_attn_ext_rows(
+    ctx: *Context,
+    q: *Tensor,
+    k: *Tensor,
+    v: *Tensor,
+    mask: ?*Tensor,
+    kv_rows: ?*Tensor,
+    scale: f32,
+    max_bias: f32,
+    logit_softcap: f32,
+) *Tensor {
+    return flashAttnExtImpl(ctx, q, k, v, mask, kv_rows, scale, max_bias, logit_softcap);
 }
 
 /// Ports `ggml_flash_attn_ext_set_prec` (ggml.c:5640 @cd959bae9).

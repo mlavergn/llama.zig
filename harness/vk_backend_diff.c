@@ -577,6 +577,112 @@ static void ask_graph_optimize(size_t i, ggml_backend_dev_t dev) {
     ggml_backend_free(be);
 }
 
+/*
+ * v0.9.0's all-reduce (`ggml-vulkan-comm.cpp`), reached as the meta backend
+ * reaches it: through the registry's proc addresses. Two backends -- devices
+ * 0 and 1, or device 0 twice when there is one -- and one f32 tensor on
+ * each, reduced in place; every byte of both results is hashed. The cases
+ * cross each arm of `ggml_backend_vk_comm_allreduce_tensor`: an f32 wire
+ * below 1 MiB, an f16 wire at and above it, an f32 wire forced by a
+ * GGML_PREC_F32 MUL_MAT, tensors without the compute flag (zero-filled),
+ * growth of the shared host buffer, both slot parities, and the refusals
+ * (a type, an element count, empty tensors). `comm_init` with one backend
+ * must refuse too. Which sync mode ran is not printed by upstream; the GB10
+ * and llvmpipe both take `host_bridge` (sync_fd needs a Mesa RADV, ANV or
+ * NVK device), so `sync_fd` is not reached on any gate machine.
+ */
+static void ask_allreduce(ggml_backend_reg_t reg, size_t n_dev) {
+    ggml_backend_comm_init_t comm_init = (ggml_backend_comm_init_t) ggml_backend_reg_get_proc_address(reg, "ggml_backend_comm_init");
+    ggml_backend_comm_free_t comm_free = (ggml_backend_comm_free_t) ggml_backend_reg_get_proc_address(reg, "ggml_backend_comm_free");
+    ggml_backend_comm_allreduce_tensor_t allreduce =
+        (ggml_backend_comm_allreduce_tensor_t) ggml_backend_reg_get_proc_address(reg, "ggml_backend_comm_allreduce_tensor");
+    if (comm_init == NULL || comm_free == NULL || allreduce == NULL || n_dev == 0) {
+        printf("allreduce: unavailable\n");
+        return;
+    }
+    ggml_backend_t be[2];
+    be[0] = ggml_backend_dev_init(ggml_backend_reg_dev_get(reg, 0), NULL);
+    be[1] = ggml_backend_dev_init(ggml_backend_reg_dev_get(reg, n_dev > 1 ? 1 : 0), NULL);
+    void * one = comm_init(be, 1);
+    printf("allreduce comm_init(1) = %s\n", one ? "ctx" : "null");
+    void * comm = comm_init(be, 2);
+    printf("allreduce comm_init(2) = %s\n", comm ? "ctx" : "null");
+    if (comm != NULL) {
+        /* label, elements, type, compute flag, PREC_F32 MUL_MAT, element count of the second */
+        struct { const char * label; int64_t ne; enum ggml_type type; int compute; int prec_f32; int64_t ne1; } cases[] = {
+            { "f32 1",            1,      GGML_TYPE_F32, 1, 0, 1 },
+            { "f32 1000",         1000,   GGML_TYPE_F32, 1, 0, 1000 },
+            { "f32 1000 again",   1000,   GGML_TYPE_F32, 1, 0, 1000 },
+            { "f16 wire 300000",  300000, GGML_TYPE_F32, 1, 0, 300000 },
+            { "f16 wire 262144",  262144, GGML_TYPE_F32, 1, 0, 262144 },
+            { "f32 wire 262143",  262143, GGML_TYPE_F32, 1, 0, 262143 },
+            { "prec_f32 300000",  300000, GGML_TYPE_F32, 1, 1, 300000 },
+            { "no compute 1000",  1000,   GGML_TYPE_F32, 0, 0, 1000 },
+            { "no compute 300000", 300000, GGML_TYPE_F32, 0, 0, 300000 },
+            { "grow 700000",      700000, GGML_TYPE_F32, 1, 0, 700000 },
+            { "f16 refused",      1000,   GGML_TYPE_F16, 1, 0, 1000 },
+            { "count refused",    1000,   GGML_TYPE_F32, 1, 0, 999 },
+            /* One element, emptied after allocation: an unallocated tensor has no buffer to ask about. */
+            { "empty",            1,      GGML_TYPE_F32, 1, 0, 1 },
+        };
+        for (size_t k = 0; k < sizeof(cases) / sizeof(cases[0]); k++) {
+            struct ggml_context * tctx[2];
+            struct ggml_tensor * t[2];
+            ggml_backend_buffer_t buf[2];
+            for (int b = 0; b < 2; b++) {
+                struct ggml_init_params ip = { ggml_tensor_overhead() * 2, NULL, true };
+                tctx[b] = ggml_init(ip);
+                t[b] = ggml_new_tensor_1d(tctx[b], cases[k].type, b == 0 ? cases[k].ne : cases[k].ne1);
+                if (cases[k].prec_f32) {
+                    t[b]->op = GGML_OP_MUL_MAT;
+                    t[b]->op_params[0] = GGML_PREC_F32;
+                }
+                buf[b] = ggml_backend_alloc_ctx_tensors(tctx[b], be[b]);
+                if (cases[k].compute) {
+                    t[b]->flags |= GGML_TENSOR_FLAG_COMPUTE;
+                }
+                if (strcmp(cases[k].label, "empty") == 0) {
+                    t[b]->ne[0] = 0;
+                }
+                const size_t nb = ggml_nbytes(t[b]);
+                if (nb > 0) {
+                    uint8_t * host = (uint8_t *) malloc(nb);
+                    if (cases[k].type == GGML_TYPE_F32) {
+                        float * f = (float *) host;
+                        for (int64_t i = 0; i < ggml_nelements(t[b]); i++) {
+                            f[i] = (float) ((i * 7 + b * 13 + (int64_t) k * 5) % 101) / 8.0f - 3.0f;
+                        }
+                    } else {
+                        for (size_t i = 0; i < nb; i++) host[i] = (uint8_t) (i * 31 + b);
+                    }
+                    ggml_backend_tensor_set(t[b], host, 0, nb);
+                    free(host);
+                }
+            }
+            const bool ok = allreduce(comm, t);
+            ggml_backend_synchronize(be[0]);
+            ggml_backend_synchronize(be[1]);
+            printf("allreduce %s = %d", cases[k].label, ok);
+            for (int b = 0; b < 2; b++) {
+                const size_t nb = ggml_nbytes(t[b]);
+                uint8_t * host = (uint8_t *) malloc(nb + 1);
+                memset(host, 0xa5, nb + 1);
+                if (nb > 0) ggml_backend_tensor_get(t[b], host, 0, nb);
+                printf(" %016llx", (unsigned long long) fnv(host, nb));
+                free(host);
+            }
+            printf("\n");
+            for (int b = 0; b < 2; b++) {
+                ggml_backend_buffer_free(buf[b]);
+                ggml_free(tctx[b]);
+            }
+        }
+        comm_free(comm);
+    }
+    ggml_backend_free(be[0]);
+    ggml_backend_free(be[1]);
+}
+
 int main(int argc, char ** argv) {
     if (argc != 2 || (strcmp(argv[1], "port") != 0 && strcmp(argv[1], "ref") != 0)) {
         fprintf(stderr, "usage: vk_backend_diff port|ref\n");
@@ -595,7 +701,8 @@ int main(int argc, char ** argv) {
     printf("reg name = %s\n", ggml_backend_reg_name(reg));
     const size_t n_dev = ggml_backend_reg_dev_count(reg);
     printf("reg dev_count = %zu\n", n_dev);
-    static const char * procs[] = { "ggml_backend_get_features", "ggml_backend_split_buffer_type", "no_such_function" };
+    static const char * procs[] = { "ggml_backend_get_features", "ggml_backend_split_buffer_type", "no_such_function",
+                                    "ggml_backend_comm_init", "ggml_backend_comm_free", "ggml_backend_comm_allreduce_tensor" };
     for (size_t i = 0; i < sizeof(procs) / sizeof(procs[0]); i++) {
         printf("reg proc %s = %s\n", procs[i], ggml_backend_reg_get_proc_address(reg, procs[i]) ? "yes" : "null");
     }
@@ -640,6 +747,7 @@ int main(int argc, char ** argv) {
             ask_backend(i, ggml_backend_reg_dev_get(reg, i), ctx);
             ask_graph_optimize(i, ggml_backend_reg_dev_get(reg, i));
         }
+        ask_allreduce(reg, n_dev);
     }
     ggml_free(ctx);
 

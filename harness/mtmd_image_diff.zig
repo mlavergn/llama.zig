@@ -63,7 +63,7 @@ extern fn ref_preprocess(kind: c_int, proj_type: c_int, hp: *const RefHparams, r
 extern fn ref_video_frame_size(kind: c_int, hp: *const RefHparams, n_frames: c_int, width: c_int, height: c_int, out: *ImageSize) c_int;
 extern fn ref_dyn_target_size(hp: *const RefHparams, w: c_int, h: c_int, out: *ImageSize) void;
 extern fn ref_longest_target_size(hp: *const RefHparams, w: c_int, h: c_int, out: *ImageSize, what: *?[*]u8, what_len: *usize) c_int;
-extern fn ref_lfm3vl_smart_resize(w: c_int, h: c_int, factor: c_int, min_pixels: i64, max_pixels: i64, n_frames: c_int, temporal_factor: c_int, out: *ImageSize) void;
+extern fn ref_qwen3vl_smart_resize(w: c_int, h: c_int, factor: c_int, min_pixels: i64, max_pixels: i64, n_frames: c_int, temporal_factor: c_int, out: *ImageSize) void;
 extern fn ref_lfm2_should_tile(hp: *const RefHparams, w: c_int, h: c_int) c_int;
 extern fn ref_lfm2_smart_resize(hp: *const RefHparams, w: c_int, h: c_int, out: *ImageSize) void;
 extern fn ref_lfm2_grid_layout(hp: *const RefHparams, height: c_int, width: c_int, out: *ImageSize) void;
@@ -341,7 +341,7 @@ fn extraSizes(kind: image.Kind) []const [2]c_int {
         .lfm2 => &.{ .{ 704, 704 }, .{ 720, 720 }, .{ 736, 736 }, .{ 1024, 977 }, .{ 1056, 384 }, .{ 400, 600 }, .{ 480, 336 }, .{ 64, 169 }, .{ 1024, 768 }, .{ 720, 1600 }, .{ 420, 1440 }, .{ 255, 2160 }, .{ 620, 410 }, .{ 2000, 1500 } },
         // an edge rounding to 0 (the max then keeps it at the factor), half
         // an alignment, and sizes either side of the pixel budgets
-        .lfm3vl => &.{ .{ 3, 1000 }, .{ 1000, 3 }, .{ 15, 16 }, .{ 16, 16 }, .{ 17, 48 }, .{ 48, 80 }, .{ 80, 48 }, .{ 400, 400 }, .{ 720, 720 }, .{ 3000, 2000 } },
+        .lfm3vl, .qwen3vl => &.{ .{ 3, 1000 }, .{ 1000, 3 }, .{ 15, 16 }, .{ 16, 16 }, .{ 17, 48 }, .{ 48, 80 }, .{ 80, 48 }, .{ 400, 400 }, .{ 720, 720 }, .{ 3000, 2000 } },
         // aspect ratios past both solver limits, an image scaled up to the
         // minimum, and one exactly on the destination's ratio
         .deepseek41v => &.{ .{ 3000, 2 }, .{ 2, 3000 }, .{ 1, 400 }, .{ 400, 1 }, .{ 2000, 3 }, .{ 3, 2000 }, .{ 96, 96 }, .{ 192, 96 }, .{ 2000, 2000 }, .{ 1920, 1080 } },
@@ -434,10 +434,13 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 try out.append(gpa, .{ h, .qwen2vl, "dyn" });
             };
         },
-        .lfm3vl => {
+        .lfm3vl, .qwen3vl => {
             // as load_hparams sets it, PAD_NONE, and with padding; budgets
             // around the test sizes, an unset minimum; torchvision's resize
+            // (v0.9.0: qwen3vl is lfm3vl with dyn_size's image size)
             for ([_]i32{ 14, 16 }) |ps| for ([_][2]i32{ .{ 64, 256 }, .{ 16, 64 }, .{ 256, 1024 }, .{ 0, 4096 }, .{ -1, 8 } }) |mm| for ([_]i32{ 0, 1, 2, torch | 0, torch | 1 }) |algo| for ([_]i32{ 0, 1 }) |pad| {
+                // dyn_size's image size asserts both budgets
+                if (kind == .qwen3vl and mm[0] <= 0) continue;
                 var h = base;
                 h.patch_size = ps;
                 h.n_merge = 2;
@@ -447,7 +450,7 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 h.image_resize_algo = algo;
                 h.image_resize_pad = pad;
                 h.image_pad_color = .{ 4, 5, 6, 0 };
-                try out.append(gpa, .{ h, .lfm3vl, "lfm3vl" });
+                if (kind == .lfm3vl) try out.append(gpa, .{ h, .lfm3vl, "lfm3vl" }) else try out.append(gpa, .{ h, .qwen3vl, "qwen3vl" });
             };
         },
         .longest_edge => {
@@ -705,8 +708,8 @@ fn sweepLfm3vl() void {
     for ([_]c_int{ 32, 28, 16 }) |factor| for (budgets) |mm| for ([_][2]c_int{ .{ 1, 1 }, .{ 1, 2 }, .{ 2, 2 }, .{ 3, 2 }, .{ 4, 2 }, .{ 5, 2 }, .{ 7, 2 }, .{ 8, 2 }, .{ 16, 2 }, .{ 101, 2 }, .{ 5, 3 } }) |ft| {
         for (sweep_edges) |w| for (sweep_edges) |h| {
             var ref: ImageSize = .{};
-            ref_lfm3vl_smart_resize(w, h, factor, mm[0], mm[1], ft[0], ft[1], &ref);
-            const port = image.Preprocessor.lfm3vlSmartResize(w, h, factor, mm[0], mm[1], ft[0], ft[1]);
+            ref_qwen3vl_smart_resize(w, h, factor, mm[0], mm[1], ft[0], ft[1], &ref);
+            const port = image.Preprocessor.qwen3vlSmartResize(w, h, factor, mm[0], mm[1], ft[0], ft[1]);
             n_checks += 1;
             if (!sameSize(ref, port)) failCheck("lfm3vl smart_resize {d}x{d} f{d} {d}..{d} frames {d}/{d}: {d}x{d} vs {d}x{d}", .{ w, h, factor, mm[0], mm[1], ft[0], ft[1], ref.width, ref.height, port.width, port.height });
         };
@@ -721,17 +724,20 @@ fn sweepVideoFrame() !void {
         const rh: RefHparams = .{ .patch_size = ps, .n_merge = 2, .image_min_pixels = 64 * ps * ps * 4, .image_max_pixels = 256 * ps * ps * 4 };
         var hp = try toHparams(&rh);
         defer hp.deinit();
-        const pp = image.Preprocessor.init(.lfm3vl, &hp, .lfm3vl);
-        var n_frames: c_int = 1;
-        while (n_frames <= 32) : (n_frames += 1) {
-            for (sweep_edges) |w| for (sweep_edges) |h| {
-                var ref: ImageSize = .{};
-                var port: ImageSize = .{};
-                const ref_has = ref_video_frame_size(@backingInt(image.Kind.lfm3vl), &rh, n_frames, w, h, &ref) != 0;
-                const port_has = pp.getVideoFrameSize(n_frames, w, h, &port);
-                n_checks += 1;
-                if (!ref_has or !port_has or !sameSize(ref, port)) failCheck("get_video_frame_size {d} frames {d}x{d} p{d}: {d}x{d} vs {d}x{d}", .{ n_frames, w, h, ps, ref.width, ref.height, port.width, port.height });
-            };
+        // v0.9.0: qwen3vl owns the video size, lfm3vl inherits it
+        for ([_]struct { image.Kind, names.ProjectorType }{ .{ .lfm3vl, .lfm3vl }, .{ .qwen3vl, .qwen3vl } }) |kp| {
+            const pp = image.Preprocessor.init(kp[0], &hp, kp[1]);
+            var n_frames: c_int = 1;
+            while (n_frames <= 32) : (n_frames += 1) {
+                for (sweep_edges) |w| for (sweep_edges) |h| {
+                    var ref: ImageSize = .{};
+                    var port: ImageSize = .{};
+                    const ref_has = ref_video_frame_size(@backingInt(kp[0]), &rh, n_frames, w, h, &ref) != 0;
+                    const port_has = pp.getVideoFrameSize(n_frames, w, h, &port);
+                    n_checks += 1;
+                    if (!ref_has or !port_has or !sameSize(ref, port)) failCheck("get_video_frame_size {s} {d} frames {d}x{d} p{d}: {d}x{d} vs {d}x{d}", .{ @tagName(kp[0]), n_frames, w, h, ps, ref.width, ref.height, port.width, port.height });
+                };
+            }
         }
     }
 }

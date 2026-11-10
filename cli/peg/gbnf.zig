@@ -8,7 +8,7 @@
 //! Ports `common_peg_arena::build_grammar`, `collect_reachable_rules` and the
 //! GBNF helpers `gbnf_escape_char_class`, `gbnf_char_class`,
 //! `gbnf_ac_grammar`, `gbnf_excluding_grammar` and `gbnf_including_grammar`
-//! from `llama.cpp/common/peg-parser.cpp` (llama.cpp v0.8.0, `8642541b2`).
+//! from `llama.cpp/common/peg-parser.cpp` (llama.cpp v0.9.0, `cd959bae9`).
 //! Each declaration names what it ports and the line it began at.
 //!
 //! The rules go to the builder in the rule map's iteration order -- libc++'s

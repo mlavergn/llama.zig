@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/pockettts-seanet.cpp` at v0.8.0
-//! (`8642541b2`), and the `clip_graph_pockettts_seanet` declaration in
+//! Ports `llama.cpp/tools/mtmd/models/pockettts-seanet.cpp` at v0.9.0
+//! (`cd959bae9`), and the `clip_graph_pockettts_seanet` declaration in
 //! `llama.cpp/tools/mtmd/models/models.h`. Each declaration names what it
 //! ports and the line it began at.
 //!

@@ -6,7 +6,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/unary.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/unary.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/unary.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels -- `unary_op_kernel`, `unary_gated_op_kernel`,
 //! `swiglu_oai_kernel`, `swiglu_clamp_kernel`, `xielu_kernel`,
 //! `silu_back_kernel`, `leaky_relu_kernel` -- stay CUDA.

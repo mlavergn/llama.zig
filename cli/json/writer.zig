@@ -5,7 +5,7 @@
 //!
 //! Ports `common_json::dump_safe` from `llama.cpp/common/json.cpp` and the
 //! string escaping of `nlohmann::detail::serializer::dump_escaped` from
-//! `llama.cpp/vendor/nlohmann/json.hpp` (v0.8.0, `8642541b2`), as
+//! `llama.cpp/vendor/nlohmann/json.hpp` (v0.9.0, `cd959bae9`), as
 //! `common/log.cpp` uses them. Each declaration names what it ports and the
 //! line it began at.
 //!

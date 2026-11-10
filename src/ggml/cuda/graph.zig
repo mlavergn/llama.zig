@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.8.0
-//! (`8642541b2`): `ggml_cuda_compute_forward`, the `USE_CUDA_GRAPH` helpers,
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.9.0
+//! (`cd959bae9`): `ggml_cuda_compute_forward`, the `USE_CUDA_GRAPH` helpers,
 //! `ggml_cuda_graph_evaluate_and_capture`, `ggml_backend_cuda_graph_compute`
 //! and `ggml_backend_cuda_graph_optimize`.
 //!

@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/wkv.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/wkv.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/wkv.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels -- `rwkv_wkv_f32`, `rwkv_wkv7_f32` and
 //! `rwkv_wkv7_f32_t1_warp_row` -- stay CUDA. Every launch is `<<<>>>`.
 

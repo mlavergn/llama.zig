@@ -1,8 +1,9 @@
 #!/bin/bash
-# Print the name-table checksums src/ggml/types.zig compares against, from the
-# stock C ggml llama.cpp.zmake builds -- never from the port, whose own
-# ggml_op_name would answer for itself. Rerun at every sync and paste the
-# lines that changed. (golden_traits has its own generator path.)
+# Print the traits and name-table checksums src/ggml/types.zig compares
+# against, from the stock C ggml llama.cpp.zmake builds -- never from the
+# port, whose own ggml_op_name would answer for itself. Rerun at every sync
+# and paste the lines that changed. (golden_traits joined at v0.9.0, whose
+# GGML_TYPE_F8_E4M3 moved it.)
 #
 # Usage: scripts/types-golden
 set -eu

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/gguf.cpp` (v0.8.0, `8642541b2`), 1,706
+//! Ported from `llama.cpp/ggml/src/gguf.cpp` (v0.9.0, `cd959bae9`), 1,755
 //! lines of C++. Each declaration below names the C++ it replaces and the line
 //! it began at. This file exports the same C symbols with the same signatures,
 //! so the C++ that calls into it links unchanged.
@@ -57,8 +57,8 @@
 //!   `src`, `buffer`, `data`, `view_src`, `extra`, `flags` and `op_params`
 //!   indeterminate before `push_back` copies the whole struct. Nothing on the
 //!   read path reads them, but both writers branch on `info.t.buffer` inside
-//!   `write_tensor_data` (gguf.cpp:1582 @8642541b2) and again in the file
-//!   writer's `write_tensor_data` (gguf.cpp:1627 @8642541b2), so a context read
+//!   `write_tensor_data` (gguf.cpp:1588 @cd959bae9) and again in the file
+//!   writer's `write_tensor_data` (gguf.cpp:1646 @cd959bae9), so a context read
 //!   from a file and then written out would branch on a garbage pointer.
 //!   Zeroing costs nothing and makes the output depend only on the input, which
 //!   is the same call this project made for `quantize_row_iq4_nl_ref`.
@@ -2011,13 +2011,13 @@ export fn gguf_set_tensor_data(ctx: ?*c.struct_gguf_context, name: [*:0]const u8
 // -----------------------------------------------------------------------------
 // Writing
 //
-// Ports `struct gguf_writer_base` (gguf.cpp:1458 @8642541b2) and its two
-// `final` subclasses. The C++ declares three pure-virtual methods and comments
+// Ports `struct gguf_writer_base` (gguf.cpp:1458 @cd959bae9) and its two
+// `final` subclasses. The C++ declares four pure-virtual methods and comments
 // them "we bet on devirtualization" just above the first, `write`
-// (gguf.cpp:1464 @cd959bae9). `gguf_write_out` (gguf.cpp:1647 @8642541b2) is
+// (gguf.cpp:1464 @cd959bae9). `gguf_write_out` (gguf.cpp:1671 @cd959bae9) is
 // already a template over the writer type, so every call is monomorphic at the
 // one place it matters. `Writer(Impl)` settles that bet at compile time:
-// `Impl` supplies the three, `Writer` supplies everything built on them.
+// `Impl` supplies the four, `Writer` supplies everything built on them.
 
 /// The failure the file writer can report. The C++ raises it as a
 /// `std::runtime_error` carrying a message that `gguf_write_to_file_ptr` logs;
@@ -2047,6 +2047,14 @@ fn Writer(comptime Impl: type) type {
         fn writeBytes(self: *Self, val: []const u8) WriteError!void {
             try self.impl_.writeBytes(val);
             self.written_bytes += val.len;
+        }
+
+        /// Ports `gguf_writer_base`'s pure-virtual `write` (gguf.cpp:1466
+        /// @cd959bae9), the `const void *, size_t` overload v0.9.0 added,
+        /// dispatched to the concrete writer.
+        fn writeData(self: *Self, data: [*]const u8, size: usize) WriteError!void {
+            self.written_bytes += size;
+            try self.impl_.writeData(data, size);
         }
 
         /// Ports `gguf_writer_base`'s templated `write` (gguf.cpp:1470 @cd959bae9).
@@ -2147,7 +2155,7 @@ fn Writer(comptime Impl: type) type {
         }
 
         /// Ports the `write_tensor_data`, `write_tensor_data` overrides of the
-        /// buffer and file writers (gguf.cpp:1582, 1627 @8642541b2).
+        /// buffer and file writers (gguf.cpp:1588, 1646 @cd959bae9).
         fn writeTensorData(self: *Self, info: *const TensorInfo, offset_data: usize, alignment: usize) WriteError!void {
             try self.impl_.writeTensorData(self, info, offset_data, alignment);
             try self.pad(alignment);
@@ -2155,7 +2163,7 @@ fn Writer(comptime Impl: type) type {
     };
 }
 
-/// Ports `struct gguf_writer_buf` (gguf.cpp:1565 @8642541b2).
+/// Ports `struct gguf_writer_buf` (gguf.cpp:1566 @cd959bae9).
 ///
 /// Cannot fail: the C++'s `push_back` and `insert` only throw `std::bad_alloc`,
 /// which this port turns into an abort. Its methods still carry `WriteError` so
@@ -2174,10 +2182,17 @@ const BufWriter = struct {
         self.buf.appendSlice(allocator, val) catch oom();
     }
 
-    /// Ports `gguf_writer_buf`'s `write_tensor_data` (gguf.cpp:1582 @8642541b2).
+    /// Ports `gguf_writer_buf`'s `const void *` `write` (gguf.cpp:1583 @cd959bae9).
+    fn writeData(self: *BufWriter, data: [*]const u8, size: usize) WriteError!void {
+        self.buf.appendSlice(allocator, data[0..size]) catch oom();
+    }
+
+    /// Ports `gguf_writer_buf`'s `write_tensor_data` (gguf.cpp:1588 @cd959bae9).
     ///
-    /// The `pad` the C++ does at the end lives in the generic caller, so it is
-    /// not repeated here.
+    /// Since v0.9.0 a tensor in a host buffer is appended straight from its
+    /// `data`, without the `ggml_backend_tensor_get` round trip. The `pad` the
+    /// C++ does at the end lives in the generic caller, so it is not repeated
+    /// here.
     fn writeTensorData(
         self: *BufWriter,
         w: *Writer(BufWriter),
@@ -2189,21 +2204,26 @@ const BufWriter = struct {
         impl.assert(self.buf.items.len - offset_data == info.offset, "buf.size() - offset_data == info.offset");
 
         impl.assert(c.ggml_is_contiguous(&info.t), "ggml_is_contiguous(&info.t)");
-        const offset = self.buf.items.len;
         const nbytes = c.ggml_nbytes(&info.t);
 
-        self.buf.resize(allocator, offset + nbytes) catch oom();
-        if (info.t.buffer != null) {
-            c.ggml_backend_tensor_get(&info.t, @ptrCast(self.buf.items[offset..].ptr), 0, nbytes);
+        if (info.t.buffer != null and c.ggml_backend_buffer_is_host(info.t.buffer)) {
+            impl.assert(info.t.data != null, "info.t.data != NULL && \"tensor not allocated\"");
+            try w.writeData(@ptrCast(info.t.data), nbytes);
         } else {
-            impl.assert(info.t.data != null, "info.t.data");
-            @memcpy(self.buf.items[offset..][0..nbytes], @as([*]const u8, @ptrCast(info.t.data))[0..nbytes]);
+            const offset = self.buf.items.len;
+            self.buf.resize(allocator, offset + nbytes) catch oom();
+            if (info.t.buffer != null) {
+                c.ggml_backend_tensor_get(&info.t, @ptrCast(self.buf.items[offset..].ptr), 0, nbytes);
+            } else {
+                impl.assert(info.t.data != null, "info.t.data");
+                @memcpy(self.buf.items[offset..][0..nbytes], @as([*]const u8, @ptrCast(info.t.data))[0..nbytes]);
+            }
+            w.written_bytes += nbytes;
         }
-        w.written_bytes += nbytes;
     }
 };
 
-/// Ports `struct gguf_writer_file` (gguf.cpp:1603 @8642541b2).
+/// Ports `struct gguf_writer_file` (gguf.cpp:1614 @cd959bae9).
 const FileWriter = struct {
     file: *c.FILE,
 
@@ -2238,7 +2258,23 @@ const FileWriter = struct {
         }
     }
 
-    /// Ports `gguf_writer_file`'s `write_tensor_data` (gguf.cpp:1627 @8642541b2).
+    /// Ports `gguf_writer_file`'s `const void *` `write` (gguf.cpp:1638 @cd959bae9).
+    fn writeData(self: *FileWriter, data: [*]const u8, size: usize) WriteError!void {
+        if (size == 0) return;
+        const ret = Libc.fwrite(@ptrCast(data), 1, size, self.file);
+        if (ret != size) {
+            impl.logError(
+                "%s: failed to write GGUF data: unexpected fwrite number of bytes written, '%zu' instead of '%zu'\n",
+                .{ "gguf_write_to_file_ptr", ret, size },
+            );
+            return error.WriteFailed;
+        }
+    }
+
+    /// Ports `gguf_writer_file`'s `write_tensor_data` (gguf.cpp:1646 @cd959bae9).
+    ///
+    /// Since v0.9.0 a tensor in a host buffer is written straight from its
+    /// `data`, without the staging copy.
     fn writeTensorData(
         self: *FileWriter,
         w: *Writer(FileWriter),
@@ -2253,16 +2289,21 @@ const FileWriter = struct {
         impl.assert(c.ggml_is_contiguous(&info.t), "ggml_is_contiguous(&info.t)");
         const nbytes = c.ggml_nbytes(&info.t);
 
-        var buf: std.ArrayList(u8) = .empty;
-        defer buf.deinit(allocator);
-        buf.resize(allocator, nbytes) catch oom();
-        if (info.t.buffer != null) {
-            c.ggml_backend_tensor_get(&info.t, @ptrCast(buf.items.ptr), 0, nbytes);
+        if (info.t.buffer != null and c.ggml_backend_buffer_is_host(info.t.buffer)) {
+            impl.assert(info.t.data != null, "info.t.data != NULL && \"tensor not allocated\"");
+            try w.writeData(@ptrCast(info.t.data), nbytes);
         } else {
-            impl.assert(info.t.data != null, "info.t.data");
-            @memcpy(buf.items, @as([*]const u8, @ptrCast(info.t.data))[0..nbytes]);
+            var buf: std.ArrayList(u8) = .empty;
+            defer buf.deinit(allocator);
+            buf.resize(allocator, nbytes) catch oom();
+            if (info.t.buffer != null) {
+                c.ggml_backend_tensor_get(&info.t, @ptrCast(buf.items.ptr), 0, nbytes);
+            } else {
+                impl.assert(info.t.data != null, "info.t.data");
+                @memcpy(buf.items, @as([*]const u8, @ptrCast(info.t.data))[0..nbytes]);
+            }
+            try w.writeBytes(buf.items);
         }
-        try w.writeBytes(buf.items);
     }
 };
 

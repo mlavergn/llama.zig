@@ -4,7 +4,7 @@
 //!
 //! Ports `common_arg`, `common_params_parse_ex`, `common_params_print_usage`,
 //! `common_params_parse` and their helpers from `llama.cpp/common/arg.cpp`
-//! (v0.8.0, `8642541b2`). The option table itself is `arg_options.zig`.
+//! (v0.9.0, `cd959bae9`). The option table itself is `arg_options.zig`.
 //! Each declaration names what it ports and the line it began at.
 //!
 //! # Exceptions
@@ -415,7 +415,7 @@ pub fn parserInit(params: *Params, ex: Example, print_usage: ?*const fn ([]const
 // Parsing
 
 /// The config files `common_params_apply_system_config` reads
-/// (arg.cpp:733 @8642541b2). None may exist: their INI presets are not
+/// (arg.cpp:709 @cd959bae9). None may exist: their INI presets are not
 /// ported.
 fn refuseSystemConfig(a: std.mem.Allocator) !void {
     var paths: std.ArrayList([:0]const u8) = .empty;
@@ -836,7 +836,7 @@ fn printUsage(ctx: *Context) !void {
     }
 }
 
-/// Ports `common_params_parse` (arg.cpp:1291 @8642541b2).
+/// Ports `common_params_parse` (arg.cpp:1238 @cd959bae9).
 ///
 /// Parameters:
 /// - `argv`: the command line, `argv[0]` included.

@@ -9,7 +9,7 @@
 //!                                       needs but which lives in a different
 //!                                       ported file
 //!
-//! Both at v0.8.0 (`8642541b2`). Each declaration below names the source file
+//! Both at v0.9.0 (`cd959bae9`). Each declaration below names the source file
 //! and line it came from.
 //!
 //! This header is not importable: it pulls in `<arm_neon.h>`, whose `__mfp8`
@@ -228,7 +228,7 @@ pub fn assert(ok: bool, comptime msg: []const u8) void {
 // -----------------------------------------------------------------------------
 // Heap allocation
 //
-// Ports `ggml_malloc` (ggml.c:418 @cd959bae9) and `ggml_calloc` (ggml.c:431 @8642541b2), plus the
+// Ports `ggml_malloc` (ggml.c:418 @cd959bae9) and `ggml_calloc` (ggml.c:432 @cd959bae9), plus the
 // `GGML_MALLOC` / `GGML_CALLOC` macros that wrap them. They are `inline
 // static` in the C, so there is no symbol to call and they have to be
 // reproduced -- and they are declared here rather than in the file that ports
@@ -638,7 +638,7 @@ pub fn e8m0ToFp32Half(x: u8) f32 {
     return @bitCast(bits);
 }
 
-/// Ports `ggml_ue4m3_to_fp32` (ggml-impl.h:514 @8642541b2).
+/// Ports `ggml_ue4m3_to_fp32` (ggml-impl.h:514 @cd959bae9).
 ///
 /// NVFP4's per-sub-block scale: unsigned, 4 exponent bits biased by 7, 3
 /// mantissa bits. Halved for the same reason as `e8m0ToFp32Half`.
@@ -653,7 +653,7 @@ pub fn ue4m3ToFp32(x: u8) f32 {
     return raw * 0.5;
 }
 
-/// Ports `ggml_fp32_to_ue4m3` (ggml-impl.h:529 @8642541b2).
+/// Ports `ggml_fp32_to_ue4m3` (ggml-impl.h:530 @cd959bae9).
 ///
 /// Round-to-nearest on the mantissa, with the carry out of the mantissa
 /// handled by bumping the exponent -- and a second overflow check after that
@@ -686,6 +686,77 @@ pub fn fp32ToUe4m3(x_in: f32) u8 {
         if (ue4m3_exp >= 15) return 0x7E;
     }
     return @intCast((ue4m3_exp << 3) | ue4m3_man);
+}
+
+/// Ports `ggml_f8_e4m3_to_fp32` (ggml-impl.h:569 @cd959bae9).
+///
+/// The OCP FP8 E4M3 element type `GGML_TYPE_F8_E4M3` stores: a sign, 4
+/// exponent bits biased by 7, 3 mantissa bits. Unlike `ue4m3ToFp32` it is
+/// signed and not halved, and `0x7F` and `0xFF` are NaN rather than zero.
+pub fn f8E4m3ToFp32(x: u8) f32 {
+    const ax = x & 0x7F;
+    if (ax == 0x7F) {
+        // OCP FP8 defines both 0x7F and 0xFF as NaN; the sign need not be preserved.
+        return std.math.nan(f32);
+    }
+
+    const exp: i32 = @intCast((ax >> 3) & 0xF);
+    const man: i32 = @intCast(ax & 0x7);
+    // OCP FP8 rev. 1.1, section 5.1: subnormal magnitude = M * 2^-9; normal magnitude = (1 + M / 8) * 2^(E - 7).
+    const value = if (exp == 0)
+        std.math.ldexp(@as(f32, @floatFromInt(man)), -9)
+    else
+        std.math.ldexp(1.0 + @as(f32, @floatFromInt(man)) / 8.0, exp - 7);
+    return if (x & 0x80 != 0) -value else value;
+}
+
+/// Ports `ggml_round_to_nearest_even` (ggml-impl.h:585 @cd959bae9).
+///
+/// `(int) floorf(x)`, then up on a fraction above one half, or of exactly one
+/// half when the floor is odd. Only called on values `fp32ToF8E4m3` has
+/// already bounded, so the C's cast is in range.
+pub fn roundToNearestEven(x: f32) i32 {
+    const value: i32 = @intFromFloat(@floor(x));
+    const fraction = x - @as(f32, @floatFromInt(value));
+    return if (fraction > 0.5 or (fraction == 0.5 and (value & 1) != 0)) value + 1 else value;
+}
+
+/// Ports `ggml_fp32_to_f8_e4m3` (ggml-impl.h:592 @cd959bae9).
+///
+/// Saturating only: infinities and overflow clamp to +/-448 (`0x7E`), NaN
+/// becomes the canonical `0x7F`, and the mantissa rounds to nearest even with
+/// its carry moving into the exponent.
+pub fn fp32ToF8E4m3(x_in: f32) u8 {
+    const sign: u8 = if (std.math.signbit(x_in)) 0x80 else 0;
+    const x = @abs(x_in);
+
+    if (std.math.isNan(x)) {
+        // OCP FP8 leaves NaN sign handling to the implementation; use canonical 0x7F.
+        return 0x7F;
+    }
+    if (x == 0.0) {
+        return sign;
+    }
+    if (std.math.isInf(x) or x >= 448.0) {
+        return sign | 0x7E;
+    }
+    if (x < 0.015625) {
+        // OCP FP8 rev. 1.1, section 5.1: subnormal magnitude = M * 2^(1 - bias - m) = M / 512.
+        return sign | @as(u8, @truncate(@as(u32, @bitCast(roundToNearestEven(x * 512.0)))));
+    }
+
+    const fr = std.math.frexp(x);
+    const mantissa = fr.significand * 2.0;
+    var encoded_exp: i32 = fr.exponent + 6;
+    var encoded_man: i32 = roundToNearestEven((mantissa - 1.0) * 8.0);
+    if (encoded_man == 8) {
+        encoded_man = 0;
+        encoded_exp += 1;
+    }
+    if (encoded_exp > 15 or (encoded_exp == 15 and encoded_man > 6)) {
+        return sign | 0x7E;
+    }
+    return sign | @as(u8, @truncate(@as(u32, @bitCast(encoded_exp << 3)))) | @as(u8, @truncate(@as(u32, @bitCast(encoded_man))));
 }
 
 /// A C float-to-integer cast: truncate toward zero.

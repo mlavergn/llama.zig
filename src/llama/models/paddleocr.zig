@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/paddleocr.cpp` at v0.8.0
-//! (`8642541b2`): `llama_model_paddleocr`'s `build_arch_graph` and its
+//! Ported from `llama.cpp/src/models/paddleocr.cpp` at v0.9.0
+//! (`cd959bae9`): `llama_model_paddleocr`'s `build_arch_graph` and its
 //! `graph`. Its loading is `llama_model_ernie4_5`'s, in `ernie4_5.zig`.
 
 const std = @import("std");

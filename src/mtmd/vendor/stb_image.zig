@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/vendor/stb/stb_image.h` (stb_image v2.30) at v0.8.0
-//! (`8642541b2`), the memory-loading path only. Each declaration names the
+//! Ports `llama.cpp/vendor/stb/stb_image.h` (stb_image v2.30) at v0.9.0
+//! (`cd959bae9`), the memory-loading path only. Each declaration names the
 //! function it ports and the line it began at.
 //!
 //! # As `mtmd-helper.cpp` compiles it
@@ -14,7 +14,7 @@
 //!
 //! - **no SIMD on aarch64** (`STBI_NEON` is opt-in), and on x86 the SSE2
 //!   kernels are documented bit-identical to the scalar ones this file
-//!   ports (`stbi__idct_simd`, `stbi__YCbCr_to_RGB_simd`: stb_image.h:2528, 3657 @8642541b2);
+//!   ports (`stbi__idct_simd`, `stbi__YCbCr_to_RGB_simd`: stb_image.h:2528, 3657 @cd959bae9);
 //! - **`pow(float, float)` is C++'s float overload**, `powf`, in the HDR to
 //!   LDR conversion -- a C build would call the double `pow`;
 //! - `STBI_ASSERT` is `assert`, compiled out under `NDEBUG`.

@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/tools/mtmd/mtmd-audio.cpp` and
-//! `llama.cpp/tools/mtmd/mtmd-audio.h` at v0.8.0 (`8642541b2`). Each
+//! `llama.cpp/tools/mtmd/mtmd-audio.h` at v0.9.0 (`cd959bae9`). Each
 //! declaration names the C++ it replaces and the line it began at. The C++'s
 //! class hierarchy -- an abstract `mtmd_audio_preprocessor` and eleven
 //! subclasses -- is one `Preprocessor` here, switched on `Kind`.
@@ -41,6 +41,15 @@ const libm = struct {
     extern "c" fn log10(x: f64) f64;
     extern "c" fn pow(x: f64, y: f64) f64;
     extern "c" fn exp(x: f64) f64;
+    // chatterbox's reference front-end
+    /// The `__double2` Apple's `__sincos_stret` returns.
+    const Double2 = extern struct { sin: f64, cos: f64 };
+    extern "c" fn __sincos_stret(x: f64) Double2;
+    extern "c" fn __exp10f(x: f32) f32;
+    extern "c" fn sin(x: f64) f64;
+    extern "c" fn cos(x: f64) f64;
+    extern "c" fn logf(x: f32) f32;
+    extern "c" fn powf(x: f32, y: f32) f32;
 };
 
 /// Whether the reference compiler treats libm calls as writing `errno`:
@@ -411,7 +420,7 @@ fn melRowSum(fft_out: [*]const f32, filt: [*]const f32, n_fft_bins: i64) f64 {
 /// CLAUDE.md's "One expression is fused; one *reduction loop* is not". The
 /// gate cannot tell the two apart here -- the variance only reaches a float
 /// through a square root and a division -- so the disassembly is the evidence.
-fn strictSquareSum(row: []const f32, mean: f64) f64 {
+pub fn strictSquareSum(row: []const f32, mean: f64) f64 {
     var sum: f64 = 0.0;
     const split = row.len - row.len % 4;
     for (row[0..split]) |v| {
@@ -691,10 +700,623 @@ fn logMelSpectrogram(samples_in: []const f32, params: *const FilterParams, cache
     return true;
 }
 
-/// The fourteen subclasses of `mtmd_audio_preprocessor`
-/// (mtmd-audio.h:56 @cd959bae9), in the header's order -- `d1omni`, new at
-/// v0.7.0, last, so the earlier kinds keep the ordinals
-/// `harness/mtmd_audio_ref.cpp` switches on.
+// -----------------------------------------------------------------------------
+// chatterbox's reference front-end
+
+/// `sin(x)` and `cos(x)` in `double` as clang emits the pair: Apple's
+/// `__sincos_stret` on Darwin (measured from the reference `mtmd-audio.o`'s
+/// imports), the separate calls under `-fmath-errno`.
+fn sinCosF64(x: f64) [2]f64 {
+    if (comptime !math_errno) {
+        const r = libm.__sincos_stret(x);
+        return .{ r.sin, r.cos };
+    }
+    return .{ libm.sin(x), libm.cos(x) };
+}
+
+/// `powf(10.0f, x)` as clang emits it: `__exp10f` on Darwin (measured from
+/// the reference `mtmd-audio.o`'s imports).
+fn pow10f(x: f32) f32 {
+    if (comptime !math_errno) return libm.__exp10f(x);
+    return libm.powf(10.0, x);
+}
+
+/// `std::max(a, b)` over `float`: `(a < b) ? b : a`.
+fn maxF32(a: f32, b: f32) f32 {
+    return if (a < b) b else a;
+}
+
+/// The FFT buffers upstream's chatterbox helpers allocate per call:
+/// `fft_in` of `2 * n_fft` and `fft_out` of `8 * n_fft`, zeroed.
+const CbxFftBufs = struct {
+    in: []f32,
+    out: []f32,
+
+    fn init(n_fft: usize) !CbxFftBufs {
+        const in = try gpa.alloc(f32, n_fft * 2);
+        errdefer gpa.free(in);
+        const out = try gpa.alloc(f32, n_fft * 8);
+        @memset(in, 0.0);
+        @memset(out, 0.0);
+        return .{ .in = in, .out = out };
+    }
+
+    fn deinit(self: *CbxFftBufs) void {
+        gpa.free(self.in);
+        gpa.free(self.out);
+    }
+};
+
+/// Ports `mtmd_audio_reflect_frame` (mtmd-audio.cpp:975 @cd959bae9): a
+/// windowed frame of a centered, reflect padded signal, `dst[i] = x[start +
+/// i] * win[i]`, zeros past the window.
+fn cbxReflectFrame(x: [*]const f32, n: c_int, start: c_int, win: []const f32, dst: []f32) void {
+    @memset(dst, 0.0);
+    for (win, 0..) |w, iu| {
+        var idx: c_int = start + @as(c_int, @intCast(iu));
+        if (idx < 0) {
+            idx = -idx;
+        }
+        if (idx >= n) {
+            idx = 2 * n - 2 - idx;
+        }
+        dst[iu] = x[@intCast(idx)] * w;
+    }
+}
+
+/// Ports `mtmd_audio_mel_energies` (mtmd-audio.cpp:990 @cd959bae9): mel
+/// energies of the frame in `fft_in`, the power (or magnitude) spectrum
+/// through `cache.filters`, into `mel`.
+fn cbxMelEnergies(cache: *const Cache, fft_in: []f32, fft_out: []f32, magnitude: bool, mel: *std.ArrayList(f64)) !void {
+    const n_fft: c_int = @intCast(cache.filters.n_fft);
+    const n_bins: usize = @intCast(@divTrunc(n_fft, 2) + 1);
+    fft(cache, fft_in.ptr, n_fft, fft_out.ptr);
+    for (0..n_bins) |k| {
+        const re = fft_out[2 * k + 0];
+        const im = fft_out[2 * k + 1];
+        const p = @mulAdd(f32, re, re, im * im);
+        fft_out[k] = if (magnitude) @sqrt(p + 1e-9) else p;
+    }
+    const n_mel: usize = @intCast(cache.filters.n_mel);
+    mel.clearRetainingCapacity();
+    try mel.appendNTimes(gpa, 0.0, n_mel);
+    for (0..n_mel) |m| {
+        const w = cache.filters.data.items[m * n_bins ..][0..n_bins];
+        var acc = mel.items[m];
+        // a `float` product into a `double` sum: never contracted
+        for (w, fft_out[0..n_bins]) |wk, fk| acc += @as(f64, wk * fk);
+        mel.items[m] = acc;
+    }
+}
+
+/// Ports `mtmd_audio_s3tok_log_mel` (mtmd-audio.cpp:1009 @cd959bae9): the
+/// whisper style log-mel of the chatterbox s3 tokenizer (s3tokenizer.py),
+/// mel major.
+fn cbxS3tokLogMel(cache: *const Cache, samples: []const f32, out: *std.ArrayList(f32), n_frames: *c_int) !bool {
+    const n_fft: c_int = 400;
+    const hop: c_int = 160;
+    const n_mel: usize = @intCast(cache.filters.n_mel);
+    const n: c_int = @intCast(samples.len);
+
+    n_frames.* = @divTrunc(n, hop);
+    if (n_frames.* <= 0) {
+        return false;
+    }
+    const nf: usize = @intCast(n_frames.*);
+
+    var bufs = try CbxFftBufs.init(n_fft);
+    defer bufs.deinit();
+    var e: std.ArrayList(f64) = .empty;
+    defer e.deinit(gpa);
+    const mel = try gpa.alloc(f64, n_mel * nf);
+    defer gpa.free(mel);
+    @memset(mel, 0.0);
+    for (0..nf) |fru| {
+        const fr: c_int = @intCast(fru);
+        cbxReflectFrame(samples.ptr, n, fr * hop - @divTrunc(n_fft, 2), cache.hann_window.items, bufs.in);
+        try cbxMelEnergies(cache, bufs.in, bufs.out, false, &e);
+        for (0..n_mel) |m| {
+            mel[m * nf + fru] = libm.log10(maxF64(e.items[m], 1e-10));
+        }
+    }
+
+    // std::max_element: the first of the largest
+    var mx = mel[0];
+    for (mel[1..]) |v| {
+        if (mx < v) mx = v;
+    }
+    out.clearRetainingCapacity();
+    try out.resize(gpa, mel.len);
+    for (out.items, mel) |*o, v| {
+        o.* = @floatCast((maxF64(v, mx - 8.0) + 4.0) / 4.0);
+    }
+    return true;
+}
+
+/// Ports `mtmd_audio_upsample_3_2` (mtmd-audio.cpp:1041 @cd959bae9): 16 kHz
+/// to 24 kHz, a hann windowed sinc cut just under the source nyquist.
+fn cbxUpsample32(samples: []const f32, out: *std.ArrayList(f32)) !void {
+    const W: c_int = 16; // sinc half width in source samples
+    const fc: f64 = 0.495; // cutoff, normalized to the source rate
+
+    const n_out = samples.len * 3 / 2;
+    const n_in: c_int = @intCast(samples.len);
+    out.clearRetainingCapacity();
+    try out.appendNTimes(gpa, 0.0, n_out);
+    for (0..n_out) |n| {
+        const t: f64 = @as(f64, @floatFromInt(2 * n)) / 3.0;
+        const k0: c_int = @as(c_int, @intFromFloat(@floor(t))) - W + 1;
+        var acc: f64 = 0.0;
+        var k = k0;
+        while (k < k0 + 2 * W) : (k += 1) {
+            if (k < 0 or k >= n_in) {
+                continue;
+            }
+            const x = t - @as(f64, @floatFromInt(k));
+            const s: f64 = if (x == 0.0) 1.0 else libm.sin(2.0 * m_pi * fc * x) / (m_pi * x);
+            acc = @mulAdd(f64, @as(f64, samples[@intCast(k)]) * s * 0.5, 1.0 + libm.cos(m_pi * x / @as(f64, W + 1)), acc);
+        }
+        out.items[n] = @floatCast(acc);
+    }
+}
+
+/// Ports `mtmd_audio_matcha_log_mel` (mtmd-audio.cpp:1064 @cd959bae9): the
+/// matcha style log-mel of the s3gen prompt features (s3gen/utils/mel.py),
+/// frame major.
+fn cbxMatchaLogMel(cache: *const Cache, samples: []const f32, out: *std.ArrayList(f32), n_frames: *c_int) !bool {
+    const n_fft: c_int = 1920;
+    const hop: c_int = 480;
+    const pad: c_int = @divTrunc(n_fft - hop, 2);
+    const n_mel: usize = 80;
+    const n: c_int = @intCast(samples.len);
+
+    n_frames.* = 1 + @divTrunc(n + 2 * pad - n_fft, hop);
+    if (n <= pad or n_frames.* <= 0) {
+        return false;
+    }
+    const nf: usize = @intCast(n_frames.*);
+
+    var bufs = try CbxFftBufs.init(n_fft);
+    defer bufs.deinit();
+    var e: std.ArrayList(f64) = .empty;
+    defer e.deinit(gpa);
+    out.clearRetainingCapacity();
+    try out.resize(gpa, n_mel * nf);
+    for (0..nf) |fru| {
+        const fr: c_int = @intCast(fru);
+        cbxReflectFrame(samples.ptr, n, fr * hop - pad, cache.hann_window.items, bufs.in);
+        try cbxMelEnergies(cache, bufs.in, bufs.out, true, &e);
+        for (0..n_mel) |m| {
+            out.items[fru * n_mel + m] = libm.logf(maxF32(@floatCast(e.items[m]), 1e-5));
+        }
+    }
+    return true;
+}
+
+/// Ports `mtmd_audio_trim_silence` (mtmd-audio.cpp:1091 @cd959bae9):
+/// librosa.effects.trim, non-silent where the rms window is within `top_db`
+/// of the peak.
+fn cbxTrimSilence(samples: []const f32, top_db: f32, start: *usize, end: *usize) !void {
+    const win: c_int = 2048;
+    const hop: c_int = 512;
+    const n: c_int = @intCast(samples.len);
+
+    const n_fr: c_int = 1 + @divTrunc(n, hop);
+    const rms = try gpa.alloc(f64, @intCast(n_fr));
+    defer gpa.free(rms);
+    var mx: f64 = 0.0;
+    for (rms, 0..) |*r, fru| {
+        const fr: c_int = @intCast(fru);
+        var acc: f64 = 0.0;
+        var i: c_int = 0;
+        while (i < win) : (i += 1) {
+            const idx = fr * hop - @divTrunc(win, 2) + i;
+            if (idx >= 0 and idx < n) {
+                const v: f64 = samples[@intCast(idx)];
+                acc = @mulAdd(f64, v, v, acc);
+            }
+        }
+        r.* = @sqrt(acc / @as(f64, win));
+        mx = maxF64(mx, r.*);
+    }
+
+    // the call is inlined with a constant `top_db`, so clang folds the pow
+    // through the host's `pow`, not `__exp10`
+    const thr = mx * libm.pow(10.0, -@as(f64, top_db) / 20.0);
+    var first: c_int = -1;
+    var last: c_int = -1;
+    for (rms, 0..) |r, fru| {
+        if (r > thr) {
+            if (first < 0) {
+                first = @intCast(fru);
+            }
+            last = @intCast(fru);
+        }
+    }
+    if (first < 0) {
+        start.* = 0;
+        end.* = 0;
+        return;
+    }
+    start.* = @as(usize, @intCast(first)) * @as(usize, @intCast(hop));
+    end.* = @min(@as(usize, @intCast(last + 1)) * @as(usize, @intCast(hop)), samples.len);
+}
+
+/// Ports `mtmd_audio_ve_mel` (mtmd-audio.cpp:1131 @cd959bae9): the power mel
+/// of the voice encoder front-end, frame major, no log.
+fn cbxVeMel(cache: *const Cache, samples: []const f32, out: *std.ArrayList(f32), n_frames: *c_int) !bool {
+    const n_fft: c_int = 400;
+    const hop: c_int = 160;
+    const n_mel: usize = 40;
+    const n: c_int = @intCast(samples.len);
+
+    n_frames.* = 1 + @divTrunc(n, hop);
+    if (n < 2) {
+        return false;
+    }
+    const nf: usize = @intCast(n_frames.*);
+
+    var bufs = try CbxFftBufs.init(n_fft);
+    defer bufs.deinit();
+    var e: std.ArrayList(f64) = .empty;
+    defer e.deinit(gpa);
+    out.clearRetainingCapacity();
+    try out.resize(gpa, n_mel * nf);
+    for (0..nf) |fru| {
+        const fr: c_int = @intCast(fru);
+        cbxReflectFrame(samples.ptr, n, fr * hop - @divTrunc(n_fft, 2), cache.hann_window.items, bufs.in);
+        try cbxMelEnergies(cache, bufs.in, bufs.out, false, &e);
+        for (0..n_mel) |m| {
+            out.items[fru * n_mel + m] = @floatCast(e.items[m]);
+        }
+    }
+    return true;
+}
+
+/// A lambda of `mtmd_audio_lufs`, its `biquad` (mtmd-audio.cpp:1160
+/// @cd959bae9), in place over `y`.
+fn cbxBiquad(y: []f64, b0: f64, b1: f64, b2: f64, a1: f64, a2: f64) void {
+    var x1: f64 = 0.0;
+    var x2: f64 = 0.0;
+    var y1: f64 = 0.0;
+    var y2: f64 = 0.0;
+    for (y) |*v| {
+        const x0 = v.*;
+        // b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2, as clang contracts it
+        v.* = @mulAdd(f64, -a2, y2, @mulAdd(f64, -a1, y1, @mulAdd(f64, b2, x2, @mulAdd(f64, b0, x0, b1 * x1))));
+        x2 = x1;
+        x1 = x0;
+        y2 = y1;
+        y1 = v.*;
+    }
+}
+
+/// A lambda of `mtmd_audio_lufs`, its `gated_mean` (mtmd-audio.cpp:1214
+/// @cd959bae9).
+fn cbxGatedMean(z: []const f64, thr_lufs: f64) f64 {
+    var acc: f64 = 0.0;
+    var n: c_int = 0;
+    for (z) |v| {
+        if (@mulAdd(f64, 10.0, libm.log10(maxF64(v, 1e-30)), -0.691) > thr_lufs) {
+            acc += v;
+            n += 1;
+        }
+    }
+    return if (n > 0) acc / @as(f64, @floatFromInt(n)) else 0.0;
+}
+
+/// Ports `mtmd_audio_lufs` (mtmd-audio.cpp:1157 @cd959bae9): the ITU-R
+/// BS.1770 integrated loudness of a mono signal, matching pyloudnorm.
+fn cbxLufs(samples: []const f32, sample_rate: c_int) !f32 {
+    const y = try gpa.alloc(f64, samples.len);
+    defer gpa.free(y);
+    for (y, samples) |*d, v| d.* = v;
+    const sr: f64 = @floatFromInt(sample_rate);
+
+    // stage 1: high shelf, f0 1681.9744509555319 Hz, +3.99984385397 dB, Q 0.7071752369554196
+    {
+        // a constant argument: clang folds the pow through the host's `pow`
+        const A = libm.pow(10.0, @as(f64, 3.99984385397) / 40.0);
+        const w0 = 2.0 * m_pi * 1681.9744509555319 / sr;
+        const sc = sinCosF64(w0);
+        const alpha = sc[0] / (2.0 * 0.7071752369554196);
+        const cw = sc[1];
+        const sq = 2.0 * @sqrt(A) * alpha;
+        const b0 = A * (@mulAdd(f64, A - 1.0, cw, A + 1.0) + sq);
+        const b1 = -2.0 * A * @mulAdd(f64, A + 1.0, cw, A - 1.0);
+        const b2 = A * (@mulAdd(f64, A - 1.0, cw, A + 1.0) - sq);
+        const a0 = @mulAdd(f64, -(A - 1.0), cw, A + 1.0) + sq;
+        const a1 = 2.0 * @mulAdd(f64, -(A + 1.0), cw, A - 1.0);
+        const a2 = @mulAdd(f64, -(A - 1.0), cw, A + 1.0) - sq;
+        cbxBiquad(y, b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0);
+    }
+    // stage 2: high pass, f0 38.13547087602444 Hz, Q 0.5003270373238773
+    {
+        const w0 = 2.0 * m_pi * 38.13547087602444 / sr;
+        const sc = sinCosF64(w0);
+        const alpha = sc[0] / (2.0 * 0.5003270373238773);
+        const cw = sc[1];
+        const b0 = (1.0 + cw) / 2.0;
+        const b1 = -(1.0 + cw);
+        const b2 = (1.0 + cw) / 2.0;
+        const a0 = 1.0 + alpha;
+        const a1 = -2.0 * cw;
+        const a2 = 1.0 - alpha;
+        cbxBiquad(y, b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0);
+    }
+
+    const win: c_int = @intFromFloat(0.4 * sr);
+    const hop: c_int = @divTrunc(win, 4);
+    const n: c_int = @intCast(samples.len);
+    if (n < win) {
+        return -std.math.inf(f32);
+    }
+    const n_blocks: c_int = 1 + @divTrunc(n - win, hop);
+    const z = try gpa.alloc(f64, @intCast(n_blocks));
+    defer gpa.free(z);
+    const wu: usize = @intCast(win);
+    for (z, 0..) |*zb, b| {
+        const blk = y[b * @as(usize, @intCast(hop)) ..][0..wu];
+        // the strict in-order reduction clang's loop vectorizer makes of
+        // `acc += y * y`: products rounded (`fmul.2d`) in whole groups of
+        // eight, only the `win % 8` past the last group fused (`fmadd`), read
+        // off the reference `mtmd-audio.o`'s disassembly at -O2, baseline
+        // CPU. The gate cannot tell: `win` is 6400 at 16 kHz
+        var acc: f64 = 0.0;
+        const split = wu - wu % 8;
+        for (blk[0..split]) |v| acc += v * v;
+        for (blk[split..]) |v| acc = @mulAdd(f64, v, v, acc);
+        zb.* = acc / @as(f64, @floatFromInt(win));
+    }
+
+    const z_abs = cbxGatedMean(z, -70.0);
+    if (z_abs <= 0.0) {
+        return -std.math.inf(f32);
+    }
+    const thr_rel = @mulAdd(f64, 10.0, libm.log10(z_abs), -0.691) - 10.0;
+    const z_rel = cbxGatedMean(z, thr_rel);
+    if (z_rel <= 0.0) {
+        return -std.math.inf(f32);
+    }
+    return @floatCast(@mulAdd(f64, 10.0, libm.log10(z_rel), -0.691));
+}
+
+/// A lambda of `mtmd_audio_preprocessor_chatterbox_ref`'s `initialize`,
+/// its `mel` (mtmd-audio.cpp:1257 @cd959bae9): kaldi's mel scale.
+fn cbxKaldiMel(f: f64) f64 {
+    return 1127.0 * libm.log(1.0 + f / 700.0);
+}
+
+/// Ports `initialize` (mtmd-audio.cpp:1242 @cd959bae9), a member of
+/// `mtmd_audio_preprocessor_chatterbox_ref`. `self.cache` is its
+/// `fbank_cache`.
+fn cbxRefInitialize(self: *Preprocessor) !void {
+    const hp = self.hparams;
+    // kaldi fbank: povey window, kaldi mel banks over the 512-point spectrum, the nyquist bin left out
+    {
+        const frame_len: c_int = 400;
+        const n_fft: c_int = 512;
+        const n_bins: usize = @intCast(@divTrunc(n_fft, 2) + 1);
+        const n_mel: c_int = hp.n_mel_bins;
+        const sr: f64 = @floatFromInt(hp.audio_sample_rate);
+        const fc = &self.cache;
+
+        try fc.fillSinCosTable(n_fft);
+        try fc.hann_window.resize(gpa, frame_len);
+        for (fc.hann_window.items, 0..) |*w, i| {
+            const arg = 2.0 * m_pi * @as(f64, @floatFromInt(i)) / @as(f64, frame_len - 1);
+            w.* = @floatCast(libm.pow(@mulAdd(f64, -0.5, libm.cos(arg), 0.5), 0.85));
+        }
+
+        const mel_lo = cbxKaldiMel(20.0);
+        const mel_hi = cbxKaldiMel(sr / 2.0);
+        const delta = (mel_hi - mel_lo) / @as(f64, @floatFromInt(n_mel + 1));
+        const bin_hz = sr / @as(f64, n_fft);
+
+        const filters = &fc.filters;
+        filters.n_mel = n_mel;
+        filters.n_fft = n_fft;
+        filters.data.clearRetainingCapacity();
+        try filters.data.appendNTimes(gpa, 0.0, @as(usize, @intCast(n_mel)) * n_bins);
+        for (0..@intCast(n_mel)) |m| {
+            const left = @mulAdd(f64, @floatFromInt(m), delta, mel_lo);
+            const center = left + delta;
+            const right = center + delta;
+            for (0..n_bins - 1) |i| {
+                const f = cbxKaldiMel(bin_hz * @as(f64, @floatFromInt(i)));
+                if (f > left and f < right) {
+                    const w = if (f <= center) (f - left) / (center - left) else (right - f) / (right - center);
+                    filters.data.items[m * n_bins + i] = @floatCast(w);
+                }
+            }
+        }
+    }
+
+    // s3 tokenizer: librosa slaney mel, 128 bands
+    try self.s3tok_cache.fillSinCosTable(400);
+    try self.s3tok_cache.fillHannWindow(400, true);
+    try self.s3tok_cache.fillMelFilterbankMatrix(128, 400, 16000, 0.0, -1.0, true, 1.0, false);
+
+    // voice encoder: slaney mel, 40 bands up to 8 kHz
+    try self.ve_cache.fillSinCosTable(400);
+    try self.ve_cache.fillHannWindow(400, true);
+    try self.ve_cache.fillMelFilterbankMatrix(40, 400, 16000, 0.0, 8000.0, true, 1.0, false);
+
+    // s3gen prompt features at the 24 kHz decoder rate
+    try self.matcha_cache.fillSinCosTable(1920);
+    try self.matcha_cache.fillHannWindow(1920, true);
+    try self.matcha_cache.fillMelFilterbankMatrix(80, 1920, 24000, 0.0, 8000.0, true, 1.0, false);
+}
+
+/// `clip.resize((clip.size() + 639) / 640 * 640, 0.0f)` over the first
+/// `cap` samples of `pcm`: the clip padded to whole 40 ms tokens. The caller
+/// owns the list.
+fn cbxCapClip(pcm: []const f32, cap: usize) !std.ArrayList(f32) {
+    var clip: std.ArrayList(f32) = .empty;
+    errdefer clip.deinit(gpa);
+    try clip.appendSlice(gpa, pcm[0..@min(pcm.len, cap)]);
+    try clip.appendNTimes(gpa, 0.0, (clip.items.len + 639) / 640 * 640 - clip.items.len);
+    return clip;
+}
+
+/// A lambda of `mtmd_audio_preprocessor_chatterbox_ref`'s `preprocess`,
+/// its `s3tok_entry` (mtmd-audio.cpp:1375 @cd959bae9).
+fn cbxS3tokEntry(self: *const Preprocessor, pcm: []const f32, cap: usize, output: *std.ArrayList(Mel)) !bool {
+    var clip = try cbxCapClip(pcm, cap);
+    defer clip.deinit(gpa);
+    var mel: std.ArrayList(f32) = .empty;
+    errdefer mel.deinit(gpa);
+    var n_frames: c_int = 0;
+    if (!try cbxS3tokLogMel(&self.s3tok_cache, clip.items, &mel, &n_frames)) {
+        mel.deinit(gpa);
+        return false;
+    }
+    try output.append(gpa, .{ .n_len = n_frames, .n_len_org = n_frames, .n_mel = self.s3tok_cache.filters.n_mel, .data = mel });
+    return true;
+}
+
+/// Ports `preprocess` (mtmd-audio.cpp:1298 @cd959bae9), a member of
+/// `mtmd_audio_preprocessor_chatterbox_ref`: one clip to five entries --
+/// the CAMPPlus kaldi fbank, the s3 tokenizer log-mels at the flow and t3
+/// caps, the s3gen prompt features and the voice encoder's power mel.
+fn cbxRefPreprocess(self: *const Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
+    for (output.items) |*m| m.deinit();
+    output.clearRetainingCapacity();
+    const hp = self.hparams;
+    const sr: c_int = hp.audio_sample_rate;
+
+    // the turbo variant loudness-normalizes the whole clip before any feature
+    const pcm = try gpa.dupe(f32, samples);
+    defer gpa.free(pcm);
+    if (!self.is_mtl) {
+        const lufs = try cbxLufs(pcm, sr);
+        if (lufs != -std.math.inf(f32)) {
+            const gain = pow10f((-27.0 - lufs) / 20.0);
+            if (std.math.isFinite(gain) and gain > 0.0) {
+                for (pcm) |*v| v.* *= gain;
+            }
+        }
+    }
+
+    // entry 0: torchaudio kaldi.fbank of CAMPPlus (snip edges, dc removal, preemphasis 0.97), mean subtracted over time
+    {
+        const frame_len: c_int = 400;
+        const hop: c_int = 160;
+        const n_fft: c_int = 512;
+        const n_mel: c_int = hp.n_mel_bins;
+
+        if (@as(c_int, @intCast(pcm.len)) < frame_len) {
+            return false;
+        }
+        const n_frames: c_int = 1 + @divTrunc(@as(c_int, @intCast(pcm.len)) - frame_len, hop);
+        const nf: usize = @intCast(n_frames);
+        const nm: usize = @intCast(n_mel);
+
+        var out: Mel = .{ .n_len = n_frames, .n_len_org = n_frames, .n_mel = n_mel };
+        errdefer out.deinit();
+        try out.data.appendNTimes(gpa, 0.0, nm * nf);
+
+        const win = self.cache.hann_window.items;
+        var bufs = try CbxFftBufs.init(n_fft);
+        defer bufs.deinit();
+        var e: std.ArrayList(f64) = .empty;
+        defer e.deinit(gpa);
+        const fl: usize = @intCast(frame_len);
+        for (0..nf) |fr| {
+            const x = pcm[fr * @as(usize, @intCast(hop)) ..][0..fl];
+
+            var mean: f64 = 0.0;
+            for (x) |v| mean += v;
+            mean /= @as(f64, frame_len);
+
+            @memset(bufs.in, 0.0);
+            bufs.in[0] = @floatCast((@as(f64, x[0]) - mean) * (@as(f64, 1.0) - 0.97) * @as(f64, win[0]));
+            for (1..fl) |i| {
+                bufs.in[i] = @floatCast(@mulAdd(f64, -0.97, @as(f64, x[i - 1]) - mean, @as(f64, x[i]) - mean) * @as(f64, win[i]));
+            }
+            try cbxMelEnergies(&self.cache, bufs.in, bufs.out, false, &e);
+            for (0..nm) |m| {
+                out.data.items[m * nf + fr] = @floatCast(libm.log(maxF64(e.items[m], @as(f64, std.math.floatEps(f32)))));
+            }
+        }
+
+        for (0..nm) |m| {
+            const row = out.data.items[m * nf ..][0..nf];
+            var mean: f64 = 0.0;
+            for (row) |v| mean += v;
+            mean /= @as(f64, @floatFromInt(n_frames));
+            for (row) |*v| v.* -= @as(f32, @floatCast(mean));
+        }
+
+        try output.append(gpa, out);
+    }
+
+    // entries 1 and 2: s3 tokenizer log-mels at the flow and t3 caps, padded to whole 40 ms tokens
+    const sr_u: usize = @intCast(sr);
+    const gen_cap: usize = 10 * sr_u;
+    const t3_cap: usize = @as(usize, if (self.is_mtl) 6 else 15) * sr_u;
+    if (!try cbxS3tokEntry(self, pcm, gen_cap, output) or !try cbxS3tokEntry(self, pcm, t3_cap, output)) {
+        return false;
+    }
+
+    // entry 3: s3gen prompt features of the flow-capped clip at 24 kHz
+    {
+        var clip = try cbxCapClip(pcm, gen_cap);
+        defer clip.deinit(gpa);
+        var pcm24: std.ArrayList(f32) = .empty;
+        defer pcm24.deinit(gpa);
+        try cbxUpsample32(clip.items, &pcm24);
+        var feat: std.ArrayList(f32) = .empty;
+        errdefer feat.deinit(gpa);
+        var n_frames: c_int = 0;
+        if (!try cbxMatchaLogMel(&self.matcha_cache, pcm24.items, &feat, &n_frames)) {
+            feat.deinit(gpa);
+            return false;
+        }
+        try output.append(gpa, .{ .n_len = n_frames, .n_len_org = n_frames, .n_mel = 80, .data = feat });
+    }
+
+    // entry 4: voice encoder mel of the silence-trimmed clip, padded to the 160-frame partial grid (rate 1.3)
+    {
+        var t0: usize = 0;
+        var t1: usize = 0;
+        try cbxTrimSilence(pcm, 20.0, &t0, &t1);
+        if (t1 <= t0) {
+            return false;
+        }
+        var mel: std.ArrayList(f32) = .empty;
+        errdefer mel.deinit(gpa);
+        var n_frames: c_int = 0;
+        if (!try cbxVeMel(&self.ve_cache, pcm[t0..t1], &mel, &n_frames)) {
+            mel.deinit(gpa);
+            return false;
+        }
+        const n_mel: c_int = 40;
+        const n_partial: c_int = 160;
+        const step: c_int = comptime @intFromFloat(@round((@as(f64, 16000.0) / 1.3) / @as(f64, n_partial)));
+        const span = @max(n_frames - n_partial + step, 0);
+        var n_wins: c_int = @divTrunc(span, step);
+        const rem: c_int = @rem(span, step);
+        if (n_wins == 0 or @as(f64, @floatFromInt(rem + n_partial - step)) / @as(f64, n_partial) >= 0.8) {
+            n_wins += 1;
+        }
+        const target: c_int = n_partial + step * (n_wins - 1);
+        const new_len: usize = @as(usize, @intCast(target)) * @as(usize, @intCast(n_mel));
+        if (new_len > mel.items.len) {
+            try mel.appendNTimes(gpa, 0.0, new_len - mel.items.len);
+        } else {
+            mel.shrinkRetainingCapacity(new_len);
+        }
+        try output.append(gpa, .{ .n_len = target, .n_len_org = target, .n_mel = n_mel, .data = mel });
+    }
+    return true;
+}
+
+/// The sixteen subclasses of `mtmd_audio_preprocessor`
+/// (mtmd-audio.h:56 @cd959bae9), in the header's order -- later ones
+/// (`d1omni` at v0.7.0, `nemotron_transcribe` and `chatterbox_ref` at v0.9.0)
+/// last, so the earlier kinds keep the ordinals `harness/mtmd_audio_ref.cpp`
+/// switches on.
 pub const Kind = enum {
     whisper,
     conformer,
@@ -714,6 +1336,13 @@ pub const Kind = enum {
     lfm3a,
     /// `mtmd_audio_preprocessor_muse_spark_audio` (mtmd-audio.h:76 @cd959bae9)
     muse_spark_audio,
+    /// `mtmd_audio_preprocessor_nemotron_transcribe` (mtmd-audio.h:213
+    /// @cd959bae9): parakeet's `initialize` and log-mel, one raw chunk
+    nemotron_transcribe,
+    /// `mtmd_audio_preprocessor_chatterbox_ref` (mtmd-audio.h:181
+    /// @cd959bae9): five entries per clip, `Preprocessor.is_mtl` picks the
+    /// variant
+    chatterbox_ref,
 };
 
 /// Ports `mtmd_audio_preprocessor` (mtmd-audio.h:56 @cd959bae9) and its
@@ -723,6 +1352,12 @@ pub const Preprocessor = struct {
     kind: Kind,
     hparams: *const Hparams,
     cache: Cache = .{},
+    /// chatterbox_ref only: the multilingual variant (no loudness
+    /// normalization, 6 s t3 cap); `cache` is its `fbank_cache`
+    is_mtl: bool = false,
+    s3tok_cache: Cache = .{},
+    matcha_cache: Cache = .{},
+    ve_cache: Cache = .{},
 
     /// Return: a preprocessor reading `hparams`, which must outlive it.
     /// `initialize` must run before `preprocess`.
@@ -732,6 +1367,9 @@ pub const Preprocessor = struct {
 
     pub fn deinit(self: *Preprocessor) void {
         self.cache.deinit();
+        self.s3tok_cache.deinit();
+        self.matcha_cache.deinit();
+        self.ve_cache.deinit();
     }
 
     /// Ports each subclass's `initialize`, not thread-safe. The C++'s
@@ -788,22 +1426,23 @@ pub const Preprocessor = struct {
                 // HTK mel scale, no Slaney area normalization
                 try self.cache.fillMelFilterbankMatrix(hp.n_mel_bins, hp.audio_n_fft, hp.audio_sample_rate, 0.0, @as(f32, @floatFromInt(hp.audio_sample_rate)) / 2.0, false, 1.0, true);
             },
-            .parakeet => {
+            .parakeet, .nemotron_transcribe => {
                 try self.cache.fillSinCosTable(n_fft);
 
                 const n_fft_bins: usize = @intCast(@divTrunc(hp.audio_n_fft, 2) + 1);
-                ggmlAssert(hp.mel_filters.items.len == @as(usize, @intCast(hp.n_mel_bins)) * n_fft_bins, 1257, "hparams.mel_filters.size() == (size_t)hparams.n_mel_bins * n_fft");
+                ggmlAssert(hp.mel_filters.items.len == @as(usize, @intCast(hp.n_mel_bins)) * n_fft_bins, 1853, "hparams.mel_filters.size() == (size_t)hparams.n_mel_bins * n_fft");
                 self.cache.filters.n_mel = hp.n_mel_bins;
                 self.cache.filters.n_fft = @intCast(n_fft_bins);
                 self.cache.filters.data.clearRetainingCapacity();
                 try self.cache.filters.data.appendSlice(gpa, hp.mel_filters.items);
 
-                ggmlAssert(hp.window.items.len == @as(usize, @intCast(hp.audio_window_len)), 1262, "hparams.window.size() == (size_t)hparams.audio_window_len");
-                ggmlAssert(hp.window.items.len <= @as(usize, @intCast(hp.audio_n_fft)), 1263, "hparams.window.size() <= (size_t) hparams.audio_n_fft");
+                ggmlAssert(hp.window.items.len == @as(usize, @intCast(hp.audio_window_len)), 1858, "hparams.window.size() == (size_t)hparams.audio_window_len");
+                ggmlAssert(hp.window.items.len <= @as(usize, @intCast(hp.audio_n_fft)), 1859, "hparams.window.size() <= (size_t) hparams.audio_n_fft");
                 self.cache.hann_window.clearRetainingCapacity();
                 try self.cache.hann_window.appendSlice(gpa, hp.window.items);
             },
             .gemma4ua, .pockettts, .muse_spark_audio => {},
+            .chatterbox_ref => try cbxRefInitialize(self),
         }
     }
 
@@ -827,6 +1466,8 @@ pub const Preprocessor = struct {
             .pockettts => self.pockettts(samples, output),
             .lfm3a => self.lfm3a(samples, output),
             .muse_spark_audio => self.museSparkAudio(samples, output),
+            .nemotron_transcribe => self.nemotronTranscribe(samples, output),
+            .chatterbox_ref => cbxRefPreprocess(self, samples, output),
         };
     }
 
@@ -1350,11 +1991,11 @@ pub const Preprocessor = struct {
         return true;
     }
 
-    /// Ports `preprocess` (mtmd-audio.cpp:1388 @8642541b2), a member of `mtmd_audio_preprocessor_parakeet`.
-    fn parakeet(self: *const Preprocessor, samples_in: []const f32, output: *std.ArrayList(Mel)) !bool {
+    /// Ports `log_mel` (mtmd-audio.cpp:1864 @cd959bae9), a member of
+    /// `mtmd_audio_preprocessor_parakeet`: the log-mel without normalization,
+    /// into `out_full`, which the caller owns and frees on error too.
+    fn parakeetLogMel(self: *const Preprocessor, samples_in: []const f32, out_full: *Mel) !void {
         const hp = self.hparams;
-        if (samples_in.len == 0) return false;
-
         const params = baseParams(hp);
         self.assertCache(1872);
 
@@ -1383,7 +2024,7 @@ pub const Preprocessor = struct {
         try padded.appendNTimes(gpa, 0, samples_in.len + 2 * pad);
         @memcpy(padded.items[pad..][0..samples_in.len], pre.items);
 
-        var out_full: Mel = .{ .n_mel = params.n_mel };
+        out_full.n_mel = params.n_mel;
         out_full.n_len = @intCast((padded.items.len - @as(usize, @intCast(frame_size))) / @as(usize, @intCast(frame_step)) + 1);
         out_full.n_len_org = out_full.n_len;
         try out_full.data.resize(gpa, @intCast(out_full.n_mel * out_full.n_len));
@@ -1397,12 +2038,21 @@ pub const Preprocessor = struct {
             .frame_step = frame_step,
             .n_fft_bins = @intCast(params.n_fft_bins),
             .cache = &self.cache,
-            .mel = &out_full,
+            .mel = out_full,
         };
-        runWorkers(ParakeetJob, parakeetWorker, &job, frame_size) catch |e| {
+        try runWorkers(ParakeetJob, parakeetWorker, &job, frame_size);
+    }
+
+    /// Ports `preprocess` (mtmd-audio.cpp:1935 @cd959bae9), a member of `mtmd_audio_preprocessor_parakeet`.
+    fn parakeet(self: *const Preprocessor, samples_in: []const f32, output: *std.ArrayList(Mel)) !bool {
+        if (samples_in.len == 0) return false;
+
+        var out_full: Mel = .{};
+        self.parakeetLogMel(samples_in, &out_full) catch |e| {
             out_full.deinit();
             return e;
         };
+        const frame_step = self.hparams.audio_hop_len;
 
         // Per-feature normalization (only on valid frames)
         {
@@ -1433,6 +2083,37 @@ pub const Preprocessor = struct {
         }
 
         try output.append(gpa, out_full);
+        return true;
+    }
+
+    /// Ports `preprocess` (mtmd-audio.cpp:1984 @cd959bae9), a member of
+    /// `mtmd_audio_preprocessor_nemotron_transcribe`: one chunk per
+    /// recording, the raw log-mel of its valid frames.
+    fn nemotronTranscribe(self: *const Preprocessor, samples: []const f32, output: *std.ArrayList(Mel)) !bool {
+        const hp = self.hparams;
+        if (samples.len < @as(usize, @intCast(hp.audio_n_fft))) return false;
+
+        var mel: Mel = .{};
+        self.parakeetLogMel(samples, &mel) catch |e| {
+            mel.deinit();
+            return e;
+        };
+
+        // frames past n_samples / hop are padding (NeMo get_seq_len); kept raw, encode_windows normalizes them for ASR
+        const n_frames: i64 = @intCast(samples.len / @as(usize, @intCast(hp.audio_hop_len)));
+        const nf: usize = @intCast(n_frames);
+        const n_len: usize = @intCast(mel.n_len);
+        var j: usize = 1;
+        while (j < mel.n_mel) : (j += 1) {
+            std.mem.copyForwards(f32, mel.data.items[j * nf ..][0..nf], mel.data.items[j * n_len ..][0..nf]);
+        }
+        mel.n_len = n_frames;
+        mel.n_len_org = n_frames;
+        mel.data.shrinkRetainingCapacity(@as(usize, @intCast(mel.n_mel)) * nf);
+        output.append(gpa, mel) catch |e| {
+            mel.deinit();
+            return e;
+        };
         return true;
     }
 

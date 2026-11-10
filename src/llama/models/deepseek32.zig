@@ -8,8 +8,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/deepseek32.cpp` at v0.8.0
-//! (`8642541b2`): `llama_model_deepseek32`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/deepseek32.cpp` at v0.9.0
+//! (`cd959bae9`): `llama_model_deepseek32`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` and
 //! `graph_mtp`.
 
@@ -246,7 +246,7 @@ fn mlaKqScale(b: *const graph.Builder, n_embd_head_k: i64) f32 {
 }
 
 /// Ports the constructor of `llama_model_deepseek32`'s `graph`
-/// (models/deepseek32.cpp:156 @8642541b2), and with `v` GLM-DSA's.
+/// (models/deepseek32.cpp:156 @cd959bae9), and with `v` GLM-DSA's.
 pub fn buildGraph(comptime v: Variant, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -496,9 +496,9 @@ pub fn lightningIndexer(
     b.cb(indexer_k, "indexer_k", il);
 
     // The Hadamard transform of the indexer's q and k.
-    indexer_q = c.ggml_mul_mat(ctx, inp_attn_dsa.self_k_rot_lid, indexer_q);
+    indexer_q = c.ggml_mul_mat(ctx, inp_attn_dsa.self_k_rot_lid[@intCast(il)], indexer_q);
     b.cb(indexer_q, "indexer_q", il);
-    indexer_k = c.ggml_mul_mat(ctx, inp_attn_dsa.self_k_rot_lid, indexer_k);
+    indexer_k = c.ggml_mul_mat(ctx, inp_attn_dsa.self_k_rot_lid[@intCast(il)], indexer_k);
     b.cb(indexer_k, "indexer_k", il);
 
     // Store the indexer keys to their cache.
@@ -525,7 +525,7 @@ pub fn lightningIndexer(
 
     var indexer_score: *Tensor = undefined;
     if (b.cparams.fused_lid) {
-        indexer_score = c.ggml_lightning_indexer(ctx, indexer_q, indexer_k, indexer_weights, inp_attn_dsa.getKqMaskLid());
+        indexer_score = c.ggml_lightning_indexer(ctx, indexer_q, indexer_k, indexer_weights, inp_attn_dsa.self_attn_mask_lid.raw);
         b.cb(indexer_score, "indexer_score", il);
         b.res.addFusedNode(.{ .op = .lightning_indexer, .tensor = indexer_score, .il = il });
     } else {
@@ -559,7 +559,7 @@ pub fn lightningIndexer(
         b.cb(indexer_score, "indexer_score", il);
 
         // The indexer scores, masked.
-        const indexer_kq_mask = inp_attn_dsa.getKqMaskLid();
+        const indexer_kq_mask = inp_attn_dsa.self_attn_mask_lid.raw;
         indexer_score = c.ggml_add(ctx, indexer_score, indexer_kq_mask);
         b.cb(indexer_score, "indexer_score", il);
     }

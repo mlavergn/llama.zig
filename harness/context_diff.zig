@@ -67,6 +67,11 @@ extern fn _Z26llama_set_embeddings_nextnP13llama_contextbb(ctx: ?*c.struct_llama
 extern fn _Z26llama_get_embeddings_nextnP13llama_context(ctx: ?*c.struct_llama_context) [*c]f32;
 extern fn _Z30llama_set_embeddings_layer_inpP13llama_contextjb(ctx: ?*c.struct_llama_context, lid: u32, value: bool) void;
 extern fn _Z30llama_get_embeddings_layer_inpP13llama_contextj(ctx: ?*c.struct_llama_context, lid: u32) [*c]f32;
+/// v0.9.0's layer input device buffer and embedding rows, `llama-ext.h`'s
+/// too: the names are `nm`'s.
+extern fn _Z34llama_set_embeddings_layer_inp_devP13llama_contextb(ctx: ?*c.struct_llama_context, value: bool) void;
+extern fn _Z23llama_supports_embd_rowPK13llama_context(ctx: ?*const c.struct_llama_context) bool;
+extern fn _Z28llama_batch_ext_add_embd_rowP15llama_batch_extii(b: ?*c.struct_llama_batch_ext, seq_id: c.llama_seq_id, row: i32) i32;
 
 /// The architectures whose graph records its layers' inputs, the ones a
 /// `llama_set_embeddings_layer_inp` request does not abort on: every
@@ -151,8 +156,8 @@ var scratch: std.ArrayList(u8) = .empty;
 /// K state snapshots after its attention rows, and token t writes slot
 /// n_tokens - 1 - t, so "when n_tokens < K only slots 0..n_tokens-1 are
 /// written; older slots are caller-owned" -- upstream's
-/// `ggml_compute_forward_gated_delta_net_one_chunk` (ops.cpp:11099
-/// @8642541b2). The rest is the allocator's leftovers. A one-token decode
+/// `ggml_compute_forward_gated_delta_net_one_chunk` (ops.cpp:11135
+/// @cd959bae9). The rest is the allocator's leftovers. A one-token decode
 /// under `n_rs_seq 4` hashed them, and on the GB10 the port then differed
 /// from itself run to run while every node that reads the output matched.
 /// Only the written prefix is hashed.
@@ -216,7 +221,7 @@ fn nodeCb(t: [*c]c.ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
     // A node without GGML_TENSOR_FLAG_COMPUTE -- an unselected branch of
     // `ggml_build_forward_select`, such as v0.6.0's mixed-batch input when
     // the ubatch is not mixed -- is skipped by every backend (ggml-cpu.c:3137,
-    // ggml-metal-ops.cpp:218 @8642541b2): its bytes are the allocator's
+    // ggml-metal-ops.cpp:218 @cd959bae9): its bytes are the allocator's
     // leftovers on either side. The flags above are compared, so a node one
     // side computes and the other does not still differs.
     if ((node.flags & c.GGML_TENSOR_FLAG_COMPUTE) == 0) {
@@ -314,6 +319,17 @@ const Case = struct {
     /// DSpark's target features, `res->t_layer_inp`) and compares them after
     /// the prompt. Only on `layer_inp_archs`: on the others the C++ asserts.
     layer_inp: bool = false,
+    /// v0.9.0, with `layer_inp`: the layer inputs go to the context's layer
+    /// input device buffer (`llama_set_embeddings_layer_inp_dev`), written by
+    /// `set_rows` nodes the node hashes see, and are not read back.
+    layer_inp_dev: bool = false,
+    /// With `layer_inp`: ask for at most this many layers' inputs, the
+    /// first ones. Under `LLAMA_SPLIT_MODE_TENSOR` the device buffer is a
+    /// one-tensor meta buffer, whose per-tensor view headroom is 16
+    /// (ggml-backend-meta.cpp:1810 @cd959bae9), and `build_layer_inp_dev`
+    /// makes one view of it per layer: every layer of Qwen3.5 (24) makes
+    /// the meta backend assert in the C++ itself.
+    layer_inp_max: u32 = std.math.maxInt(u32),
     /// Turns the KV cache's attention rotation off on the model before the
     /// context is made, through `llama_model_set_attn_rot` (v0.7.0), and
     /// back on after.
@@ -452,6 +468,29 @@ fn sharedHistory(comptime A: type, ctx: ?*c.struct_llama_context, t: []const i32
 /// Whether the model configuration under test has `no_alloc` set.
 var model_no_alloc = false;
 
+/// The architectures whose token embeddings upstream cannot read back:
+/// DeepSeek V4 and Qwen4-Exp declare their output embedding
+/// `dsv4_hc_mult * n_embd` wide (models/deepseek4.cpp:45 @cd959bae9,
+/// models/qwen4exp.cpp:54 @cd959bae9) while the `t_embd` their graph returns
+/// is `result_norm`, `n_embd` wide, so `llama_context::decode`'s extraction
+/// reads past it and `ggml_backend_tensor_get_async` aborts (ggml-backend.cpp:479
+/// @cd959bae9) -- in upstream alone, on upstream's own ggml, since v0.8.0
+/// added the embeddings toggle below. The script skips only that toggle on
+/// them, so the rest of every case still runs on these fixtures.
+const embd_out_wider_archs = [_][]const u8{ "deepseek4", "qwen4exp" };
+var embd_out_wider = false;
+
+/// The architectures whose memory is `llama_kv_cache_dsv4`
+/// (llama-model.cpp:3174 @cd959bae9). It keeps one raw KV stream per
+/// sequence (llama-kv-cache-dsv4.cpp:1259 @cd959bae9), so with more than one
+/// sequence its `seq_to_stream` holds exactly `n_seq_max` entries, and
+/// `state_write` (llama-kv-cache-dsv4.cpp:1728 @cd959bae9) hands any other id
+/// to `seq_pos_max`, which asserts (llama-kv-cache.cpp:735 @cd959bae9) -- in
+/// upstream alone, where the other memories answer an out-of-range sequence
+/// with an empty state. `saveState` leaves its `seq 3` probe out there.
+const dsv4_cache_archs = [_][]const u8{ "deepseek4", "deepseek41" };
+var dsv4_cache = false;
+
 extern fn context_ref_breakdown(ctx: ?*const c.struct_llama_context, bufts: [*]c.ggml_backend_buffer_type_t, sizes: [*]usize, cap: usize) usize;
 
 /// `llama_get_memory_breakdown`, by buffer type name, which unlike the
@@ -537,10 +576,13 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
     }
 
     const MAl = if (A == c) c else harness_root.api.model;
-    const n_layer_inp: u32 = if (cs.layer_inp) @intCast(MAl.llama_model_n_layer(@ptrCast(model))) else 0;
+    const n_layer_inp: u32 = if (cs.layer_inp) @min(cs.layer_inp_max, @as(u32, @intCast(MAl.llama_model_n_layer(@ptrCast(model))))) else 0;
     const n_embd_row: usize = @intCast(MAl.llama_model_n_embd(@ptrCast(model)));
     for (0..n_layer_inp) |lid| {
         if (A == c) _Z30llama_set_embeddings_layer_inpP13llama_contextjb(ctx, @intCast(lid), true) else harness_root.api.context.llama_set_embeddings_layer_inp(ctx, @intCast(lid), true);
+    }
+    if (cs.layer_inp_dev) {
+        if (A == c) _Z34llama_set_embeddings_layer_inp_devP13llama_contextb(ctx, true) else harness_root.api.context.llama_set_embeddings_layer_inp_dev(ctx, true);
     }
 
     const embeddings = params.embeddings;
@@ -617,7 +659,9 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
         // v0.7.0: a pooled embeddings context has no LM head, so no
         // logits buffer (#30255, #30445)
         note("logits buffer: {}", .{A.llama_get_logits(ctx) != null});
-        for (0..n_layer_inp) |lid| {
+        // On the device, the rows are not copied out: the C++ asserts on a
+        // read.
+        for (0..if (cs.layer_inp_dev) 0 else n_layer_inp) |lid| {
             const row: [*c]f32 = if (A == c) _Z30llama_get_embeddings_layer_inpP13llama_contextj(ctx, @intCast(lid)) else harness_root.api.context.llama_get_embeddings_layer_inp(ctx, @intCast(lid));
             Out.row("layer_inp", row, tokens.len * n_embd_row, @intCast(lid));
         }
@@ -650,7 +694,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
         var saved: std.ArrayList(u8) = .empty;
         defer saved.deinit(gpa);
         const first_next = next;
-        if (round == 0) saveState(S, ctx, tokens, &saved);
+        if (round == 0) saveState(S, ctx, tokens, &saved, !(dsv4_cache and n_seq > 1));
 
         // Greedy steps, one token at a time.
         var pos: i32 = @intCast(tokens.len);
@@ -755,6 +799,28 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
             }
             note("process type 7: {d}", .{A.llama_process(ctx, 7, eb)});
             State.positions(mem, n_seq);
+
+            // v0.9.0: entries whose embedding is a row of ctx_other's layer
+            // input device buffer, which only a DFlash/DSpark decoder over a
+            // target with that buffer reads; everywhere else decode and
+            // encode refuse the batch before touching the memory.
+            {
+                const supports = if (A == c) _Z23llama_supports_embd_rowPK13llama_context(ctx) else harness_root.api.context.llama_supports_embd_row(ctx);
+                note("supports embd row: {}", .{supports});
+                AB.llama_batch_ext_clear(eb);
+                for (0..3) |k| {
+                    const idx = if (A == c) _Z28llama_batch_ext_add_embd_rowP15llama_batch_extii(eb, 0, @intCast(k)) else harness_root.api.batch.llama_batch_ext_add_embd_row(eb, 0, @intCast(k));
+                    note("add embd row {d}: {d}", .{ k, idx });
+                    if (idx < 0) continue;
+                    const pk = pos + @as(i32, @intCast(k));
+                    const p = [_]i32{ pk, pk, pk, 0 };
+                    _ = AB.llama_batch_ext_set_pos(eb, idx, &p);
+                    _ = AB.llama_batch_ext_set_output_logits(eb, idx, true);
+                }
+                note("process embd rows: {d}", .{A.llama_process(ctx, c.LLAMA_PROCESS_TYPE_DECODE, eb)});
+                note("encode embd rows: {d}", .{A.llama_process(ctx, c.LLAMA_PROCESS_TYPE_ENCODE, eb)});
+                State.positions(mem, n_seq);
+            }
             // The cells the mixed batch wrote -- a row's token id among them,
             // which an embedding row must not carry.
             {
@@ -822,6 +888,31 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
             if (other == 0) pos = other_pos;
             State.positions(mem, n_seq);
 
+            // v0.9.0: sequences 0 and 2 as runs, three tokens each and
+            // then one token each, which a unified cache with flash
+            // attention splits into one cell list per sequence
+            // (`get_n_kv_slices`'s runs) for `ggml_flash_attn_ext_rows`;
+            // the interleaved batch above is one slice over both.
+            if (other != 0) {
+                for ([_]usize{ 3, 1 }) |run| {
+                    b.n_tokens = 0;
+                    for (0..run) |k| {
+                        batchAdd(&b, tokens[(k + 9) % tokens.len], pos + @as(i32, @intCast(k)), &.{0}, true);
+                    }
+                    for (0..run) |k| {
+                        batchAdd(&b, tokens[(k + 13) % tokens.len], other_pos + @as(i32, @intCast(k)), &.{other}, true);
+                    }
+                    ret = A.llama_decode(ctx, b);
+                    note("decode runs of {d}: {d}", .{ run, ret });
+                    if (ret == 0) {
+                        pos += @intCast(run);
+                        other_pos += @intCast(run);
+                        for (0..2 * run) |k| Out.row("logits", A.llama_get_logits_ith(ctx, @intCast(k)), n_vocab, @intCast(k));
+                    }
+                    State.positions(mem, n_seq);
+                }
+            }
+
             seqStateOnDevice(A, S, ctx, mem, 1, tokens);
             State.positions(mem, n_seq);
             // A token on the restored sequence.
@@ -882,6 +973,52 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
             note("decode over injected: {d}", .{ret_i});
             if (ret_i == 0) Out.row("logits", A.llama_get_logits_ith(ctx, 0), n_vocab, 0);
 
+            // v0.9.0: the same injection read from the target's layer input
+            // device buffer (`llama_set_embeddings_layer_inp_dev`, rows added
+            // with `llama_batch_ext_add_embd_row`), as common/speculative.cpp
+            // drives a DFlash draft whose target writes its features on the
+            // device. As many target layers as the draft's features hold.
+            if (target_ctx) |tc| {
+                const tm = target_model.?;
+                const t_embd: usize = @intCast(MA.llama_model_n_embd(@ptrCast(tm)));
+                const t_layer: usize = @intCast(MA.llama_model_n_layer(@ptrCast(tm)));
+                const n_li = draft.n_enc / t_embd;
+                if (draft.n_enc % t_embd == 0 and n_li >= 1 and n_li <= t_layer + 1) {
+                    for (0..n_li) |lid| {
+                        if (A == c) _Z30llama_set_embeddings_layer_inpP13llama_contextjb(tc, @intCast(lid), true) else harness_root.api.context.llama_set_embeddings_layer_inp(tc, @intCast(lid), true);
+                    }
+                    if (A == c) _Z34llama_set_embeddings_layer_inp_devP13llama_contextb(tc, true) else harness_root.api.context.llama_set_embeddings_layer_inp_dev(tc, true);
+                    A.llama_memory_clear(A.llama_get_memory(tc), true);
+                    var tb = c.llama_batch_init(8, 0, 1);
+                    defer c.llama_batch_free(tb);
+                    for (0..4) |k| batchAdd(&tb, tokens[k], @intCast(k), &.{0}, k == 3);
+                    note("target decode, layer inputs on the device: {d}", .{A.llama_decode(tc, tb)});
+                    const supports = if (A == c) _Z23llama_supports_embd_rowPK13llama_context(ctx) else harness_root.api.context.llama_supports_embd_row(ctx);
+                    note("draft supports embd row: {}", .{supports});
+                    const AB = if (A == c) c else harness_root.api.batch;
+                    if (AB.llama_batch_ext_init(ctx)) |rb| {
+                        defer AB.llama_batch_ext_free(rb);
+                        const q0: i32 = A.llama_memory_seq_pos_max(mem, 0) + 1;
+                        for (0..4) |k| {
+                            const idx = if (A == c) _Z28llama_batch_ext_add_embd_rowP15llama_batch_extii(rb, 0, @intCast(k)) else harness_root.api.batch.llama_batch_ext_add_embd_row(rb, 0, @intCast(k));
+                            const p = [_]i32{ q0 + @as(i32, @intCast(k)), 0, 0, 0 };
+                            _ = AB.llama_batch_ext_set_pos(rb, idx, &p);
+                            _ = AB.llama_batch_ext_set_output_logits(rb, idx, false);
+                        }
+                        note("draft inject rows: {d}", .{A.llama_process(ctx, c.LLAMA_PROCESS_TYPE_DECODE, rb)});
+                        State.positions(mem, n_seq);
+                        b.n_tokens = 0;
+                        batchAdd(&b, tokens[5], q0 + 4, &.{0}, true);
+                        const ret_r = A.llama_decode(ctx, b);
+                        note("decode over injected rows: {d}", .{ret_r});
+                        if (ret_r == 0) Out.row("logits", A.llama_get_logits_ith(ctx, 0), n_vocab, 0);
+                    }
+                    if (A == c) _Z34llama_set_embeddings_layer_inp_devP13llama_contextb(tc, false) else harness_root.api.context.llama_set_embeddings_layer_inp_dev(tc, false);
+                } else {
+                    note("draft features {d} are not a whole number of target layers of {d}", .{ draft.n_enc, t_embd });
+                }
+            }
+
             // v0.7.0's LiliCorr head builds only for a token ubatch with
             // state embeddings of `block_size` tokens per sequence: one
             // drafting block as common/speculative.cpp:1297 makes it, every
@@ -919,8 +1056,8 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
             }
         }
 
-        // `check_causal_attn_toggle` (tests/test-llama-archs.cpp:839
-        // @8642541b2): non-causal decodes of n_ubatch/2 and n_ubatch tokens,
+        // `check_causal_attn_toggle` (tests/test-llama-archs.cpp:892
+        // @cd959bae9): non-causal decodes of n_ubatch/2 and n_ubatch tokens,
         // a flip that must not need a scheduler reserve.
         if (round == 1 and draft.kind == .none) {
             const AB = if (A == c) c else harness_root.api.batch;
@@ -1022,7 +1159,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
 
     // v0.8.0: with pooling NONE the toggle changes the reserve graph too --
     // it outputs every token -- so it must reserve again.
-    if (!pooled and !embeddings and mem != null and draft.kind == .none and !enc_dec) {
+    if (!pooled and !embeddings and mem != null and draft.kind == .none and !enc_dec and !embd_out_wider) {
         A.llama_set_embeddings(ctx, true);
         b.n_tokens = 0;
         batchAdd(&b, tokens[2], A.llama_memory_seq_pos_max(mem, 0) + 1, &.{0}, true);
@@ -1077,7 +1214,7 @@ fn fileHash(path: [:0]const u8) u64 {
     return h.final();
 }
 
-fn saveState(comptime S: type, ctx: anytype, tokens: []const i32, saved: *std.ArrayList(u8)) void {
+fn saveState(comptime S: type, ctx: anytype, tokens: []const i32, saved: *std.ArrayList(u8), probe_seq3: bool) void {
     const sz = S.llama_state_get_size(ctx);
     note("state size {d}", .{sz});
     saved.resize(gpa, sz) catch unreachable;
@@ -1092,7 +1229,7 @@ fn saveState(comptime S: type, ctx: anytype, tokens: []const i32, saved: *std.Ar
     seq.resize(gpa, ssz) catch unreachable;
     const sn = S.llama_state_seq_get_data(ctx, seq.items.ptr, ssz, 0);
     note("seq 0 state size {d} get {d} h {x}", .{ ssz, sn, hashBytes(seq.items.ptr, sn) });
-    note("seq 3 state size {d}", .{S.llama_state_seq_get_size(ctx, 3)});
+    if (probe_seq3) note("seq 3 state size {d}", .{S.llama_state_seq_get_size(ctx, 3)});
     const psz = S.llama_state_seq_get_size_ext(ctx, 0, c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
     note("seq 0 partial state size {d}", .{psz});
 
@@ -1296,6 +1433,8 @@ const cases = [_]Case{
     .{ .name = "n_batch 0", .edit = Edits.badBatch },
     .{ .name = "n_seq_max 300", .edit = Edits.tooManySeqs },
     .{ .name = "layer inputs", .edit = Edits.none, .layer_inp = true },
+    .{ .name = "layer inputs, device", .edit = Edits.none, .layer_inp = true, .layer_inp_dev = true, .tensor_ok = false },
+    .{ .name = "layer inputs, device, 8", .edit = Edits.none, .layer_inp = true, .layer_inp_dev = true, .layer_inp_max = 8 },
 };
 
 const ModelCfg = struct {
@@ -1396,7 +1535,7 @@ const ModelEdits = struct {
     /// A MoE cache too small for every expert, so the SLRU evicts, and
     /// ubatches of two tokens, so the cache is used: it reads the cache
     /// only for 32 tokens or fewer. `upstream`'s own test uses the same
-    /// n_ubatch (tests/test-llama-archs.cpp:752 @8642541b2).
+    /// n_ubatch (tests/test-llama-archs.cpp:805 @cd959bae9).
     fn moeCacheCtx(p: *c.llama_context_params) void {
         p.moe_cache_size = moe_cache_size;
         // non-causal attention needs the whole batch in one ubatch (the
@@ -1728,6 +1867,12 @@ pub fn main(init: std.process.Init) !void {
         const n_embd: usize = @intCast(if (load_ref) c.llama_model_n_embd_out(rm) else harness_root.api.model.llama_model_n_embd_out(rm));
         var arch_buf: [256]u8 = undefined;
         const model_arch = if (load_ref) metaStr(c, rm, "general.architecture", &arch_buf) else metaStr(harness_root.api.model, rm, "general.architecture", &arch_buf);
+        embd_out_wider = for (embd_out_wider_archs) |a| {
+            if (std.mem.eql(u8, a, model_arch)) break true;
+        } else false;
+        dsv4_cache = for (dsv4_cache_archs) |a| {
+            if (std.mem.eql(u8, a, model_arch)) break true;
+        } else false;
 
         // A first context initializes what each backend initializes once
         // per process, which logs.

@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/json-schema.h` and
-//! `llama.cpp/common/json-schema.cpp` (llama.cpp v0.8.0, `8642541b2`).
+//! `llama.cpp/common/json-schema.cpp` (llama.cpp v0.9.0, `cd959bae9`).
 //! Each declaration names what it ports and the line it began at.
 //!
 //! # Shape

@@ -4,11 +4,12 @@
 //!
 //! **Not a port.** Scaffolding this project owns, matching the barrels above
 //! it. Everything it gathers ports
-//! `llama.cpp/ggml/src/ggml-cpu/quants.c` at v0.8.0 (`8642541b2`), split by
+//! `llama.cpp/ggml/src/ggml-cpu/quants.c` at v0.9.0 (`cd959bae9`), split by
 //! format family:
 //!
-//! - `rows.zig`    — the 20 row quantizers `type_traits_cpu` points at
-//! - `legacy.zig`  — the block-per-32 dot products, plus mxfp4 and nvfp4
+//! - `rows.zig`    — the 21 row quantizers `type_traits_cpu` points at
+//! - `legacy.zig`  — the block-per-32 dot products, plus mxfp4, nvfp4 and
+//!                   the live f8_e4m3 one
 //! - `k.zig`       — the K-quant super-block dot products
 //! - `ternary.zig` — tq1_0 and tq2_0
 //! - `iq.zig`      — the codebook formats
@@ -20,10 +21,12 @@
 //!
 //! # The dot products here are unreachable on this target
 //!
+//! All but `ggml_vec_dot_f8_e4m3_f32` in `legacy.zig`, which is live.
+//!
 //! `arch-fallback.h` renames nothing from `quants.c` on ARM, and
 //! `arch/arm/quants.c` supplies every real entry point, so the 25 `_generic`
 //! names are exported and never called. `golden.zig` is their only gate. The
-//! 20 row quantizers are live: 17 are what the traits table calls, and three
+//! 21 row quantizers are live: 18 are what the traits table calls, and three
 //! are `_generic` fallbacks the NEON file replaces.
 
 const std = @import("std");

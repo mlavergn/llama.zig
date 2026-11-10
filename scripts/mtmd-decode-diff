@@ -12,8 +12,13 @@
 # afconvert for WAV at every PCM, float and law format, and FLAC at 16 and
 # 24 bits, mono to eight channels, at rates that resample; the harness adds
 # its own FLAC encoder's output -- every subframe type and channel
-# assignment, 4- to 32-bit samples, odd block sizes, Ogg-FLAC and ID3.
-# Every input is also truncated and corrupted.
+# assignment, 4- to 32-bit samples (33-bit side channels), odd block sizes,
+# partition orders to 15, frames past STREAMINFO's block size or of another
+# depth, 0xFF before sync codes, metadata dr_flac refuses, Ogg-FLAC and
+# ID3; RIFF edge cases (short fmt and fact chunks, MS-ADPCM frame counts
+# from fact, deltas that overflow int); and each MP3 with a Xing or Info
+# tag re-headed so its frame no longer holds the tag. Every input is also
+# truncated and corrupted.
 #
 # Usage: scripts/mtmd-decode-diff [--quick] [--verbose] [--only=<substring>]
 #   MTMD_DECODE_O=fast|safe  the build mode, ReleaseFast by default

@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/conv-transpose-1d.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/conv-transpose-1d.cuh` at v0.8.0
-//! (`8642541b2`). The kernel, `conv_transpose_1d_kernel`, stays CUDA.
+//! `llama.cpp/ggml/src/ggml-cuda/conv-transpose-1d.cuh` at v0.9.0
+//! (`cd959bae9`). The kernel, `conv_transpose_1d_kernel`, stays CUDA.
 //!
 //! Only the stride is read from `op_params`; padding and dilation are the
 //! C's hard-coded 0 and 1.

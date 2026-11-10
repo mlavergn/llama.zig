@@ -7,7 +7,7 @@
 //! - `llama.cpp/ggml/src/ggml-metal/ggml-metal-tuning.cpp` — the logic
 //! - `llama.cpp/ggml/src/ggml-metal/ggml-metal-tuning.h`   — the types and buckets
 //!
-//! both at v0.8.0 (`8642541b2`). `tuning_table.zig` holds the 1,033
+//! both at v0.9.0 (`cd959bae9`). `tuning_table.zig` holds the 1,033
 //! generated rows.
 //!
 //! # This file had to go first, and `PLAN.md` said otherwise

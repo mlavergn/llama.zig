@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ports the data half of `llama.cpp/common/chat.h` and `llama.cpp/common/chat.cpp`
-//! (llama.cpp v0.8.0, `8642541b2`): `common_chat_tool_call`,
+//! (llama.cpp v0.9.0, `cd959bae9`): `common_chat_tool_call`,
 //! `common_chat_msg_content_part`, `common_chat_msg` and its methods,
 //! `common_chat_msg_diff::compute_diffs`, the role, span and delimiter
 //! types, `common_chat_tool`, the tool-choice, format, continuation and

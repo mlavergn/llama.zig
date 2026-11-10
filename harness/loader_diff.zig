@@ -947,6 +947,10 @@ const Qwen = struct {
         c.gguf_set_val_u32(ctx, "general.file_type", c.LLAMA_FTYPE_MOSTLY_IQ3_M);
     }
 
+    fn fileTypeF8(ctx: *c.gguf_context) void {
+        c.gguf_set_val_u32(ctx, "general.file_type", c.LLAMA_FTYPE_MOSTLY_F8_E4M3);
+    }
+
     fn noFileType(ctx: *c.gguf_context) void {
         _ = c.gguf_remove_key(ctx, "general.file_type");
     }
@@ -1132,6 +1136,15 @@ const Tensors = struct {
         _ = c.gguf_remove_key(g, "general.file_type");
     }
 
+    /// v0.9.0's F8_E4M3: the guessed type and its file-type name.
+    fn f8(g: *c.gguf_context, ctx: *c.ggml_context) void {
+        addTensor(g, ctx, "output.weight", c.GGML_TYPE_F32, 64);
+        addTensor(g, ctx, "blk.0.a.weight", c.GGML_TYPE_F8_E4M3, 256);
+        addTensor(g, ctx, "blk.0.b.weight", c.GGML_TYPE_F8_E4M3, 256);
+        addTensor(g, ctx, "blk.1.a.weight", c.GGML_TYPE_Q8_0, 256);
+        _ = c.gguf_remove_key(g, "general.file_type");
+    }
+
     fn many(g: *c.gguf_context, ctx: *c.ggml_context) void {
         const types = [_]c.enum_ggml_type{ c.GGML_TYPE_Q8_0, c.GGML_TYPE_BF16, c.GGML_TYPE_IQ4_NL, c.GGML_TYPE_Q5_1, c.GGML_TYPE_Q8_0 };
         for (types, 0..) |ty, i| {
@@ -1235,6 +1248,7 @@ pub fn main(init: std.process.Init) !void {
         runCase(.{ .name = "tensors: type tie", .path = tensorFile(dir, base, "tie", Tensors.tie, 0), .vocab_only = true });
         runCase(.{ .name = "tensors: integer types", .path = tensorFile(dir, base, "integers", Tensors.integers, 0), .vocab_only = true });
         runCase(.{ .name = "tensors: many types", .path = tensorFile(dir, base, "many", Tensors.many, 0), .vocab_only = true });
+        runCase(.{ .name = "tensors: f8_e4m3", .path = tensorFile(dir, base, "f8", Tensors.f8, 0), .vocab_only = true });
         runCase(.{ .name = "tensors: truncated", .path = tensorFile(dir, base, "truncated", Tensors.tie, 100), .vocab_only = true });
         runCase(.{ .name = "split: ok", .path = splitSet(dir, base, "s-ok", .ok), .vocab_only = true });
         runCase(.{ .name = "split: wrong index", .path = splitSet(dir, base, "s-idx", .wrong_idx), .vocab_only = true });
@@ -1290,6 +1304,7 @@ pub fn main(init: std.process.Init) !void {
             .{ "size 0.8B", Qwen.size0_8b },
             .{ "file_type", Qwen.fileType },
             .{ "no file_type", Qwen.noFileType },
+            .{ "file_type f8_e4m3", Qwen.fileTypeF8 },
             .{ "no name", Qwen.noName },
             .{ "classifier labels", Qwen.labels },
             .{ "decision labels", Qwen.decisionLabels },

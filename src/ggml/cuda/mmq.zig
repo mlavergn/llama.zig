@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/mmq.cu` and the host half of
-//! `llama.cpp/ggml/src/ggml-cuda/mmq.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/mmq.cuh` at v0.9.0 (`cd959bae9`). The
 //! configuration tables of `mmq-config-{pascal,ampere,blackwell}.cuh` are
 //! generated into `mmq_config_table.zig`. The kernels, `mul_mat_q` and
 //! `mul_mat_q_stream_k_fixup`, stay CUDA, one instantiation set per type in
@@ -129,8 +129,8 @@ fn lookup(t: *const table.Table, ty: c.enum_ggml_type, J: c_int, fallback: bool)
     return lookup(t.fallthrough.?, ty, J, fallback);
 }
 
-/// Ports the host `ggml_cuda_mmq_get_config` (mmq.cuh:232 @8642541b2),
-/// NVIDIA arms. The AMD arms -- GCN, CDNA, RDNA2/3/3.5/4 -- are taken only
+/// Ports the host `ggml_cuda_mmq_get_config` (mmq.cuh:232 @cd959bae9),
+/// NVIDIA arms. The AMD arms -- GCN, CDNA, RDNA2/3/3.5/4 and v0.9.0's RDNA4_M -- are taken only
 /// for an AMD compute capability, which a CUDA device never has. Since
 /// v0.7.0 `prec_src1` has no default: every caller passes it (#30168).
 pub fn getConfig(ty: c.enum_ggml_type, J: c_int, fallback: bool, x: c_int, prec_src1: c.enum_ggml_prec) Config {
@@ -552,12 +552,12 @@ fn getJBest(ty: c.enum_ggml_type, ncols: i64, fallback: bool, x: c_int, smpbo: u
     return J_best;
 }
 
-/// Ports `ggml_cuda_mul_mat_q` (mmq.cu:164 @8642541b2). Since v0.7.0 (#29953)
+/// Ports `ggml_cuda_mul_mat_q` (mmq.cu:164 @cd959bae9). Since v0.7.0 (#29953)
 /// it chooses the tile width `J_best` itself, as `mul_mat_q_switch_J` had,
 /// and pads `src1`'s quantized copy and `ids_dst` by what one tile of that
 /// width can read past the end, where it had padded by the widest tile any
 /// configuration allowed. With `fusion` (v0.8.0, gate/up/GLU) `src0` is the
-/// up weight and `dst` the GLU output.
+/// up weight and `dst` the GLU output; since v0.9.0 with `ids` too (MoE).
 pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, ids: ?*const Tensor, dst: *Tensor, fusion: ?*const common.MmFusionArgsHost) void {
     impl.assert(src1.type == c.GGML_TYPE_F32, "        src1->type == GGML_TYPE_F32");
     impl.assert(dst.type == c.GGML_TYPE_F32, "        dst->type  == GGML_TYPE_F32");
@@ -565,10 +565,13 @@ pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, i
 
     // Fused gate/up/GLU: src0 is the up weight, dst the GLU output.
     const gate: ?*const Tensor = if (fusion) |f| f.gate else null;
+    var fusion_device: common.MmFusionArgsDevice = .{};
     if (fusion) |f| {
-        // TODO MoE support
-        impl.assert(gate != null and ids == null and f.x_bias == null and f.gate_bias == null and f.x_scale == null and f.gate_scale == null, "gate && !ids && !fusion->x_bias && !fusion->gate_bias && !fusion->x_scale && !fusion->gate_scale");
+        impl.assert(gate != null and f.x_bias == null and f.gate_bias == null and f.x_scale == null and f.gate_scale == null, "gate && !fusion->x_bias && !fusion->gate_bias && !fusion->x_scale && !fusion->gate_scale");
         impl.assert(gate.?.type == src0.type and c.ggml_are_same_shape(gate.?, src0) and c.ggml_are_same_stride(gate.?, src0), "gate->type == src0->type && ggml_are_same_shape(gate, src0) && ggml_are_same_stride(gate, src0)");
+        fusion_device.gate = gate.?.data;
+        fusion_device.glu_op = f.glu_op;
+        fusion_device.glu_limit = f.glu_limit;
     }
 
     const ne00 = src0.ne[0];
@@ -647,8 +650,8 @@ pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, i
             // Each expert only sees ne12*n_expert_used/ne02 tokens on
             // average. On RDNA3 and RDNA4 it is faster to pick the tile size
             // against this value instead of ne12: the C's
-            // `GGML_CUDA_CC_IS_RDNA3(cc) || GGML_CUDA_CC_IS_RDNA4(cc)` arm,
-            // which a CUDA device never takes.
+            // `GGML_CUDA_CC_IS_RDNA3(cc) || GGML_CUDA_CC_IS_RDNA4_M(cc) ||
+            // GGML_CUDA_CC_IS_RDNA4(cc)` arm, which a CUDA device never takes.
         }
 
         J_best = getJBest(src0.type, ncols_opt, fallback, x, smpbo, prec_src1, &nthreads_best);
@@ -690,13 +693,6 @@ pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, i
         else
             @divTrunc(ne11 * ne10_padded * sizeof_block_q8_1, c.QK8_1 * @sizeOf(c_int));
         const s13 = ne12 * s12;
-
-        var fusion_device: common.MmFusionArgsDevice = .{};
-        if (gate) |g| {
-            fusion_device.gate = g.data;
-            fusion_device.glu_op = fusion.?.glu_op;
-            fusion_device.glu_limit = fusion.?.glu_limit;
-        }
 
         const args: Args = .{
             .x = src0_d,
@@ -829,6 +825,7 @@ pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, i
         .stride_sample_dst = s3,
         .ncols_max = ne12,
         .J_best = J_best,
+        .fusion = fusion_device,
     };
 
     mulMatQSwitchType(ctx, &args, stream, prec_src1);
@@ -838,7 +835,8 @@ fn firstOf(comptime T: type, p: ?[*]T) ?*T {
     return if (p) |x| &x[0] else null;
 }
 
-/// Ports `ggml_cuda_should_use_mmq` (mmq.cu:386 @8642541b2), NVIDIA arms.
+/// Ports `ggml_cuda_should_use_mmq` (mmq.cu:382 @cd959bae9), NVIDIA arms
+/// (v0.9.0's RDNA4_M arms are AMD).
 /// v0.6.0's `cc == GGML_CUDA_CC_PH1` refusal is a Moore Threads arm, which
 /// no CUDA device's compute capability reaches.
 pub fn shouldUseMmq(ty: c.enum_ggml_type, x: c_int, ne11: i64, n_experts: i64) bool {

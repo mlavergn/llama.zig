@@ -8,8 +8,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/deepseek4.cpp` at v0.8.0
-//! (`8642541b2`): `llama_model_deepseek4`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/deepseek4.cpp` at v0.9.0
+//! (`cd959bae9`): `llama_model_deepseek4`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, its `graph` with the
 //! hyper-connection, compressor and attention builders, and `graph_mtp`.
 //! The memory these graphs read is `kv_cache_dsv4.zig`'s, and the MTP
@@ -654,7 +654,7 @@ pub fn buildOverlapCompressedKvFromState(b: *const Builder, kv_state_: *Tensor, 
 // Attention
 
 /// Ports `llama_model_deepseek4`'s graph's `build_lid_top_k`
-/// (models/deepseek4.cpp:592 @8642541b2): the lightning indexer's score of
+/// (models/deepseek4.cpp:592 @cd959bae9): the lightning indexer's score of
 /// every compressed row for each query, and the top-k rows.
 pub fn buildLidTopK(b: *const Builder, model: *const Model, inp_dsv4: *const graph.InpDsv4, qr: *Tensor, cur: *Tensor, inp_pos: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -668,7 +668,7 @@ pub fn buildLidTopK(b: *const Builder, model: *const Model, inp_dsv4: *const gra
     const nt = cur.ne[1];
 
     impl.assert(inp_lid.kq_mask != null, src, 607, "inp_lid.kq_mask");
-    impl.assert(inp_lid.k_rot != null, src, 608, "inp_lid.k_rot");
+    impl.assert(inp_lid.k_rot[@intCast(il)] != null, src, 608, "inp_lid.k_rot[il]");
     impl.assert(n_embd_indexer_head >= n_embd_indexer_head_rope, src, 609, "n_embd_indexer_head >= n_embd_indexer_head_rope");
 
     var indexer_q = b.buildLoraMm(layer.indexer_attn_q_b.?, qr, null);
@@ -679,7 +679,7 @@ pub fn buildLidTopK(b: *const Builder, model: *const Model, inp_dsv4: *const gra
     indexer_q = c.ggml_rope_set_offset(indexer_q, @intCast(n_embd_indexer_head_nope));
     b.cb(indexer_q, "lid_q_rope", il);
 
-    indexer_q = graph.mulMatHadamard(ctx, indexer_q, inp_lid.k_rot.?);
+    indexer_q = graph.mulMatHadamard(ctx, indexer_q, inp_lid.k_rot[@intCast(il)].?);
     b.cb(indexer_q, "lid_q_rot", il);
 
     var indexer_weights = b.buildLoraMm(layer.indexer_proj.?, cur, null);
@@ -765,7 +765,7 @@ pub fn buildTopKMask(b: *const Builder, kq_mask: *Tensor, top_k: *Tensor, name: 
 }
 
 /// Ports `llama_model_deepseek4`'s graph's `build_csa_lid_attention`
-/// (models/deepseek4.cpp:716 @8642541b2): attention over the raw window
+/// (models/deepseek4.cpp:716 @cd959bae9): attention over the raw window
 /// and the indexer's top-k CSA rows, as one K.
 pub fn buildCsaLidAttention(b: *const Builder, model: *const Model, inp_dsv4: *const graph.InpDsv4, inp_attn: *const graph.InpDsv4Raw, q_: *Tensor, kv_: *Tensor, qr: *Tensor, cur: *Tensor, inp_pos: *Tensor, sinks: ?*Tensor, kq_scale: f32, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -776,7 +776,7 @@ pub fn buildCsaLidAttention(b: *const Builder, model: *const Model, inp_dsv4: *c
 
     const top_k = buildLidTopK(b, model, inp_dsv4, qr, cur, inp_pos, il);
 
-    const k_rot = inp_attn.self_k_rot;
+    const k_rot = inp_attn.self_k_rot[@intCast(il)];
     if (k_rot) |r| {
         q = graph.mulMatHadamard(ctx, q, r);
         kv = graph.mulMatHadamard(ctx, kv, r);
@@ -803,14 +803,14 @@ pub fn buildCsaLidAttention(b: *const Builder, model: *const Model, inp_dsv4: *c
     const k_all: *Tensor = c.ggml_concat(ctx, raw_k, csa_k, 2);
     b.cb(k_all, "csa_k_all", il);
 
-    const raw_mask = inp_attn.getKqMask();
+    const raw_mask = inp_attn.self_attn_mask.raw;
     const csa_mask = buildTopKMask(b, inp_csa.kq_mask.?, top_k, "csa_top_k_mask", il);
 
     const kq_mask: *Tensor = c.ggml_concat(ctx, raw_mask, csa_mask, 0);
     b.cb(kq_mask, "csa_lid_kq_mask", il);
 
     const n_kv_max: i64 = @as(i64, @min(raw_mask.?.ne[0], @as(i64, b.hparams.n_swa))) + top_k.ne[0];
-    var out = b.buildAttnMha(q, k_all, k_all, null, kq_mask, sinks, null, n_kv_max, kq_scale, il);
+    var out = b.buildAttnMha(q, k_all, k_all, null, kq_mask, null, sinks, null, n_kv_max, kq_scale, il);
     if (k_rot) |r| out = graph.mulMatHadamard(ctx, out, r);
     b.cb(out, "attn_csa_lid", il);
 
@@ -818,7 +818,7 @@ pub fn buildCsaLidAttention(b: *const Builder, model: *const Model, inp_dsv4: *c
 }
 
 /// Ports `llama_model_deepseek4`'s graph's `build_hca_attention`
-/// (models/deepseek4.cpp:778 @8642541b2): attention over the raw window
+/// (models/deepseek4.cpp:778 @cd959bae9): attention over the raw window
 /// and every visible HCA row, as one K.
 pub fn buildHcaAttention(b: *const Builder, inp_dsv4: *const graph.InpDsv4, inp_attn: *const graph.InpDsv4Raw, q_: *Tensor, kv_: *Tensor, sinks: ?*Tensor, kq_scale: f32, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -827,7 +827,7 @@ pub fn buildHcaAttention(b: *const Builder, inp_dsv4: *const graph.InpDsv4, inp_
     const inp_hca = inp_dsv4.getHca();
     impl.assert(inp_hca.kq_mask != null, src, 787, "inp_hca.kq_mask");
 
-    const k_rot = inp_attn.self_k_rot;
+    const k_rot = inp_attn.self_k_rot[@intCast(il)];
     if (k_rot) |r| {
         q = graph.mulMatHadamard(ctx, q, r);
         kv = graph.mulMatHadamard(ctx, kv, r);
@@ -854,13 +854,13 @@ pub fn buildHcaAttention(b: *const Builder, inp_dsv4: *const graph.InpDsv4, inp_
     const k_all: *Tensor = c.ggml_concat(ctx, raw_k, hca_k, 2);
     b.cb(k_all, "hca_k_all", il);
 
-    const raw_mask = inp_attn.getKqMask();
+    const raw_mask = inp_attn.self_attn_mask.raw;
     const hca_mask = inp_hca.kq_mask;
 
     const kq_mask: *Tensor = c.ggml_concat(ctx, raw_mask, hca_mask, 0);
     b.cb(kq_mask, "hca_kq_mask", il);
 
-    var out = b.buildAttnMha(q, k_all, k_all, null, kq_mask, sinks, null, 0, kq_scale, il);
+    var out = b.buildAttnMha(q, k_all, k_all, null, kq_mask, null, sinks, null, 0, kq_scale, il);
     if (k_rot) |r| out = graph.mulMatHadamard(ctx, out, r);
     b.cb(out, "attn_hca", il);
 
@@ -868,7 +868,7 @@ pub fn buildHcaAttention(b: *const Builder, inp_dsv4: *const graph.InpDsv4, inp_
 }
 
 /// Ports `llama_model_deepseek4`'s graph's `build_raw_attention`
-/// (models/deepseek4.cpp:833 @8642541b2): attention over the raw window
+/// (models/deepseek4.cpp:833 @cd959bae9): attention over the raw window
 /// alone.
 pub fn buildRawAttention(b: *const Builder, inp_attn: *const graph.InpDsv4Raw, q_: *Tensor, kv_: *Tensor, sinks: ?*Tensor, kq_scale: f32, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -876,7 +876,7 @@ pub fn buildRawAttention(b: *const Builder, inp_attn: *const graph.InpDsv4Raw, q
     var kv = kv_;
     impl.assert(b.hparams.isSwa(@intCast(il)), src, 840, "hparams.is_swa(il)");
 
-    const k_rot = inp_attn.self_k_rot;
+    const k_rot = inp_attn.self_k_rot[@intCast(il)];
 
     if (k_rot) |r| {
         q = graph.mulMatHadamard(ctx, q, r);
@@ -890,11 +890,11 @@ pub fn buildRawAttention(b: *const Builder, inp_attn: *const graph.InpDsv4Raw, q
 
     c.ggml_build_forward_expand(b.gf, mctx_cur.cpyK(ctx, kv, inp_attn.getKIdxs(), il));
 
-    const kq_mask = inp_attn.getKqMask();
+    const kq_mask = inp_attn.self_attn_mask.raw;
 
     const k = mctx_cur.getK(ctx, il);
 
-    var out = b.buildAttnMha(q, k, k, null, kq_mask, sinks, null, 0, kq_scale, il);
+    var out = b.buildAttnMha(q, k, k, null, kq_mask, null, sinks, null, 0, kq_scale, il);
     if (k_rot) |r| out = graph.mulMatHadamard(ctx, out, r);
     b.cb(out, "attn_raw", il);
 
@@ -911,7 +911,7 @@ pub const AttnInput = union(enum) {
 /// Ports `llama_model_deepseek4`'s graph's `build_attention`, both overloads
 /// (models/deepseek4.cpp:869, 878 @cd959bae9), and the
 /// `build_attention_impl` they forward to (models/deepseek4.cpp:887
-/// @8642541b2): one shared K/V head, RoPE'd on its tail, with the layer's
+/// @cd959bae9): one shared K/V head, RoPE'd on its tail, with the layer's
 /// compressor states updated and its compressed rows committed before
 /// attention; then the output de-rotated and projected through the grouped
 /// low-rank `wo_a` and `wo_b`.
@@ -1028,7 +1028,7 @@ pub fn buildAttention(b: *const Builder, model: *const Model, inp: AttnInput, cu
 
         var kv_comp_csa_state = buildOverlapCompressedKvFromState(b, csa_source_kv, csa_source_score, inp_csa.state_read_idxs, inp_csa.state_write_pos, layer.attn_comp_norm, csa_ratio, n_embd_head, "csa_state_compress", il);
 
-        if (inp_csa.k_rot) |r| {
+        if (inp_csa.k_rot[@intCast(il)]) |r| {
             kv_comp_csa_state = graph.mulMatHadamard(ctx, kv_comp_csa_state, r);
             b.cb(kv_comp_csa_state, "csa_state_compress_rot", il);
         }
@@ -1075,7 +1075,7 @@ pub fn buildAttention(b: *const Builder, model: *const Model, inp: AttnInput, cu
 
         var kv_comp_lid_state = buildOverlapCompressedKvFromState(b, lid_source_kv, lid_source_score, inp_lid.state_read_idxs, inp_lid.state_write_pos, layer.indexer_comp_norm, csa_ratio, hp.indexer_head_size, "lid_state_compress", il);
 
-        if (inp_lid.k_rot) |r| {
+        if (inp_lid.k_rot[@intCast(il)]) |r| {
             kv_comp_lid_state = graph.mulMatHadamard(ctx, kv_comp_lid_state, r);
             b.cb(kv_comp_lid_state, "lid_state_compress_rot", il);
         }
@@ -1118,7 +1118,7 @@ pub fn buildAttention(b: *const Builder, model: *const Model, inp: AttnInput, cu
 
         var kv_comp_hca = buildHcaCompressedKvFromState(b, hca_source_kv.?, hca_source_score.?, inp_hca.state_read_idxs, inp_hca.state_write_pos, layer.attn_comp_norm, n_embd_head, "hca_state_compress", il);
 
-        if (inp_hca.k_rot) |r| {
+        if (inp_hca.k_rot[@intCast(il)]) |r| {
             kv_comp_hca = graph.mulMatHadamard(ctx, kv_comp_hca, r);
             b.cb(kv_comp_hca, "hca_state_compress_rot", il);
         }
@@ -1169,7 +1169,7 @@ pub fn buildAttention(b: *const Builder, model: *const Model, inp: AttnInput, cu
     } else if (ratio == csa_ratio and
         inp_dsv4.?.getCsa().kq_mask != null and
         inp_dsv4.?.getLid().kq_mask != null and
-        inp_dsv4.?.getLid().k_rot != null)
+        inp_dsv4.?.getLid().k_rot[@intCast(il)] != null)
     {
         out = buildCsaLidAttention(b, model, inp_dsv4.?, inp_attn.?, q, kv, qr, cur, inp_pos, layer.attn_sinks, kq_scale, il);
     } else if (ratio == hca_ratio and inp_dsv4.?.getHca().kq_mask != null) {
@@ -1200,7 +1200,7 @@ pub fn buildAttention(b: *const Builder, model: *const Model, inp: AttnInput, cu
 // The graphs
 
 /// Ports the constructor of `llama_model_deepseek4`'s `graph`
-/// (models/deepseek4.cpp:1231 @8642541b2).
+/// (models/deepseek4.cpp:1231 @cd959bae9).
 pub fn buildGraph(model: *const Model, b: *const Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -1211,7 +1211,7 @@ pub fn buildGraph(model: *const Model, b: *const Builder) void {
     const inp_out_ids = b.buildInpOutIds();
     const inp_dsv4 = b.buildInpDsv4();
     const inp_attn = inp_dsv4.getRaw();
-    c.ggml_build_forward_expand(b.gf, inp_attn.self_kq_mask);
+    c.ggml_build_forward_expand(b.gf, inp_attn.self_attn_mask.raw);
 
     const hc: i64 = hp.dsv4_hc_mult;
     var inpL: *Tensor = c.ggml_reshape_3d(ctx, inp, b.n_embd, 1, b.n_tokens);

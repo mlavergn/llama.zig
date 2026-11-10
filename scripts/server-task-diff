@@ -799,6 +799,18 @@ def decision_records():
             body["videos"] = rng.choice([[], None, ["v"]])
         yield "D", {"v": base + rng.randrange(6), "body": body, "pool": pool(), "n_slots": rng.choice([1, 2, 3, 8]),
                     "nan_at": rng.choice([-1, -1, -1, 0, 1]), "short": rng.random() < 0.05}
+    # v0.9.0: a shared prefix stops before the first position a task reads,
+    # here kev's option markers, which questions with the same instructions
+    # and options share
+    d_kev = DEC_NAMES.index("KEV")
+    for qs in ({"a": {"type": "choice", "instructions": "same", "criteria": {"x": None, "y": "one"}},
+                "b": {"type": "choice", "instructions": "same", "criteria": {"x": None, "y": "two"}}},
+               {"a": {"type": "noul", "instructions": "same"}, "b": {"type": "noul", "instructions": "same"}},
+               {"a": {"type": "choice", "instructions": "same", "criteria": {"x": None, "y": None, "z": "p"}},
+                "b": {"type": "choice", "instructions": "same", "criteria": {"x": None, "y": None, "z": "q"}},
+                "c": {"type": "choice", "instructions": "same", "criteria": {"x": None, "w": None}}}):
+        for n_slots in (2, 3):
+            yield "D", {"v": base + d_kev, "body": {"state": "a shared state", "questions": qs}, "pool": pool(), "n_slots": n_slots}
     # v0.8.0's types: granite-switch, h2o-lightning, lfm3-d1, lfm3-d1-omni, minicpm-ocr-jev
     d_granite, d_h2o, d_lfm3, d_omni, d_ocr = (DEC_NAMES.index(n) for n in ("GRANITE", "H2OQ", "LFM3D1", "LFM3OMNI", "OCR"))
     deep = lambda n: {"a": deep(n - 1)} if n else "x"
@@ -992,7 +1004,7 @@ def responses_body():
         b.pop("input")
     for _ in range(rng.randint(0, 4)):
         k = rng.choice(["instructions", "previous_response_id", "tools", "max_output_tokens", "reasoning", "model",
-                        "stream", "temperature", "max_tokens", "messages"])
+                        "stream", "temperature", "max_tokens", "messages", "extra_params"])
         b[k] = rng.choice({
             "instructions": ["Be brief.", 5, None, ""],
             "previous_response_id": ["", "resp_1", None, 3],
@@ -1001,6 +1013,7 @@ def responses_body():
             "max_output_tokens": [16, "x", None],
             "reasoning": [{"effort": "low"}, {"effort": None}, {}, "x", {"summary": "auto"}],
             "model": ["m"], "stream": [True, False], "temperature": [0.5], "max_tokens": [3], "messages": [[]],
+            "extra_params": [{"seed": 3}, {"max_tokens": 5, "top_k": 2}, {}, 5, None],
         }[k])
     return b
 
@@ -1210,7 +1223,13 @@ def chat_step4():
               {"input": [{"type": "function_call", "call_id": "c1", "name": "f", "arguments": "{}"},
                          {"role": "assistant", "type": "message", "content": "plain"}]},
               {"input": "x", "tools": [{"type": "function", "name": "f"}, {"type": "web_search"}, {"type": 3}]},
-              {"input": "x", "tools": {"a": 1}}, {"input": "x", "tools": []}, [1, 2], "x"):
+              {"input": "x", "tools": {"a": 1}}, {"input": "x", "tools": []}, [1, 2], "x",
+              # v0.9.0: the members of extra_params merged into the converted body, over what it set
+              {"input": "hi", "extra_params": {"seed": 7, "min_p": 0.5, "model": "x"}},
+              {"input": "hi", "max_output_tokens": 8, "reasoning": {"effort": "low"},
+               "extra_params": {"max_tokens": 2, "reasoning_effort": "high", "messages": 5}},
+              {"input": "hi", "extra_params": 5}, {"input": "hi", "extra_params": []}, {"input": "hi", "extra_params": None},
+              {"input": "hi", "extra_params": {}}, {"input": "hi", "extra_params": {"extra_params": {"a": 1}}}):
         yield "RC", b
     for _ in range(N):
         yield "RC", responses_body()

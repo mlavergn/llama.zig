@@ -6,7 +6,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/t5.cpp` at v0.8.0 (`8642541b2`):
+//! Ported from `llama.cpp/src/models/t5.cpp` at v0.9.0 (`cd959bae9`):
 //! `llama_model_t5`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and both specialisations of its `graph<is_enc>`.
 //! `llama_model_t5encoder` (`t5encoder.zig`) reuses the encoder graph.

@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-metal/ggml-metal-common.cpp` at
-//! v0.8.0 (`8642541b2`). Each declaration below names the C++ it replaces
+//! v0.9.0 (`cd959bae9`). Each declaration below names the C++ it replaces
 //! and the line it began at.
 //!
 //! # Nothing here touches Metal

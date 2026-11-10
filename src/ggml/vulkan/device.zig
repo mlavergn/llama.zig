@@ -5,8 +5,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` and
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.8.0
-//! (`8642541b2`). Upstream split `ggml-vulkan.cpp` into those files at
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.9.0
+//! (`cd959bae9`). Upstream split `ggml-vulkan.cpp` into those files at
 //! v0.5.0. A device is created once per index and lives for the process, as
 //! the C++'s `vk_instance.devices[]` shared pointers do; the C++ destroys
 //! them from a static destructor at exit, which the port does not reproduce.
@@ -212,7 +212,7 @@ pub fn lightningIndexerKTypeSupported(t: c.ggml_type) bool {
     return std.mem.indexOfScalar(c.ggml_type, &lightning_indexer_k_types, t) != null;
 }
 
-/// Ports `vk_device_struct` (ggml-vulkan-types.h:661 @8642541b2).
+/// Ports `vk_device_struct` (ggml-vulkan-types.h:661 @cd959bae9).
 pub const Device = struct {
     mutex: RecursiveMutex = .{},
     queue_submit_mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
@@ -232,6 +232,7 @@ pub const Device = struct {
     suballocation_block_size: u64 = 0,
     min_imported_host_pointer_alignment: u64 = 0,
     external_memory_host: bool = false,
+    external_semaphore: bool = false,
     fp16: bool = false,
     bf16: bool = false,
     pipeline_robustness: bool = false,
@@ -803,7 +804,7 @@ fn link(last: **vk.VkBaseOutStructure, next: anytype) void {
 /// `ggml_vk_get_device`'s function-local `static std::mutex mutex`.
 var get_device_mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER;
 
-/// Ports `ggml_vk_get_device` (ggml-vulkan.cpp:4016 @8642541b2): creates
+/// Ports `ggml_vk_get_device` (ggml-vulkan.cpp:4023 @cd959bae9): creates
 /// the logical device for index `idx` on first use, and returns it. One
 /// lock covers the whole construction, and the device is published only
 /// once it is fully built, so concurrent first calls build it once.
@@ -901,6 +902,8 @@ pub fn getDevice(idx: usize) *Device {
             device.memory_priority = true;
         } else if (eq("VK_EXT_external_memory_host", n)) {
             device.external_memory_host = true;
+        } else if (eq("VK_KHR_external_semaphore_fd", n)) {
+            device.external_semaphore = true;
         } else if (@hasDecl(vk, "VK_EXT_shader_64bit_indexing") and eq("VK_EXT_shader_64bit_indexing", n)) {
             device.shader_64b_indexing = true;
         } else if (eq(vk.VK_KHR_INTERNALLY_SYNCHRONIZED_QUEUES_EXTENSION_NAME, n)) {
@@ -1138,6 +1141,7 @@ pub fn getDevice(idx: usize) *Device {
     }
 
     if (device.external_memory_host) addExt(&device_extensions, "VK_EXT_external_memory_host");
+    if (device.external_semaphore) addExt(&device_extensions, "VK_KHR_external_semaphore_fd");
 
     var shader_64bit_indexing_features = common.structure(vk.VkPhysicalDeviceShader64BitIndexingFeaturesEXT, vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_64_BIT_INDEXING_FEATURES_EXT);
     if (device.shader_64b_indexing) {

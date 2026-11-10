@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/col2im-1d.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/col2im-1d.cuh` at v0.8.0 (`8642541b2`).
+//! `llama.cpp/ggml/src/ggml-cuda/col2im-1d.cuh` at v0.9.0 (`cd959bae9`).
 //! The kernel, `col2im_1d_kernel`, stays CUDA.
 
 const std = @import("std");

@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ports parts of `llama.cpp/vendor/cpp-httplib/httplib.cpp` (cpp-httplib
-//! 0.62.0, vendored at v0.8.0, `8642541b2`): the POSIX arm of each `#if
+//! 0.64.0, vendored at v0.9.0, `cd959bae9`): the POSIX arm of each `#if
 //! _WIN32`. Each declaration names what it ports and the line it began at.
 //!
 //! # The C library, called directly
@@ -273,7 +273,7 @@ pub const ReadInterrupt = struct {
 /// Ports `select_read_interruptible` (httplib.cpp:1912 @cd959bae9):
 /// `select_read`, but waits in slices and gives up once `interrupted`
 /// returns true. A `sec` below zero never comes (`deadline_after`,
-/// httplib.cpp:1888 @8642541b2), as it waits forever in `select_impl`.
+/// httplib.cpp:1887 @cd959bae9), as it waits forever in `select_impl`.
 pub fn selectReadInterruptible(sock: Socket, sec: i64, usec: i64, interrupted: ?ReadInterrupt) isize {
     const it = interrupted orelse return selectRead(sock, sec, usec);
     const slice: i64 = 100000;

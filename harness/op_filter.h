@@ -3,7 +3,7 @@
  * an op name matched exactly or, if it is not a plain `[A-Z0-9_]+` name, a
  * regex searched for in the name (POSIX extended here, ECMAScript there;
  * the same for the filters the gates pass) -- `op_filter_entries` and
- * `op_filter_entry_matches` (test-backend-ops.cpp:1158, 1180 @8642541b2).
+ * `op_filter_entry_matches` (test-backend-ops.cpp:1158, 1180 @cd959bae9).
  * An entry naming a full test case, `OP(...)`, matches no extra case.
  *
  * The extras compared the whole `-o` argument with `strcmp` until v0.8.0, so

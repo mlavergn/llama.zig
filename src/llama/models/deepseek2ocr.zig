@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/deepseek2ocr.cpp` at v0.8.0
-//! (`8642541b2`): `llama_model_deepseek2ocr`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/deepseek2ocr.cpp` at v0.9.0
+//! (`cd959bae9`): `llama_model_deepseek2ocr`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`. Its graph is
 //! `llama_model_deepseek2`'s, which takes the OCR attention when the
 //! architecture is this one; `deepseek2.zig` holds it.

@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/argmax.cu` at v0.8.0
-//! (`8642541b2`). The kernel, `argmax_f32`, stays CUDA.
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/argmax.cu` at v0.9.0
+//! (`cd959bae9`). The kernel, `argmax_f32`, stays CUDA.
 
 const std = @import("std");
 const impl = @import("../impl.zig");

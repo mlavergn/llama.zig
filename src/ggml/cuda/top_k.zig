@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/top-k.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/top-k.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/top-k.cuh` at v0.9.0 (`cd959bae9`). The
 //! radix-select kernels -- `top_k_radix_init`, `top_k_radix_histogram`,
 //! `top_k_radix_select`, `top_k_radix_reset_counters`,
 //! `top_k_radix_gather` -- stay CUDA; the argsort arms sort with

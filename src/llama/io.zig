@@ -7,7 +7,7 @@
 //! - `llama.cpp/src/llama-io.h` -- `llama_io_write_i` and `llama_io_read_i`
 //! - `llama.cpp/src/llama-io.cpp` -- `write_string` and `read_string`
 //!
-//! All at v0.8.0 (`8642541b2`).
+//! All at v0.9.0 (`cd959bae9`).
 //!
 //! # Exceptions
 //!

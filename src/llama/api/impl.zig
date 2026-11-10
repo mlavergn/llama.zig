@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-impl.cpp` (v0.8.0, `8642541b2`):
+//! Ported from `llama.cpp/src/llama-impl.cpp` (v0.9.0, `cd959bae9`):
 //! `llama_log_get` and `llama_log_set`, its two unmangled exports. The
 //! logger they configure is `log.zig`.
 //!

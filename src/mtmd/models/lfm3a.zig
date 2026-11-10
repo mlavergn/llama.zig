@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/lfm3a.cpp` at v0.8.0 (`8642541b2`).
+//! Ports `llama.cpp/tools/mtmd/models/lfm3a.cpp` at v0.9.0 (`cd959bae9`).
 //! Each declaration names what it ports and the line it began at.
 //!
 //! `state_in` is a `std::map` read only through `at()`, so a hash map stands

@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/convert.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/convert.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/convert.cuh` at v0.9.0 (`cd959bae9`). The
 //! `dequantize_block*`, `convert_unary` and `convert_unary_cont_vec4`
 //! kernels stay CUDA.
 //!
@@ -105,7 +105,7 @@ const RowGrid = enum {
 
 /// Ports the `dequantize_row_*_cuda` launchers from `dequantize_row_q2_K_cuda`
 /// (convert.cu:279 @cd959bae9) to `dequantize_row_mxfp4_cuda` (convert.cu:378
-/// @8642541b2): one `<<<nb, threads>>>` launch of `dequantize_block_<name>`.
+/// @cd959bae9): one `<<<nb, threads>>>` launch of `dequantize_block_<name>`.
 /// `dequantize_row_iq4_nl_cuda` (convert.cu:359 @cd959bae9) passes its
 /// block count since v0.6.0, so the kernel can stop at a row's end.
 fn DequantizeRow(comptime name: []const u8, comptime threads: comptime_int, comptime grid: RowGrid, comptime T: type) type {
@@ -154,7 +154,7 @@ fn DequantizeRowNvfp4(comptime T: type) type {
 /// `convert_unary_cont_cuda` (convert.cu:483 @cd959bae9). A contiguous
 /// conversion whose length is a multiple of four and whose two buffers are
 /// aligned to four elements (`alignof(cvt_vec4<T>)`, convert.cu:448
-/// @8642541b2) moves four elements per thread.
+/// @cd959bae9) moves four elements per thread.
 fn ConvertUnary(comptime S: type, comptime T: type) type {
     return struct {
         const k = kernels.get("convert", kernels.tmpl("convert_unary", &.{ kernels.typeName(S), kernels.typeName(T) }));

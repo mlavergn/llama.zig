@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/translate-gemma.cpp` (llama.cpp v0.8.0,
-//! `8642541b2`).
+//! Ports `llama.cpp/common/parsers/translate-gemma.cpp` (llama.cpp v0.9.0,
+//! `cd959bae9`).
 
 const std = @import("std");
 const json = @import("json");

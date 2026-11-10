@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/speculative.cpp` and
-//! `llama.cpp/common/speculative.h` (v0.8.0, `8642541b2`): the type names,
+//! `llama.cpp/common/speculative.h` (v0.9.0, `cd959bae9`): the type names,
 //! the parameters' helpers, the four n-gram drafters, the driver and its
 //! statistics. The four drafters that run a second model are
 //! `speculative_draft.zig`; the n-gram stores under them are
@@ -94,6 +94,12 @@ pub const ext = struct {
     }
     pub fn getCtxOther(ctx: ?*c.llama_context) ?*c.llama_context {
         return @ptrCast(api.context.llama_get_ctx_other(@ptrCast(ctx)));
+    }
+    pub fn setEmbeddingsLayerInpDev(ctx: ?*c.llama_context, value: bool) void {
+        api.context.llama_set_embeddings_layer_inp_dev(@ptrCast(ctx), value);
+    }
+    pub fn supportsEmbdRow(ctx: ?*c.llama_context) bool {
+        return api.context.llama_supports_embd_row(@ptrCast(ctx));
     }
 };
 
@@ -419,7 +425,7 @@ pub const NgramMapK = struct {
 
     /// Ports `begin` (speculative.cpp:2072 @cd959bae9).
     fn begin(self: *NgramMapK, base: *Base, seq_id: c.llama_seq_id, prompt: []const c.llama_token) void {
-        assertC(seq_id < @as(c.llama_seq_id, @intCast(base.n_seq)), 1999, "seq_id < (llama_seq_id) n_seq");
+        assertC(seq_id < @as(c.llama_seq_id, @intCast(base.n_seq)), 2073, "seq_id < (llama_seq_id) n_seq");
 
         ngram_map.begin(&self.config[@intCast(seq_id)], prompt);
     }
@@ -440,7 +446,7 @@ pub const NgramMapK = struct {
 
     /// Ports `accept` (speculative.cpp:2096 @cd959bae9).
     fn accept(self: *NgramMapK, _: *Base, seq_id: c.llama_seq_id, n_accepted: u16, is_other: bool) void {
-        assertC(seq_id < @as(c.llama_seq_id, @intCast(self.config.len)), 2023, "(seq_id < (llama_seq_id) config.size())");
+        assertC(seq_id < @as(c.llama_seq_id, @intCast(self.config.len)), 2097, "(seq_id < (llama_seq_id) config.size())");
 
         if (is_other) return;
 
@@ -846,10 +852,12 @@ pub const Impl = struct {
         }
     }
 
-    /// `get_state` (speculative.cpp:216 @cd959bae9): only EAGLE3 has one.
+    /// `get_state` (speculative.cpp:216 @cd959bae9): only EAGLE3 and MTP
+    /// have one.
     fn getState(self: *Impl, seq_id: c.llama_seq_id, data: *std.ArrayList(u8)) bool {
         return switch (self.kind) {
             .eagle3 => |*k| k.getState(&self.base, seq_id, data),
+            .mtp => |*k| k.getState(&self.base, seq_id, data),
             else => false,
         };
     }
@@ -858,6 +866,7 @@ pub const Impl = struct {
     fn setState(self: *Impl, seq_id: c.llama_seq_id, data: []const u8) void {
         switch (self.kind) {
             .eagle3 => |*k| k.setState(&self.base, seq_id, data),
+            .mtp => |*k| k.setState(&self.base, seq_id, data),
             else => {},
         }
     }
@@ -1466,7 +1475,7 @@ pub fn free(spec: ?*Speculative) void {
 /// @cd959bae9): the slot a caller fills before `draft`.
 pub fn getDraftParams(spec: ?*Speculative, seq_id: c.llama_seq_id) *DraftParams {
     assertC(spec != null, 3017, "spec");
-    assertC(seq_id < @as(c.llama_seq_id, @intCast(spec.?.dparams.len)), 2944, "seq_id < (llama_seq_id) spec->dparams.size()");
+    assertC(seq_id < @as(c.llama_seq_id, @intCast(spec.?.dparams.len)), 3018, "seq_id < (llama_seq_id) spec->dparams.size()");
 
     return &spec.?.dparams[@intCast(seq_id)];
 }

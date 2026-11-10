@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/imatrix/imatrix.cpp` at v0.8.0 (`8642541b2`).
+//! Ported from `llama.cpp/tools/imatrix/imatrix.cpp` at v0.9.0 (`cd959bae9`).
 //! Each declaration names the C++ it replaces and the line it began at.
 //!
 //! # Orders that come from libc++
@@ -1423,7 +1423,7 @@ const NextnCollector = struct {
         self.pending_h.clearRetainingCapacity(); // a chunk's last h-row has no next token, the trunk restarts at position 0
     }
 
-    /// Ports `decode` (imatrix.cpp:1387 @8642541b2), a member of
+    /// Ports `decode` (imatrix.cpp:1387 @cd959bae9), a member of
     /// `nextn_collector`: each trunk row's NextN hidden state goes in with
     /// the token after it, the last held back for the next batch.
     fn decode(self: *NextnCollector, ctx_trunk: ?*c.llama_context, batch_trunk: *const tc.common.Batch) !bool {
@@ -1434,7 +1434,7 @@ const NextnCollector = struct {
         if (self.pending_h.items.len != 0) {
             const t0 = batch_trunk.tokens.items[0];
             const idx = self.batch.add(t0.id, t0.pos[0], 0, self.own_lm_head);
-            _ = self.batch.setEmbd(idx, .{ .data = self.pending_h.items.ptr, .n_rows = 1, .n_embd = n_embd });
+            _ = self.batch.setEmbdState(idx, .{ .data = self.pending_h.items.ptr, .n_rows = 1, .n_embd = n_embd });
         }
 
         var h_last: ?[*]const f32 = null;
@@ -1453,7 +1453,7 @@ const NextnCollector = struct {
 
             const tn = batch_trunk.tokens.items[@intCast(i + 1)];
             const idx = self.batch.add(tn.id, tn.pos[0], 0, self.own_lm_head);
-            _ = self.batch.setEmbd(idx, .{ .data = h, .n_rows = 1, .n_embd = n_embd });
+            _ = self.batch.setEmbdState(idx, .{ .data = h, .n_rows = 1, .n_embd = n_embd });
         }
 
         if (self.batch.size() > 0) {

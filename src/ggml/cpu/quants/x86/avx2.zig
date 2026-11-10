@@ -4,7 +4,7 @@
 //!
 //! **Not a port of a file.** Each function here reproduces one Intel
 //! intrinsic that `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` or
-//! `arch/x86/repack.cpp` (v0.8.0, `8642541b2`) calls, and is named after it
+//! `arch/x86/repack.cpp` (v0.9.0, `cd959bae9`) calls, and is named after it
 //! with the leading underscore dropped: `_mm256_maddubs_epi16` is
 //! `mm256_maddubs_epi16`. The semantics are Intel's.
 //!

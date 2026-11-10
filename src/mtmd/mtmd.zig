@@ -5,7 +5,7 @@
 //!
 //! Ports `llama.cpp/tools/mtmd/mtmd.cpp`, the C types of
 //! `llama.cpp/tools/mtmd/mtmd.h` and `mtmd_input_part` of
-//! `llama.cpp/tools/mtmd/mtmd-internal.h`, at v0.8.0 (`8642541b2`). Each
+//! `llama.cpp/tools/mtmd/mtmd-internal.h`, at v0.9.0 (`cd959bae9`). Each
 //! declaration names what it ports and the line it began at.
 //!
 //! # The C ABI
@@ -47,6 +47,9 @@ extern fn expf(x: f32) f32;
 extern fn sinf(x: f32) f32;
 extern fn cosf(x: f32) f32;
 extern fn lround(x: f64) c_long;
+// chatterbox's host voice encoder and perceiver (cbx_ref_cond)
+extern fn tanhf(x: f32) f32;
+extern fn exp(x: f64) f64;
 
 /// `MTMD_SERIALIZATION_VERSION` (mtmd.cpp:34 @cd959bae9).
 const serialization_version: u64 = 4;
@@ -107,14 +110,15 @@ pub const DecoderPos = extern struct { t: u32, x: u32, y: u32, z: u32 };
 /// Ports `mtmd_caps` (mtmd.h:392 @cd959bae9).
 pub const Caps = extern struct { inp_vision: bool, inp_audio: bool, gen_audio: bool };
 
-/// Ports `mtmd_gen_audio_type` (mtmd.h:459 @8642541b2).
-pub const GenAudioType = enum(c_int) { none, qwen3tts, pockettts, soprano, lfm3a };
+/// Ports `mtmd_gen_audio_type` (mtmd.h:463 @cd959bae9).
+pub const GenAudioType = enum(c_int) { none, qwen3tts, pockettts, soprano, lfm3a, chatterbox };
 
-/// Ports `mtmd_gen_audio_info` (mtmd.h:467 @8642541b2).
+/// Ports `mtmd_gen_audio_info` (mtmd.h:472 @cd959bae9).
 pub const GenAudioInfo = extern struct {
     type: GenAudioType,
-    sample_rate: i32,
-    model_variant: ?[*:0]const u8,
+    sample_rate: i32, // in Hz, for example 24000 for qwen3tts
+    model_variant: ?[*:0]const u8, // name of the weight variant, can be nullptr if not applicable
+    n_voices: i32, // predefined voices, see mtmd_gen_audio_voice_name()
 };
 
 /// Ports `mtmd_gen_process_type` (mtmd.h:491 @cd959bae9).
@@ -334,14 +338,43 @@ fn deserializeBatch(b: *impl.ImageF32Batch, ser: *Ser) Error!void {
 // -----------------------------------------------------------------------------
 // bitmaps, tokens and chunks
 
-/// Ports `mtmd_bitmap` (mtmd.cpp:172 @8642541b2). An image is RGB
-/// interleaved, `nx * ny * 3` bytes; audio is `nx` F32 samples and `ny = 1`.
-/// No data marks a placeholder.
+/// A `std::shared_ptr<const clip_gen_ref>`: shared by the voice bitmap, the
+/// track it tokenizes to, and every copy of either; `refs` counts the owners.
+pub const SharedGenRef = struct {
+    refs: std.atomic.Value(usize) = .init(1),
+    ref: clip.GenRef = .{},
+
+    /// `std::make_shared<const clip_gen_ref>(r)`.
+    fn make(r: *const clip.GenRef) !*SharedGenRef {
+        const self = try gpa.create(SharedGenRef);
+        self.* = .{};
+        errdefer gpa.destroy(self);
+        self.ref = try r.clone();
+        return self;
+    }
+
+    fn retain(self: *SharedGenRef) *SharedGenRef {
+        _ = self.refs.fetchAdd(1, .monotonic);
+        return self;
+    }
+
+    fn release(self: *SharedGenRef) void {
+        if (self.refs.fetchSub(1, .acq_rel) != 1) return;
+        self.ref.deinit();
+        gpa.destroy(self);
+    }
+};
+
+/// Ports `mtmd_bitmap` (mtmd.cpp:173 @cd959bae9). An image is RGB
+/// interleaved, `nx * ny * 3` bytes; audio is `nx` F32 samples and `ny = 1`;
+/// a voice is `ny` F32 rows of `nx`. No data marks a placeholder.
 pub const Bitmap = struct {
     nx: u32 = 0,
     ny: u32 = 0,
     id: Str = .{}, // optional user-defined id, for ex: can be set to image hash, useful for KV cache tracking
     is_audio: bool = false, // true if the bitmap is audio
+    is_voice: bool = false,
+    gen_ref: ?*SharedGenRef = null, // gen-side reference of a predefined voice, if any
     mergeable: bool = false, // [QWEN_VIDEO] set only on frames of the same video
     is_video: bool = false, // see mtmd_bitmap_set_is_video()
 
@@ -367,7 +400,21 @@ pub const Bitmap = struct {
         return self;
     }
 
+    /// Ports `init_voice` (mtmd.cpp:205 @cd959bae9), a member of `mtmd_bitmap`.
+    fn initVoice(name: []const u8, voice: *const clip.GenVoice, n_embd: u32) !*Bitmap {
+        const rows = voice.rows.items;
+        const n_rows: u32 = @intCast(rows.len / n_embd);
+        const self = try createImage(null, n_embd, n_rows);
+        errdefer self.destroy();
+        self.is_voice = true;
+        if (voice.ref.tokens.items.len != 0) self.gen_ref = try SharedGenRef.make(&voice.ref);
+        try self.id.set(name);
+        try self.data.appendSlice(gpa, std.mem.sliceAsBytes(rows[0 .. @as(usize, n_embd) * n_rows]));
+        return self;
+    }
+
     fn destroy(self: *Bitmap) void {
+        if (self.gen_ref) |g| g.release();
         self.id.deinit();
         self.data.deinit(gpa);
         gpa.destroy(self);
@@ -510,7 +557,7 @@ pub const ImageTokens = struct {
     }
 };
 
-/// Ports `mtmd_audio_track` (mtmd.cpp:337 @8642541b2): an audio track split
+/// Ports `mtmd_audio_track` (mtmd.cpp:353 @cd959bae9): an audio track split
 /// across chunks (e.g. the soundtrack of a video): it is encoded once, as one
 /// clip, and every chunk takes its rows of it. Shared as the C++'s `shared_ptr`
 /// shares it, `refs` counting the owners.
@@ -519,6 +566,7 @@ pub const AudioTrack = struct {
     batch_f32: impl.ImageF32Batch = .{}, // the mel of the whole track
     n_tokens: u32 = 0,
     embd: std.ArrayList(f32) = .empty, // filled by the first encode
+    gen_ref: ?*SharedGenRef = null, // gen-side reference of a predefined voice, if any
 
     fn ref(self: *AudioTrack) *AudioTrack {
         _ = self.refs.fetchAdd(1, .monotonic);
@@ -527,13 +575,14 @@ pub const AudioTrack = struct {
 
     fn unref(self: *AudioTrack) void {
         if (self.refs.fetchSub(1, .acq_rel) != 1) return;
+        if (self.gen_ref) |g| g.release();
         self.batch_f32.deinit();
         self.embd.deinit(gpa);
         gpa.destroy(self);
     }
 };
 
-/// Ports `mtmd_audio_tokens` (mtmd.cpp:343 @8642541b2).
+/// Ports `mtmd_audio_tokens` (mtmd.cpp:360 @cd959bae9).
 pub const AudioTokens = struct {
     n_tokens: u32 = 0, // number of tokens
     batch_f32: impl.ImageF32Batch = .{}, // preprocessed image patches
@@ -552,6 +601,9 @@ pub const AudioTokens = struct {
 
     /// true if one of entries in batch_f32 is a placeholder
     fn isPlaceholder(self: *const AudioTokens) bool {
+        if (self.track) |t| {
+            if (t.batch_f32.entries.items.len == 0) return t.embd.items.len == 0; // a voice: its rows are not serialized
+        }
         const batch = if (self.track) |t| &t.batch_f32 else &self.batch_f32;
         for (batch.entries.items) |*e| if (e.isPlaceholder()) return true;
         return false;
@@ -760,7 +812,13 @@ pub fn mtmd_context_params_default() callconv(.c) ContextParams {
 // -----------------------------------------------------------------------------
 // the context
 
-/// Ports `mtmd_context` (mtmd.cpp:554 @8642541b2).
+/// Ports `cbx_is_mtl` (mtmd.cpp:575 @cd959bae9): chatterbox multilingual
+/// has a perceiver in its conditioning encoder (speaker encoding context).
+fn cbxIsMtl(ctx_a: *clip.Ctx) bool {
+    return clip.cbxReadTensor(ctx_a, "a.cenc.perceiver.pre_attention_query", null, 0) > 0;
+}
+
+/// Ports `mtmd_context` (mtmd.cpp:579 @cd959bae9).
 pub const Context = struct {
     ctx_v: ?*clip.Ctx = null, // vision
     ctx_a: ?*clip.Ctx = null, // audio
@@ -768,6 +826,9 @@ pub const Context = struct {
 
     // generation context
     ctx_gen_a: ?*clip.Ctx = null, // audio
+
+    // gen-side reference data of the last encoded chunk (chatterbox), see mtmd_gen_state_set_ref()
+    gen_ref: clip.GenRef = .{},
 
     print_timings: bool = false,
     n_threads: c_int = 0,
@@ -813,15 +874,17 @@ pub const Context = struct {
     // batching
     batch_max_tokens: i32 = 0,
 
-    /// The constructor `mtmd_context` (mtmd.cpp:606 @8642541b2). A throw leaks the clip
+    /// The constructor `mtmd_context` (mtmd.cpp:634 @cd959bae9). A throw leaks the clip
     /// contexts as the C++'s does -- its destructor never runs for an
     /// object whose constructor threw, and the pointers are raw -- so that
     /// freeing them logs nothing upstream does not.
     fn create(mmproj_fname: [*:0]const u8, text_model: ?*const c.struct_llama_model, ctx_params: *const ContextParams, no_alloc: bool) Error!*Context {
         const self = try gpa.create(Context);
         self.* = .{};
-        errdefer self.deinitMembers();
+        // errdefers run last-registered first: the members go before the
+        // object that holds them
         errdefer gpa.destroy(self);
+        errdefer self.deinitMembers();
 
         self.print_timings = ctx_params.print_timings;
         self.n_threads = ctx_params.n_threads;
@@ -867,9 +930,8 @@ pub const Context = struct {
         self.ctx_v = res.ctx_v;
         self.ctx_a = res.ctx_a;
         self.ctx_gen_a = res.ctx_gen_a;
-        // soprano has no speaker encoder, its mmproj only holds the decoder
-        const gen_only = self.ctx_gen_a != null and clip.getProjectorType(self.ctx_gen_a.?) == .soprano;
-        if (self.ctx_v == null and self.ctx_a == null and !gen_only) {
+        // soprano and pocket-tts without voice cloning have no encoder
+        if (self.ctx_v == null and self.ctx_a == null and self.ctx_gen_a == null) {
             return clip.throwErr("Failed to load CLIP model from %s\n", .{mmproj_fname});
         }
 
@@ -907,7 +969,7 @@ pub const Context = struct {
         try list.appendSlice(gpa, toks);
     }
 
-    /// Ports `init_vision` (mtmd.cpp:707 @8642541b2).
+    /// Ports `init_vision` (mtmd.cpp:734 @cd959bae9).
     fn initVision(self: *Context) Error!void {
         impl.ggmlAssert(self.ctx_v != null, "mtmd.cpp", 735, "ctx_v != nullptr");
         self.image_preproc = null;
@@ -965,7 +1027,13 @@ pub const Context = struct {
                 self.use_image_id = true;
                 kind = if (proj == .minicpm_ocr_1_0) .minicpm_ocr_1_0 else .minicpmv;
             },
-            .qwen2vl, .qwen25vl, .qwen3vl, .ling3vl, .mimovl => {
+            .qwen3vl => {
+                // <|vision_start|> ... (image embeddings) ... <|vision_end|>
+                self.img_beg = "<|vision_start|>";
+                self.img_end = "<|vision_end|>";
+                kind = .qwen3vl;
+            },
+            .qwen2vl, .qwen25vl, .ling3vl, .mimovl => {
                 // <|vision_start|> ... (image embeddings) ... <|vision_end|>
                 self.img_beg = "<|vision_start|>";
                 self.img_end = "<|vision_end|>";
@@ -1185,7 +1253,7 @@ pub const Context = struct {
         self.image_preproc = image.Preprocessor.init(kind, hparams, proj);
     }
 
-    /// Ports `init_audio` (mtmd.cpp:1060 @8642541b2).
+    /// Ports `init_audio` (mtmd.cpp:1093 @cd959bae9).
     fn initAudio(self: *Context) Error!void {
         impl.ggmlAssert(self.ctx_a != null, "mtmd.cpp", 1094, "ctx_a != nullptr");
         if (self.audio_preproc) |*p| p.deinit();
@@ -1244,6 +1312,7 @@ pub const Context = struct {
                 break :blk .gemma4a;
             },
             .parakeet => .parakeet,
+            .nemotron_transcribe => .nemotron_transcribe,
             .gemma4ua => blk: {
                 self.aud_beg = "<|audio>";
                 self.aud_end = "<audio|>";
@@ -1262,12 +1331,15 @@ pub const Context = struct {
             },
             .qwen3tts_spkenc => .qwen3tts_spk,
             .pockettts_spkenc => .pockettts,
+            .chatterbox_spkenc => .chatterbox_ref,
             else => return clip.throwErr("%s: unexpected audio projector type %d\n", .{ "init_audio", @as(c_int, @backingInt(proj)) }),
         };
 
         // initialize audio preprocessor
         if (kind) |k| {
             self.audio_preproc = audio.Preprocessor.init(k, clip.getHparams(self.ctx_a.?));
+            // `mtmd_audio_preprocessor_chatterbox_ref(ctx_a, cbx_is_mtl(ctx_a))`
+            if (k == .chatterbox_ref) self.audio_preproc.?.is_mtl = cbxIsMtl(self.ctx_a.?);
             try self.audio_preproc.?.initialize();
         }
     }
@@ -1312,6 +1384,7 @@ pub const Context = struct {
 
     fn deinitMembers(self: *Context) void {
         if (self.audio_preproc) |*p| p.deinit();
+        self.gen_ref.deinit();
         self.out_embd.deinit(gpa);
         self.media_marker.deinit();
         inline for (.{ "tok_ov_img_start", "tok_ov_img_end", "tok_slices_start", "tok_slices_end", "tok_sli_img_start", "tok_sli_img_end", "tok_sli_img_mid", "tok_row_end" }) |f| {
@@ -1421,7 +1494,7 @@ const Soundtrack = struct {
     }
 };
 
-/// Ports `mtmd_tokenizer` (mtmd.cpp:1288 @8642541b2).
+/// Ports `mtmd_tokenizer` (mtmd.cpp:1329 @cd959bae9).
 const Tokenizer = struct {
     ctx: *const Context,
 
@@ -1671,12 +1744,16 @@ const Tokenizer = struct {
         try self.cur.entries.append(gpa, ch);
     }
 
-    /// Ports `add_media` (mtmd.cpp:1534 @8642541b2).
+    /// Ports `add_media` (mtmd.cpp:1575 @cd959bae9).
     fn addMedia(self: *Tokenizer, bitmaps: []const *const Bitmap) Error!i32 {
         impl.ggmlAssert(bitmaps.len != 0, "mtmd.cpp", 1576, "!bitmaps.empty()");
         const ctx = self.ctx;
 
         // note: only one type of media is supported per call, caller should enforce this
+        if (bitmaps[0].is_voice) {
+            impl.ggmlAssert(bitmaps.len == 1, "mtmd.cpp", 1580, "bitmaps.size() == 1");
+            return self.addVoice(bitmaps[0]);
+        }
         const is_vision = !bitmaps[0].is_audio;
 
         if (is_vision) {
@@ -1944,6 +2021,31 @@ const Tokenizer = struct {
                 }
             }
 
+            // one chunk for the five entries of a chatterbox clip, one token per talker conditioning row
+            if (clip.getProjectorType(ctx_a) == .chatterbox_spkenc) {
+                impl.ggmlAssert(mel_spec_chunks.items.len == 5, "mtmd.cpp", 1875, "mel_spec_chunks.size() == 5");
+                // mtl: spkr, perceiver query rows, emotion; turbo: spkr, t3 speech tokens
+                const n_query: usize = clip.cbxReadTensor(ctx_a, "a.cenc.perceiver.pre_attention_query", null, 0) / @as(usize, @intCast(try ctx.nEmbdOut()));
+                const n_tokens: usize = if (cbxIsMtl(ctx_a)) 2 + n_query else 1 + @as(usize, @bitCast(mel_spec_chunks.items[2].n_len)) / 4;
+
+                const audio_tokens = try gpa.create(AudioTokens);
+                audio_tokens.* = .{};
+                errdefer audio_tokens.destroy();
+                audio_tokens.batch_f32.is_audio = true;
+                for (mel_spec_chunks.items) |*mel_spec| {
+                    impl.ggmlAssert(mel_spec.n_len <= std.math.maxInt(i32) and mel_spec.n_len >= 0, "mtmd.cpp", 1883, "mel_spec.n_len <= INT32_MAX && mel_spec.n_len >= 0");
+                    impl.ggmlAssert(mel_spec.n_mel <= std.math.maxInt(i32) and mel_spec.n_mel >= 0, "mtmd.cpp", 1884, "mel_spec.n_mel <= INT32_MAX && mel_spec.n_mel >= 0");
+                    var mel_f32: impl.ImageF32 = .{};
+                    errdefer mel_f32.deinit();
+                    try mel_f32.setSize(.{ .width = @intCast(mel_spec.n_len), .height = @intCast(mel_spec.n_mel) }, mel_spec.data.items.len == 0, true);
+                    try mel_f32.cpyBuf(mel_spec.data.items);
+                    try audio_tokens.batch_f32.entries.append(gpa, mel_f32);
+                }
+                audio_tokens.n_tokens = @truncate(n_tokens);
+                try audio_tokens.id.set(bitmap.id.slice());
+
+                try self.pushChunk(.{ .type = .audio, .tokens_audio = audio_tokens });
+            } else
             // consider each mel_spec as a separate audio chunk
             for (mel_spec_chunks.items) |*mel_spec| {
                 const is_placeholder = mel_spec.data.items.len == 0;
@@ -1974,6 +2076,33 @@ const Tokenizer = struct {
             if (ctx.aud_end.len != 0) try self.addTextStr(ctx.aud_end, true); // add audio end token
         }
 
+        return 0;
+    }
+
+    /// Ports `add_voice` (mtmd.cpp:1949 @cd959bae9): a voice is a filled
+    /// track, its rows are the embeddings.
+    fn addVoice(self: *Tokenizer, bitmap: *const Bitmap) Error!i32 {
+        if (bitmap.ny == 0) {
+            impl.logErr("%s: error: voice \"%s\" holds no embeddings\n", .{ "add_voice", bitmap.id.cStr() });
+            return 2;
+        }
+        const track = try gpa.create(AudioTrack);
+        track.* = .{};
+        defer track.unref();
+        track.n_tokens = bitmap.ny;
+        const buf = bitmap.data.items;
+        const rows: [*]const f32 = @ptrCast(@alignCast(buf.ptr));
+        try track.embd.appendSlice(gpa, rows[0 .. buf.len / @sizeOf(f32)]);
+        if (bitmap.gen_ref) |g| track.gen_ref = g.retain();
+
+        const audio_tokens = try gpa.create(AudioTokens);
+        audio_tokens.* = .{};
+        errdefer audio_tokens.destroy();
+        audio_tokens.n_tokens = bitmap.ny;
+        try audio_tokens.id.set(bitmap.id.slice());
+        audio_tokens.track = track.ref();
+
+        try self.pushChunk(.{ .type = .audio, .tokens_audio = audio_tokens });
         return 0;
     }
 
@@ -2266,8 +2395,9 @@ fn encodeImpl(ctx: *Context, image_tokens: *const ImageTokens, out_embd: *std.Ar
     return if (ok) 0 else 1;
 }
 
-/// Ports `mtmd_encode_chunk_impl` (mtmd.cpp:2148 @8642541b2).
+/// Ports `mtmd_encode_chunk_impl` (mtmd.cpp:2252 @cd959bae9).
 fn encodeChunkImpl(ctx: *Context, chunk: *const InputChunk, out_embd: *std.ArrayList(f32)) Error!i32 {
+    ctx.gen_ref.deinit(); // see mtmd_gen_state_set_ref()
     if (chunk.type == .text) {
         impl.logWrn("mtmd_encode_chunk has no effect for text chunks\n", .{});
         return 0;
@@ -2286,10 +2416,6 @@ fn encodeChunkImpl(ctx: *Context, chunk: *const InputChunk, out_embd: *std.Array
         }
         return encodeImpl(ctx, t, out_embd);
     } else if (chunk.type == .audio) {
-        const ctx_a = ctx.ctx_a orelse {
-            impl.logErr("%s: model does not support audio input\n", .{"mtmd_encode_chunk_impl"});
-            return 1;
-        };
         const t = chunk.tokens_audio orelse {
             impl.logErr("%s: audio tokens are null\n", .{"mtmd_encode_chunk_impl"});
             return 1;
@@ -2298,22 +2424,31 @@ fn encodeChunkImpl(ctx: *Context, chunk: *const InputChunk, out_embd: *std.Array
             impl.logErr("%s: audio tokens batch is placeholder\n", .{"mtmd_encode_chunk_impl"});
             return 1;
         }
-        const n_mmproj_embd: c_int = @truncate(try ctx.nEmbdOut());
+        // a filled track (e.g. a voice) needs no audio encoder
+        if (ctx.ctx_a == null and (t.track == null or t.track.?.embd.items.len == 0)) {
+            impl.logErr("%s: model does not support audio input\n", .{"mtmd_encode_chunk_impl"});
+            return 1;
+        }
         if (t.track) |track| {
-            const ne: usize = @bitCast(@as(isize, n_mmproj_embd));
             if (track.embd.items.len == 0) {
-                try resizeZero(f32, &track.embd, @as(usize, track.n_tokens) * ne);
-                if (!try clip.imageBatchEncode(ctx_a, ctx.n_threads, &track.batch_f32, &track.embd)) {
+                try resizeZero(f32, &track.embd, @as(usize, track.n_tokens) *% @as(usize, @bitCast(@as(isize, @truncate(try ctx.nEmbdOut())))));
+                if (!try clip.imageBatchEncode(ctx.ctx_a.?, ctx.n_threads, &track.batch_f32, &track.embd)) {
                     track.embd.clearRetainingCapacity();
                     return 1;
                 }
             }
+            const ne = track.embd.items.len / track.n_tokens;
             const off = @as(usize, t.row_begin) * ne;
             out_embd.clearRetainingCapacity();
             try out_embd.appendSlice(gpa, track.embd.items[off .. off + @as(usize, t.n_tokens) * ne]);
+            if (track.gen_ref) |g| try ctx.gen_ref.assign(&g.ref);
             return 0;
         }
-        try resizeZero(f32, out_embd, @as(usize, t.n_tokens) *% @as(usize, @bitCast(@as(isize, n_mmproj_embd))));
+        if (clip.getProjectorType(ctx.ctx_a.?) == .chatterbox_spkenc) {
+            return cbxRefEncode(ctx, t, out_embd);
+        }
+        const ctx_a = ctx.ctx_a.?;
+        try resizeZero(f32, out_embd, @as(usize, t.n_tokens) *% @as(usize, @bitCast(@as(isize, @truncate(try ctx.nEmbdOut())))));
         const ok = try clip.imageBatchEncode(ctx_a, ctx.n_threads, &t.batch_f32, out_embd);
         return if (ok) 0 else 1;
     }
@@ -2347,15 +2482,16 @@ pub fn mtmd_get_output_embd(ctx: *Context) callconv(.c) ?[*]f32 {
 // -----------------------------------------------------------------------------
 // audio generation
 
-/// Ports `mtmd_gen_audio_get_info` (mtmd.cpp:2234 @8642541b2).
+/// Ports `mtmd_gen_audio_get_info` (mtmd.cpp:2346 @cd959bae9).
 pub fn mtmd_gen_audio_get_info(ctx: *const Context) callconv(.c) GenAudioInfo {
-    var info: GenAudioInfo = .{ .type = .none, .sample_rate = 0, .model_variant = "" };
+    var info: GenAudioInfo = .{ .type = .none, .sample_rate = 0, .model_variant = "", .n_voices = 0 };
     const g = ctx.ctx_gen_a orelse {
         info.type = .none;
         return info;
     };
     // `Loader.getString` keeps a NUL past the string's end.
     info.model_variant = @ptrCast(clip.getHparams(g).gen_model_variant.ptr);
+    info.n_voices = @intCast(clip.genGetVoices(g).count());
     switch (clip.getProjectorType(g)) {
         .qwen3tts_gen => {
             info.type = .qwen3tts;
@@ -2373,9 +2509,529 @@ pub fn mtmd_gen_audio_get_info(ctx: *const Context) callconv(.c) GenAudioInfo {
             info.type = .lfm3a;
             info.sample_rate = 24000;
         },
+        .chatterbox => {
+            info.type = .chatterbox;
+            info.sample_rate = 24000;
+        },
         else => info.type = .none,
     }
     return info;
+}
+
+/// Ports `mtmd_gen_audio_read_tensor` (mtmd.cpp:2383 @cd959bae9): a named
+/// tensor of the gen audio model as F32, returns the element count (0 if not
+/// found); `out` may be null to query the size.
+pub fn mtmd_gen_audio_read_tensor(ctx: *Context, name: [*:0]const u8, out: ?[*]f32, n_max: usize) callconv(.c) usize {
+    const g = ctx.ctx_gen_a orelse return 0;
+    return clip.cbxReadTensor(g, std.mem.span(name), out, n_max);
+}
+
+// -----------------------------------------------------------------------------
+// chatterbox speaker-clip cloning: the five entries of a CHATTERBOX_SPKENC
+// chunk to talker conditioning rows and the flow decoder's reference
+
+/// A one-entry audio batch holding a copy of `mel`, as `cbx_ref_xvec` and
+/// `cbx_ref_tokenize` build it. The caller owns the batch.
+fn cbxOneEntryBatch(mel: *const impl.ImageF32) Error!impl.ImageF32Batch {
+    var batch: impl.ImageF32Batch = .{};
+    errdefer batch.deinit();
+    batch.is_audio = true;
+    {
+        var mel_img: impl.ImageF32 = .{};
+        errdefer mel_img.deinit();
+        try mel_img.setSize(mel.getSize(), false, true);
+        try mel_img.cpyBuf(mel.buf.items);
+        try batch.entries.append(gpa, mel_img);
+    }
+    return batch;
+}
+
+/// Ports `cbx_ref_xvec` (mtmd.cpp:2391 @cd959bae9): the raw 192-dim
+/// CAMPPlus x-vector of the fbank entry.
+fn cbxRefXvec(ctx: *Context, fbank: *const impl.ImageF32, xvec: *std.ArrayList(f32)) Error!bool {
+    var batch = try cbxOneEntryBatch(fbank);
+    defer batch.deinit();
+    try resizeZero(f32, xvec, 192);
+    if (!try clip.imageBatchEncode(ctx.ctx_a.?, ctx.n_threads, &batch, xvec)) {
+        impl.logErr("%s: speaker encoder failed\n", .{"cbx_ref_xvec"});
+        return false;
+    }
+    return true;
+}
+
+/// Ports `cbx_ref_tokenize` (mtmd.cpp:2407 @cd959bae9): the s3 speech
+/// tokens of a log-mel entry; `rows` optionally receives their speech
+/// embedding rows.
+fn cbxRefTokenize(ctx: *Context, mel: *const impl.ImageF32, codes: *std.ArrayList(i32), rows: ?*std.ArrayList(f32)) Error!i32 {
+    var batch = try cbxOneEntryBatch(mel);
+    defer batch.deinit();
+
+    var out_codes: std.ArrayList(i32) = .empty;
+    defer out_codes.deinit(gpa);
+    var out_embd: std.ArrayList(f32) = .empty;
+    defer out_embd.deinit(gpa);
+
+    var params: clip.EncodeParams = .{
+        .imgs = &batch,
+        .n_threads = ctx.n_threads,
+        .gen_process = .tokenize,
+        .out_codes = &out_codes,
+        .out_code_embd = if (rows != null) &out_embd else null,
+    };
+
+    if (!try clip.encode(ctx.ctx_gen_a.?, &params)) {
+        impl.logErr("%s: clip_encode failed (tokenize)\n", .{"cbx_ref_tokenize"});
+        return 1;
+    }
+
+    codes.deinit(gpa);
+    codes.* = out_codes;
+    out_codes = .empty;
+    if (rows) |r| {
+        r.deinit(gpa);
+        r.* = out_embd;
+        out_embd = .empty;
+    }
+    return 0;
+}
+
+/// A lambda of `cbx_ref_cond`, its `read_t` (mtmd.cpp:2444 @cd959bae9): a
+/// chatterbox host tensor as F32, or null if it is missing or not
+/// `n_expect` long (0 accepts any non-empty size). The slice is allocated
+/// from `a`.
+fn cbxReadT(a: std.mem.Allocator, ctx_clip: *clip.Ctx, name: []const u8, n_expect: usize) Error!?[]f32 {
+    const n = clip.cbxReadTensor(ctx_clip, name, null, 0);
+    if (n == 0 or (n_expect > 0 and n != n_expect)) {
+        return null;
+    }
+    const v = try a.alloc(f32, n);
+    @memset(v, 0.0);
+    return if (clip.cbxReadTensor(ctx_clip, name, v.ptr, n) == n) v else null;
+}
+
+/// `sum += (x[i] - mean) * (x[i] - mean)` over a `float` row into a
+/// `double`, as the reference `mtmd.o` computes `cbx_ref_cond`'s
+/// `layer_norm` variance: the loop vectorizer's strict in-order reduction,
+/// products rounded in whole groups of four and only the `n % 4` past the
+/// last group fused (read off its disassembly at `-O2`, baseline CPU; the
+/// same shape as `audio.zig`'s `strictSquareSum`).
+fn cbxStrictSquareSum(row: []const f32, mean: f64) f64 {
+    var sum: f64 = 0.0;
+    const split = row.len - row.len % 4;
+    for (row[0..split]) |v| {
+        const d: f64 = @as(f64, v) - mean;
+        sum += d * d;
+    }
+    for (row[split..]) |v| {
+        const d: f64 = @as(f64, v) - mean;
+        sum = @mulAdd(f64, d, d, sum);
+    }
+    return sum;
+}
+
+/// The perceiver's weights: the locals of `cbx_ref_cond`'s perceiver arm,
+/// which opens on its `query` (mtmd.cpp:2565 @cd959bae9), that its lambdas
+/// capture.
+const CbxPerceiver = struct {
+    a: std.mem.Allocator,
+    n_e: usize,
+    n_head: usize,
+    d_head: usize,
+    ln_w: []const f32,
+    ln_b: []const f32,
+    wq: []const f32,
+    bq: []const f32,
+    wk: []const f32,
+    bk: []const f32,
+    wv: []const f32,
+    bv: []const f32,
+    wo: []const f32,
+    bo: []const f32,
+
+    /// The `layer_norm` lambda (mtmd.cpp:2585 @cd959bae9).
+    fn layerNorm(self: *const CbxPerceiver, in: []const f32, out: []f32) void {
+        const n_e = self.n_e;
+        var mean: f64 = 0.0;
+        for (in[0..n_e]) |v| mean += v;
+        mean /= @as(f64, @floatFromInt(n_e));
+        const variance = cbxStrictSquareSum(in[0..n_e], mean);
+        const sd = @sqrt(variance / @as(f64, @floatFromInt(n_e)) + 1e-5);
+        for (0..n_e) |i| {
+            out[i] = @floatCast(@mulAdd(f64, (@as(f64, in[i]) - mean) / sd, self.ln_w[i], self.ln_b[i]));
+        }
+    }
+
+    /// The `linear` lambda (mtmd.cpp:2599 @cd959bae9). The products of two
+    /// `float`s in `double` are exact, so whether clang fuses the sum
+    /// cannot change a bit.
+    fn linear(self: *const CbxPerceiver, w: []const f32, b: []const f32, in: []const f32, n_rows: usize) Error![]f32 {
+        const n_e = self.n_e;
+        const out = try self.a.alloc(f32, n_rows * n_e);
+        for (0..n_rows) |r| {
+            for (0..n_e) |o| {
+                var acc: f64 = b[o];
+                const wr = w[o * n_e ..][0..n_e];
+                const ir = in[r * n_e ..][0..n_e];
+                for (wr, ir) |wv, iv| acc += @as(f64, wv) * @as(f64, iv);
+                out[r * n_e + o] = @floatCast(acc);
+            }
+        }
+        return out;
+    }
+
+    /// The `attn_block` lambda (mtmd.cpp:2614 @cd959bae9): a pre-norm
+    /// multi-head attention of `x1` over `x2`, plus the residual.
+    fn attnBlock(self: *const CbxPerceiver, x1: []const f32, n1: usize, x2: []const f32, n2: usize) Error![]f32 {
+        const n_e = self.n_e;
+        const d_head = self.d_head;
+        const nx1 = try self.a.alloc(f32, n1 * n_e);
+        const nx2 = try self.a.alloc(f32, n2 * n_e);
+        for (0..n1) |r| self.layerNorm(x1[r * n_e ..][0..n_e], nx1[r * n_e ..][0..n_e]);
+        for (0..n2) |r| self.layerNorm(x2[r * n_e ..][0..n_e], nx2[r * n_e ..][0..n_e]);
+        const q = try self.linear(self.wq, self.bq, nx1, n1);
+        const k = try self.linear(self.wk, self.bk, nx2, n2);
+        const v = try self.linear(self.wv, self.bv, nx2, n2);
+
+        const ctxt = try self.a.alloc(f32, n1 * n_e);
+        @memset(ctxt, 0.0);
+        const sc = try self.a.alloc(f64, n2);
+        @memset(sc, 0.0);
+        for (0..self.n_head) |hd| {
+            const off = hd * d_head;
+            for (0..n1) |t| {
+                var mx: f64 = -1e30;
+                for (0..n2) |s| {
+                    var acc: f64 = 0.0;
+                    for (0..d_head) |i| {
+                        acc += @as(f64, q[t * n_e + off + i]) * @as(f64, k[s * n_e + off + i]);
+                    }
+                    sc[s] = acc / @sqrt(@as(f64, @floatFromInt(d_head)));
+                    mx = if (mx < sc[s]) sc[s] else mx;
+                }
+                var sum: f64 = 0.0;
+                for (sc) |*e| {
+                    e.* = exp(e.* - mx);
+                    sum += e.*;
+                }
+                for (0..d_head) |i| {
+                    // strided over v: clang leaves it scalar and fused (it
+                    // vectorizes only a unit stride, n_e == 1)
+                    var acc: f64 = 0.0;
+                    for (0..n2) |s| {
+                        acc = @mulAdd(f64, sc[s], @as(f64, v[s * n_e + off + i]), acc);
+                    }
+                    ctxt[t * n_e + off + i] = @floatCast(acc / sum);
+                }
+            }
+        }
+        const out = try self.linear(self.wo, self.bo, ctxt, n1);
+        for (out, x1[0..out.len]) |*o, x| o.* += x;
+        return out;
+    }
+};
+
+/// Ports `cbx_ref_cond` (mtmd.cpp:2440 @cd959bae9): the talker
+/// conditioning rows -- the speaker row, then on mtl the perceiver block
+/// and the emotion row.
+fn cbxRefCond(ctx: *Context, ve_mel: *const impl.ImageF32, pse: []const f32, out_rows: *std.ArrayList(f32)) Error!i32 {
+    const func = "cbx_ref_cond";
+    const ctx_clip = ctx.ctx_a.?;
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // voice encoder (embeds_from_wavs): 3-layer lstm per 160-frame partial, the normalized partial embeddings are averaged
+    const mel = ve_mel.buf.items;
+    const n_mel: usize = 40;
+    const n_partial: c_int = 160;
+    const n_h: usize = 256;
+    const step: c_int = @intCast(lround((@as(f64, 16000.0) / 1.3) / @as(f64, n_partial))); // reference rate 1.3
+    if (ve_mel.nx() < n_partial or mel.len < @as(usize, @intCast(ve_mel.nx())) * n_mel) {
+        impl.logErr("%s: voice encoder mel too short\n", .{func});
+        return 1;
+    }
+    const n_wins: usize = @intCast(@divTrunc(ve_mel.nx() - n_partial, step) + 1);
+
+    var w_ih: [3][]const f32 = undefined;
+    var w_hh: [3][]const f32 = undefined;
+    var b_ih: [3][]const f32 = undefined;
+    var b_hh: [3][]const f32 = undefined;
+    for (0..3) |l| {
+        const n_in: usize = if (l == 0) n_mel else n_h;
+        var nb: [64]u8 = undefined;
+        w_ih[l] = (try cbxReadT(a, ctx_clip, std.fmt.bufPrint(&nb, "a.ve.lstm.weight_ih_l{d}", .{l}) catch unreachable, 4 * n_h * n_in)) orelse {
+            impl.logErr("%s: model has no voice encoder\n", .{func});
+            return 1;
+        };
+        w_hh[l] = (try cbxReadT(a, ctx_clip, std.fmt.bufPrint(&nb, "a.ve.lstm.weight_hh_l{d}", .{l}) catch unreachable, 4 * n_h * n_h)) orelse {
+            impl.logErr("%s: model has no voice encoder\n", .{func});
+            return 1;
+        };
+        b_ih[l] = (try cbxReadT(a, ctx_clip, std.fmt.bufPrint(&nb, "a.ve.lstm.bias_ih_l{d}", .{l}) catch unreachable, 4 * n_h)) orelse {
+            impl.logErr("%s: model has no voice encoder\n", .{func});
+            return 1;
+        };
+        b_hh[l] = (try cbxReadT(a, ctx_clip, std.fmt.bufPrint(&nb, "a.ve.lstm.bias_hh_l{d}", .{l}) catch unreachable, 4 * n_h)) orelse {
+            impl.logErr("%s: model has no voice encoder\n", .{func});
+            return 1;
+        };
+    }
+    const w_proj = (try cbxReadT(a, ctx_clip, "a.ve.proj.weight", n_h * n_h)) orelse {
+        impl.logErr("%s: model has no voice encoder projection\n", .{func});
+        return 1;
+    };
+    const b_proj = (try cbxReadT(a, ctx_clip, "a.ve.proj.bias", n_h)) orelse {
+        impl.logErr("%s: model has no voice encoder projection\n", .{func});
+        return 1;
+    };
+
+    const ve = try a.alloc(f32, n_h);
+    @memset(ve, 0.0);
+    const h = try a.alloc(f32, 3 * n_h);
+    const cs = try a.alloc(f32, 3 * n_h);
+    const x = try a.alloc(f32, n_h);
+    const g = try a.alloc(f32, 4 * n_h);
+    @memset(x, 0.0);
+    @memset(g, 0.0);
+    const e = try a.alloc(f32, n_h);
+    for (0..n_wins) |p| {
+        @memset(h, 0.0);
+        @memset(cs, 0.0);
+        for (0..@intCast(n_partial)) |t| {
+            var in: []const f32 = mel[(p * @as(usize, @intCast(step)) + t) * n_mel ..][0..n_mel];
+            for (0..3) |l| {
+                const hl = h[l * n_h ..][0..n_h];
+                const cl = cs[l * n_h ..][0..n_h];
+                const n_in = in.len;
+                for (0..4 * n_h) |j| {
+                    // a `float` sum, widened; the products of two `float`s
+                    // in `double` are exact, fused or not
+                    var acc: f64 = b_ih[l][j] + b_hh[l][j];
+                    const wi = w_ih[l][j * n_in ..][0..n_in];
+                    for (wi, in) |wv, iv| acc += @as(f64, wv) * @as(f64, iv);
+                    const wh = w_hh[l][j * n_h ..][0..n_h];
+                    for (wh, hl) |wv, hv| acc += @as(f64, wv) * @as(f64, hv);
+                    g[j] = @floatCast(acc);
+                }
+                // torch gate order: input, forget, cell, output
+                for (0..n_h) |i| {
+                    const gi = 1.0 / (1.0 + expf(-g[i]));
+                    const gf = 1.0 / (1.0 + expf(-g[i + n_h]));
+                    const gc = tanhf(g[i + 2 * n_h]);
+                    const go = 1.0 / (1.0 + expf(-g[i + 3 * n_h]));
+                    cl[i] = @mulAdd(f32, gf, cl[i], gi * gc);
+                    x[i] = go * tanhf(cl[i]);
+                }
+                @memcpy(hl, x);
+                in = hl;
+            }
+        }
+        // projected, relu'd, normalized partial embedding
+        var norm: f64 = 0.0;
+        const hl = h[2 * n_h ..][0..n_h];
+        for (0..n_h) |o| {
+            var acc: f64 = b_proj[o];
+            const w = w_proj[o * n_h ..][0..n_h];
+            for (w, hl) |wv, hv| acc += @as(f64, wv) * @as(f64, hv);
+            e[o] = @floatCast(if (acc < 0.0) 0.0 else acc);
+            norm += @as(f64, e[o]) * @as(f64, e[o]);
+        }
+        norm = @sqrt(norm);
+        for (0..n_h) |o| {
+            ve[o] += @as(f32, @floatCast(@as(f64, e[o]) / norm));
+        }
+    }
+    {
+        var norm: f64 = 0.0;
+        for (ve) |v| norm += @as(f64, v) * @as(f64, v);
+        norm = @sqrt(norm);
+        for (ve) |*v| v.* = @floatCast(@as(f64, v.*) / norm);
+    }
+
+    // speaker projection row
+    const n_e: usize = @intCast(try ctx.nEmbdOut());
+    const w_spkr = try cbxReadT(a, ctx_clip, "a.cenc.spkr_enc.weight", n_e * n_h);
+    const b_spkr = if (w_spkr != null) try cbxReadT(a, ctx_clip, "a.cenc.spkr_enc.bias", n_e) else null;
+    if (w_spkr == null or b_spkr == null) {
+        impl.logErr("%s: model has no speaker conditioning projection\n", .{func});
+        return 1;
+    }
+    var rows: std.ArrayList(f32) = .empty;
+    defer rows.deinit(gpa);
+    try rows.resize(gpa, n_e);
+    for (0..n_e) |o| {
+        var acc: f64 = b_spkr.?[o];
+        const w = w_spkr.?[o * n_h ..][0..n_h];
+        for (w, ve) |wv, vv| acc += @as(f64, wv) * @as(f64, vv);
+        rows.items[o] = @floatCast(acc);
+    }
+
+    // the perceiver runs its shared attention block as cross then self attention
+    if (try cbxReadT(a, ctx_clip, "a.cenc.perceiver.pre_attention_query", 0)) |query| {
+        const n_head: usize = 4;
+        const n_ee = n_e * n_e;
+        if (pse.len == 0 or pse.len % n_e != 0 or query.len % n_e != 0 or n_e % n_head != 0) {
+            impl.logErr("%s: reference speech embeddings required for the perceiver\n", .{func});
+            return 1;
+        }
+        const names_ = [_]struct { []const u8, usize }{
+            .{ "a.cenc.perceiver.attn.norm.weight", n_e },
+            .{ "a.cenc.perceiver.attn.norm.bias", n_e },
+            .{ "a.cenc.perceiver.attn.to_q.weight", n_ee },
+            .{ "a.cenc.perceiver.attn.to_q.bias", n_e },
+            .{ "a.cenc.perceiver.attn.to_k.weight", n_ee },
+            .{ "a.cenc.perceiver.attn.to_k.bias", n_e },
+            .{ "a.cenc.perceiver.attn.to_v.weight", n_ee },
+            .{ "a.cenc.perceiver.attn.to_v.bias", n_e },
+            .{ "a.cenc.perceiver.attn.proj_out.weight", n_ee },
+            .{ "a.cenc.perceiver.attn.proj_out.bias", n_e },
+            .{ "a.cenc.emotion_adv_fc.weight", n_e },
+        };
+        var t: [names_.len][]const f32 = undefined;
+        for (names_, 0..) |nm, i| {
+            t[i] = (try cbxReadT(a, ctx_clip, nm[0], nm[1])) orelse {
+                impl.logErr("%s: model has an incomplete perceiver\n", .{func});
+                return 1;
+            };
+        }
+        const pc: CbxPerceiver = .{
+            .a = a,
+            .n_e = n_e,
+            .n_head = n_head,
+            .d_head = n_e / n_head,
+            .ln_w = t[0],
+            .ln_b = t[1],
+            .wq = t[2],
+            .bq = t[3],
+            .wk = t[4],
+            .bk = t[5],
+            .wv = t[6],
+            .bv = t[7],
+            .wo = t[8],
+            .bo = t[9],
+        };
+        const emo = t[10];
+
+        const n_q = query.len / n_e;
+        const pre = try pc.attnBlock(query, n_q, pse, pse.len / n_e);
+        const p32 = try pc.attnBlock(pre, n_q, pre, n_q);
+
+        try rows.appendSlice(gpa, p32);
+        const exaggeration: f32 = 0.5; // reference default
+        for (0..n_e) |i| {
+            try rows.append(gpa, emo[i] * exaggeration);
+        }
+    }
+
+    out_rows.deinit(gpa);
+    out_rows.* = rows;
+    rows = .empty;
+    return 0;
+}
+
+/// Ports `cbx_ref_encode` (mtmd.cpp:2679 @cd959bae9): the talker
+/// conditioning rows go to `out_embd`, the flow decoder reference to
+/// `ctx.gen_ref`.
+fn cbxRefEncode(ctx: *Context, audio_tokens: *const AudioTokens, out_embd: *std.ArrayList(f32)) Error!i32 {
+    const func = "cbx_ref_encode";
+    if (ctx.ctx_gen_a == null) {
+        impl.logErr("%s: reference encoding needs the audio generation context\n", .{func});
+        return 1;
+    }
+    const entries = audio_tokens.batch_f32.entries.items;
+    impl.ggmlAssert(entries.len == 5, "mtmd.cpp", 2685, "entries.size() == 5");
+
+    var xvec: std.ArrayList(f32) = .empty;
+    defer xvec.deinit(gpa);
+    if (!try cbxRefXvec(ctx, &entries[0], &xvec)) {
+        return 1;
+    }
+
+    var flow_codes: std.ArrayList(i32) = .empty;
+    defer flow_codes.deinit(gpa);
+    var t3_codes: std.ArrayList(i32) = .empty;
+    defer t3_codes.deinit(gpa);
+    var t3_rows: std.ArrayList(f32) = .empty;
+    defer t3_rows.deinit(gpa);
+    if (try cbxRefTokenize(ctx, &entries[1], &flow_codes, null) != 0 or
+        try cbxRefTokenize(ctx, &entries[2], &t3_codes, &t3_rows) != 0)
+    {
+        return 1;
+    }
+
+    const nx3: usize = @intCast(entries[3].nx());
+    const n_feat = nx3 * 80;
+    if (nx3 != 2 * flow_codes.items.len) {
+        impl.logErr("%s: reference mel length %d does not match %zu codes\n", .{ func, entries[3].nx(), flow_codes.items.len });
+        return 1;
+    }
+
+    // [spkr, perceiver block] on mtl, [spkr, reference speech rows] on turbo
+    const mtl = cbxIsMtl(ctx.ctx_a.?);
+    var pse: std.ArrayList(f32) = .empty;
+    defer pse.deinit(gpa);
+    if (mtl) {
+        // `pse = std::move(t3_rows)`: t3_rows is left empty
+        pse = t3_rows;
+        t3_rows = .empty;
+    }
+    var rows: std.ArrayList(f32) = .empty;
+    defer rows.deinit(gpa);
+    if (try cbxRefCond(ctx, &entries[4], pse.items, &rows) != 0) {
+        return 1;
+    }
+    if (!mtl) {
+        try rows.appendSlice(gpa, t3_rows.items);
+    }
+    if (rows.items.len != @as(usize, audio_tokens.n_tokens) * @as(usize, @intCast(try ctx.nEmbdOut()))) {
+        impl.logErr("%s: unexpected number of conditioning rows\n", .{func});
+        return 1;
+    }
+
+    ctx.gen_ref.tokens.deinit(gpa);
+    ctx.gen_ref.tokens = flow_codes;
+    flow_codes = .empty;
+    ctx.gen_ref.feat.clearRetainingCapacity();
+    try ctx.gen_ref.feat.appendSlice(gpa, entries[3].buf.items[0..n_feat]);
+    ctx.gen_ref.spk.deinit(gpa);
+    ctx.gen_ref.spk = xvec;
+    xvec = .empty;
+
+    out_embd.deinit(gpa);
+    out_embd.* = rows;
+    rows = .empty;
+    return 0;
+}
+
+/// Ports `mtmd_gen_audio_voice_name` (mtmd.cpp:2732 @cd959bae9): the name of
+/// the idx-th predefined voice, null when idx is out of range.
+pub fn mtmd_gen_audio_voice_name(ctx: *const Context, idx: i32) callconv(.c) ?[*:0]const u8 {
+    const g = ctx.ctx_gen_a orelse return null;
+    if (idx < 0) return null;
+    const voices = clip.genGetVoices(g);
+    return if (idx < @as(i32, @intCast(voices.count()))) voices.entries.items[@intCast(idx)].name.ptr else null;
+}
+
+/// Ports `mtmd_gen_audio_get_voice` (mtmd.cpp:2740 @cd959bae9): the
+/// predefined voice with this name as a voice bitmap, to pass as speaker
+/// reference; null if there is no such voice, the caller must free it.
+pub fn mtmd_gen_audio_get_voice(ctx: *const Context, name: ?[*:0]const u8) callconv(.c) ?*Bitmap {
+    const g = ctx.ctx_gen_a orelse return null;
+    const n = std.mem.span(name orelse return null);
+    // the name is matched case-insensitively, as the lfm3a "tts" chat template lowers it
+    for (clip.genGetVoices(g).entries.items) |*e| {
+        if (e.name.len != n.len) continue;
+        var eq = true;
+        for (e.name, n) |a, b| {
+            if (std.ascii.toLower(a) != std.ascii.toLower(b)) {
+                eq = false;
+                break;
+            }
+        }
+        if (!eq) continue;
+        return Bitmap.initVoice(e.name, &e.voice, @intCast(clip.nMmprojEmbd(g))) catch oom();
+    }
+    return null;
 }
 
 /// Ports `mtmd_gen_inp_default` (mtmd.cpp:2756 @cd959bae9).
@@ -2419,7 +3075,7 @@ fn moveList(comptime T: type, dst: *std.ArrayList(T), src: *std.ArrayList(T)) vo
     src.* = .empty;
 }
 
-/// Ports `mtmd_gen_state` (mtmd.cpp:2305 @8642541b2).
+/// Ports `mtmd_gen_state` (mtmd.cpp:2795 @cd959bae9).
 pub const GenState = struct {
     ctx_clip: ?*clip.Ctx = null,
     clip_state: ?*clip.GenState = null,
@@ -2429,11 +3085,15 @@ pub const GenState = struct {
     out_embd: std.ArrayList(f32) = .empty, // next-step hidden state fed back to backbone (GEN_CODE)
     out_audio: std.ArrayList(f32) = .empty, // decoded PCM samples for the current frame (GEN_WAV)
 
+    // voice reference for GEN_WAV, from a speaker clip or a predefined voice (chatterbox)
+    ref: clip.GenRef = .{},
+
     // lfm3a: the codec graph yields STFT frames, the ISTFT runs on the host
     istft: ?audio.StreamingIstft = null,
 
     fn destroy(self: *GenState) void {
         if (self.istft) |*i| i.deinit();
+        self.ref.deinit();
         self.out_audio.deinit(gpa);
         self.out_embd.deinit(gpa);
         self.out_feats.deinit(gpa);
@@ -2489,6 +3149,27 @@ pub fn mtmd_gen_state_reset(state: *GenState) callconv(.c) void {
         i.deinit();
         i.* = audio.StreamingIstft.init(hparams.audio_n_fft, hparams.audio_hop_len) catch impl.abortUncaught("std::bad_alloc", "std::bad_alloc");
     }
+}
+
+/// Ports `mtmd_gen_state_set_ref` (mtmd.cpp:2913 @cd959bae9): copies the
+/// gen-side reference data of the last `mtmd_encode_chunk()` call into the
+/// state (speaker clip or predefined voice); non-zero if the last encode
+/// produced no such data.
+pub fn mtmd_gen_state_set_ref(ctx: *Context, state: ?*GenState) callconv(.c) i32 {
+    const st = state orelse {
+        impl.logErr("%s: invalid gen state\n", .{"mtmd_gen_state_set_ref"});
+        return 1;
+    };
+    if (st.ctx_clip != ctx.ctx_gen_a) {
+        impl.logErr("%s: invalid gen state\n", .{"mtmd_gen_state_set_ref"});
+        return 1;
+    }
+    if (ctx.gen_ref.tokens.items.len == 0) {
+        impl.logErr("%s: the last encode produced no reference data\n", .{"mtmd_gen_state_set_ref"});
+        return 1;
+    }
+    st.ref.assign(&ctx.gen_ref) catch oom();
+    return 0;
 }
 
 /// Ports `mtmd_gen_wav_lfm3a` (mtmd.cpp:2852 @cd959bae9): lfm3a GEN_WAV, the ISTFT of the
@@ -2568,7 +3249,7 @@ fn genWavLfm3a(ctx: *Context, state: *GenState, inp: *const GenInp, out: *GenOut
     return 0;
 }
 
-/// Ports `mtmd_gen_audio_process_impl` (mtmd.cpp:2420 @8642541b2).
+/// Ports `mtmd_gen_audio_process_impl` (mtmd.cpp:2926 @cd959bae9).
 fn genAudioProcessImpl(ctx: *Context, state: ?*GenState, inp: *const GenInp, out: *GenOut) Error!i32 {
     const ctx_clip = ctx.ctx_gen_a orelse {
         impl.logErr("%s: model does not support audio generation\n", .{"mtmd_gen_audio_process_impl"});
@@ -2663,6 +3344,50 @@ fn genAudioProcessImpl(ctx: *Context, state: ?*GenState, inp: *const GenInp, out
     }
 
     // MTMD_GEN_PROCESS_TYPE_GEN_WAV
+    if (clip.getProjectorType(ctx_clip) == .chatterbox) {
+        if (inp.codes == null or inp.n_codes == 0) {
+            impl.logErr("%s: codes required for gen_wav\n", .{"mtmd_gen_audio_process_impl"});
+            return 1;
+        }
+        if (st.ref.tokens.items.len == 0) {
+            impl.logErr("%s: gen_wav needs a voice reference, see mtmd_gen_state_set_ref()\n", .{"mtmd_gen_audio_process_impl"});
+            return 1;
+        }
+        var cbx_codes: std.ArrayList(i32) = .empty;
+        defer cbx_codes.deinit(gpa);
+        try cbx_codes.appendSlice(gpa, inp.codes.?[0..inp.n_codes]);
+
+        // the batch entry is unused, present to satisfy the encode interface
+        var cbx_batch: impl.ImageF32Batch = .{ .is_audio = true };
+        defer cbx_batch.deinit();
+        {
+            var dummy: impl.ImageF32 = .{};
+            errdefer dummy.deinit();
+            try dummy.setSize(.{ .width = 1, .height = 1 }, false, true);
+            try dummy.cpyBuf(&.{0.0});
+            try cbx_batch.entries.append(gpa, dummy);
+        }
+
+        var cbx_params: clip.EncodeParams = .{
+            .imgs = &cbx_batch,
+            .n_threads = ctx.n_threads,
+            .gen_process = .tts,
+            .codes = &cbx_codes,
+            .out_audio = &st.out_audio,
+            .ref = &st.ref,
+            .gen_state = st.clip_state,
+        };
+
+        if (!try clip.encode(ctx_clip, &cbx_params)) {
+            impl.logErr("%s: clip_encode failed (gen_wav)\n", .{"mtmd_gen_audio_process_impl"});
+            return 1;
+        }
+
+        out.audio = dataPtr(f32, &st.out_audio);
+        out.n_samples = st.out_audio.items.len;
+        return 0;
+    }
+
     const has_codes = inp.codes != null and inp.n_codes > 0;
     const has_feats = inp.feats != null and inp.n_feats > 0;
     if (has_codes == has_feats) {
@@ -2885,12 +3610,13 @@ pub fn mtmd_get_audio_sample_rate(ctx: *const Context) callconv(.c) c_int {
     return clip.getHparams(a).audio_sample_rate;
 }
 
-/// Ports `mtmd_video_template` (mtmd.h:62 @8642541b2): how the frames and timestamps of a
+/// Ports `mtmd_video_template` (mtmd.h:62 @cd959bae9): how the frames and timestamps of a
 /// video are laid out in the prompt.
 pub const VideoTemplate = enum(c_int) {
     default, // "Video:" prefix, then a "[XmY.YYs]" timestamp every N ms
     lfm3, // "<X.X seconds>" before every group of 2 frames
     lfm3_omni, // same as LFM3, then the soundtrack of each group, as an audio bitmap after its frames
+    qwen3vl, // "<X.X seconds>" before every group of 2 frames, no markers around the whole video
     _,
 };
 
@@ -2905,31 +3631,42 @@ pub const VideoConfig = extern struct {
     frame_height: i32,
 };
 
-/// Ports `mtmd_get_video_config` (mtmd.cpp:2724 @8642541b2): `src_n_frames` and
-/// `src_fps` can be <= 0 if unknown.
-pub fn mtmd_get_video_config(ctx: *const Context, src_width: i32, src_height: i32, src_n_frames: i32, src_fps: f32) callconv(.c) VideoConfig {
-    var cfg: VideoConfig = .{ .tmpl = .default, .fps = 0.0, .n_frames = 0, .frame_width = 0, .frame_height = 0 };
-    if (ctx.ctx_v == null or clip.getProjectorType(ctx.ctx_v.?) != .lfm3vl) return cfg;
+/// Ports `mtmd_video_config_init` (mtmd.cpp:3268 @cd959bae9), declared in
+/// `mtmd-internal.h`: `mtmd_get_video_config()` for a given template, without
+/// a context.
+pub fn videoConfigInit(tmpl: VideoTemplate, preproc: ?*const image.Preprocessor, src_width: i32, src_height: i32, src_n_frames: i32, src_fps: f32) VideoConfig {
+    var cfg: VideoConfig = .{ .tmpl = tmpl, .fps = 0.0, .n_frames = 0, .frame_width = 0, .frame_height = 0 };
+    if (tmpl == .default) return cfg;
 
-    // matches Lfm3VlVideoProcessor: 2 fps sampling with a [4, 768] frame clamp
+    // matches Qwen3VLVideoProcessor and Lfm3VlVideoProcessor: 2 fps sampling with a [4, 768] frame clamp
     // LFM3-Omni samples at most 384 frames and hears the soundtrack
-    const omni = ctx.videoHasSoundtrack();
-    cfg.tmpl = if (omni) .lfm3_omni else .lfm3;
     cfg.fps = 2.0;
     if (src_n_frames <= 0 or src_fps <= 0.0) return cfg;
 
     const n_f: f64 = @as(f64, @floatFromInt(src_n_frames)) / @as(f64, src_fps) * @as(f64, cfg.fps);
     var n: i32 = @intFromFloat(n_f);
-    n = std.math.clamp(n, 4, if (omni) @as(i32, 384) else 768);
+    n = std.math.clamp(n, 4, if (tmpl == .lfm3_omni) @as(i32, 384) else 768);
     n = @min(n, src_n_frames);
     cfg.n_frames = n;
 
     var size: impl.ImageSize = .{ .width = 0, .height = 0 };
-    if (ctx.image_preproc != null and ctx.image_preproc.?.getVideoFrameSize(n, src_width, src_height, &size)) {
+    if (preproc != null and preproc.?.getVideoFrameSize(n, src_width, src_height, &size)) {
         cfg.frame_width = size.width;
         cfg.frame_height = size.height;
     }
     return cfg;
+}
+
+/// Ports `mtmd_get_video_config` (mtmd.cpp:3296 @cd959bae9): `src_n_frames` and
+/// `src_fps` can be <= 0 if unknown.
+pub fn mtmd_get_video_config(ctx: *const Context, src_width: i32, src_height: i32, src_n_frames: i32, src_fps: f32) callconv(.c) VideoConfig {
+    var tmpl: VideoTemplate = .default;
+    switch (if (ctx.ctx_v) |v| clip.getProjectorType(v) else names.ProjectorType.unknown) {
+        .lfm3vl => tmpl = if (ctx.videoHasSoundtrack()) .lfm3_omni else .lfm3,
+        .qwen3vl => tmpl = .qwen3vl,
+        else => {},
+    }
+    return videoConfigInit(tmpl, if (ctx.image_preproc) |*p| p else null, src_width, src_height, src_n_frames, src_fps);
 }
 
 /// Ports `mtmd_get_marker` (mtmd.cpp:3313 @cd959bae9).
@@ -2986,6 +3723,11 @@ pub fn mtmd_bitmap_get_n_bytes(bitmap: *const Bitmap) callconv(.c) usize {
 /// Ports `mtmd_bitmap_is_audio` (mtmd.cpp:3362 @cd959bae9).
 pub fn mtmd_bitmap_is_audio(bitmap: *const Bitmap) callconv(.c) bool {
     return bitmap.is_audio;
+}
+
+/// Ports `mtmd_bitmap_is_voice` (mtmd.cpp:3366 @cd959bae9).
+pub fn mtmd_bitmap_is_voice(bitmap: *const Bitmap) callconv(.c) bool {
+    return bitmap.is_voice;
 }
 
 /// Ports `mtmd_bitmap_get_id` (mtmd.cpp:3370 @cd959bae9).

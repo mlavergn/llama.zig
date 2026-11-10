@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Ports the per-projector `switch` inside `clip_model_loader::load_hparams`
-//! of `llama.cpp/tools/mtmd/clip.cpp` (lines 1458-2117) at v0.8.0
-//! (`8642541b2`). The code before and after the switch is `clip.zig`'s
+//! of `llama.cpp/tools/mtmd/clip.cpp` (lines 1481-2162) at v0.9.0
+//! (`cd959bae9`). The code before and after the switch is `clip.zig`'s
 //! `Loader.loadHparams`, which calls `load` here. Each arm keeps upstream's
 //! keys, required flags, defaults, log lines and messages verbatim; a comment
 //! names the `case` labels it covers.
@@ -45,8 +45,8 @@ var wa_ordered: std.ArrayList(i32) = .empty;
 
 const func = "load_hparams";
 
-/// Ports the model-specific switch of `load_hparams` (mtmd/clip.cpp:1351
-/// @8642541b2), a member of `clip_model_loader`.
+/// Ports the model-specific switch of `load_hparams` (mtmd/clip.cpp:1374
+/// @cd959bae9), a member of `clip_model_loader`.
 pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!void {
     const hparams = &model.hparams;
     var kb: [256]u8 = undefined;
@@ -138,6 +138,27 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.audio_n_fft = 512;
             hparams.audio_window_len = 400;
             hparams.audio_hop_len = 160;
+        },
+        // PROJECTOR_TYPE_NEMOTRON_TRANSCRIBE
+        .nemotron_transcribe => {
+            try ld.getU32(names.KEY_AUDIO_SUBSMPL_FACTOR, &hparams.subsampling_factor, true);
+            try ld.getU32(names.KEY_A_ROPE_DIMS, &hparams.audio_rope_dims, true);
+            try ld.getU32(names.KEY_A_SPK_N_BLOCK, &hparams.spk_n_layer, true);
+            try ld.getU32(names.KEY_A_SPK_N_HEAD, &hparams.spk_n_head, true);
+            if (hparams.subsampling_factor != 8) {
+                return clip.throwErr("%s: unsupported subsampling factor %d\n", .{ func, hparams.subsampling_factor });
+            }
+            if (hparams.spk_n_layer <= 0 or hparams.spk_n_layer > @as(c_int, @truncate(impl.c.gguf_get_n_tensors(ld.ctx_gguf)))) {
+                return clip.throwErr("%s: invalid speaker block count %d\n", .{ func, hparams.spk_n_layer });
+            }
+            hparams.audio_chunk_len = 0;
+            hparams.audio_sample_rate = 16000;
+            hparams.audio_n_fft = 512;
+            hparams.audio_window_len = 400;
+            hparams.audio_hop_len = 160;
+            // one full window
+            const nt = @import("models/nemotron_transcribe.zig");
+            hparams.warmup_audio_size = (nt.window_left + nt.window_core + nt.window_right) * hparams.subsampling_factor;
         },
         // PROJECTOR_TYPE_IDEFICS3
         .idefics3 => {
@@ -353,6 +374,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             info.log_ffn_op.* = "gelu";
             hparams.n_merge = 3; // pooling_kernel_size
             hparams.image_resize_algo = .bicubic;
+            hparams.image_resize_pad = .none;
             try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
             if (model.proj_type == .gemma4uv) {
                 // for "unified" variant, we directly use a bigger patch size, because the "token merging" is done directly on conv layer
@@ -653,6 +675,14 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.audio_window_len = 1024;
             hparams.audio_hop_len = 256;
         },
+        // `PROJECTOR_TYPE_CHATTERBOX_SPKENC` (mtmd/clip.cpp:2206 @cd959bae9)
+        .chatterbox_spkenc => {
+            // kaldi fbank front-end of CAMPPlus: 25 ms / 10 ms framing, 512-point spectrum
+            hparams.audio_sample_rate = 16000;
+            hparams.audio_n_fft = 512;
+            hparams.audio_window_len = 400;
+            hparams.audio_hop_len = 160;
+        },
         // PROJECTOR_TYPE_LFM3A_GEN
         .lfm3a_gen => {
             // fixed by LiquidCodecConfig, head counts come from the tensors
@@ -714,6 +744,11 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             // flow_lm defaults, see pocket_tts/default_parameters.py
             hparams.flow_n_step = 1;
             hparams.gen_eos_threshold = -4.0;
+        },
+        // PROJECTOR_TYPE_CHATTERBOX
+        .chatterbox => {
+            // s3gen output rate
+            hparams.audio_sample_rate = 24000;
         },
         // PROJECTOR_TYPE_SOPRANO
         .soprano => {

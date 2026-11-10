@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/llamafile/sgemm.cpp` at v0.8.0
-//! (`8642541b2`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/llamafile/sgemm.cpp` at v0.9.0
+//! (`cd959bae9`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # Only a tenth of the file compiles here
@@ -867,7 +867,7 @@ fn TinyBlasQ0Avx(comptime TA: type) type {
     };
 }
 
-/// Ports `llamafile_sgemm` (sgemm.cpp:3896 @8642541b2).
+/// Ports `llamafile_sgemm` (sgemm.cpp:3896 @cd959bae9).
 ///
 /// Returns **false** when there is no kernel for this shape or type pair,
 /// and `cpu/mulmat.zig` then computes the product itself. On this target
@@ -1064,7 +1064,7 @@ fn sgemmAvx(
             if (Btype != c.GGML_TYPE_F16) return false;
             return float(c.ggml_fp16_t, c.ggml_fp16_t, params, m, n, k, A, lda, B, ldb, C, ldc);
         },
-        // sgemm.cpp:4132, 4169, 4206, 4222 @8642541b2: each `__AVX2__` arm
+        // sgemm.cpp:4132, 4169, 4206, 4222 @cd959bae9: each `__AVX2__` arm
         // takes `tinyBLAS_Q0_AVX` against `q8_0`, with no minimum `n`.
         c.GGML_TYPE_Q8_0 => return q0(qblocks.Q8_0, params, m, n, k, A, lda, B, ldb, C, ldc, Btype),
         c.GGML_TYPE_Q4_0 => return q0(qblocks.Q4_0, params, m, n, k, A, lda, B, ldb, C, ldc, Btype),

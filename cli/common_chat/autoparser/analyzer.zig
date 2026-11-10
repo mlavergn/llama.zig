@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/chat-diff-analyzer.cpp` (llama.cpp v0.8.0,
-//! `8642541b2`): the probe constants and messages, the workarounds,
+//! Ports `llama.cpp/common/chat-diff-analyzer.cpp` (llama.cpp v0.9.0,
+//! `cd959bae9`): the probe constants and messages, the workarounds,
 //! `autoparser`'s `analyze_template` and its helpers, and the three analyzers'
 //! constructors and methods. Each declaration names what it ports and the
 //! line it began at.

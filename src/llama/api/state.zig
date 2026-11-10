@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-context.cpp` (v0.8.0, `8642541b2`):
+//! Ported from `llama.cpp/src/llama-context.cpp` (v0.9.0, `cd959bae9`):
 //! the C API from `llama_get_state_size` through
 //! `llama_state_seq_load_file`. Each function is `pub`, not `export`; see
 //! `api/context.zig`.

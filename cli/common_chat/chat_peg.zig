@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/chat-peg-parser.h` and
-//! `llama.cpp/common/chat-peg-parser.cpp` (llama.cpp v0.8.0, `8642541b2`):
+//! `llama.cpp/common/chat-peg-parser.cpp` (llama.cpp v0.9.0, `cd959bae9`):
 //! `common_chat_peg_builder`, `common_chat_peg_mapper` and its gemma4 and
 //! minimax-m3 variants, `tag_based_peg_mapper`, `tagged_peg_parser`, and the
 //! string helpers they share. Each declaration names what it ports and the

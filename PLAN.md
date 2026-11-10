@@ -80,9 +80,10 @@ Settled in review. The plan below assumes all of these.
 | 60 | zDNN, ZenDNN and BLAS | **BLAS on Apple, over Accelerate; zDNN and ZenDNN not ported** (asked on 2026-10-24: "not external libs"). Each of the three is a thin ggml backend whose whole job is to call a vendor library -- measured, BLAS 530 lines around `cblas_sgemm`, zDNN 924 around IBM's `libzdnn` on s390x NNPA, ZenDNN 838 around AMD's C++ `zendnnl.hpp`, which upstream downloads and builds with oneDNN, libxsmm and AOCL. Without the library nothing is left to port, and the library-gains-no-dependencies rule stands, so zDNN and ZenDNN stay out. BLAS is the exception on Apple only: the port **already links Accelerate** on every Darwin target and calls its vDSP from the CPU backend (`GGML_USE_ACCELERATE`), so a BLAS backend over it adds nothing. Off Apple it would need OpenBLAS or another vendor library, so it is not built there. **Opt-in, `-Dblas`**: the reference configuration has BLAS off, and on by default it would change which device computes every large CPU `MUL_MAT` in every gate. Gated as each backend before it: upstream's `ggml-blas.cpp` with its exports renamed beside the port, in one process, on bits. **Done** (`NOTES.md`, "BLAS over Accelerate"): `src/ggml/blas.zig`, swapped in under `-Dblas`, `make blas-diff` and `make blas-node-diff` identical. |
 | 61 | Upstream's other tools | **Ported, each as its own Zig binary under `tools/`** (asked on 2026-10-25: "do them all please"): `gguf-split`, `quantize`, `tokenize`, `fit-params`, `export-lora`, `batched-bench`, `cvector-generator`, `imatrix`, `perplexity`, `llama-bench`. This reverses SPEC §2's "never writes one" for these binaries -- `quantize`, `gguf-split`, `export-lora`, `imatrix` and `cvector-generator` write GGUF -- while the library and `llama-cli` stay as they were. They share `tools/common/`, the ported parts of upstream's `common/`: `common_params_parse`'s option table for these examples (161 options, help text exact), `common_log`, `common_init`, the imatrix loader. Each is gated by `scripts/tools-diff <tool>` against upstream's own binary, built unmodified over `libllama-ref` (`zig build tools-ref`): stdout, stderr, exit code and every file written. `tts` was held: it links `mtmd`, the 26,700-line multimodal library -- Decision 62. The downloader (`-hf`, `-mu`, `-dr`) and the INI config files are refused: the first would be an external dependency. `NOTES.md`, "Upstream's other tools". |
 | 62 | libmtmd and `llama-tts` | **Ported, with `llama-mtmd-cli`** (asked on 2026-10-26: "port mtmd and tts, don't stop until they are completed"). Upstream's multimodal library, `tools/mtmd/` -- 17,399 lines of C++ plus 8,292 in 43 graph files, 60 projector types -- is `src/mtmd/`, every translation unit, and its C contract is the 82 `mtmd_*`/`mtmd_helper_*` functions of `mtmd.h` and `mtmd-helper.h`, exported by `src/mtmd/exports.zig` and equal to the reference's by `nm` (`make mtmd-exports`). It is pure Zig like the rest: the stb_image and miniaudio decoders upstream compiles into `mtmd-helper.cpp` are ported to Zig as far as it reaches them (`src/mtmd/vendor/`), and the SHA-256 bitmap id is `std.crypto`'s. No `MTMD_VIDEO`, as the reference builds none: the video helpers are their `#else` arms. The debugging entry points (`mtmd_debug_*`, C++ linkage, `std::vector` arguments) are not ported; `mtmd_get_memory_usage`, C++ linkage and a `std::map`, is Zig-only. No mmproj file exists here, so `make mmproj-fixtures` writes one small random mmproj per projector type, checked through upstream's libmtmd. Gated by `make mtmd-diff` (libmtmd through its C API, port against upstream, every fixture, CPU and Metal, per node and fused), `make mtmd-image-diff`, `make mtmd-audio-diff`, `make mtmd-decode-diff` and `make mtmd-exports`; the two binaries by `make tools-diff TOOL=tts|mtmd-cli` against upstream's own (28 and 39 cases). `llama-mtmd-cli` formats prompts through upstream's legacy (non-Jinja) chat templates, ported in `tools/common/chat.zig`; `--jinja` is refused, as is `MTMD_DEBUG_GRAPH` (upstream's graph dumper is not ported), and the console's Windows arm falls back to plain line reading. `NOTES.md`, "Stage 8: libmtmd and `llama-tts`". |
-| 63 | The xcframework | **A drop-in for upstream's `build-xcframework.sh` output** (asked on 2026-10-26: "Our make xcframework target needs to produce an xcframework that is drop in compatible with it"), replacing the static `llamazig.xcframework`. `xcframework/` (renamed from `xcfwk/`) builds `llama.xcframework`: upstream's seven slices (macOS, iOS, tvOS and visionOS, devices and simulators, arm64 and x86_64 as upstream has them), its minimums (iOS 16.4, macOS 13.3, tvOS 16.4, visionOS 1.0), dynamic frameworks with its install names and dSYMs, and its headers, module map and `Info.plist` byte for byte -- `mtmd.h`, `mtmd-helper.h` and `ggml-blas.h` included, since libmtmd (Decision 62) and the BLAS backend (Decision 60) are ported. Each slice architecture is `zig build xcframework`: `libggml.a` with BLAS and `libmtmd.a`, libllama compiled into it. **The arm64 CPUs are Apple clang's defaults for each target** (`apple_m1` for macOS and the simulators, `apple_a7` for iOS and tvOS devices, `apple_a12` for visionOS), so it runs wherever upstream's does; x86_64 is `x86_64_v3`, the port's floor. Built with `../zig17`, Zig 0.17.0 patched for Apple's mobile SDKs. Gated by `make -C xcframework compat` against upstream's own, built by its script from a `git archive` of the pin; a binary built against upstream's framework runs on ours unrelinked (`dropin-macos`); upstream's `examples/llama.swiftui` builds against it untouched and runs on an iPhone 15 (`swiftui`). Gating `apple_a7` found the port's vectorizer model wrong for every Apple core before the A14. `NOTES.md`, "llama.xcframework". |
+| 63 | The xcframework | **A drop-in for upstream's `build-xcframework.sh` output** (asked on 2026-10-26: "Our make xcframework target needs to produce an xcframework that is drop in compatible with it"), replacing the static `llamazig.xcframework`. `xcframework/` (renamed from `xcfwk/`) builds `llama.xcframework`: upstream's seven slices (macOS, iOS, tvOS and visionOS, devices and simulators, arm64 and x86_64 as upstream has them), its minimums (iOS 16.4, macOS 13.3, tvOS 16.4, visionOS 1.0; 26.0 everywhere since v0.9.0, Decision 66), dynamic frameworks with its install names and dSYMs, and its headers, module map and `Info.plist` byte for byte -- `mtmd.h`, `mtmd-helper.h` and `ggml-blas.h` included, since libmtmd (Decision 62) and the BLAS backend (Decision 60) are ported. Each slice architecture is `zig build xcframework`: `libggml.a` with BLAS and `libmtmd.a`, libllama compiled into it. **The arm64 CPUs are Apple clang's defaults for each target** (`apple_m1` for macOS and the simulators, `apple_a7` for iOS and tvOS devices, `apple_a12` for visionOS), so it runs wherever upstream's does; x86_64 is `x86_64_v3`, the port's floor. Built with `../zig17`, Zig 0.17.0 patched for Apple's mobile SDKs. Gated by `make -C xcframework compat` against upstream's own, built by its script from a `git archive` of the pin; a binary built against upstream's framework runs on ours unrelinked (`dropin-macos`); upstream's `examples/llama.swiftui` builds against it untouched and runs on an iPhone 15 (`swiftui`). Gating `apple_a7` found the port's vectorizer model wrong for every Apple core before the A14. `NOTES.md`, "llama.xcframework". |
 | 64 | Chat parsing, and tool calling | **Port `common/`'s chat parsing stack to Zig, in `cli/`, before tool execution** (asked on 2026-10-29: "we should add tool calling, can we do that prior to calling 0.4.1 done"; answered "parsing stack first", and "commit 0.4.1+1 now, tools next"). Upstream's `llama-cli` has no tool calling at v0.4.1 -- `--tools` is a server flag -- but it does run the chat parser, through its embedded server, to separate reasoning from content. So the stage ports `common_chat_templates_apply_jinja` and `common_chat_parse` with everything under them: the PEG parser, the auto-parser and diff analyzer, the per-model parsers, `json-schema.cpp` and `json-schema-to-grammar.cpp`, over a port of nlohmann's `ordered_json`. `--json-schema` comes with it. Running tools is a later decision. "Stage 9 — Chat parsing". |
 | 65 | `llama-server` | **Ported, as `tools/server/`, a Zig `llama-server` held to upstream's on the wire** (asked on 2026-11-01, after learning that tool calling and MCP live only in the server: "we need to port llama-server ... get started"). Upstream's tool calling is the server's -- `--tools` (seven built-in tools), `--mcp-servers-config`/`--mcp-servers-json`, `--ui-mcp-proxy` are all `LLAMA_EXAMPLE_SERVER` options, and `llama-cli` links the code and never reaches it -- so porting the server is how this project gets tools without designing behaviour of its own. Measured at v0.4.1: 21,852 lines in `tools/server/`, over Stage 9's chat stack, `common/speculative.cpp` and its n-gram helpers (~4,000), `subproc`, `preset`, `download`/`hf-cache` for router mode, and cpp-httplib (`httplib.cpp` 18,209 + `httplib.h` 4,667, of which the server half and a plain-HTTP client are reached: the reference builds without SSL). The web UI is not built by either side -- the reference compiles `llama.cpp.zmake`'s `zig/ui-stub`, so both serve no assets -- and whether to embed upstream's prebuilt bundle is left open. Gated by `server-diff`: both binaries started on the same model, the same request transcript sent to each, status, headers and bodies compared with timings masked. "Stage 10 -- `llama-server`". |
+| 66 | Apple minimum OS | **26.0 on every Apple platform, from v0.9.0** (stated on 2026-11-09: "the ios / macos baseline OS is 26.0 ... that's as low as we need to go"; then "all apple frameworks are pinned at 26.0 and up"). Amends Decision 63: `llama.xcframework`'s seven slices are built at minimum iOS, macOS, tvOS and visionOS 26.0 where upstream's `build-xcframework.sh` says 16.4, 13.3, 16.4 and 1.0, so it is a drop-in only for apps whose deployment target is 26.0 or later. `verify.sh compat` holds each slice's binaries to 26.0 (`COMPAT_MINOS`; on a device binary `vtool` writes the minimum into the SDK field too) and the bundle `Info.plist` to upstream's with that minimum written in (`MinimumOSVersion`, `DTSDKName`); every other byte stays upstream's. The CMake reference builds (`make buildmacos`, `buildios`) and `validate`'s iOS check target 26.0 as well. The device CPUs stay Apple clang's defaults (`apple_a7`, `apple_a12`): 26.0 needs newer cores, but a new CPU target is a new reference, and that is a separate decision. |
 
 ---
 
@@ -2608,6 +2609,78 @@ AVX-512 items it carries.
 - `make validate` does not build `llama-server`: a lint fix in
   `tools/server/models.zig` that did not compile passed it. Add
   `zig build tools` (or the server step) to `make test`.
+
+### Pickup for the v0.9.0 sync
+
+Upstream `v0.9.0` (`cd959bae9`). Move `llama.cpp/` and the zmake checkout to
+`cd959bae9`, zmake to its v0.9.0 commits, and zigjinja to `5b2472e` (v3.1.9;
+not on its remote yet -- carry it in a bundle), before anything else. Both
+GPU host layers were ported blind, so every CUDA and Vulkan gate below runs
+here for the first time.
+
+**GB10 (`spark-dbff`, `~/src/mlavergn/llama.zig`)**
+
+1. **CUDA** (`NOTES.md`, "Upstream sync v0.8.0 → v0.9.0"):
+   - `zig build reference cuda-ref --release=fast --prefix zig-out/cuda-port`
+     regenerates every fatbin, the new `batch-get.cu` among them (72
+     top-level `.cu`), and the kernel table. The one new key,
+     `batch-get` / `ggml_cuda_batch_get_kernel`, is unconfirmed: a wrong
+     spelling is a compile error. The first launch checks argument sizes:
+     every vec, tile and mma FA kernel takes a new `KV_rows` argument.
+   - `gen-fattn-config` and `gen-mmq-config`: expect no diff.
+   - `cuda-ops-diff`: find the 60 `kv_rows` FLASH_ATTN_EXT cases (six
+     shapes x `nb` {1,3,8,64,512} x `n_slices` {1,4}, supported on both
+     sides and identical on bits), the two MoE `test_mul_mat_vec_fusion`
+     cases (q4_K SWIGLU m=17 n=5120 k=256 n_mats=16 n_used=8; q8_0 SWIGLU
+     m=2048 n=128 k=256 n_mats=40 n_used=8), and F8_E4M3 CPY/fusion
+     unsupported on both sides.
+   - `cuda-backend-diff` in all four settings, with its new batched-slot
+     section; inject (a) `.get_tensor_n` dropped from the buffer interface,
+     (b) `batch_get.zig`'s descriptor `.dst + 1`, (c) `bufferCpyTensorN`
+     without its `bufferIsCuda` loop -- each must fail.
+   - `cuda-node-diff` per node and fused, `cuda-parity-cli`. The CUDA-graph
+     eviction rework differs only after 10 s idle: no gate sees it.
+2. **Vulkan**, on all four arms (`vk-repro`, `vk-ops-diff` and
+   `vk-parity-cli` once per arm):
+   - `make vk-builds`: the port's `libggml` must hold no
+     `ggml-vulkan-comm.o`.
+   - `vk-push-layout`: 1,491 facts.
+   - `vk-backend-diff`, all 32 scenarios: `ask_allreduce` must match in
+     every one (both backends on `0,0` and `0,1`), then inject the f16
+     threshold `<` -> `<=`, `needsF32` dropping MUL_MAT, the zero-fill
+     skipped, slot parity fixed at 0, `ensure` not growing, `submit`'s
+     ready-wait removed, `binary_semaphore_idx` not reset.
+   - `vk-ops-diff`: the new `supports_extra` lines (plain against row-list
+     FA, the 4 TiB unallocated set) agree, and fail with `non_compute` and
+     the `src[5]` refusal each injected away; the full run reaches
+     `count_experts`' skipped-row zeroing through the `-1` ids cases.
+   - `vk-node-diff` per node and fused; `vk-repro` and `vk-parity-cli` 6/6.
+   - Unreachable here, recorded not deferred: the sync_fd all-reduce path
+     (it needs Mesa's `VK_KHR_external_semaphore_fd`; NVIDIA and llvmpipe
+     take the host bridge) and the RDNA3/4 `guess_split_k` arms.
+3. **Linux arm64 CPU set**: `ops-diff`, `repack-diff`, `node-diff`,
+   `parity-port-cpu`, `host-arms-diff`, `libcxx-diff`, `regex-diff`,
+   `unicode-diff`, `vocab-diff`, `loader-diff`, `quant-diff`,
+   `gemma4-assistant-diff`. The f8 dot product's `generic` tail shape (2)
+   was measured on the Mac's `GATE_CPU=generic` build only.
+4. **Models**: `arch-model-diff` (the 229 fixtures, the DSV4-family harness
+   skips included), `mtp-diff`, `moe-slru-diff`, the full `context-diff`.
+5. **libmtmd**: `mtmd-gates`; parakeet's fixture is expect-fail (upstream's
+   view bound).
+6. **Chat, tools and server**: `json-diff`, `schema-diff`, `peg-diff`,
+   `jinja-diff`, `chat-parse-diff`, `chat-msg-diff`, `cnv-diff`,
+   `spec-diff`, `http-diff`, `server-task-diff`, every tool's `tools-diff`,
+   every `server-diff` file (`spec`'s new MTP block among them; run
+   `--self` before reading a failure in `parallel`, `sleep` or `decision`).
+
+**DESKTOP-BR7J5S9 (Windows x86_64)**: `make x86-gates` at `x86_64_v3`, plus
+`win-host-diffs`. New: the AVX2 arm of `ggml_vec_dot_f8_e4m3_f32` and its
+all-fused tail (both measured from the reference's disassembly, not run),
+`ops-diff`'s F8 and FA-rows cases on Intel. Check that `llama-cli.exe` and
+the tools build and carry `win-app.manifest` (`activeCodePage` UTF-8).
+
+**JWHLPTOP** -- excluded; v0.9.0 adds the AVX512BW arm of the f8 dot product
+to the AVX-512 items it carries.
 
 ---
 

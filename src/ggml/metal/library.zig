@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-metal/ggml-metal-device.cpp` at
-//! v0.8.0 (`8642541b2`). Each declaration below names the C++ it replaces
+//! v0.9.0 (`cd959bae9`). Each declaration below names the C++ it replaces
 //! and the line it began at.
 //!
 //! # What this file is
@@ -1204,7 +1204,7 @@ pub export fn ggml_metal_library_get_pipeline_mul_mm(lib: *mc.Library, op: *cons
 /// The `(nsg, nr0, smem, split)` a quantized `mul_mv` kernel wants, by
 /// weight type -- the quantized arms of
 /// `ggml_metal_library_get_pipeline_mul_mv` (ggml-metal-device.cpp:1027
-/// @8642541b2), whose switch is at its line 845, and of
+/// @cd959bae9), whose switch is at its line 1048, and of
 /// `ggml_metal_library_get_pipeline_mul_mv_id`, which repeats them.
 ///
 /// The C writes 23 `case` blocks assigning two or three locals each; this
@@ -1255,7 +1255,9 @@ fn mvShapeQuantBase(t: c.enum_ggml_type, log_type: c.enum_ggml_type) MvShape {
         c.GGML_TYPE_Q5_0 => .{ .nsg = fc.N_SG_Q5_0, .nr0 = fc.N_R0_Q5_0 },
         c.GGML_TYPE_Q5_1 => .{ .nsg = fc.N_SG_Q5_1, .nr0 = fc.N_R0_Q5_1 },
         c.GGML_TYPE_Q8_0 => .{ .nsg = fc.N_SG_Q8_0, .nr0 = fc.N_R0_Q8_0, .smem = 32 * @sizeOf(f32) * fc.N_R0_Q8_0 },
-        c.GGML_TYPE_MXFP4 => .{ .nsg = fc.N_SG_MXFP4, .nr0 = fc.N_R0_MXFP4, .smem = 32 * @sizeOf(f32) },
+        // Since v0.9.0 MXFP4 takes no shared memory: its table moved into
+        // the kernel's constant space.
+        c.GGML_TYPE_MXFP4 => .{ .nsg = fc.N_SG_MXFP4, .nr0 = fc.N_R0_MXFP4 },
         c.GGML_TYPE_Q2_K => .{ .nsg = fc.N_SG_Q2_K, .nr0 = fc.N_R0_Q2_K },
         c.GGML_TYPE_Q3_K => .{ .nsg = fc.N_SG_Q3_K, .nr0 = fc.N_R0_Q3_K },
         c.GGML_TYPE_Q4_K => .{ .nsg = fc.N_SG_Q4_K, .nr0 = fc.N_R0_Q4_K },
@@ -1279,7 +1281,7 @@ fn mvShapeQuantBase(t: c.enum_ggml_type, log_type: c.enum_ggml_type) MvShape {
 }
 
 /// Ports `ggml_metal_library_get_pipeline_mul_mv`
-/// (ggml-metal-device.cpp:1027 @8642541b2).
+/// (ggml-metal-device.cpp:1027 @cd959bae9).
 pub export fn ggml_metal_library_get_pipeline_mul_mv(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     const src0 = src(op, 0);
     const src1 = src(op, 1);
@@ -1436,7 +1438,7 @@ pub export fn ggml_metal_library_get_pipeline_mul_mm_id(lib: *mc.Library, op: *c
 }
 
 /// Ports `ggml_metal_library_get_pipeline_mul_mv_id`
-/// (ggml-metal-device.cpp:1330 @8642541b2).
+/// (ggml-metal-device.cpp:1329 @cd959bae9).
 ///
 /// The quantized arms are `mul_mv`'s, to the value; the float arm differs
 /// in having no `_short` path, so `ne00 < 32` is not special-cased.
@@ -1900,6 +1902,19 @@ pub export fn ggml_metal_library_get_pipeline_flash_attn_ext(
     return res;
 }
 
+/// Ports `ggml_metal_library_get_pipeline_flash_attn_ext_rows`
+/// (ggml-metal-device.cpp:1990 @cd959bae9), new at v0.9.0: the kernel that
+/// gathers the K/V cache rows a `ggml_flash_attn_ext_rows` op's lists
+/// reference into contiguous F16 buffers.
+pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_rows(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
+    impl.assert(op.op == c.GGML_OP_FLASH_ATTN_EXT, "op->op == GGML_OP_FLASH_ATTN_EXT");
+
+    var base: Name = .{};
+    base.set("kernel_flash_attn_ext_rows", .{});
+
+    return getOrCompile(lib, &base, &base, null);
+}
+
 /// Ports `ggml_metal_library_get_pipeline_flash_attn_ext_vec_idx`
 /// (ggml-metal-device.cpp:2007 @cd959bae9).
 ///
@@ -1916,7 +1931,7 @@ pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_vec_idx(lib: *mc.Li
 }
 
 /// Ports `ggml_metal_library_get_pipeline_flash_attn_ext_vec`
-/// (ggml-metal-device.cpp:2012 @8642541b2).
+/// (ggml-metal-device.cpp:2027 @cd959bae9).
 ///
 /// The only selection function that consults the tuning table: a
 /// `(nqpsg, ne)` pair equal to the baseline for this `(dk, dv)` is left
@@ -1931,6 +1946,7 @@ pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_vec(
     has_scap: bool,
     has_kvpad: bool,
     has_sparse: bool,
+    has_rows: bool,
     nqpsg: i32,
     ne: i32,
     nsg: i32,
@@ -1960,7 +1976,7 @@ pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_vec(
     var base: Name = .{};
     var name: Name = .{};
     base.set("kernel_{s}_{s}_dk{d}_dv{d}{s}", .{ "flash_attn_ext_vec", kv_type, dk, dv, qne_suffix });
-    name.set("{s}_mask={d}_sink={d}_bias={d}_scap={d}_kvpad={d}_sparse={d}_ns10={d}_ns20={d}_nsg={d}_nwg={d}", .{
+    name.set("{s}_mask={d}_sink={d}_bias={d}_scap={d}_kvpad={d}_sparse={d}_rows={d}_ns10={d}_ns20={d}_nsg={d}_nwg={d}", .{
         base.str(),
         @as(c_int, if (has_mask) 1 else 0),
         @as(c_int, if (has_sinks) 1 else 0),
@@ -1968,6 +1984,7 @@ pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_vec(
         @as(c_int, if (has_scap) 1 else 0),
         @as(c_int, if (has_kvpad) 1 else 0),
         @as(c_int, if (has_sparse) 1 else 0),
+        @as(c_int, if (has_rows) 1 else 0),
         ns10,
         ns20,
         nsg,
@@ -1985,6 +2002,7 @@ pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_vec(
         mc.ggml_metal_cv_set_bool(cv, has_scap, fc.FC_FLASH_ATTN_EXT_VEC + 3);
         mc.ggml_metal_cv_set_bool(cv, has_kvpad, fc.FC_FLASH_ATTN_EXT_VEC + 4);
         mc.ggml_metal_cv_set_bool(cv, has_sparse, fc.FC_FLASH_ATTN_EXT_VEC + 5);
+        mc.ggml_metal_cv_set_bool(cv, has_rows, fc.FC_FLASH_ATTN_EXT_VEC + 6);
 
         mc.ggml_metal_cv_set_int32(cv, ns10, fc.FC_FLASH_ATTN_EXT_VEC + 20);
         mc.ggml_metal_cv_set_int32(cv, ns20, fc.FC_FLASH_ATTN_EXT_VEC + 21);

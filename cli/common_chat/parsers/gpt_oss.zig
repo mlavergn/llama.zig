@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/gpt-oss.cpp` (llama.cpp v0.8.0,
-//! `8642541b2`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/gpt-oss.cpp` (llama.cpp v0.9.0,
+//! `cd959bae9`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -35,7 +35,7 @@ const Build = struct {
     extract_reasoning: bool,
     cb: *ChatBuilder = undefined,
     channel: ParserId = undefined,
-    constrain_type: ParserId = undefined,
+    constraint: ParserId = undefined,
     tool_choice: ParserId = undefined,
 
     fn parser(self: *Build, p: *ChatBuilder) chat_peg.Error!ParserId {
@@ -45,9 +45,10 @@ const Build = struct {
         const end = try b.rule("end", try b.literal("<|end|>"), false);
         const content = try b.rule("message-content", try b.until("<|end|>"), false);
         self.channel = try b.plus(try b.literal("<|channel|>"), try b.orr(try b.literal("commentary"), try b.literal("analysis")));
-        self.constrain_type = try b.chars("[A-Za-z0-9_-]", 1, -1);
+        const constrain_type = try b.chars("[A-Za-z0-9_-]", 1, -1);
+        self.constraint = try b.optional(try b.plus(try b.plus(try b.space(), try b.optional(try b.literal("<|constrain|>"))), constrain_type));
         const channel = self.channel;
-        const constrain_type = self.constrain_type;
+        const constraint = self.constraint;
 
         // Occasionally, gpt-oss-20b will prefix channels with this commentary
         const stray_commentary = try b.optional(try b.plus(try b.literal("<|channel|>commentary"), try b.optional(try b.literal(" to=assistant"))));
@@ -61,7 +62,7 @@ const Build = struct {
 
         const analysis = try b.ref("analysis");
         const preamble = try b.rule("preamble", try b.plus(try b.plus(try b.literal("<|channel|>commentary<|message|>"), try p.content(content)), end), false);
-        const final_msg = try b.rule("final", try b.plus(try b.plus(stray_commentary, try b.literal("<|channel|>final<|message|>")), try p.content(content)), false);
+        const final_msg = try b.rule("final", try b.plus(try b.plus(try b.plus(try b.plus(stray_commentary, try b.literal("<|channel|>final")), constraint), try b.literal("<|message|>")), try p.content(content)), false);
 
         // Consume any unsolicited tool calls, e.g. builtin functions
         const unsolicited_body = try b.plus(try b.plus(try b.plus(try b.optional(channel), try b.literal(" to=")), content), end);
@@ -70,7 +71,6 @@ const Build = struct {
         const any = try b.rule("any", try b.orr(preamble, analysis), false);
 
         if (self.has_response_format) {
-            const constraint = try b.optional(try b.plus(try b.plus(try b.space(), try b.optional(try b.literal("<|constrain|>"))), constrain_type));
             var rf = try b.plus(try b.literal("<|channel|>final"), constraint);
             rf = try b.plus(rf, try b.literal("<|message|>"));
             rf = try b.plus(rf, try p.content(try b.schemaJson(try b.json(), "response-format-schema", &self.inputs.json_schema, false)));
@@ -107,7 +107,7 @@ const Build = struct {
         const params = msg_mod.toolParameters(self.a, function) catch |e| return util.toPeg(e);
 
         const func_name = try b.plus(try b.literal(" to=functions."), try p.toolName(try b.literal(name)));
-        const constraint = try b.optional(try b.plus(try b.plus(try b.space(), try b.optional(try b.literal("<|constrain|>"))), self.constrain_type));
+        const constraint = self.constraint;
         const schema_name = try parsers.indexName(self.a, "tool-", tool_index, "-schema");
         const args = try p.toolArgs(try b.schemaJson(try b.json(), schema_name, &params, false));
 
@@ -154,7 +154,7 @@ fn adjustMessages(a: Allocator, messages: *const Value) Error!Value {
     return adjusted;
 }
 
-/// Ports `common_chat_params_init_gpt_oss` (parsers/gpt-oss.cpp:3 @8642541b2).
+/// Ports `common_chat_params_init_gpt_oss` (parsers/gpt-oss.cpp:3 @cd959bae9).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

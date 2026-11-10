@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports the template half of `llama.cpp/common/chat.cpp` (llama.cpp v0.8.0,
-//! `8642541b2`): `common_chat_templates` and its init, free, source and
+//! Ports the template half of `llama.cpp/common/chat.cpp` (llama.cpp v0.9.0,
+//! `cd959bae9`): `common_chat_templates` and its init, free, source and
 //! explicit flag; `common_chat_templates_inputs`; `common_chat_verify_template`;
 //! `common_chat_format_single` and `common_chat_format_example`;
 //! `common_chat_templates_get_caps`;

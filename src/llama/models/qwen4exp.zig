@@ -17,7 +17,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/qwen4exp.cpp` at v0.8.0 (`8642541b2`),
+//! Ported from `llama.cpp/src/models/qwen4exp.cpp` at v0.9.0 (`cd959bae9`),
 //! with its declaration in `llama.cpp/src/models/models.h`:
 //! `qwen4exp_require_nonzero`, `qwen4exp_require_arr_len`,
 //! `llama_model_qwen4exp`'s `load_arch_hparams`, `load_arch_tensors` and
@@ -1234,7 +1234,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_attn_qsa`
-    /// (models/qwen4exp.cpp:960 @8642541b2): dense GQA self-attention over
+    /// (models/qwen4exp.cpp:960 @cd959bae9): dense GQA self-attention over
     /// the cells the QSA mask keeps.
     fn buildAttnQsa(self: *Graph, inp: *graph.InpAttnKv, q_cur_: *Tensor, k_cur_: *Tensor, v_cur_: *Tensor, sel_: *Tensor, n_sel: i64, kq_scale: f32, il: c_int) *Tensor {
         const b = self.b;
@@ -1246,12 +1246,12 @@ const Graph = struct {
         // Q, K and V rotated before they reach a quantized cache, as the
         // dense path does. The indexer has already scored with its own
         // query in build_qsa_sel, so the selection is unaffected.
-        if (inp.self_k_rot) |r| {
+        if (inp.self_k_rot[@intCast(il)]) |r| {
             q_cur = graph.mulMatHadamard(ctx, q_cur, r);
             k_cur = graph.mulMatHadamard(ctx, k_cur, r);
         }
 
-        if (inp.self_v_rot) |r| {
+        if (inp.self_v_rot[@intCast(il)]) |r| {
             v_cur = graph.mulMatHadamard(ctx, v_cur, r);
         }
 
@@ -1284,12 +1284,12 @@ const Graph = struct {
         const sel: *Tensor = c.ggml_reshape_4d(ctx, sel_, sel_.ne[0], @divTrunc(sel_.ne[1], n_stream), 1, n_stream);
         b.cb(sel, "kq_mask_qsa", il);
 
-        var cur = b.buildAttnMha(q, k, v, null, sel, null, null, n_sel, kq_scale, il);
+        var cur = b.buildAttnMha(q, k, v, null, sel, null, null, null, n_sel, kq_scale, il);
         b.cb(cur, "kqv_out", il);
 
         // The rotation is its own inverse, so it is undone on the value
         // side of the output.
-        if (inp.self_v_rot) |r| {
+        if (inp.self_v_rot[@intCast(il)]) |r| {
             cur = graph.mulMatHadamard(ctx, cur, r);
         }
 
@@ -1560,7 +1560,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_qwen4exp::graph`'s `build_conv_state_at`
-    /// (models/qwen4exp.cpp:1398 @8642541b2): a conv history read out of
+    /// (models/qwen4exp.cpp:1398 @cd959bae9): a conv history read out of
     /// its own recurrent row, and the new tail written back. The shared
     /// build_conv_state cannot do this: qwen4exp has two such rows per
     /// layer.
@@ -1607,7 +1607,7 @@ const Graph = struct {
 
             const dst: *Tensor = c.ggml_view_2d(ctx, conv_states_all, state_cols * channels, n_seqs, conv_states_all.nb[1], @as(usize, @intCast(slot * mem_size + kv_head)) * row_size);
 
-            c.ggml_build_forward_expand(b.gf, c.ggml_cpy(ctx, c.ggml_cont(ctx, tail), dst));
+            c.ggml_build_forward_expand(b.gf, c.ggml_cpy(ctx, tail, dst));
         }
 
         return conv_input;

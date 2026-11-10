@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/cpy.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/cpy.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/cpy.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels -- `cpy_scalar`, `cpy_scalar_transpose`, `cpy_scalar_contiguous`,
 //! `cpy_f32_q`, `cpy_q_f32` -- stay CUDA. The MUSA `mudnnMemcpyAsync` arm
 //! is not ported: this build is CUDA only.
@@ -160,7 +160,7 @@ fn cpyF32QCuda(comptime blck: []const u8, comptime qk: comptime_int, comptime qk
 
 /// Ports the five dequantizing launchers: `ggml_cpy_q8_0_f32_cuda`
 /// (cpy.cu:262 @cd959bae9), `ggml_cpy_q4_0_f32_cuda` (cpy.cu:285
-/// @8642541b2), `ggml_cpy_q4_1_f32_cuda` (cpy.cu:311 @cd959bae9),
+/// @cd959bae9), `ggml_cpy_q4_1_f32_cuda` (cpy.cu:311 @cd959bae9),
 /// `ggml_cpy_q5_0_f32_cuda` (cpy.cu:337 @cd959bae9) and
 /// `ggml_cpy_q5_1_f32_cuda` (cpy.cu:363 @cd959bae9). None asserts
 /// divisibility, as in the C.

@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/snake.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/snake.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/snake.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernel, `snake_kernel`, stays CUDA.
 
 const std = @import("std");

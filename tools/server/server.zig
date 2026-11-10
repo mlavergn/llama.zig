@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/server/server.cpp` at v0.8.0 (`8642541b2`):
+//! Ports `llama.cpp/tools/server/server.cpp` at v0.9.0 (`cd959bae9`):
 //! `llama_server(argc, argv)` and what it runs by role -- the router, an
 //! instance, the download and measure children -- the route table, the 403
 //! handlers, shutdown and the signal handler, `ex_wrapper` and

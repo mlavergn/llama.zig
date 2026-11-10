@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` (v0.8.0,
-//! `8642541b2`): the `__AVX2__` arms of the helpers at the top of the file.
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` (v0.9.0,
+//! `cd959bae9`): the `__AVX2__` arms of the helpers at the top of the file.
 //! Each names the C++ it replaces and the line it began at. x86-64-v3 has
 //! F16C, so the `GGML_F32Cx8` loads are the `_mm256_cvtph_ps` macros, not the
 //! table-driven `__avx_f32cx8_load` family below them, which it does not

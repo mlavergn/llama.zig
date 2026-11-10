@@ -9,7 +9,7 @@
 //! `ggml_cuda_graph`, `ggml_cuda_concurrent_event`,
 //! `ggml_backend_cuda_context`) and `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu`
 //! (`ggml_cuda_error`, device selection, `ggml_cuda_init`, both pools and the
-//! context destructor), at v0.8.0 (`8642541b2`).
+//! context destructor), at v0.9.0 (`cd959bae9`).
 //!
 //! # What is not here
 //!
@@ -128,7 +128,7 @@ pub fn fastFp16HardwareAvailable(x: c_int) bool {
         (cc.isMthreads(x) and x >= cc.offset_mthreads + 0x220);
 }
 
-/// Ports `fp16_mma_hardware_available` (common.cuh:327 @8642541b2), NVIDIA
+/// Ports `fp16_mma_hardware_available` (common.cuh:337 @cd959bae9), NVIDIA
 /// arm; the CDNA/RDNA tests are false on a CUDA device.
 pub fn fp16MmaHardwareAvailable(x: c_int) bool {
     return (cc.isNvidia(x) and x >= cc.volta) or (cc.isMthreads(x) and x >= cc.offset_mthreads + 0x220);
@@ -1098,7 +1098,7 @@ pub const StreamContext = struct {
 // -----------------------------------------------------------------------------
 // The backend context
 
-/// Ports `ggml_backend_cuda_context` (common.cuh:1445 @8642541b2).
+/// Ports `ggml_backend_cuda_context` (common.cuh:1455 @cd959bae9).
 pub const Context = struct {
     device: c_int,
     name_buf: [16:0]u8 = @splat(0),
@@ -1114,7 +1114,8 @@ pub const Context = struct {
     /// Map from first_node_ptr to cuda_graph -- multiple graphs per context
     /// when the computation is split across CPU and GPU.
     cuda_graphs: std.AutoArrayHashMapUnmanaged(?*const anyopaque, *Graph) = .empty,
-    last_graph_eviction_sweep: i64 = 0,
+    next_graph_eviction_time: i64 = 0,
+    last_graph_use_time: i64 = 0,
 
     concurrent_stream_context: StreamContext = .{},
 
@@ -1164,17 +1165,29 @@ pub const Context = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `ggml_backend_cuda_context`'s `cuda_graph` (common.cuh:1464 @8642541b2).
+    /// Ports `ggml_backend_cuda_context`'s `cuda_graph` (common.cuh:1475 @cd959bae9)
+    /// with its defaulted `time_now = ggml_time_us()`.
     pub fn cudaGraph(self: *Context, first_node_ptr: ?*const anyopaque) *Graph {
-        const time_now = c.ggml_time_us();
+        return self.cudaGraphAt(first_node_ptr, c.ggml_time_us());
+    }
 
-        // sweep every 5s, evicting cuda graphs unused for >=10s
-        if (time_now - self.last_graph_eviction_sweep >= 5_000_000) {
-            self.last_graph_eviction_sweep = time_now;
+    /// Ports `ggml_backend_cuda_context`'s `cuda_graph` (common.cuh:1475 @cd959bae9)
+    /// with `time_now` given, as the C's default argument allows.
+    pub fn cudaGraphAt(self: *Context, first_node_ptr: ?*const anyopaque, time_now: i64) *Graph {
+        // Give all cached graphs 10s to be reused after an idle period, without updating each graph.
+        if (self.cuda_graphs.count() != 0 and time_now - self.last_graph_use_time >= 10_000_000) {
+            self.next_graph_eviction_time = time_now + 10_000_000;
+        }
+        self.last_graph_use_time = time_now;
+
+        // Sweep every 5s during active use, evicting graphs unused for at least 10s.
+        if (time_now >= self.next_graph_eviction_time) {
+            self.next_graph_eviction_time = time_now + 5_000_000;
             var i: usize = 0;
             while (i < self.cuda_graphs.count()) {
+                const key = self.cuda_graphs.keys()[i];
                 const g = self.cuda_graphs.values()[i];
-                if (time_now - g.last_used_time >= 10_000_000) {
+                if (key != first_node_ptr and time_now - g.last_used_time >= 10_000_000) {
                     g.deinit();
                     allocator.destroy(g);
                     self.cuda_graphs.swapRemoveAt(i);

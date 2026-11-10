@@ -5,8 +5,8 @@
 //! # Provenance
 //!
 //! Ports the model-specific switch of `clip_model_loader::load_tensors`
-//! and `clip_n_mmproj_embd` from `llama.cpp/tools/mtmd/clip.cpp` at v0.8.0
-//! (`8642541b2`). Each declaration names what it ports and the line it
+//! and `clip_n_mmproj_embd` from `llama.cpp/tools/mtmd/clip.cpp` at v0.9.0
+//! (`cd959bae9`). Each declaration names what it ports and the line it
 //! began at.
 //!
 //! # Order is part of the contract
@@ -91,8 +91,376 @@ fn loadClampInfo(tl: *TensorLoader) Error!void {
     }
 }
 
-/// Ports the model-specific switch of `load_tensors` (mtmd/clip.cpp:2478
-/// @8642541b2), the `switch (model.proj_type)` after its generic layer loop.
+/// `get_tensor(a + b, required)` for the chatterbox speaker encoder's
+/// string-concatenated names.
+fn getCat(tl: *TensorLoader, a: []const u8, b: []const u8, required: bool) Error!T {
+    var buf: [256]u8 = undefined;
+    const name = std.fmt.bufPrintSentinel(&buf, "{s}{s}", .{ a, b }, 0) catch return clip.throwStr("chatterbox: tensor name too long");
+    return tl.getTensor(name.ptr, required);
+}
+
+/// The `load_bn` lambda of the CHATTERBOX_SPKENC arm (mtmd/clip.cpp:4006
+/// @cd959bae9).
+fn cbxLoadBn(tl: *TensorLoader, p: []const u8, n: *model_mod.Chatterbox.Bn) Error!void {
+    n.mean = try getCat(tl, p, ".running_mean", true);
+    n.@"var" = try getCat(tl, p, ".running_var", true);
+    n.w = try getCat(tl, p, ".weight", false);
+    n.b = try getCat(tl, p, ".bias", false);
+}
+
+/// The `load_res2d` lambda of the CHATTERBOX_SPKENC arm (mtmd/clip.cpp:4012
+/// @cd959bae9).
+fn cbxLoadRes2d(tl: *TensorLoader, p: []const u8, r: *model_mod.Chatterbox.SpkRes2d) Error!void {
+    var buf: [256]u8 = undefined;
+    r.conv1_w = try getCat(tl, p, ".conv1.weight", true);
+    try cbxLoadBn(tl, std.fmt.bufPrint(&buf, "{s}.bn1", .{p}) catch unreachable, &r.bn1);
+    r.conv2_w = try getCat(tl, p, ".conv2.weight", true);
+    try cbxLoadBn(tl, std.fmt.bufPrint(&buf, "{s}.bn2", .{p}) catch unreachable, &r.bn2);
+    r.shortcut_w = try getCat(tl, p, ".shortcut.0.weight", false);
+    if (r.shortcut_w != null) {
+        try cbxLoadBn(tl, std.fmt.bufPrint(&buf, "{s}.shortcut.1", .{p}) catch unreachable, &r.shortcut_bn);
+    }
+}
+
+/// The `load_cam_block` lambda of the CHATTERBOX_SPKENC arm
+/// (mtmd/clip.cpp:4022 @cd959bae9).
+fn cbxLoadCamBlock(tl: *TensorLoader, bp: []const u8, tp: []const u8, blk: *model_mod.Chatterbox.SpkCamBlock) Error!void {
+    var pbuf: [200]u8 = undefined;
+    var nbuf: [256]u8 = undefined;
+    var li: c_int = 1;
+    while (true) : (li += 1) {
+        const probe = std.fmt.bufPrintSentinel(&nbuf, "{s}.tdnnd{d}.linear1.weight", .{ bp, li }, 0) catch unreachable;
+        if (c.gguf_find_tensor(tl.loader.ctx_gguf, probe.ptr) < 0) break;
+        const p = std.fmt.bufPrint(&pbuf, "{s}.tdnnd{d}", .{ bp, li }) catch unreachable;
+        var l: model_mod.Chatterbox.SpkCamLayer = .{};
+        try cbxLoadBn(tl, std.fmt.bufPrint(&nbuf, "{s}.nonlinear1.batchnorm", .{p}) catch unreachable, &l.nl1_bn);
+        l.linear1_w = try getCat(tl, p, ".linear1.weight", true);
+        try cbxLoadBn(tl, std.fmt.bufPrint(&nbuf, "{s}.nonlinear2.batchnorm", .{p}) catch unreachable, &l.nl2_bn);
+        l.local_w = try getCat(tl, p, ".cam_layer.linear_local.weight", true);
+        l.ctx1_w = try getCat(tl, p, ".cam_layer.linear1.weight", true);
+        l.ctx1_b = try getCat(tl, p, ".cam_layer.linear1.bias", true);
+        l.ctx2_w = try getCat(tl, p, ".cam_layer.linear2.weight", true);
+        l.ctx2_b = try getCat(tl, p, ".cam_layer.linear2.bias", true);
+        try blk.layers.append(gpa, l);
+    }
+    try cbxLoadBn(tl, std.fmt.bufPrint(&nbuf, "{s}.nonlinear.batchnorm", .{tp}) catch unreachable, &blk.transit_bn);
+    blk.transit_w = try getCat(tl, tp, ".linear.weight", true);
+}
+
+/// The `has` lambda of the CHATTERBOX arm (mtmd/clip.cpp:3748 @cd959bae9),
+/// over a name `std::to_string` and `+` would build.
+fn cbxHas(tl: *TensorLoader, comptime fmt: []const u8, args: anytype) bool {
+    var buf: [256]u8 = undefined;
+    const name = std.fmt.bufPrintSentinel(&buf, fmt, args, 0) catch return false;
+    return c.gguf_find_tensor(tl.loader.ctx_gguf, name.ptr) >= 0;
+}
+
+/// The `load_enc_layer` lambda of the CHATTERBOX arm (mtmd/clip.cpp:3751
+/// @cd959bae9).
+fn cbxLoadEncLayer(tl: *TensorLoader, p: []const u8, l: *model_mod.Chatterbox.EncLayer) Error!void {
+    l.norm_mha_w = try getCat(tl, p, ".norm_mha.weight", true);
+    l.norm_mha_b = try getCat(tl, p, ".norm_mha.bias", true);
+    l.attn_q_w = try getCat(tl, p, ".self_attn.linear_q.weight", true);
+    l.attn_q_b = try getCat(tl, p, ".self_attn.linear_q.bias", true);
+    l.attn_k_w = try getCat(tl, p, ".self_attn.linear_k.weight", true);
+    l.attn_k_b = try getCat(tl, p, ".self_attn.linear_k.bias", true);
+    l.attn_v_w = try getCat(tl, p, ".self_attn.linear_v.weight", true);
+    l.attn_v_b = try getCat(tl, p, ".self_attn.linear_v.bias", true);
+    l.attn_pos_w = try getCat(tl, p, ".self_attn.linear_pos.weight", true);
+    l.attn_pos_bias_u = try getCat(tl, p, ".self_attn.pos_bias_u", true);
+    l.attn_pos_bias_v = try getCat(tl, p, ".self_attn.pos_bias_v", true);
+    l.attn_out_w = try getCat(tl, p, ".self_attn.linear_out.weight", true);
+    l.attn_out_b = try getCat(tl, p, ".self_attn.linear_out.bias", true);
+    l.norm_ff_w = try getCat(tl, p, ".norm_ff.weight", true);
+    l.norm_ff_b = try getCat(tl, p, ".norm_ff.bias", true);
+    l.ffn_1_w = try getCat(tl, p, ".feed_forward.w_1.weight", true);
+    l.ffn_1_b = try getCat(tl, p, ".feed_forward.w_1.bias", true);
+    l.ffn_2_w = try getCat(tl, p, ".feed_forward.w_2.weight", true);
+    l.ffn_2_b = try getCat(tl, p, ".feed_forward.w_2.bias", true);
+}
+
+/// The `load_causal` lambda of the CHATTERBOX arm (mtmd/clip.cpp:3772
+/// @cd959bae9).
+fn cbxLoadCausal(tl: *TensorLoader, p: []const u8, b: *model_mod.Chatterbox.CausalBlock) Error!void {
+    b.conv_w = try getCat(tl, p, ".block.0.weight", true);
+    b.conv_b = try getCat(tl, p, ".block.0.bias", true);
+    b.norm_w = try getCat(tl, p, ".block.2.weight", true);
+    b.norm_b = try getCat(tl, p, ".block.2.bias", true);
+}
+
+/// The `load_resnet` lambda of the CHATTERBOX arm (mtmd/clip.cpp:3778
+/// @cd959bae9).
+fn cbxLoadResnet(tl: *TensorLoader, p: []const u8, r: *model_mod.Chatterbox.Resnet) Error!void {
+    var buf: [200]u8 = undefined;
+    try cbxLoadCausal(tl, std.fmt.bufPrint(&buf, "{s}.block1", .{p}) catch unreachable, &r.block1);
+    try cbxLoadCausal(tl, std.fmt.bufPrint(&buf, "{s}.block2", .{p}) catch unreachable, &r.block2);
+    r.mlp_w = try getCat(tl, p, ".mlp.1.weight", true);
+    r.mlp_b = try getCat(tl, p, ".mlp.1.bias", true);
+    r.res_conv_w = try getCat(tl, p, ".res_conv.weight", true);
+    r.res_conv_b = try getCat(tl, p, ".res_conv.bias", true);
+}
+
+/// The `load_tfm` lambda of the CHATTERBOX arm (mtmd/clip.cpp:3786
+/// @cd959bae9).
+fn cbxLoadTfm(tl: *TensorLoader, p: []const u8, b: *model_mod.Chatterbox.TfmBlock) Error!void {
+    b.norm1_w = try getCat(tl, p, ".norm1.weight", true);
+    b.norm1_b = try getCat(tl, p, ".norm1.bias", true);
+    b.attn_q_w = try getCat(tl, p, ".attn1.to_q.weight", true);
+    b.attn_k_w = try getCat(tl, p, ".attn1.to_k.weight", true);
+    b.attn_v_w = try getCat(tl, p, ".attn1.to_v.weight", true);
+    b.attn_out_w = try getCat(tl, p, ".attn1.to_out.0.weight", true);
+    b.attn_out_b = try getCat(tl, p, ".attn1.to_out.0.bias", true);
+    b.norm3_w = try getCat(tl, p, ".norm3.weight", true);
+    b.norm3_b = try getCat(tl, p, ".norm3.bias", true);
+    b.ff_in_w = try getCat(tl, p, ".ff.net.0.proj.weight", true);
+    b.ff_in_b = try getCat(tl, p, ".ff.net.0.proj.bias", true);
+    b.ff_out_w = try getCat(tl, p, ".ff.net.2.weight", true);
+    b.ff_out_b = try getCat(tl, p, ".ff.net.2.bias", true);
+}
+
+/// The `load_stage` lambda of the CHATTERBOX arm (mtmd/clip.cpp:3801
+/// @cd959bae9).
+fn cbxLoadStage(tl: *TensorLoader, p: []const u8, s_: *model_mod.Chatterbox.EstStage, boundary: bool) Error!void {
+    var buf: [200]u8 = undefined;
+    try cbxLoadResnet(tl, std.fmt.bufPrint(&buf, "{s}.0", .{p}) catch unreachable, &s_.res);
+    var j: c_int = 0;
+    while (cbxHas(tl, "{s}.1.{d}.norm1.weight", .{ p, j })) : (j += 1) {
+        var b: model_mod.Chatterbox.TfmBlock = .{};
+        try cbxLoadTfm(tl, std.fmt.bufPrint(&buf, "{s}.1.{d}", .{ p, j }) catch unreachable, &b);
+        try s_.tfm.append(gpa, b);
+    }
+    if (boundary) {
+        s_.conv_w = try getCat(tl, p, ".2.weight", true);
+        s_.conv_b = try getCat(tl, p, ".2.bias", true);
+    }
+}
+
+/// The `load_hres` lambda of the CHATTERBOX arm (mtmd/clip.cpp:3813
+/// @cd959bae9).
+fn cbxLoadHres(tl: *TensorLoader, p: []const u8, r: *model_mod.Chatterbox.HiftRes) Error!void {
+    var buf: [256]u8 = undefined;
+    var j: c_int = 0;
+    while (cbxHas(tl, "{s}.convs1.{d}.weight", .{ p, j })) : (j += 1) {
+        var u: model_mod.Chatterbox.HiftResUnit = .{};
+        u.act1_alpha = try tl.getTensor((std.fmt.bufPrintSentinel(&buf, "{s}.activations1.{d}.alpha", .{ p, j }, 0) catch unreachable).ptr, true);
+        u.act2_alpha = try tl.getTensor((std.fmt.bufPrintSentinel(&buf, "{s}.activations2.{d}.alpha", .{ p, j }, 0) catch unreachable).ptr, true);
+        u.conv1_w = try tl.getTensor((std.fmt.bufPrintSentinel(&buf, "{s}.convs1.{d}.weight", .{ p, j }, 0) catch unreachable).ptr, true);
+        u.conv1_b = try tl.getTensor((std.fmt.bufPrintSentinel(&buf, "{s}.convs1.{d}.bias", .{ p, j }, 0) catch unreachable).ptr, true);
+        u.conv2_w = try tl.getTensor((std.fmt.bufPrintSentinel(&buf, "{s}.convs2.{d}.weight", .{ p, j }, 0) catch unreachable).ptr, true);
+        u.conv2_b = try tl.getTensor((std.fmt.bufPrintSentinel(&buf, "{s}.convs2.{d}.bias", .{ p, j }, 0) catch unreachable).ptr, true);
+        try r.units.append(gpa, u);
+    }
+}
+
+/// `get_tensor(string_format(fmt, args...))` with std::format-style
+/// arguments, as the CHATTERBOX arm builds its names with `std::to_string`.
+fn cbxGet(tl: *TensorLoader, comptime fmt: []const u8, args: anytype) Error!T {
+    var buf: [256]u8 = undefined;
+    const name = std.fmt.bufPrintSentinel(&buf, fmt, args, 0) catch return clip.throwStr("chatterbox: tensor name too long");
+    return tl.getTensor(name.ptr, true);
+}
+
+/// The `PROJECTOR_TYPE_CHATTERBOX` arm (mtmd/clip.cpp:3745 @cd959bae9) of
+/// load_tensors.
+fn loadChatterbox(tl: *TensorLoader) Error!void {
+    const func = "load_tensors";
+    const model = &tl.ctx_clip.model;
+    const cb = &model.cbx;
+    var pbuf: [200]u8 = undefined;
+
+    // flow encoder
+    cb.input_embedding_w = try tl.getTensor("a.gen.flow.input_embedding.weight", true);
+    cb.spk_affine_w = try tl.getTensor("a.gen.flow.spk_embed_affine_layer.weight", true);
+    cb.spk_affine_b = try tl.getTensor("a.gen.flow.spk_embed_affine_layer.bias", true);
+    cb.embed_linear_w = try tl.getTensor("a.gen.fenc.embed.out.0.weight", true);
+    cb.embed_linear_b = try tl.getTensor("a.gen.fenc.embed.out.0.bias", true);
+    cb.embed_norm_w = try tl.getTensor("a.gen.fenc.embed.out.1.weight", true);
+    cb.embed_norm_b = try tl.getTensor("a.gen.fenc.embed.out.1.bias", true);
+    cb.pre_conv1_w = try tl.getTensor("a.gen.fenc.pre_lookahead_layer.conv1.weight", true);
+    cb.pre_conv1_b = try tl.getTensor("a.gen.fenc.pre_lookahead_layer.conv1.bias", true);
+    cb.pre_conv2_w = try tl.getTensor("a.gen.fenc.pre_lookahead_layer.conv2.weight", true);
+    cb.pre_conv2_b = try tl.getTensor("a.gen.fenc.pre_lookahead_layer.conv2.bias", true);
+    var i: c_int = 0;
+    while (cbxHas(tl, "a.gen.fenc.encoders.{d}.norm_mha.weight", .{i})) : (i += 1) {
+        var l: model_mod.Chatterbox.EncLayer = .{};
+        try cbxLoadEncLayer(tl, std.fmt.bufPrint(&pbuf, "a.gen.fenc.encoders.{d}", .{i}) catch unreachable, &l);
+        try cb.enc.append(gpa, l);
+    }
+    cb.up_conv_w = try tl.getTensor("a.gen.fenc.up_layer.conv.weight", true);
+    cb.up_conv_b = try tl.getTensor("a.gen.fenc.up_layer.conv.bias", true);
+    cb.up_embed_linear_w = try tl.getTensor("a.gen.fenc.up_embed.out.0.weight", true);
+    cb.up_embed_linear_b = try tl.getTensor("a.gen.fenc.up_embed.out.0.bias", true);
+    cb.up_embed_norm_w = try tl.getTensor("a.gen.fenc.up_embed.out.1.weight", true);
+    cb.up_embed_norm_b = try tl.getTensor("a.gen.fenc.up_embed.out.1.bias", true);
+    i = 0;
+    while (cbxHas(tl, "a.gen.fenc.up_encoders.{d}.norm_mha.weight", .{i})) : (i += 1) {
+        var l: model_mod.Chatterbox.EncLayer = .{};
+        try cbxLoadEncLayer(tl, std.fmt.bufPrint(&pbuf, "a.gen.fenc.up_encoders.{d}", .{i}) catch unreachable, &l);
+        try cb.up_enc.append(gpa, l);
+    }
+    cb.after_norm_w = try tl.getTensor("a.gen.fenc.after_norm.weight", true);
+    cb.after_norm_b = try tl.getTensor("a.gen.fenc.after_norm.bias", true);
+    cb.encoder_proj_w = try tl.getTensor("a.gen.flow.encoder_proj.weight", true);
+    cb.encoder_proj_b = try tl.getTensor("a.gen.flow.encoder_proj.bias", true);
+
+    // cfm estimator
+    cb.time_mlp_1_w = try tl.getTensor("a.gen.est.time_mlp.linear_1.weight", true);
+    cb.time_mlp_1_b = try tl.getTensor("a.gen.est.time_mlp.linear_1.bias", true);
+    cb.time_mlp_2_w = try tl.getTensor("a.gen.est.time_mlp.linear_2.weight", true);
+    cb.time_mlp_2_b = try tl.getTensor("a.gen.est.time_mlp.linear_2.bias", true);
+    cb.time_embed_mixer_w = try tl.getTensor("a.gen.est.time_embed_mixer.weight", false);
+    try cbxLoadStage(tl, "a.gen.est.down_blocks.0", &cb.est_down, true);
+    i = 0;
+    while (cbxHas(tl, "a.gen.est.mid_blocks.{d}.0.block1.block.0.weight", .{i})) : (i += 1) {
+        var st: model_mod.Chatterbox.EstStage = .{};
+        try cbxLoadStage(tl, std.fmt.bufPrint(&pbuf, "a.gen.est.mid_blocks.{d}", .{i}) catch unreachable, &st, false);
+        try cb.est_mid.append(gpa, st);
+    }
+    try cbxLoadStage(tl, "a.gen.est.up_blocks.0", &cb.est_up, true);
+    try cbxLoadCausal(tl, "a.gen.est.final_block", &cb.est_final_block);
+    cb.est_final_proj_w = try tl.getTensor("a.gen.est.final_proj.weight", true);
+    cb.est_final_proj_b = try tl.getTensor("a.gen.est.final_proj.bias", true);
+
+    // hift vocoder
+    cb.hift_pre_w = try tl.getTensor("a.gen.hift.conv_pre.weight", true);
+    cb.hift_pre_b = try tl.getTensor("a.gen.hift.conv_pre.bias", true);
+    cb.hift_post_w = try tl.getTensor("a.gen.hift.conv_post.weight", true);
+    cb.hift_post_b = try tl.getTensor("a.gen.hift.conv_post.bias", true);
+    i = 0;
+    while (cbxHas(tl, "a.gen.hift.ups.{d}.weight", .{i})) : (i += 1) {
+        var up: model_mod.Chatterbox.HiftUp = .{};
+        up.up_w = try cbxGet(tl, "a.gen.hift.ups.{d}.weight", .{i});
+        up.up_b = try cbxGet(tl, "a.gen.hift.ups.{d}.bias", .{i});
+        up.source_down_w = try cbxGet(tl, "a.gen.hift.source_downs.{d}.weight", .{i});
+        up.source_down_b = try cbxGet(tl, "a.gen.hift.source_downs.{d}.bias", .{i});
+        try cbxLoadHres(tl, std.fmt.bufPrint(&pbuf, "a.gen.hift.source_resblocks.{d}", .{i}) catch unreachable, &up.source_res);
+        try cbxLoadHres(tl, std.fmt.bufPrint(&pbuf, "a.gen.hift.resblocks.{d}", .{3 * i}) catch unreachable, &up.res_0);
+        try cbxLoadHres(tl, std.fmt.bufPrint(&pbuf, "a.gen.hift.resblocks.{d}", .{3 * i + 1}) catch unreachable, &up.res_1);
+        try cbxLoadHres(tl, std.fmt.bufPrint(&pbuf, "a.gen.hift.resblocks.{d}", .{3 * i + 2}) catch unreachable, &up.res_2);
+        try cb.hift_ups.append(gpa, up);
+    }
+    i = 0;
+    while (cbxHas(tl, "a.gen.hift.f0_predictor.condnet.{d}.weight", .{i})) : (i += 2) {
+        var fc: model_mod.Chatterbox.F0Conv = .{};
+        fc.w = try cbxGet(tl, "a.gen.hift.f0_predictor.condnet.{d}.weight", .{i});
+        fc.b = try cbxGet(tl, "a.gen.hift.f0_predictor.condnet.{d}.bias", .{i});
+        try cb.f0_condnet.append(gpa, fc);
+    }
+    cb.f0_classifier_w = try tl.getTensor("a.gen.hift.f0_predictor.classifier.weight", true);
+    cb.f0_classifier_b = try tl.getTensor("a.gen.hift.f0_predictor.classifier.bias", true);
+
+    // s3 tokenizer
+    cb.s3tok_conv1_w = try tl.getTensor("a.s3tok.encoder.conv1.weight", true);
+    cb.s3tok_conv1_b = try tl.getTensor("a.s3tok.encoder.conv1.bias", true);
+    cb.s3tok_conv2_w = try tl.getTensor("a.s3tok.encoder.conv2.weight", true);
+    cb.s3tok_conv2_b = try tl.getTensor("a.s3tok.encoder.conv2.bias", true);
+    i = 0;
+    while (cbxHas(tl, "a.s3tok.encoder.blocks.{d}.attn_ln.weight", .{i})) : (i += 1) {
+        const p = std.fmt.bufPrint(&pbuf, "a.s3tok.encoder.blocks.{d}", .{i}) catch unreachable;
+        var b: model_mod.Chatterbox.S3tokBlock = .{};
+        b.attn_ln_w = try getCat(tl, p, ".attn_ln.weight", true);
+        b.attn_ln_b = try getCat(tl, p, ".attn_ln.bias", true);
+        b.attn_q_w = try getCat(tl, p, ".attn.query.weight", true);
+        b.attn_q_b = try getCat(tl, p, ".attn.query.bias", true);
+        b.attn_k_w = try getCat(tl, p, ".attn.key.weight", true);
+        b.attn_v_w = try getCat(tl, p, ".attn.value.weight", true);
+        b.attn_v_b = try getCat(tl, p, ".attn.value.bias", true);
+        b.fsmn_w = try getCat(tl, p, ".attn.fsmn_block.weight", true);
+        b.attn_out_w = try getCat(tl, p, ".attn.out.weight", true);
+        b.attn_out_b = try getCat(tl, p, ".attn.out.bias", true);
+        b.mlp_ln_w = try getCat(tl, p, ".mlp_ln.weight", true);
+        b.mlp_ln_b = try getCat(tl, p, ".mlp_ln.bias", true);
+        b.mlp_in_w = try getCat(tl, p, ".mlp.0.weight", true);
+        b.mlp_in_b = try getCat(tl, p, ".mlp.0.bias", true);
+        b.mlp_out_w = try getCat(tl, p, ".mlp.2.weight", true);
+        b.mlp_out_b = try getCat(tl, p, ".mlp.2.bias", true);
+        try cb.s3tok_blocks.append(gpa, b);
+    }
+    cb.s3tok_down_w = try tl.getTensor("a.s3tok.quantizer._codebook.project_down.weight", true);
+    cb.s3tok_down_b = try tl.getTensor("a.s3tok.quantizer._codebook.project_down.bias", true);
+
+    // read on the host: embedding tables, source module
+    var t: ?*c.ggml_tensor = c.ggml_get_first_tensor(tl.loader.ctx_meta);
+    while (t != null) : (t = c.ggml_get_next_tensor(tl.loader.ctx_meta, t)) {
+        const name = std.mem.sliceTo(&t.?.name, 0);
+        if (std.mem.startsWith(u8, name, "a.gen.code.") or std.mem.startsWith(u8, name, "a.gen.t3.") or
+            std.mem.startsWith(u8, name, "a.gen.hift.m_source."))
+        {
+            const loaded = try tl.getTensor(@ptrCast(&t.?.name), true);
+            const gop = try model.cbx_tensors.getOrPut(gpa, name);
+            if (!gop.found_existing) gop.key_ptr.* = try gpa.dupe(u8, name);
+            gop.value_ptr.* = loaded;
+        }
+    }
+
+    // voice.<name> holds the talker rows, voice.<name>.ref_* the flow decoder reference
+    const out_embd = (model.cbx_tensors.get("a.gen.code.out_embd.weight") orelse return clip.throwStr("map::at:  key not found")).?;
+    const n_embd_talker = out_embd.ne[0];
+    const ctx_gguf = tl.loader.ctx_gguf;
+    var ids: std.ArrayList(f32) = .empty; // the converter stores 1D tensors as F32, ids are exact
+    defer ids.deinit(gpa);
+    var it: i64 = 0;
+    while (it < c.gguf_get_n_tensors(ctx_gguf)) : (it += 1) {
+        const name_z = c.gguf_get_tensor_name(ctx_gguf, it);
+        const name = std.mem.span(name_z);
+        if (!std.mem.startsWith(u8, name, "voice.")) continue;
+        const vt: *c.ggml_tensor = c.ggml_get_tensor(tl.loader.ctx_meta, name_z);
+        var voice: []const u8 = name[6..];
+        ids.clearRetainingCapacity();
+        var dst: []f32 = &.{};
+        var ok = false;
+        const n_el: usize = @intCast(c.ggml_nelements(vt));
+        if (cbxTake(&voice, ".ref_tokens")) {
+            try ids.resize(gpa, n_el);
+            dst = ids.items;
+            ok = vt.type == c.GGML_TYPE_F32;
+        } else if (cbxTake(&voice, ".ref_feat")) {
+            const v = &(try model.gen_voices.getOrPut(voice)).ref.feat;
+            try v.resize(gpa, n_el);
+            dst = v.items;
+            ok = vt.type == c.GGML_TYPE_F32 and vt.ne[0] == 80;
+        } else if (cbxTake(&voice, ".ref_spk")) {
+            const v = &(try model.gen_voices.getOrPut(voice)).ref.spk;
+            try v.resize(gpa, n_el);
+            dst = v.items;
+            ok = vt.type == c.GGML_TYPE_F32 and vt.ne[0] == 192;
+        } else {
+            const v = &(try model.gen_voices.getOrPut(voice)).rows;
+            try v.resize(gpa, n_el);
+            dst = v.items;
+            ok = vt.type == c.GGML_TYPE_F32 and c.ggml_n_dims(vt) <= 2 and vt.ne[0] == n_embd_talker;
+        }
+        if (!ok) return clip.throwErr("%s: invalid voice tensor %s\n", .{ func, name_z });
+        if (!tl.readTensorBytes(name, std.mem.sliceAsBytes(dst)[0..c.ggml_nbytes(vt)])) {
+            return clip.throwErr("%s: failed to read %s\n", .{ func, name_z });
+        }
+        if (ids.items.len != 0) {
+            const tokens = &(try model.gen_voices.getOrPut(voice)).ref.tokens;
+            try tokens.resize(gpa, ids.items.len);
+            for (tokens.items, ids.items) |*d, f| d.* = @intFromFloat(f);
+        }
+    }
+    for (model.gen_voices.entries.items) |*e| {
+        const v = &e.voice;
+        if (v.rows.items.len == 0 or v.ref.tokens.items.len == 0 or v.ref.feat.items.len != 2 * 80 * v.ref.tokens.items.len or v.ref.spk.items.len == 0) {
+            return clip.throwErr("%s: incomplete voice %s\n", .{ func, e.name.ptr });
+        }
+    }
+}
+
+/// The `take` lambda of the CHATTERBOX arm's voice loop (mtmd/clip.cpp:3955
+/// @cd959bae9): strips `suffix` off `voice` if it ends with it.
+fn cbxTake(voice: *[]const u8, suffix: []const u8) bool {
+    const n = suffix.len;
+    if (voice.len > n and std.mem.eql(u8, voice.*[voice.len - n ..], suffix)) {
+        voice.* = voice.*[0 .. voice.len - n];
+        return true;
+    }
+    return false;
+}
+
+/// Ports the model-specific switch of `load_tensors` (mtmd/clip.cpp:2536
+/// @cd959bae9), the `switch (model.proj_type)` after its generic layer loop.
 pub fn load(tl: *TensorLoader) Error!void {
     const func = "load_tensors";
     const model = &tl.ctx_clip.model;
@@ -734,6 +1102,40 @@ pub fn load(tl: *TensorLoader) Error!void {
             model.downsample_w = try get(tl, names.TN_A_DOWNSAMPLE_CONV, .{W}, true);
             model.spk_proj_w = try get(tl, names.TN_A_SPEAKER_PROJ, .{W}, true);
         },
+        // `PROJECTOR_TYPE_CHATTERBOX_SPKENC` (mtmd/clip.cpp:4000 @cd959bae9)
+        .chatterbox_spkenc => {
+            const cb = &model.cbx;
+            cb.spk_conv1_w = try tl.getTensor("a.spk.head.conv1.weight", true);
+            try cbxLoadBn(tl, "a.spk.head.bn1", &cb.spk_bn1);
+            try cbxLoadRes2d(tl, "a.spk.head.layer1.0", &cb.spk_layer1_0);
+            try cbxLoadRes2d(tl, "a.spk.head.layer1.1", &cb.spk_layer1_1);
+            try cbxLoadRes2d(tl, "a.spk.head.layer2.0", &cb.spk_layer2_0);
+            try cbxLoadRes2d(tl, "a.spk.head.layer2.1", &cb.spk_layer2_1);
+            cb.spk_conv2_w = try tl.getTensor("a.spk.head.conv2.weight", true);
+            try cbxLoadBn(tl, "a.spk.head.bn2", &cb.spk_bn2);
+            cb.spk_tdnn_w = try tl.getTensor("a.spk.xvector.tdnn.linear.weight", true);
+            try cbxLoadBn(tl, "a.spk.xvector.tdnn.nonlinear.batchnorm", &cb.spk_tdnn_bn);
+            try cbxLoadCamBlock(tl, "a.spk.xvector.block1", "a.spk.xvector.transit1", &cb.spk_block1);
+            try cbxLoadCamBlock(tl, "a.spk.xvector.block2", "a.spk.xvector.transit2", &cb.spk_block2);
+            try cbxLoadCamBlock(tl, "a.spk.xvector.block3", "a.spk.xvector.transit3", &cb.spk_block3);
+            try cbxLoadBn(tl, "a.spk.xvector.out_nonlinear.batchnorm", &cb.spk_out_bn);
+            cb.spk_dense_w = try tl.getTensor("a.spk.xvector.dense.linear.weight", true);
+            try cbxLoadBn(tl, "a.spk.xvector.dense.nonlinear.batchnorm", &cb.spk_dense_bn);
+
+            // read on the host: voice encoder lstm, conditioning encoder
+            var t: ?*c.ggml_tensor = c.ggml_get_first_tensor(tl.loader.ctx_meta);
+            while (t != null) : (t = c.ggml_get_next_tensor(tl.loader.ctx_meta, t)) {
+                const name = std.mem.sliceTo(&t.?.name, 0);
+                if (std.mem.startsWith(u8, name, "a.ve.") or std.mem.startsWith(u8, name, "a.cenc.")) {
+                    const loaded = try tl.getTensor(@ptrCast(&t.?.name), true);
+                    const gop = try model.cbx_tensors.getOrPut(gpa, name);
+                    if (!gop.found_existing) gop.key_ptr.* = try gpa.dupe(u8, name);
+                    gop.value_ptr.* = loaded;
+                }
+            }
+        },
+        // `PROJECTOR_TYPE_CHATTERBOX` (mtmd/clip.cpp:3745 @cd959bae9)
+        .chatterbox => try loadChatterbox(tl),
         .pockettts_gen => {
             const flow = &model.flow;
             flow.input_proj_w = try get(tl, names.TN_A_GEN_FLOW_INPUT_PROJ, .{W}, true);
@@ -800,8 +1202,34 @@ pub fn load(tl: *TensorLoader) Error!void {
                 layer.ff_down_w = try get(tl, names.TN_FFN_DOWN, .{ p, l, W }, true);
                 layer.ls_2_w = try get(tl, names.TN_LS_2, .{ p, l, W }, true);
             }
+
+            const ctx_gguf = tl.loader.ctx_gguf;
+            var i: i64 = 0;
+            while (i < c.gguf_get_n_tensors(ctx_gguf)) : (i += 1) {
+                const name = c.gguf_get_tensor_name(ctx_gguf, i);
+                if (!std.mem.startsWith(u8, std.mem.span(name), "voice.")) continue;
+                const t: *const c.ggml_tensor = c.ggml_get_tensor(tl.loader.ctx_meta, name);
+                if (t.type != c.GGML_TYPE_F32 or c.ggml_n_dims(t) > 2 or t.ne[0] != model.gen_input_lin_w.?.ne[1]) {
+                    return clip.throwErr("%s: invalid voice tensor %s\n", .{ "load_tensors", name });
+                }
+                const embd = &(try model.gen_voices.getOrPut(std.mem.span(name + 6))).rows;
+                const old_len = embd.items.len;
+                try embd.resize(gpa, @intCast(c.ggml_nelements(t)));
+                if (embd.items.len > old_len) @memset(embd.items[old_len..], 0);
+                if (!tl.readTensorBytes(std.mem.span(name), std.mem.sliceAsBytes(embd.items)[0..c.ggml_nbytes(t)])) {
+                    return clip.throwErr("%s: failed to read %s\n", .{ "load_tensors", name });
+                }
+            }
+            if (model.gen_voices.count() != 0) {
+                impl.logInf("%s: %zu predefined voices\n", .{ "load_tensors", model.gen_voices.count() });
+            }
         },
         .lfm3a_gen => {
+            // must match the "tts" chat template, see conversion/lfm3.py
+            // note for contributor: this is one-off fix, do not repeat this for future models
+            _ = try model.gen_voices.getOrPut("female");
+            _ = try model.gen_voices.getOrPut("male");
+
             // depthformer, the generic loop above loaded the a.gen.code.blk.* tensors
             for (model.layers.items, 0..) |*layer, il| {
                 layer.attn_gate_w = try get(tl, names.TN_ATTN_GATE, .{ prefix, ci(il), W }, true);
@@ -1312,6 +1740,93 @@ pub fn load(tl: *TensorLoader) Error!void {
             model.mm_model_mlp_2_w = try get(tl, names.TN_MVLM_PROJ_MLP, .{ ci(1), W }, true);
             model.mm_model_mlp_3_w = try get(tl, names.TN_MVLM_PROJ_MLP, .{ ci(3), W }, true);
         },
+        // PROJECTOR_TYPE_NEMOTRON_TRANSCRIBE
+        .nemotron_transcribe => {
+            hparams.mel_filters.deinit(gpa);
+            hparams.mel_filters = try tl.getVector(names.TN_MEL_FILTERS);
+            hparams.window.deinit(gpa);
+            hparams.window = try tl.getVector(names.TN_WINDOW);
+
+            // ASR expert: blocks, pre_ln and post_ln come from the generic loader
+            model.inp_proj_w = try get(tl, names.TN_INP_PROJ, .{W}, true);
+            for (model.layers.items, 0..) |*layer, ilu| {
+                const il = ci(ilu);
+                layer.q_norm_b = try get(tl, names.TN_ATTN_Q_NORM, .{ prefix, il, B }, true);
+                layer.k_norm_b = try get(tl, names.TN_ATTN_K_NORM, .{ prefix, il, B }, true);
+            }
+
+            // speaker expert
+            const sp: [*:0]const u8 = "a.spk";
+            model.spk_inp_proj_w = try get(tl, names.TN_A_SPK_INP_PROJ, .{W}, true);
+            model.spk_pre_ln_w = try get(tl, names.TN_LN_PRE, .{ sp, W }, true);
+            model.spk_pre_ln_b = try get(tl, names.TN_LN_PRE, .{ sp, B }, true);
+            model.spk_post_ln_w = try get(tl, names.TN_LN_POST, .{ sp, W }, true);
+            model.spk_post_ln_b = try get(tl, names.TN_LN_POST, .{ sp, B }, true);
+            try resizeList(model_mod.Layer, &model.spk_layers, @intCast(hparams.spk_n_layer));
+            for (model.spk_layers.items, 0..) |*layer, ilu| {
+                const il = ci(ilu);
+                layer.ln_1_w = try get(tl, names.TN_LN_1, .{ sp, il, W }, true);
+                layer.ln_1_b = try get(tl, names.TN_LN_1, .{ sp, il, B }, true);
+                layer.qkv_w = try get(tl, names.TN_ATTN_QKV, .{ sp, il, W }, true);
+                layer.o_w = try get(tl, names.TN_ATTN_OUTPUT, .{ sp, il, W }, true);
+                layer.o_b = try get(tl, names.TN_ATTN_OUTPUT, .{ sp, il, B }, true);
+                layer.ln_2_w = try get(tl, names.TN_LN_2, .{ sp, il, W }, true);
+                layer.ln_2_b = try get(tl, names.TN_LN_2, .{ sp, il, B }, true);
+                layer.ff_up_w = try get(tl, names.TN_FFN_UP, .{ sp, il, W }, true);
+                layer.ff_up_b = try get(tl, names.TN_FFN_UP, .{ sp, il, B }, true);
+                layer.ff_down_w = try get(tl, names.TN_FFN_DOWN, .{ sp, il, W }, true);
+                layer.ff_down_b = try get(tl, names.TN_FFN_DOWN, .{ sp, il, B }, true);
+            }
+
+            // Sortformer head, fusion
+            model.spk_head_proj_w = try get(tl, names.TN_A_SPK_HEAD, .{ s("proj"), W }, true);
+            model.spk_head_proj_b = try get(tl, names.TN_A_SPK_HEAD, .{ s("proj"), B }, true);
+            model.spk_head_up_w = try get(tl, names.TN_A_SPK_HEAD, .{ s("upsample"), W }, true);
+            model.spk_head_up_b = try get(tl, names.TN_A_SPK_HEAD, .{ s("upsample"), B }, true);
+            model.spk_head_fc1_w = try get(tl, names.TN_A_SPK_HEAD, .{ s("fc1"), W }, true);
+            model.spk_head_fc1_b = try get(tl, names.TN_A_SPK_HEAD, .{ s("fc1"), B }, true);
+            model.spk_head_fc2_w = try get(tl, names.TN_A_SPK_HEAD, .{ s("fc2"), W }, true);
+            model.spk_head_fc2_b = try get(tl, names.TN_A_SPK_HEAD, .{ s("fc2"), B }, true);
+            model.fusion_asr_norm_w = try get(tl, names.TN_A_FUSION_NORM, .{ s("asr_norm"), W }, true);
+            model.fusion_asr_norm_b = try get(tl, names.TN_A_FUSION_NORM, .{ s("asr_norm"), B }, true);
+            model.fusion_spk_norm_w = try get(tl, names.TN_A_FUSION_NORM, .{ s("spk_norm"), W }, true);
+            model.fusion_spk_norm_b = try get(tl, names.TN_A_FUSION_NORM, .{ s("spk_norm"), B }, true);
+            model.fusion_spk_kernel = try tl.getTensor(names.TN_A_FUSION_KERNEL, true);
+
+            model.spk_sil_emb.deinit(gpa);
+            model.spk_sil_emb = try tl.getVector(names.TN_A_SPK_SIL_EMB);
+
+            // the head layouts and the widths the graph and the speaker state use must match the tensors
+            hparams.spk_n_embd = @truncate(graph.ne(model.spk_inp_proj_w, 1));
+            const n_embd: i64 = hparams.n_embd;
+            const spk_n_embd: i64 = hparams.spk_n_embd;
+            const d_head: i64 = if (hparams.n_head > 0) @divTrunc(hparams.n_embd, hparams.n_head) else 0;
+            const d_head_spk: i64 = if (hparams.spk_n_head > 0) @divTrunc(hparams.spk_n_embd, hparams.spk_n_head) else 0;
+            const n_spk: i64 = graph.ne(model.spk_head_fc2_w, 1);
+            // the graph splits each fused QKV into three views of the layer width
+            var qkv_ok = true;
+            for (model.layers.items) |*layer| {
+                qkv_ok = qkv_ok and layer.qkv_w != null and graph.ne(layer.qkv_w, 0) == n_embd and graph.ne(layer.qkv_w, 1) == 3 * n_embd;
+            }
+            for (model.spk_layers.items) |*layer| {
+                qkv_ok = qkv_ok and graph.ne(layer.qkv_w, 0) == spk_n_embd and graph.ne(layer.qkv_w, 1) == 3 * spk_n_embd;
+            }
+            if (!qkv_ok or graph.ne(model.inp_proj_w, 1) != n_embd or d_head <= 0 or d_head * hparams.n_head != n_embd or
+                (hparams.n_embd_head > 0 and hparams.n_embd_head != d_head) or
+                hparams.audio_rope_dims <= 0 or @rem(hparams.audio_rope_dims, 2) != 0 or hparams.audio_rope_dims > d_head or
+                d_head_spk <= 0 or @rem(d_head_spk, 2) != 0 or d_head_spk * hparams.spk_n_head != spk_n_embd or
+                @as(i64, @intCast(model.spk_sil_emb.items.len)) != spk_n_embd or n_spk <= 0 or
+                graph.ne(model.fusion_spk_kernel, 0) != n_spk or graph.ne(model.fusion_spk_kernel, 1) != n_embd or
+                hparams.mel_filters.items.len != @as(usize, @bitCast(@as(isize, hparams.n_mel_bins))) *% @as(usize, @bitCast(@as(isize, @divTrunc(hparams.audio_n_fft, 2) + 1))) or
+                hparams.window.items.len != @as(usize, @bitCast(@as(isize, hparams.audio_window_len))))
+            {
+                return clip.throwErr("%s: hparams do not match the tensor shapes\n", .{func});
+            }
+
+            // projection to the text model
+            model.mm_fc_w = try get(tl, names.TN_MM_AUDIO_FC, .{W}, true);
+            model.mm_fc_b = try get(tl, names.TN_MM_AUDIO_FC, .{B}, true);
+        },
         .granite_speech => {
             model.inp_proj_w = try get(tl, names.TN_INP_PROJ, .{W}, true);
             model.inp_proj_b = try get(tl, names.TN_INP_PROJ, .{B}, true);
@@ -1436,7 +1951,7 @@ inline fn neI(t: T, i: usize) c_int {
     return @truncate(graph.ne(t, i));
 }
 
-/// Ports `clip_n_mmproj_embd` (mtmd/clip.cpp:6954 @8642541b2): the embedding
+/// Ports `clip_n_mmproj_embd` (mtmd/clip.cpp:7816 @cd959bae9): the embedding
 /// size of the projector's output, which must be the text model's.
 pub fn nMmprojEmbd(ctx: *const clip.Ctx) c_int {
     const m = &ctx.model;
@@ -1464,7 +1979,7 @@ pub fn nMmprojEmbd(ctx: *const clip.Ctx) c_int {
         .meralion => neI(m.mm_3_w, 1), // out_proj output dim
         .internvl, .nemotron_v2_vl, .nemotron_omni => neI(m.mm_3_w, 1),
         .llama4 => neI(m.mm_model_proj, 1),
-        .qwen2a => neI(m.mm_fc_w, 1),
+        .qwen2a, .nemotron_transcribe => neI(m.mm_fc_w, 1),
         .qwen3a => neI(m.mm_2_w, 1),
         .glma, .lfm2, .d1omni_v, .kimivl, .paddleocr, .kimik25, .yasa2, .deepseek4v, .deepseek41v, .cohere2v => neI(m.mm_2_w, 1),
         .hunyuanvl => neI(m.mm_model_proj, 1),
@@ -1481,6 +1996,12 @@ pub fn nMmprojEmbd(ctx: *const clip.Ctx) c_int {
         .qwen3tts_gen, .lfm3a_gen => neI(m.gen_code_out_embd_w, 0),
         .pockettts_spkenc => neI(m.spk_proj_w, 1),
         .pockettts_gen => neI(m.gen_input_lin_w, 1),
+        // talker conditioning rows, the speaker projection carries their width
+        .chatterbox_spkenc => neI(m.cbx_tensors.get("a.cenc.spkr_enc.weight") orelse
+            impl.abortUncaught("std::out_of_range", "unordered_map::at: key not found"), 1),
+        // talker conditioning rows, the speech table carries their width
+        .chatterbox => neI(m.cbx_tensors.get("a.gen.code.out_embd.weight") orelse
+            impl.abortUncaught("std::out_of_range", "map::at:  key not found"), 0),
         .parakeet => neI(m.mm_1_w, 1),
         else => impl.abort("clip.cpp", 7943, "Unknown projector type"),
     };

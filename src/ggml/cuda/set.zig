@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/set.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/set.cuh` at v0.8.0 (`8642541b2`). It has no
+//! `llama.cpp/ggml/src/ggml-cuda/set.cuh` at v0.9.0 (`cd959bae9`). It has no
 //! kernel of its own.
 
 const std = @import("std");

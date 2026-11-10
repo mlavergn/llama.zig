@@ -13,7 +13,7 @@
 //! - `llama.cpp/src/llama-ext.h` -- `llama_quant_model_desc`
 //! - `llama.cpp/src/llama-impl.cpp` -- `llama_format_tensor_shape`
 //!
-//! All at v0.8.0 (`8642541b2`). The C entry points are `api/quant.zig`'s.
+//! All at v0.9.0 (`cd959bae9`). The C entry points are `api/quant.zig`'s.
 //!
 //! # The contract
 //!
@@ -341,12 +341,12 @@ fn remapImatrix(re: *const regex.Regex, orig_name: [:0]const u8, mapped: *const 
 // -----------------------------------------------------------------------------
 // Dequantization
 
-/// Ports `llama_tensor_dequantize_impl` (llama-quant.cpp:231 @8642541b2):
+/// Ports `llama_tensor_dequantize_impl` (llama-quant.cpp:231 @cd959bae9):
 /// `nelements` of `type` at `data` as f32 in `f32_output`, split across
 /// `nthread` threads.
 fn dequantize(ty: GgmlType, data: *const anyopaque, f32_output: [*]f32, nelements: usize, nthread: c_int, exc: *Exception) Thrown!void {
     const qtype = c.ggml_get_type_traits(ty);
-    if (c.ggml_is_quantized(ty)) {
+    if (c.ggml_is_quantized(ty) or ty == c.GGML_TYPE_F8_E4M3) {
         if (qtype.*.to_float == null) {
             return exc.throw(.runtime_error, "type {s} unsupported for integer quantization: no dequantization available", .{typeName(ty)});
         }
@@ -391,7 +391,7 @@ fn dequantize(ty: GgmlType, data: *const anyopaque, f32_output: [*]f32, nelement
 }
 
 /// The `compute` lambda of `llama_tensor_dequantize_impl`
-/// (llama-quant.cpp:231 @8642541b2).
+/// (llama-quant.cpp:231 @cd959bae9).
 fn convertRun(ty: GgmlType, to_float: c.ggml_to_float_t, inbuf: [*]const u8, outbuf: [*]f32, nels: i64) void {
     if (ty == c.GGML_TYPE_F16) {
         c.ggml_fp16_to_fp32_row(@ptrCast(@alignCast(inbuf)), outbuf, nels);
@@ -405,7 +405,7 @@ fn convertRun(ty: GgmlType, to_float: c.ggml_to_float_t, inbuf: [*]const u8, out
 // -----------------------------------------------------------------------------
 // Which tensors are quantized
 
-/// Ports `tensor_allows_quantization` (llama-quant.cpp:302 @8642541b2).
+/// Ports `tensor_allows_quantization` (llama-quant.cpp:302 @cd959bae9).
 ///
 /// Parameters:
 /// - `params`: the quantization parameters.
@@ -439,6 +439,13 @@ pub fn tensorAllowsQuantization(params: *const c.llama_model_quantize_params, a:
     allowed = allowed and !contains(name, "laurel");
     allowed = allowed and !contains(name, "per_layer_model_proj");
 
+    // Limite: very small gates and dense connection mixers.
+    if (a == .limite) {
+        allowed = allowed and !contains(name, "attn_gate.weight");
+        allowed = allowed and !contains(name, "attn_ve_gate.weight");
+        allowed = allowed and !contains(name, "mudd_");
+    }
+
     // Positional embeddings and token types (BERT).
     const pos_embd = arch.tensorName(.pos_embd, "weight", -1, -1);
     const token_types = arch.tensorName(.token_types, "weight", -1, -1);
@@ -451,13 +458,23 @@ pub fn tensorAllowsQuantization(params: *const c.llama_model_quantize_params, a:
     // LFM3-VL's depthwise conv kernels: CONV_2D_DW takes F32 kernels.
     allowed = allowed and !contains(name, "conv2d_spatial.weight");
 
-    // LFM3-Audio's encoder convs and codec: the codec output does not survive quantization.
+    // LFM3-Audio's encoder convs, depthwise convs and the codec FSQ.
     allowed = allowed and !std.mem.startsWith(u8, name, "a.conv1d.");
     allowed = allowed and !contains(name, "conv_dw");
-    allowed = allowed and !std.mem.startsWith(u8, name, "a.gen.wav.");
+    allowed = allowed and !std.mem.startsWith(u8, name, "a.gen.wav.quant.");
 
     allowed = allowed and !contains(name, "indexer.k_proj.weight");
     allowed = allowed and !contains(name, "indexer.q_proj.weight");
+
+    // Metis16: small control tensors that steer every layer; the stream and
+    // hc_ tables (ne[0] = 4) would fall back to F16. The C++ tests the first
+    // two with `rfind(prefix, 0) == npos`, which is "does not start with".
+    if (a == .metis16) {
+        allowed = allowed and !std.mem.startsWith(u8, name, "depth_mem_");
+        allowed = allowed and !std.mem.startsWith(u8, name, "cont_");
+        inline for (.{ "stream_embd", "attn_pass_lora", "ffn_exp_embd", "hc_" }) |s|
+            allowed = allowed and !contains(name, s);
+    }
 
     // GLM5-Next
     if (a == .glm5_next) {

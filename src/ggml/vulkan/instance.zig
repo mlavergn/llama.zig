@@ -7,8 +7,8 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-debug.cpp`, and
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.8.0
-//! (`8642541b2`). Upstream split `ggml-vulkan.cpp` into those files at
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.9.0
+//! (`cd959bae9`). Upstream split `ggml-vulkan.cpp` into those files at
 //! v0.5.0. Each declaration below names the C++ it replaces and the line it
 //! began at.
 //!
@@ -231,7 +231,7 @@ pub fn khrCooperativeMatrixSupport(props: *const vk.VkPhysicalDeviceProperties, 
 // -----------------------------------------------------------------------------
 // The instance
 
-/// Ports `vk_instance_t` (ggml-vulkan-types.h:1321 @8642541b2), without
+/// Ports `vk_instance_t` (ggml-vulkan-types.h:1325 @cd959bae9), without
 /// `devices[]`, which belongs to the logical-device layer, or
 /// `host_allocations` and its mutex, which belong to the buffer layer
 /// (`buffer.zig`'s `host_allocations`).
@@ -254,6 +254,7 @@ pub const Instance = struct {
     host_import_failed: u32 = 0, // bitmask by device->idx, guarded by host_allocations_mutex
 
     multi_device: bool = false,
+    allreduce_disabled: bool = false,
 };
 
 /// Ports `vk_instance_initialized` (ggml-vulkan.cpp:329 @cd959bae9).
@@ -409,7 +410,7 @@ const DeviceIdentity = struct {
     }
 };
 
-/// Ports `ggml_vk_instance_init` (ggml-vulkan.cpp:5208 @8642541b2).
+/// Ports `ggml_vk_instance_init` (ggml-vulkan.cpp:5220 @cd959bae9).
 ///
 /// Return: nothing; an error where the C++ throws. As in the C++, the
 /// instance counts as initialised from the moment it is created, so a
@@ -498,6 +499,7 @@ pub fn instanceInit() InitError!void {
     loggers.perf_logger_concurrent = common.envSet("GGML_VK_PERF_LOGGER_CONCURRENT");
     loggers.enable_sync_logger = common.envSet("GGML_VK_SYNC_LOGGER");
     loggers.memory_logger_enabled = common.envSet("GGML_VK_MEMORY_LOGGER");
+    instance.allreduce_disabled = common.envSet("GGML_VK_DISABLE_ALLREDUCE");
     if (std.c.getenv("GGML_VK_PIPELINE_STATS")) |stats| loggers.pipeline_stats_filter = std.mem.span(stats);
     if (std.c.getenv("GGML_VK_PERF_LOGGER_FREQUENCY")) |freq| {
         loggers.perf_logger_frequency = try stoulTruncated(std.mem.span(freq));

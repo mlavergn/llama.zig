@@ -12,7 +12,7 @@ budget's states) and the same stderr -- common_log's every line -- after
 masking what differs by design: timings, pointers, an abort's backtrace.
 
 Two decoders over real models: Qwen3-0.6B as target and draft, and the arch
-fixtures' draft architectures (EAGLE3 over a 128-wide Gemma 4, DFlash and
+fixtures' draft architectures (EAGLE3 over a 256-wide Gemma 4, DFlash and
 DSpark over Nemotron-H). Both sides decode through their own libllama over
 the one libggml.a; context-diff holds those to the same bits.
 
@@ -147,6 +147,10 @@ CASES = [
                         "-n", "16", "--temp", "0", "-dev", "none", "-devd", "none"] + FIXV),
     case("dflash", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-dense.gguf", "--spec-type", "draft-dflash", "-p", IDS,
                     "-n", "16", "--temp", "0"] + FIXV),
+    # v0.9.0: DFlash takes the target's features from its device buffer where the draft can read rows
+    # of it (llama_supports_embd_row); LLAMA_DFLASH_DEV=0 keeps the host copies every case used before
+    case("dflash-host", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-dense.gguf", "--spec-type", "draft-dflash",
+                         "-p", IDS, "-n", "16", "--temp", "0"] + FIXV, {"LLAMA_DFLASH_DEV": "0"}),
     case("dflash-iswa-clamp", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-iswa.gguf", "--spec-type", "draft-dflash",
                                "-p", IDS, "-n", "16", "--temp", "0", "--spec-draft-n-max", "40", "--spec-draft-n-min", "2"] + FIXV,
          {"SPEC_SYNTH_LEN": "2"}),
@@ -210,6 +214,11 @@ CASES = [
     case("mtp-gemma4-embd", ["-m", f"{FX}/gemma4-moe.gguf", "-md", f"{FX}/gemma4-assistant.gguf", "--spec-type", "draft-mtp",
                              "-p", IDS, "-n", "16", "--temp", "0"] + FIX,
          {"SPEC_PREFILL_EMBD": "1"}),
+    # v0.9.0: on a shared memory (Gemma 4) the MTP head keeps only the last row of a batch whose
+    # other rows have no output; a prefill with its last token output reaches that arm
+    case("mtp-gemma4-lastout", ["-m", f"{FX}/gemma4-moe.gguf", "-md", f"{FX}/gemma4-assistant.gguf", "--spec-type",
+                                "draft-mtp", "-np", "2", "-p", IDS2, "-n", "16", "--temp", "0"] + FIX,
+         {"SPEC_PREFILL_LAST_OUT": "1"}),
     # v0.7.0: LiliCorr (lilicorr.candidate_topk), a DFlash whose head reads the draft's own projected
     # embeddings of the last block as a state input and walks a candidate lattice, as DFlash2 does
     case("lilicorr", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-lilicorr.gguf", "--spec-type", "draft-dflash",
@@ -268,6 +277,8 @@ PHRASES = [
     "adding speculative implementation 'draft-dflash'",
     "adding speculative implementation 'draft-dspark'",
     "adding speculative implementation 'draft-mtp'",
+    "DFlash target features via host copies",
+    "DFlash target features via device buffer",
     "is too small - poor quality is possible",
     "ngram_mod occupancy =",
     "low acceptance streak",

@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cpu/tiled/tiled-kernel.h` and
-//! `llama.cpp/ggml/src/ggml-cpu/tiled/tiled-kernel.cpp` (v0.8.0,
-//! `8642541b2`), new at v0.6.0 and replacing `iqp.cpp`. Each declaration
+//! `llama.cpp/ggml/src/ggml-cpu/tiled/tiled-kernel.cpp` (v0.9.0,
+//! `cd959bae9`), new at v0.6.0 and replacing `iqp.cpp`. Each declaration
 //! names the C it replaces and the line it began at; the driver that calls
 //! these is `tiled.zig`.
 //!

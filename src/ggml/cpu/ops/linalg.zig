@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.8.0 (`8642541b2`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.9.0 (`cd959bae9`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # `out_prod` accumulates through `ggml_vec_mad_f32`
@@ -251,7 +251,7 @@ fn outProdWiden(comptime is_f16: bool, params: *const ComputeParams, dst: *Tenso
     }
 }
 
-/// Ports `ggml_compute_forward_out_prod` (ops.cpp:4791 @8642541b2).
+/// Ports `ggml_compute_forward_out_prod` (ops.cpp:4803 @cd959bae9).
 pub export fn ggml_compute_forward_out_prod(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -265,6 +265,7 @@ pub export fn ggml_compute_forward_out_prod(params: *const ComputeParams, dst: *
         c.GGML_TYPE_Q8_0,
         c.GGML_TYPE_MXFP4,
         c.GGML_TYPE_NVFP4,
+        c.GGML_TYPE_F8_E4M3,
         c.GGML_TYPE_Q2_K,
         c.GGML_TYPE_Q3_K,
         c.GGML_TYPE_Q4_K,
@@ -490,7 +491,7 @@ fn setT(comptime T: type, params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_set` (ops.cpp:5105 @8642541b2).
+/// Ports `ggml_compute_forward_set` (ops.cpp:5118 @cd959bae9).
 pub export fn ggml_compute_forward_set(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 

@@ -8,7 +8,7 @@
 //! - `llama.cpp/ggml/src/ggml-cpu/common.h`       — `type_conversion_table`
 //!                                                  and `get_thread_range`
 //!
-//! Both at v0.8.0 (`8642541b2`). Each declaration below names the C++ it
+//! Both at v0.9.0 (`cd959bae9`). Each declaration below names the C++ it
 //! replaces and the line it began at. This file exports the same four C
 //! symbols with the same signatures, so `ops.cpp` and the ported `ggml-cpu.c`
 //! dispatch into it unchanged.

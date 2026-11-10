@@ -8,7 +8,7 @@
 //!   getter with its override handling, `llama_model_loader::get_key`, and
 //!   the override map the constructor builds
 //!
-//! All at v0.8.0 (`8642541b2`).
+//! All at v0.9.0 (`cd959bae9`).
 //!
 //! # Scope
 //!
@@ -47,7 +47,7 @@ pub const Meta = struct {
     overrides: std.StringHashMapUnmanaged(c.llama_model_kv_override) = .empty,
 
     /// Ports the override half of `llama_model_loader`'s constructor
-    /// (llama-model-loader.cpp:535 @8642541b2): every override up to the
+    /// (llama-model-loader.cpp:537 @cd959bae9): every override up to the
     /// one with an empty key, the first of any repeated key kept, as
     /// `unordered_map`'s `insert` keeps it.
     ///

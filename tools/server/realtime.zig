@@ -8,8 +8,8 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/server/server-realtime.cpp` and
-//! `llama.cpp/tools/server/server-realtime.h` (llama.cpp v0.8.0,
-//! `8642541b2`) whole: `server_realtime_deps`,
+//! `llama.cpp/tools/server/server-realtime.h` (llama.cpp v0.9.0,
+//! `cd959bae9`) whole: `server_realtime_deps`,
 //! `server_realtime_conversation`, `realtime_conversation`,
 //! `server_realtime_op` and `server_realtime_slot`. Each declaration names
 //! what it ports and the line it began at.

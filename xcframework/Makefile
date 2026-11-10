@@ -66,10 +66,13 @@ ZIG        ?= $(ROOT)/../zig17/stage/zig/zig
 HOST_ZIG   ?= zig
 
 # Upstream's minimums (build-xcframework.sh:7-10).
-IOS_MIN      := 16.4
-MACOS_MIN    := 13.3
-VISIONOS_MIN := 1.0
-TVOS_MIN     := 16.4
+IOS_MIN      := 26.0
+MACOS_MIN    := 26.0
+VISIONOS_MIN := 26.0
+TVOS_MIN     := 26.0
+
+# The platforms whose minimum is not upstream's, for `verify.sh compat`.
+COMPAT_MINOS := ios:$(IOS_MIN) macos:$(MACOS_MIN) tvos:$(TVOS_MIN) xros:$(VISIONOS_MIN)
 
 MODEL      ?= $(ROOT)/Qwen3.5-2B-Q4_K_M.gguf
 NPRED      ?= 32
@@ -98,9 +101,15 @@ BUILDS := ios-sim ios-device macos visionos visionos-sim tvos-sim tvos-device
 # The arm64 CPU is the one Apple clang picks for that target when upstream's
 # CMake names none (GGML_NATIVE is off): measured with `clang -###`. It
 # decides which kernel arms compile, and the oldest device each slice runs
-# on: apple_a7 runs on everything iOS 16.4 and tvOS 16.4 do. x86_64 is
-# x86_64_v3 (AVX2), the floor of the port's x86 kernels; every Mac macOS 13.3
+# on: apple_a7 runs on everything iOS 26.0 and tvOS 26.0 do. x86_64 is
+# x86_64_v3 (AVX2), the floor of the port's x86 kernels; every Mac macOS 26.0
 # supports has it.
+#
+# Every Apple platform's minimum is 26.0 since v0.9.0 (Marc, 2026-11-09: the
+# Apple frameworks are pinned at 26.0 and up), above upstream's
+# build-xcframework.sh (iOS 16.4, macOS 13.3, tvOS 16.4, visionOS 1.0).
+# `compat` holds the slices to 26.0 instead of to upstream's minimum
+# (COMPAT_MINOS).
 ios-sim_ARCHS        := arm64 x86_64
 ios-sim_OS           := ios.$(IOS_MIN)-simulator
 ios-sim_CPU          := apple_m1
@@ -196,6 +205,9 @@ part_cpu = $(if $(filter arm64,$(2)),$($(1)_CPU),x86_64_v3)
 # dylib carried another SDK version than upstream's.)
 # $(1): the command; $(2): what the injected fault is; $(3): an extended
 # regular expression for the failure it must produce, with no comma or quote.
+# A literal comma inside a $(call ...) argument.
+comma := ,
+
 expect_fail = if ( $(1) ) > "$(B)/neg/last.log" 2>&1; then \
         echo "NEGATIVE TEST ESCAPED: $(2)"; cat "$(B)/neg/last.log"; exit 1; \
     elif ! grep -Eq '$(3)' "$(B)/neg/last.log"; then \
@@ -304,7 +316,7 @@ compat:
 	@# by the sync, and compat would report the version gap as ours.
 	@test "$$(cat "$(B)/upstream/COMMIT" 2>/dev/null)" = "$$(git -C "$(ROOT)/llama.cpp" rev-parse HEAD)" \
 	    || { echo "FAIL: $(UPSTREAM) is not at llama.cpp's HEAD -- run 'make upstream'"; exit 1; }
-	./verify.sh compat "$(XCF)" "$(UPSTREAM)"
+	COMPAT_MINOS="$(COMPAT_MINOS)" ./verify.sh compat "$(XCF)" "$(UPSTREAM)"
 
 # Every structural gate, fed an input with one fault injected.
 NEG_O := $(B)/macos/arm64
@@ -312,7 +324,7 @@ negative: xcframework
 	@printf '\n== negative tests ==\n'
 	rm -rf "$(B)/neg" && mkdir -p "$(B)/neg"
 	@# Fault: wrong platform -- the simulator object checked as a device one.
-	@$(call expect_fail,./verify.sh platform $(ios-device_PLAT) $(IOS_MIN) "$(B)/ios-sim/arm64/llama.o",simulator object passed as iOS device,llama.o are not platform 2 minos 16.4)
+	@$(call expect_fail,./verify.sh platform $(ios-device_PLAT) $(IOS_MIN) "$(B)/ios-sim/arm64/llama.o",simulator object passed as iOS device,llama.o are not platform 2 minos $(IOS_MIN))
 	@# Fault: wrong minimum OS.
 	@$(call expect_fail,./verify.sh platform $(macos_PLAT) 15.0 "$(NEG_O)/llama.o",macOS $(MACOS_MIN) object passed as minos 15.0,llama.o are not platform 1 minos 15.0)
 	@# Fault: no exports list, so every internal symbol stays global.
@@ -356,11 +368,11 @@ negative-compat:
 	rm -rf "$(B)/neg/hdr" && cp -R "$(XCF)" "$(B)/neg/hdr"
 	chmod u+w "$(B)/neg/hdr/ios-arm64/llama.framework/Headers/llama.h"
 	echo '// edited' >> "$(B)/neg/hdr/ios-arm64/llama.framework/Headers/llama.h"
-	@$(call expect_fail,./verify.sh compat "$(B)/neg/hdr" "$(UPSTREAM)",a header that is not upstream's,compat: ios-arm64: ./Headers/llama.h is not upstream)
+	@$(call expect_fail,COMPAT_MINOS="$(COMPAT_MINOS)" ./verify.sh compat "$(B)/neg/hdr" "$(UPSTREAM)",a header that is not upstream's,compat: ios-arm64: ./Headers/llama.h is not upstream)
 	@# Fault: our own module name, as the static framework had.
 	rm -rf "$(B)/neg/mod" && cp -R "$(XCF)" "$(B)/neg/mod"
 	sed -i '' 's/^framework module llama/framework module llamazig/' "$(B)/neg/mod/tvos-arm64/llama.framework/Modules/module.modulemap"
-	@$(call expect_fail,./verify.sh compat "$(B)/neg/mod" "$(UPSTREAM)",module renamed,compat: tvos-arm64: ./Modules/module.modulemap is not upstream)
+	@$(call expect_fail,COMPAT_MINOS="$(COMPAT_MINOS)" ./verify.sh compat "$(B)/neg/mod" "$(UPSTREAM)",module renamed,compat: tvos-arm64: ./Modules/module.modulemap is not upstream)
 	@# Fault: an API function no longer exported.
 	rm -rf "$(B)/neg/api" && cp -R "$(XCF)" "$(B)/neg/api"
 	grep -v '^_mtmd_' exports.txt > "$(B)/neg/exports-nomtmd.txt"
@@ -373,11 +385,11 @@ negative-compat:
 	    -framework Foundation -framework Metal -framework Accelerate "-Wl,-exported_symbols_list,$(B)/neg/exports-nomtmd.txt" \
 	    -install_name @rpath/llama.framework/Versions/Current/llama -o "$(B)/neg/arm64.dylib"
 	xcrun lipo -create "$(B)/neg/arm64.dylib" "$(B)/macos/x86_64/llama.dylib" -output "$(B)/neg/api/macos-arm64_x86_64/llama.framework/Versions/A/llama"
-	@$(call expect_fail,./verify.sh compat "$(B)/neg/api" "$(UPSTREAM)",mtmd_* not exported on macOS arm64,compat: macos-arm64_x86_64 arm64: [0-9]+ header-declared symbols upstream exports and ours does not: _mtmd_)
+	@$(call expect_fail,COMPAT_MINOS="$(COMPAT_MINOS)" ./verify.sh compat "$(B)/neg/api" "$(UPSTREAM)",mtmd_* not exported on macOS arm64,compat: macos-arm64_x86_64 arm64: [0-9]+ header-declared symbols upstream exports and ours does not: _mtmd_)
 	@# Fault: the device binary not re-marked by vtool, so its SDK field differs.
 	rm -rf "$(B)/neg/vt" && cp -R "$(XCF)" "$(B)/neg/vt"
 	cp "$(B)/tvos-device/arm64/llama.dylib" "$(B)/neg/vt/tvos-arm64/llama.framework/llama"
-	@$(call expect_fail,./verify.sh compat "$(B)/neg/vt" "$(UPSTREAM)",tvOS binary without vtool,compat: tvos-arm64: binary identity differs:.*sdk=16.4 .*sdk=[0-9.]+)
+	@$(call expect_fail,COMPAT_MINOS="$(COMPAT_MINOS)" ./verify.sh compat "$(B)/neg/vt" "$(UPSTREAM)",tvOS binary without vtool,compat: tvos-arm64: arm64 of ours is sdk [0-9.]+$(comma) not the minimum $(TVOS_MIN) vtool writes)
 
 # -----------------------------------------------------------------------------
 # Smoke tests

@@ -9,7 +9,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/hy-v4.cpp` at v0.8.0 (`8642541b2`):
+//! Ported from `llama.cpp/src/models/hy-v4.cpp` at v0.9.0 (`cd959bae9`):
 //! the view helpers, `llama_model_hy_v4`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, `hy_v4_hc_reduce`, and its
 //! `graph` with the hyper-connection, attention and indexer builders. The
@@ -417,7 +417,7 @@ fn buildAttention(b: *const Builder, model: *const Model, inp_attn: *graph.InpAt
 }
 
 /// Ports `llama_model_hy_v4`'s graph's `build_indexer_top_k`
-/// (models/hy-v4.cpp:341 @8642541b2): the lightning indexer -- scores
+/// (models/hy-v4.cpp:341 @cd959bae9): the lightning indexer -- scores
 /// every cached indexer key for each query, stores this ubatch's keys,
 /// and picks the top-k positions attention may see.
 ///
@@ -475,7 +475,7 @@ fn buildIndexerTopK(b: *const Builder, model: *const Model, inp_attn_dsa: *graph
 
     var score: *Tensor = undefined;
     if (b.cparams.fused_lid) {
-        score = c.ggml_lightning_indexer(ctx, iq, ik, iw, inp_attn_dsa.getKqMaskLid());
+        score = c.ggml_lightning_indexer(ctx, iq, ik, iw, inp_attn_dsa.self_attn_mask_lid.raw);
         b.cb(score, "indexer_score", il);
         b.res.addFusedNode(.{ .op = .lightning_indexer, .tensor = score, .il = il });
     } else {
@@ -488,7 +488,7 @@ fn buildIndexerTopK(b: *const Builder, model: *const Model, inp_attn_dsa: *graph
         score = c.ggml_mul(ctx, score, iw);
         score = c.ggml_sum_rows(ctx, score);
         score = c.ggml_cont(ctx, c.ggml_permute(ctx, score, 2, 1, 0, 3));
-        score = c.ggml_add(ctx, score, inp_attn_dsa.getKqMaskLid());
+        score = c.ggml_add(ctx, score, inp_attn_dsa.self_attn_mask_lid.raw);
         b.cb(score, "indexer_score", il);
     }
 

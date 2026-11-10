@@ -5,7 +5,7 @@
 //! Ports `nlohmann::detail::lexer`, `nlohmann::detail::parser` and the DOM
 //! half of `json_sax_dom_parser` from `llama.cpp/vendor/nlohmann/json.hpp`
 //! (nlohmann/json 3.12.0), and `common_json::parse` and `parse_no_throw`
-//! from `llama.cpp/common/json.cpp` (llama.cpp v0.8.0, `8642541b2`). Each
+//! from `llama.cpp/common/json.cpp` (llama.cpp v0.9.0, `cd959bae9`). Each
 //! declaration names what it ports and the line it began at.
 //!
 //! # What has to match

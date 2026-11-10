@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/binbcast.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/binbcast.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/binbcast.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels -- `k_bin_bcast`, `k_bin_bcast_unravel`, `k_repeat_back` -- stay
 //! CUDA.
 //!

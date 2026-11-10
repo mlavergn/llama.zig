@@ -7,7 +7,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/k2-horizon.cpp` at v0.8.0 (`8642541b2`):
+//! Ported from `llama.cpp/src/models/k2-horizon.cpp` at v0.9.0 (`cd959bae9`):
 //! `llama_model_k2_horizon`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `graph` and `graph::build_routed_value`, and the
 //! file's `k2_horizon_group_rms_norm`. The class is declared in

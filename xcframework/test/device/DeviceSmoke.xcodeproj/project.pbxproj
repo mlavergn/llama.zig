@@ -140,7 +140,7 @@
 		A1000000000000000000000E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";

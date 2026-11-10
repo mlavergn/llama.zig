@@ -6,8 +6,8 @@
 //! # Provenance
 //!
 //! Ports parts of `llama.cpp/tools/server/server-common.cpp` and
-//! `llama.cpp/tools/server/server-common.h` (llama.cpp v0.8.0,
-//! `8642541b2`). The rest of that pair is `tokens.zig` (`server_tokens` and
+//! `llama.cpp/tools/server/server-common.h` (llama.cpp v0.9.0,
+//! `cd959bae9`). The rest of that pair is `tokens.zig` (`server_tokens` and
 //! prompt tokenization), `oaicompat.zig` (the OpenAI request conversions and
 //! response formatters) and `subproc.zig` (`server_subproc`). Each
 //! declaration names what it ports and the line it began at.

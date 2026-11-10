@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-alloc.c` (v0.8.0, `8642541b2`),
+//! Ported from `llama.cpp/ggml/src/ggml-alloc.c` (v0.9.0, `cd959bae9`),
 //! 1,249 lines of C. Each function below names the C function it replaces and
 //! the line it began at, so behaviour can be cross-referenced against the
 //! original. This file exports the same C symbols with the same signatures, so

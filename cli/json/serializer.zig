@@ -6,7 +6,7 @@
 //! `dump_integer`, `dump_float`, `hex_bytes` and `decode` -- and
 //! `basic_json::dump` from `llama.cpp/vendor/nlohmann/json.hpp`, and
 //! `common_json::dump`/`dump_safe` from `llama.cpp/common/json.cpp`
-//! (llama.cpp v0.8.0, `8642541b2`). Each declaration names what it ports and
+//! (llama.cpp v0.9.0, `cd959bae9`). Each declaration names what it ports and
 //! the line it began at. The number text is `dtoa.zig`'s.
 //!
 //! The C writes strings through a 512-byte buffer it flushes only at a code

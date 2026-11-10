@@ -8,7 +8,7 @@
 //!   structs, `llama_swa_type` and `is_masked_swa`
 //! - `llama.cpp/src/llama-hparams.cpp` -- every member function
 //!
-//! Both at v0.8.0 (`8642541b2`).
+//! Both at v0.9.0 (`cd959bae9`).
 //!
 //! # The layout is upstream's
 //!
@@ -83,7 +83,7 @@ pub const Convnext = extern struct {
 /// causal (lfm3 d1).
 pub const non_causal_type_dense_only: c_int = 3;
 
-/// Mirrors `llama_hparams` (llama-hparams.h:60 @8642541b2).
+/// Mirrors `llama_hparams` (llama-hparams.h:60 @cd959bae9).
 ///
 /// Defaults are the member initializers, and zero where the C++ has none,
 /// as `llama_hparams hparams = {}` value-initializes the rest.
@@ -106,6 +106,7 @@ pub const Hparams = extern struct {
     n_value_expert: u32 = 0,
     n_value_expert_used: u32 = 0,
     n_layer_kv_from_start: i32 = -1,
+    kv_source_impl: [512]u32 = @splat(0),
     n_embd_head_k_full: u32 = 0,
     n_embd_head_v_full: u32 = 0,
     n_embd_head_k_swa: u32 = 0,
@@ -182,6 +183,7 @@ pub const Hparams = extern struct {
     ssm_d_state: u32 = 0,
     ssm_dt_rank: u32 = 0,
     ssm_n_group: u32 = 0,
+    ssm_norm_eps: f32 = 0.0,
     n_embd_head_la: u32 = 0,
     n_embd_head_kda: u32 = 0,
     kda_safe_gate: bool = false,
@@ -194,6 +196,16 @@ pub const Hparams = extern struct {
     n_hrm_h_cycles: u32 = 0,
     n_hrm_l_cycles: u32 = 0,
     hrm_prefix_lm: bool = false,
+    metis_n_pass: u32 = 0,
+    metis_n_mem: u32 = 0,
+    metis_n_route: u32 = 0,
+    metis_pass_lora_rank: u32 = 0,
+    metis_cont_limit: f32 = 0.0,
+    f_xsa_eps: f32 = 0.0,
+    final_logit_sigmoid_capping: [3]f32 = @splat(0),
+    n_mudd_ff: u32 = 0,
+    n_mudd_taps: u32 = 0,
+    mudd_tap_idx: [512]i32 = @splat(0),
     ssm_dt_b_c_rms: bool = false,
     f_clamp_kqv: f32 = 0.0,
     f_max_alibi_bias: f32 = 0.0,
@@ -540,10 +552,17 @@ pub const Hparams = extern struct {
         return if (self.isMla()) self.n_embd_head_v_mla_impl else self.nEmbdHeadV(0);
     }
 
-    /// Ports `llama_hparams`'s `has_kv` (llama-hparams.cpp:321 @8642541b2).
+    /// Ports `llama_hparams`'s `has_kv` (llama-hparams.cpp:321 @cd959bae9).
     pub fn hasKv(self: *const Self, il: u32) bool {
-        if (self.n_layer_kv_from_start >= 0) return il < @as(u32, @bitCast(self.n_layer_kv_from_start));
-        return true;
+        return self.kvSource(il) == il;
+    }
+
+    /// Ports `llama_hparams`'s `kv_source` (llama-hparams.cpp:325 @cd959bae9):
+    /// the layer whose KV cache layer `il` reads, `il` itself when it has
+    /// its own.
+    pub fn kvSource(self: *const Self, il: u32) u32 {
+        if (il < self.n_layer_all) return self.kv_source_impl[il];
+        outOfBounds(330, "kv_source", il, self.n_layer_all, "n_layer_all");
     }
 
     /// Ports `llama_hparams`'s `has_rope` (llama-hparams.cpp:333 @cd959bae9).

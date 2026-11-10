@@ -160,6 +160,7 @@ static std::unique_ptr<mtmd_image_preprocessor> make_preprocessor(int kind, cons
         case 16: return std::make_unique<mtmd_image_preprocessor_lfm3vl>(ctx);
         case 17: return std::make_unique<mtmd_image_preprocessor_deepseek41v>(ctx);
         case 18: return std::make_unique<mtmd_image_preprocessor_minicpm_ocr_1_0>(ctx);
+        case 19: return std::make_unique<mtmd_image_preprocessor_qwen3vl>(ctx);
         default: return nullptr;
     }
 }
@@ -244,8 +245,8 @@ int ref_longest_target_size(const ref_hparams * hp, int w, int h, clip_image_siz
     return 0;
 }
 
-void ref_lfm3vl_smart_resize(int w, int h, int factor, int64_t min_pixels, int64_t max_pixels, int n_frames, int temporal_factor, clip_image_size * out) {
-    *out = mtmd_image_preprocessor_lfm3vl::smart_resize(w, h, factor, min_pixels, max_pixels, n_frames, temporal_factor);
+void ref_qwen3vl_smart_resize(int w, int h, int factor, int64_t min_pixels, int64_t max_pixels, int n_frames, int temporal_factor, clip_image_size * out) {
+    *out = mtmd_image_preprocessor_qwen3vl::smart_resize(w, h, factor, min_pixels, max_pixels, n_frames, temporal_factor);
 }
 
 int ref_lfm2_should_tile(const ref_hparams * hp, int w, int h) {

@@ -125,6 +125,70 @@ static struct ggml_tensor * prec_node;
 static void prec_idx_negative(void) { ggml_prec_get_src(prec_node, -1); }
 static void prec_idx_past_end(void) { ggml_prec_get_src(prec_node, GGML_MAX_SRC); }
 
+/* v0.9.0: `ggml_new_tensor_impl` takes a view's strides and bounds the view by
+ * the bytes those strides reach (`ggml_nbytes`), where it had bounded it by
+ * its element count. Overlapping rows near the end of the source now build;
+ * gapped rows that run past it, and an element count that fits while the
+ * strides do not, no longer do. `ggml_view_impl` also refuses strides over a
+ * source that is not contiguous along dim 0. */
+static void view_overlap_tail(void) {
+    struct ggml_tensor * a = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 4);
+    /* 4 rows of 8 at a 4-float stride: 128 bytes of elements, 80 reached */
+    ggml_view_2d(ctx, a, 8, 4, 16, 32);
+}
+static void view_gap_past_end(void) {
+    struct ggml_tensor * a = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 4);
+    /* 2 rows of 8 at a 112-byte stride: 64 bytes of elements, 144 reached */
+    ggml_view_2d(ctx, a, 8, 2, 112, 0);
+}
+static void view_gap_fits(void) {
+    struct ggml_tensor * a = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 4);
+    ggml_view_2d(ctx, a, 8, 2, 64, 0);
+}
+static void view_transposed_src(void) {
+    struct ggml_tensor * a = ggml_transpose(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 4));
+    ggml_view_2d(ctx, a, 2, 2, 8, 0);
+}
+static void view_1d_transposed_src(void) {
+    struct ggml_tensor * a = ggml_transpose(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 4));
+    ggml_view_1d(ctx, a, 4, 0);
+}
+static void view_4d_past_end(void) {
+    struct ggml_tensor * a = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 4, 4, 2, 2);
+    ggml_view_4d(ctx, a, 4, 4, 2, 2, 8, 32, 72, 0);
+}
+
+/* v0.9.0: `ggml_roll` bounds each shift on both sides instead of through
+ * `abs`, which is undefined for INT_MIN. */
+static void roll_int_min(void) {
+    ggml_roll(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 4), -2147483647 - 1, 0, 0, 0);
+}
+static void roll_neg_edge(void) {
+    ggml_roll(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 4), -7, -3, 0, 0);
+}
+static void roll_neg_ne(void) {
+    ggml_roll(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 4), 0, -4, 0, 0);
+}
+
+/* v0.9.0: every GGML_ASSERT `ggml_flash_attn_ext_impl` adds for `kv_rows`,
+ * each from a call that is otherwise valid. */
+#define FAR_Q()    ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 64, 4, 8, 3)
+#define FAR_KV()   ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 64, 40, 2, 1)
+#define FAR_MASK() ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 32, 4, 1, 3)
+#define FAR_ROWS() ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 32, 3)
+static void far_ok(void)         { ggml_flash_attn_ext_rows(ctx, FAR_Q(), FAR_KV(), FAR_KV(), FAR_MASK(), FAR_ROWS(), 0.125f, 0.0f, 0.0f); }
+static void far_no_mask(void)    { ggml_flash_attn_ext_rows(ctx, FAR_Q(), FAR_KV(), FAR_KV(), NULL, FAR_ROWS(), 0.125f, 0.0f, 0.0f); }
+static void far_mask_ne0(void)   { ggml_flash_attn_ext_rows(ctx, FAR_Q(), FAR_KV(), FAR_KV(), FAR_MASK(), ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 16, 3), 0.125f, 0.0f, 0.0f); }
+static void far_rows_type(void)  { ggml_flash_attn_ext_rows(ctx, FAR_Q(), FAR_KV(), FAR_KV(), FAR_MASK(), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 32, 3), 0.125f, 0.0f, 0.0f); }
+static void far_rows_strided(void) { ggml_flash_attn_ext_rows(ctx, FAR_Q(), FAR_KV(), FAR_KV(), FAR_MASK(), ggml_transpose(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 3, 32)), 0.125f, 0.0f, 0.0f); }
+static void far_rows_ne1(void)   { ggml_flash_attn_ext_rows(ctx, FAR_Q(), FAR_KV(), FAR_KV(), FAR_MASK(), ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 32, 2), 0.125f, 0.0f, 0.0f); }
+static void far_rows_ne2(void)   { ggml_flash_attn_ext_rows(ctx, FAR_Q(), FAR_KV(), FAR_KV(), FAR_MASK(), ggml_new_tensor_3d(ctx, GGML_TYPE_I32, 32, 3, 2), 0.125f, 0.0f, 0.0f); }
+static void far_rows_ne3(void)   { ggml_flash_attn_ext_rows(ctx, FAR_Q(), FAR_KV(), FAR_KV(), FAR_MASK(), ggml_new_tensor_4d(ctx, GGML_TYPE_I32, 32, 3, 1, 2), 0.125f, 0.0f, 0.0f); }
+static void far_k_ne3(void)      { ggml_flash_attn_ext_rows(ctx, FAR_Q(), ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 64, 40, 2, 3), FAR_KV(), FAR_MASK(), FAR_ROWS(), 0.125f, 0.0f, 0.0f); }
+static void far_v_ne3(void)      { ggml_flash_attn_ext_rows(ctx, FAR_Q(), FAR_KV(), ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 64, 40, 2, 3), FAR_MASK(), FAR_ROWS(), 0.125f, 0.0f, 0.0f); }
+/* without kv_rows the q/k ne[3] check stays as it was */
+static void fa_k_ne3(void)       { ggml_flash_attn_ext(ctx, FAR_Q(), FAR_KV(), FAR_KV(), NULL, 0.125f, 0.0f, 0.0f); }
+
 /* ggml-backend-impl.h: which ops `get_alloc_size` may size past `ggml_nbytes`. */
 bool ggml_op_alloc_size_may_expand(enum ggml_op op);
 
@@ -480,6 +544,68 @@ int main(void) {
         prec_node = ggml_mul_mat(ctx, w, a2);
         dies("prec_get_src(-1)", prec_idx_negative);
         dies("prec_get_src(GGML_MAX_SRC)", prec_idx_past_end);
+    }
+
+    puts("=== v0.9.0: strided views ===");
+    {
+        struct ggml_tensor * v4 = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 4, 4, 2, 2);
+        D(ggml_view_2d(ctx, a2, 8, 4, 16, 32));
+        D(ggml_view_2d(ctx, a2, 4, 2, 64, 16));
+        D(ggml_view_3d(ctx, a3, 4, 2, 2, 64, 128, 8));
+        D(ggml_view_4d(ctx, v4, 2, 4, 2, 1, 8, 32, 64, 64));
+        D(ggml_view_4d(ctx, v4, 4, 2, 2, 2, 8, 64, 32, 0));
+        D(ggml_view_tensor(ctx, ggml_permute(ctx, a3, 1, 0, 2, 3)));
+        D(ggml_view_1d(ctx, ggml_transpose(ctx, a2), 3, 4));
+        D(ggml_reshape_2d(ctx, a3, 16, 4));
+        dies("view overlap tail", view_overlap_tail);
+        dies("view gap past end", view_gap_past_end);
+        dies("view gap fits", view_gap_fits);
+        dies("view of transposed src", view_transposed_src);
+        dies("view_1d of transposed src", view_1d_transposed_src);
+        dies("view_4d past end", view_4d_past_end);
+    }
+
+    puts("=== v0.9.0: roll bounds ===");
+    dies("roll INT_MIN", roll_int_min);
+    dies("roll -7,-3", roll_neg_edge);
+    dies("roll -ne1", roll_neg_ne);
+    D(ggml_roll(ctx, a2, -7, -3, 0, 0));
+
+    puts("=== v0.9.0: flash_attn_ext_rows ===");
+    {
+        struct ggml_tensor * q    = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 64, 4, 8, 3);
+        struct ggml_tensor * kk   = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 64, 40, 2, 1);
+        struct ggml_tensor * vv   = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 48, 40, 2, 1);
+        struct ggml_tensor * mask = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 32, 4, 1, 3);
+        struct ggml_tensor * rows = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 32, 3);
+        D(ggml_flash_attn_ext_rows(ctx, q, kk, vv, mask, rows, 0.125f, 0.0f, 0.0f));
+        D(ggml_flash_attn_ext_rows(ctx, q, kk, vv, mask, rows, 0.25f, 8.0f, 30.0f));
+        dies("fa_rows valid", far_ok);
+        dies("fa_rows no mask", far_no_mask);
+        dies("fa_rows mask ne0", far_mask_ne0);
+        dies("fa_rows rows type", far_rows_type);
+        dies("fa_rows rows strided", far_rows_strided);
+        dies("fa_rows rows ne1", far_rows_ne1);
+        dies("fa_rows rows ne2", far_rows_ne2);
+        dies("fa_rows rows ne3", far_rows_ne3);
+        dies("fa_rows k ne3", far_k_ne3);
+        dies("fa_rows v ne3", far_v_ne3);
+        dies("fa k ne3 != q ne3", fa_k_ne3);
+    }
+
+    puts("=== v0.9.0: f8_e4m3 ===");
+    {
+        struct ggml_tensor * f8 = ggml_new_tensor_3d(ctx, GGML_TYPE_F8_E4M3, 32, 6, 2);
+        struct ggml_tensor * x  = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 32, 5, 2);
+        struct ggml_tensor * ix = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 3);
+        D(f8);
+        D(ggml_mul_mat(ctx, f8, x));
+        D(ggml_get_rows(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F8_E4M3, 32, 6), ix));
+        D(ggml_cpy(ctx, x, ggml_new_tensor_3d(ctx, GGML_TYPE_F8_E4M3, 32, 5, 2)));
+        D(ggml_view_2d(ctx, f8, 16, 3, f8->nb[1] * 2, 8));
+        D(ggml_add(ctx, f8, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 32, 6, 2)));
+        printf("row_size(f8,33)=%zu nbytes=%zu ftype=%d\n", ggml_row_size(GGML_TYPE_F8_E4M3, 33), ggml_nbytes(f8),
+               (int) ggml_ftype_to_ggml_type(GGML_FTYPE_MOSTLY_F8_E4M3));
     }
 
     puts("=== op tables ===");

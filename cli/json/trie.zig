@@ -6,7 +6,7 @@
 //! Ports `common_trie` from `llama.cpp/common/trie.h` and
 //! `llama.cpp/common/trie.cpp`, and `common_parse_utf8_codepoint` and
 //! `common_unicode_cpt_to_utf8` from `llama.cpp/common/unicode.cpp`
-//! (llama.cpp v0.8.0, `8642541b2`). Each declaration names what it ports
+//! (llama.cpp v0.9.0, `cd959bae9`). Each declaration names what it ports
 //! and the line it began at.
 //!
 //! # Scope

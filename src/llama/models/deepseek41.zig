@@ -6,7 +6,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/deepseek41.cpp` at v0.8.0 (`8642541b2`):
+//! Ported from `llama.cpp/src/models/deepseek41.cpp` at v0.9.0 (`cd959bae9`):
 //! `dsv41_env_on`, `llama_model_deepseek41`'s `load_arch_hparams`,
 //! `load_arch_tensors`, `build_arch_graph`, `engram_index` and `engram_hash`,
 //! `llm_graph_input_dsv41`, and its `graph` with `build_engram` and
@@ -582,7 +582,7 @@ fn join(ctx: *c.ggml_context, v: *std.ArrayList(*Tensor)) *Tensor {
 }
 
 /// Ports `llama_model_deepseek41::graph`'s `build_attention41`
-/// (models/deepseek41.cpp:409 @8642541b2).
+/// (models/deepseek41.cpp:409 @cd959bae9).
 fn buildAttention41(self: *Graph, b: *const Builder, model: *const Model, inp_dsv4: *const graph.InpDsv4, cur: *Tensor, inp_pos: *Tensor, cand_pin: ?*Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -812,7 +812,7 @@ fn buildAttention41(self: *Graph, b: *const Builder, model: *const Model, inp_ds
 
         // A quantized K cache stores the window Hadamard-rotated, as
         // build_raw_attention does.
-        const k_rot = inp_attn.self_k_rot;
+        const k_rot = inp_attn.self_k_rot[@intCast(il)];
         if (k_rot) |r| {
             q = graph.mulMatHadamard(ctx, q, r);
             kv = graph.mulMatHadamard(ctx, kv, r);
@@ -822,7 +822,7 @@ fn buildAttention41(self: *Graph, b: *const Builder, model: *const Model, inp_ds
         c.ggml_build_forward_expand(b.gf, inp_attn.mctx.cpyK(ctx, kv, inp_attn.getKIdxs(), il));
 
         var raw_k: *Tensor = inp_attn.mctx.getK(ctx, il);
-        const raw_mask: *Tensor = inp_attn.getKqMask().?;
+        const raw_mask: *Tensor = inp_attn.self_attn_mask.raw.?;
 
         const k_sel = top_k.ne[0];
         const n_raw = raw_k.ne[2];
@@ -906,7 +906,7 @@ fn buildAttention41(self: *Graph, b: *const Builder, model: *const Model, inp_ds
                 mask_entry.value_ptr.* = t;
             }
 
-            out = b.buildAttnMha(q, k_all, k_all, null, mask_entry.value_ptr.*.?, layer.attn_sinks, null, 0, kq_scale, il);
+            out = b.buildAttnMha(q, k_all, k_all, null, mask_entry.value_ptr.*.?, null, layer.attn_sinks, null, 0, kq_scale, il);
         } else {
             // Dense attention over [window | all compressed rows], the
             // selection applied as a mask.
@@ -937,7 +937,7 @@ fn buildAttention41(self: *Graph, b: *const Builder, model: *const Model, inp_ds
             // At most window + top-k visible columns per query: lets CUDA FA
             // gather only those.
             const n_kv_max: i64 = if (self.sparse) @min(raw_mask.ne[0], @as(i64, hp.n_swa)) + k_sel else 0;
-            out = b.buildAttnMha(q, k_all, k_all, null, kq_mask, layer.attn_sinks, null, @intCast(n_kv_max), kq_scale, il);
+            out = b.buildAttnMha(q, k_all, k_all, null, kq_mask, null, layer.attn_sinks, null, @intCast(n_kv_max), kq_scale, il);
         }
         if (k_rot) |r| {
             out = graph.mulMatHadamard(ctx, out, r);
@@ -962,7 +962,7 @@ fn buildAttention41(self: *Graph, b: *const Builder, model: *const Model, inp_ds
 }
 
 /// Ports the constructor of `llama_model_deepseek41`'s `graph`
-/// (models/deepseek41.cpp:768 @8642541b2).
+/// (models/deepseek41.cpp:768 @cd959bae9).
 fn buildGraph(model: *const Model, b: *const Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -983,7 +983,7 @@ fn buildGraph(model: *const Model, b: *const Builder) void {
     const inp_pos = b.buildInpPos();
     const inp_out_ids = b.buildInpOutIds();
     const inp_dsv4 = b.buildInpDsv4();
-    c.ggml_build_forward_expand(b.gf, inp_dsv4.getRaw().self_kq_mask);
+    c.ggml_build_forward_expand(b.gf, inp_dsv4.getRaw().self_attn_mask.raw);
 
     const inp41 = allocator.create(InpDsv41) catch oom();
     inp41.* = .{ .model = model, .mctx = inp_dsv4.mctx };

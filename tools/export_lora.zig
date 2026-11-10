@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/export-lora/export-lora.cpp` at v0.8.0
-//! (`8642541b2`). Each declaration names the C++ it replaces and the line it
+//! Ported from `llama.cpp/tools/export-lora/export-lora.cpp` at v0.9.0
+//! (`cd959bae9`). Each declaration names the C++ it replaces and the line it
 //! began at.
 //!
 //! # Order
@@ -162,7 +162,7 @@ const Input = struct {
     }
 };
 
-/// Ports `lora_merge_ctx` (export-lora.cpp:118 @8642541b2).
+/// Ports `lora_merge_ctx` (export-lora.cpp:118 @cd959bae9).
 const MergeCtx = struct {
     a: std.mem.Allocator,
     // input base model + adapters
@@ -222,9 +222,15 @@ const MergeCtx = struct {
         if (!std.mem.eql(u8, general_arch_base, general_arch_lora)) return throw("model arch and LoRA arch mismatch", .{});
     }
 
-    /// Ports `get_out_tensor_type` (export-lora.cpp:182 @8642541b2), a member of `lora_merge_ctx`.
+    /// Ports `get_out_tensor_type` (export-lora.cpp:182 @cd959bae9), a member of `lora_merge_ctx`.
     fn getOutTensorType(t: *const c.ggml_tensor) c.ggml_type {
-        return if (t.type == c.GGML_TYPE_F32) c.GGML_TYPE_F32 else c.GGML_TYPE_F16;
+        if (t.type == c.GGML_TYPE_F32) {
+            return c.GGML_TYPE_F32;
+        } else if (t.type == c.GGML_TYPE_BF16) {
+            return c.GGML_TYPE_BF16;
+        } else {
+            return c.GGML_TYPE_F16;
+        }
     }
 
     /// Ports `run_merge` (export-lora.cpp:192 @cd959bae9), a member of `lora_merge_ctx`.
@@ -425,11 +431,10 @@ const MergeCtx = struct {
 /// The `static std::vector<uint8_t> buf` the graph is built in.
 var graph_buf: ?[]u8 = null;
 
-/// Ports `print_usage` (export-lora.cpp:410 @8642541b2).
+/// Ports `print_usage` (export-lora.cpp:412 @cd959bae9).
 fn printUsage(argv: []const [:0]const u8) void {
     io.printf("\nexample usage:\n", .{});
-    io.printf("\n  %s -m base-model.gguf --lora lora-file.gguf -o merged-model-f16.gguf\n", .{argv[0].ptr});
-    io.printf("\nNOTE: output model is F16\n", .{});
+    io.printf("\n  %s -m base-model.gguf --lora lora-file.gguf -o merged-model.gguf\n", .{argv[0].ptr});
     io.printf("\n", .{});
 }
 

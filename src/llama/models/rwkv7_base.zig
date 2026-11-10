@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/rwkv7-base.cpp` at v0.8.0
-//! (`8642541b2`): `llm_build_rwkv7_base`'s `build_rwkv7_channel_mix` and
+//! Ported from `llama.cpp/src/models/rwkv7-base.cpp` at v0.9.0
+//! (`cd959bae9`): `llm_build_rwkv7_base`'s `build_rwkv7_channel_mix` and
 //! `build_rwkv7_time_mix`. Its constructor only stores the model, which the
 //! port passes to each function instead.
 

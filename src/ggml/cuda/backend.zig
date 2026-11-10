@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.8.0
-//! (`8642541b2`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.9.0
+//! (`cd959bae9`). Each declaration below names the C++ it replaces and the
 //! line it began at. The compute loop is in `graph.zig` and `supports_op`
 //! in `supports.zig`.
 //!
@@ -29,6 +29,7 @@ const common = @import("common.zig");
 const graph = @import("graph.zig");
 const supports = @import("supports.zig");
 const fattn = @import("fattn.zig");
+const batch_get = @import("batch_get.zig");
 
 const cu = common.cu;
 const c = impl.c;
@@ -132,6 +133,48 @@ fn bufferGetTensor2d(buffer: c.ggml_backend_buffer_t, tensor: [*c]const Tensor, 
     cudaCheck(cu.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
 }
 
+/// Ports `ggml_backend_cuda_buffer_set_tensor_n` (ggml-cuda.cu:865 @cd959bae9),
+/// new at v0.9.0: every non-empty copy on the per-thread stream, then one
+/// wait.
+fn bufferSetTensorN(buffer: c.ggml_backend_buffer_t, tensors: [*c]const [*c]Tensor, data: [*c]const ?*const anyopaque, offsets: [*c]const usize, sizes: [*c]const usize, n_tensors: usize) callconv(.c) void {
+    const ctx = bufferCtx(buffer);
+
+    common.setDevice(ctx.device);
+
+    for (0..n_tensors) |i| {
+        if (sizes[i] == 0) {
+            continue;
+        }
+        cudaCheck(cu.cudaMemcpyAsync(at(tensors[i].*.data, offsets[i]), data[i], sizes[i], cu.cudaMemcpyHostToDevice, stream_per_thread), "cudaMemcpyAsync( (char *) tensors[i]->data + offsets[i], data[i], sizes[i], cudaMemcpyHostToDevice, cudaStreamPerThread)", @src());
+    }
+
+    cudaCheck(cu.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
+}
+
+/// Ports `ggml_backend_cuda_buffer_get_tensor_n` (ggml-cuda.cu:885 @cd959bae9),
+/// new at v0.9.0: `batch_get.getTensorN`'s gather when pinned memory is
+/// allowed and it accepts the request, else one copy per read.
+fn bufferGetTensorN(buffer: c.ggml_backend_buffer_t, tensors: [*c]const [*c]const Tensor, data: [*c]const ?*anyopaque, offsets: [*c]const usize, sizes: [*c]const usize, n_tensors: usize) callconv(.c) void {
+    const ctx = bufferCtx(buffer);
+
+    common.setDevice(ctx.device);
+
+    if (!common.pinnedMemoryDisabled() and
+        batch_get.getTensorN(ctx.device, tensors, data, offsets, sizes, n_tensors))
+    {
+        return;
+    }
+
+    for (0..n_tensors) |i| {
+        if (sizes[i] == 0) {
+            continue;
+        }
+        cudaCheck(cu.cudaMemcpyAsync(data[i], at(tensors[i].*.data, offsets[i]), sizes[i], cu.cudaMemcpyDeviceToHost, stream_per_thread), "cudaMemcpyAsync( data[i], (const char *) tensors[i]->data + offsets[i], sizes[i], cudaMemcpyDeviceToHost, cudaStreamPerThread)", @src());
+    }
+
+    cudaCheck(cu.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
+}
+
 /// Ports `ggml_backend_cuda_buffer_cpy_tensor` (ggml-cuda.cu:910 @cd959bae9).
 fn bufferCpyTensor(buffer: c.ggml_backend_buffer_t, src_c: [*c]const Tensor, dst_c: [*c]Tensor) callconv(.c) bool {
     _ = buffer;
@@ -153,6 +196,46 @@ fn bufferCpyTensor(buffer: c.ggml_backend_buffer_t, src_c: [*c]const Tensor, dst
     return true;
 }
 
+/// The buffer a tensor's bytes live in: its view source's, for a view.
+fn backingBuffer(t: *const Tensor) c.ggml_backend_buffer_t {
+    return if (t.view_src) |v| v.*.buffer else t.buffer;
+}
+
+/// Ports `ggml_backend_cuda_buffer_cpy_tensor_n` (ggml-cuda.cu:935 @cd959bae9),
+/// new at v0.9.0: false, having copied nothing, unless every source is in a
+/// CUDA buffer; then each copy same-device or peer on the per-thread stream,
+/// and one wait. `GGML_CUDA_NO_PEER_COPY` is not defined, so its two arms
+/// are not ported.
+fn bufferCpyTensorN(buffer: c.ggml_backend_buffer_t, srcs: [*c]const [*c]const Tensor, dsts: [*c]const [*c]Tensor, n_tensors: usize) callconv(.c) bool {
+    const dst_ctx = bufferCtx(buffer);
+
+    for (0..n_tensors) |i| {
+        const src_buf = backingBuffer(impl.one(Tensor, @constCast(srcs[i])));
+        if (!bufferIsCuda(src_buf)) {
+            return false;
+        }
+    }
+
+    common.setDevice(dst_ctx.device);
+
+    for (0..n_tensors) |i| {
+        const src = impl.one(Tensor, @constCast(srcs[i]));
+        const dst = impl.one(Tensor, dsts[i]);
+        const src_ctx = bufferCtx(backingBuffer(src));
+        const dst_ctx_i = bufferCtx(backingBuffer(dst));
+        const src_physical = common.physicalDevice(src_ctx.device);
+        const dst_physical = common.physicalDevice(dst_ctx_i.device);
+        if (src_physical == dst_physical) {
+            cudaCheck(cu.cudaMemcpyAsync(dst.data, src.data, c.ggml_nbytes(src), cu.cudaMemcpyDeviceToDevice, stream_per_thread), "cudaMemcpyAsync(dsts[i]->data, srcs[i]->data, ggml_nbytes(srcs[i]), cudaMemcpyDeviceToDevice, cudaStreamPerThread)", @src());
+        } else {
+            cudaCheck(cu.cudaMemcpyPeerAsync(dst.data, dst_physical, src.data, src_physical, c.ggml_nbytes(src), stream_per_thread), "cudaMemcpyPeerAsync(dsts[i]->data, dst_physical, srcs[i]->data, src_physical, ggml_nbytes(srcs[i]), cudaStreamPerThread)", @src());
+        }
+    }
+
+    cudaCheck(cu.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
+    return true;
+}
+
 /// Ports `ggml_backend_cuda_buffer_clear` (ggml-cuda.cu:983 @cd959bae9).
 fn bufferClear(buffer: c.ggml_backend_buffer_t, value: u8) callconv(.c) void {
     const ctx = bufferCtx(buffer);
@@ -161,7 +244,8 @@ fn bufferClear(buffer: c.ggml_backend_buffer_t, value: u8) callconv(.c) void {
     cudaCheck(cu.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
 }
 
-/// Ports `ggml_backend_cuda_buffer_interface` (ggml-cuda.cu:897 @8642541b2).
+/// Ports `ggml_backend_cuda_buffer_interface` (ggml-cuda.cu:991 @cd959bae9).
+/// Since v0.9.0 the CUDA buffer implements the three batched slots.
 const buffer_interface = c.ggml_backend_buffer_i{
     .free_buffer = bufferFreeBuffer,
     .get_base = bufferGetBase,
@@ -174,6 +258,9 @@ const buffer_interface = c.ggml_backend_buffer_i{
     .cpy_tensor = bufferCpyTensor,
     .clear = bufferClear,
     .reset = null,
+    .set_tensor_n = bufferSetTensorN,
+    .get_tensor_n = bufferGetTensorN,
+    .cpy_tensor_n = bufferCpyTensorN,
 };
 
 // -----------------------------------------------------------------------------
@@ -298,8 +385,10 @@ pub fn bufferType(device: c_int) callconv(.c) c.ggml_backend_buffer_type_t {
 // -----------------------------------------------------------------------------
 // Tensor-parallel communication
 
-/// Ports `ggml_backend_cuda_comm_context` (ggml-cuda.cu:1014 @8642541b2),
-/// without the NCCL member: `GGML_USE_NCCL` is not defined.
+/// Ports `ggml_backend_cuda_comm_context` (ggml-cuda.cu:1111 @cd959bae9),
+/// without the NCCL member: `GGML_USE_NCCL` is not defined. So neither is
+/// v0.9.0's `ggml_backend_cuda_comm_init_rank` (one rank per process,
+/// `ncclCommInitRank`), the only thing that sets `world_size`.
 const CommContext = struct {
     const TryAllreduce = *const fn (*CommContext, [*c][*c]Tensor) bool;
 
@@ -307,6 +396,16 @@ const CommContext = struct {
     dev_ids: []c_int,
     try_allreduce: ?TryAllreduce = null,
     ar_pipeline: ?*anyopaque = null,
+
+    /// Number of ranks in the communicator when each rank is a separate
+    /// process. Zero unless comm_init_rank created this context.
+    world_size: c_int = 0,
+
+    /// Ports `ggml_backend_cuda_comm_context`'s `n_ranks`: the ranks taking
+    /// part in the reduction. Only the NCCL reduction reads it.
+    fn nRanks(self: *const CommContext) usize {
+        return if (self.world_size > 0) @intCast(self.world_size) else self.backends.len;
+    }
 
     fn destroy(self: *CommContext) void {
         arPipelineFree(self.ar_pipeline);
@@ -1013,7 +1112,9 @@ fn getFeatures(r: c.ggml_backend_reg_t) callconv(.c) [*c]c.struct_ggml_backend_f
     return &Features.list;
 }
 
-/// Ports `ggml_backend_cuda_reg_get_proc_address` (ggml-cuda.cu:6279 @8642541b2).
+/// Ports `ggml_backend_cuda_reg_get_proc_address` (ggml-cuda.cu:6479 @cd959bae9).
+/// v0.9.0's `ggml_backend_comm_init_rank` is answered only under
+/// `GGML_USE_NCCL`, which is not defined.
 fn regGetProcAddress(r: c.ggml_backend_reg_t, name_c: [*c]const u8) callconv(.c) ?*anyopaque {
     _ = r;
     const name = std.mem.span(@as([*:0]const u8, @ptrCast(name_c)));

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/lfm-base.cpp` at v0.8.0 (`8642541b2`):
+//! Ported from `llama.cpp/src/models/lfm-base.cpp` at v0.9.0 (`cd959bae9`):
 //! every member of `llm_build_lfm_base`. The C++ makes them members of a
 //! subclass of `llm_graph_context`; here they are functions over the
 //! builder.
@@ -19,7 +19,7 @@ const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
 /// Ports `llm_build_lfm_base`'s `build_lfm_shortconv` (lfm-base.cpp:9
-/// @8642541b2), the overload over a recurrent state: a gated depthwise
+/// @cd959bae9), the overload over a recurrent state: a gated depthwise
 /// convolution over the last `n_shortconv_l_cache` tokens, whose state is
 /// the recurrent memory.
 ///
@@ -47,11 +47,10 @@ pub fn buildLfmShortconv(model: *const Model, b: *const graph.Builder, mctx_recr
     const d_conv: u32 = hp.n_shortconv_l_cache - 1;
     const n_embd: i64 = hp.n_embd;
 
-    // {n_embd, n_tokens} => {n_embd, n_seq_tokens, n_seqs}
-    const cur: *Tensor = c.ggml_reshape_3d(ctx, cur_, cur_.ne[0], n_seq_tokens, n_seqs);
-
-    const bcx = b.buildLoraMm(layer.shortconv.in_proj.?, cur, null);
+    var bcx = b.buildLoraMm(layer.shortconv.in_proj.?, cur_, null);
     b.cb(bcx, "model.layers.{}.conv.in_proj", il);
+    // {3*n_embd, n_tokens} => {3*n_embd, n_seq_tokens, n_seqs}
+    bcx = c.ggml_reshape_3d(ctx, bcx, bcx.ne[0], n_seq_tokens, n_seqs);
 
     const n_chunks = 3;
     impl.assert(@rem(bcx.ne[0], n_chunks) == 0, "models/lfm-base.cpp", 31, "bcx->ne[0] % n_chunks == 0");
@@ -98,10 +97,10 @@ pub fn buildLfmShortconv(model: *const Model, b: *const graph.Builder, mctx_recr
     b.cb(conv_out, "model.layers.{}.conv.conv", il);
 
     var y: *Tensor = c.ggml_mul(ctx, cv, conv_out);
-    y = b.buildLoraMm(layer.shortconv.out_proj.?, y, null);
-    b.cb(y, "model.layers.{}.conv.out_proj", il);
     // {n_embd, n_seq_tokens, n_seqs} => {n_embd, n_tokens}
     y = c.ggml_reshape_2d(ctx, y, y.ne[0], n_seq_tokens * n_seqs);
+    y = b.buildLoraMm(layer.shortconv.out_proj.?, y, null);
+    b.cb(y, "model.layers.{}.conv.out_proj", il);
 
     return y;
 }
@@ -146,8 +145,8 @@ pub fn buildLfmShortconvNoState(model: *const Model, b: *const graph.Builder, cu
     return y;
 }
 
-/// Ports `llm_build_lfm_base`'s `build_lfm_dense_ffn` (lfm-base.cpp:114
-/// @8642541b2).
+/// Ports `llm_build_lfm_base`'s `build_lfm_dense_ffn` (lfm-base.cpp:113
+/// @cd959bae9).
 ///
 /// Parameters:
 /// - `model`: the model.
@@ -161,11 +160,11 @@ pub fn buildLfmDenseFfn(model: *const Model, b: *const graph.Builder, cur: *Tens
     impl.assert(layer.ffn_up_b == null, "models/lfm-base.cpp", 116, "!model.layers[il].ffn_up_b");
     impl.assert(layer.ffn_gate_b == null, "models/lfm-base.cpp", 117, "!model.layers[il].ffn_gate_b");
     impl.assert(layer.ffn_down_b == null, "models/lfm-base.cpp", 118, "!model.layers[il].ffn_down_b");
-    return b.buildFfn(cur, layer.ffn_up, null, null, layer.ffn_gate, null, null, layer.ffn_down, null, null, null, .silu, .par, il);
+    return b.buildFfn(cur, layer.ffn_up, null, layer.ffn_up_s, layer.ffn_gate, null, layer.ffn_gate_s, layer.ffn_down, null, layer.ffn_down_s, null, .silu, .par, il);
 }
 
-/// Ports `llm_build_lfm_base`'s `build_lfm_moe_ffn` (lfm-base.cpp:127
-/// @8642541b2).
+/// Ports `llm_build_lfm_base`'s `build_lfm_moe_ffn` (lfm-base.cpp:126
+/// @cd959bae9).
 ///
 /// Parameters:
 /// - `model`: the model.
@@ -189,6 +188,9 @@ pub fn buildLfmMoeFfn(model: *const Model, b: *const graph.Builder, cur: *Tensor
         .norm_w = true,
         .w_scale = hp.expert_weights_scale,
         .gating_op = @fromBackingInt(@intCast(hp.expert_gating_func)),
+        .up_exps_s = layer.ffn_up_exps_s,
+        .gate_exps_s = layer.ffn_gate_exps_s,
+        .down_exps_s = layer.ffn_down_exps_s,
     }, il);
 }
 

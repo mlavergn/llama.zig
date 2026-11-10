@@ -21,7 +21,7 @@
 //! - `llama.cpp/src/llama-kv-cache-dsv4.cpp` -- their bodies and the static
 //!   planners
 //!
-//! All at v0.8.0 (`8642541b2`).
+//! All at v0.9.0 (`cd959bae9`).
 
 const std = @import("std");
 const impl = @import("impl.zig");
@@ -32,6 +32,7 @@ const memory = @import("memory.zig");
 const io = @import("io.zig");
 const kv_cache = @import("kv_cache.zig");
 const kv_cache_iswa = @import("kv_cache_iswa.zig");
+const graph = @import("graph.zig");
 const model_mod = @import("model.zig");
 
 const c = impl.c;
@@ -132,7 +133,7 @@ fn tokenHasSeq(ubatch: *const Ubatch, i: usize, seq_id: i32) bool {
 }
 
 /// Ports `dsv4_build_raw_write_ubatch` (llama-kv-cache-dsv4.cpp:82
-/// @8642541b2): a coupled ubatch, with tokens shared between sequences,
+/// @cd959bae9): a coupled ubatch, with tokens shared between sequences,
 /// unrolled into one copy of each token per sequence, so the raw cache
 /// writes each sequence's stream separately.
 ///
@@ -212,6 +213,7 @@ fn buildRawWriteUbatch(ubatch: *const Ubatch) Ubatch {
         .token = if (data.token.items.len == 0) null else data.token.items.ptr,
         .embd = null,
         .embd_state = null,
+        .embd_row = null,
         .pos = data.pos.items.ptr,
         .n_seq_id = data.n_seq_id.items.ptr,
         .seq_id = data.seq_id.items.ptr,
@@ -341,7 +343,8 @@ fn stateReadTensorStreams(r: io.Reader, tensor: *Tensor, tensor_rows: u32, n_row
 
 /// Ports `dsv4_k_cache_state_layers` (llama-kv-cache-dsv4.cpp:338
 /// @cd959bae9): the serialized compressed-KV layers, all except per-device
-/// mirrors (`kv_src[il] != il`), refilled from their source on read.
+/// mirrors (`kv_src[il] != il`), refilled from their source before the
+/// next graph after a read (`refill_comp_mirrors`).
 ///
 /// Return: the layer ids, the caller's to free.
 fn kCacheStateLayers(kv: *const KvCache, kv_src: []const i32) std.ArrayList(u32) {
@@ -383,7 +386,7 @@ fn stateWriteKCache(w: io.Writer, kv: *const KvCache, seq_id: i32, flags: u32, n
     }
 }
 
-/// Ports `dsv4_state_read_k_cache` (llama-kv-cache-dsv4.cpp:381 @8642541b2).
+/// Ports `dsv4_state_read_k_cache` (llama-kv-cache-dsv4.cpp:382 @cd959bae9).
 fn stateReadKCache(r: io.Reader, kv: *KvCache, seq_id: i32, flags: u32, kv_src: []const i32, exc: *Exception) Thrown!void {
     _ = flags;
 
@@ -415,25 +418,6 @@ fn stateReadKCache(r: io.Reader, kv: *KvCache, seq_id: i32, flags: u32, kv_src: 
         const il_ref = try r.readValue(u32, exc);
         if (il_ref != il) return exc.throw(.runtime_error, "DSV4 K-cache layer id mismatch", .{});
         try stateReadTensorStreams(r, kv.getKStorage(@intCast(il)), kv_size, n_rows_ref, s0, ns, exc);
-    }
-
-    if (n_rows_ref == 0) return;
-
-    // refill the mirrors from their sources; a mirror gets the same rows as
-    // its source, so a whole copy is exact
-    var all = kv.getLayerIds();
-    defer all.deinit(allocator);
-    for (all.items) |il| {
-        const src = kv_src[il];
-        if (src == @as(i32, @intCast(il))) continue;
-
-        const t_src = kv.getKStorage(src);
-        const t_dst = kv.getKStorage(@intCast(il));
-        if (t_src.type != t_dst.type or !c.ggml_are_same_shape(t_src, t_dst)) {
-            return exc.throw(.runtime_error, "DSV4 K-cache mirror layout mismatch", .{});
-        }
-
-        c.ggml_backend_tensor_copy(t_src, t_dst);
     }
 }
 
@@ -1160,7 +1144,7 @@ pub const CompState = struct {
         if (!data) return;
 
         if (seq_id >= 0) {
-            impl.assert(@as(u32, @bitCast(seq_id)) < self.n_stream, file, 1042, "(uint32_t) seq_id < n_stream");
+            impl.assert(@as(u32, @bitCast(seq_id)) < self.n_stream, file, 1024, "(uint32_t) seq_id < n_stream");
 
             for (self.layers.items) |*layer| {
                 var d: u32 = 0;
@@ -1180,8 +1164,8 @@ pub const CompState = struct {
     /// @cd959bae9): clear the destination now and queue the stream copy for
     /// the next update.
     pub fn seqCp(self: *CompState, seq_id_src: i32, seq_id_dst: i32) void {
-        impl.assert(seq_id_src >= 0 and @as(u32, @bitCast(seq_id_src)) < self.n_stream, file, 1060, "seq_id_src >= 0 && (uint32_t) seq_id_src < n_stream");
-        impl.assert(seq_id_dst >= 0 and @as(u32, @bitCast(seq_id_dst)) < self.n_stream, file, 1061, "seq_id_dst >= 0 && (uint32_t) seq_id_dst < n_stream");
+        impl.assert(seq_id_src >= 0 and @as(u32, @bitCast(seq_id_src)) < self.n_stream, file, 1042, "seq_id_src >= 0 && (uint32_t) seq_id_src < n_stream");
+        impl.assert(seq_id_dst >= 0 and @as(u32, @bitCast(seq_id_dst)) < self.n_stream, file, 1043, "seq_id_dst >= 0 && (uint32_t) seq_id_dst < n_stream");
 
         if (seq_id_src == seq_id_dst) return;
 
@@ -1503,7 +1487,7 @@ fn dsv41SharedHistoryOk(b: *const c.llama_batch, kv: ?*const KvCache, n_hist: u3
     return true;
 }
 
-/// Ports `llama_kv_cache_dsv4` (llama-kv-cache-dsv4.h:90 @8642541b2): the
+/// Ports `llama_kv_cache_dsv4` (llama-kv-cache-dsv4.h:90 @cd959bae9): the
 /// raw iSWA token cache, the three compressed K-only caches and their
 /// compressor states, driven as one memory.
 ///
@@ -1521,6 +1505,11 @@ pub const KvCacheDsv4 = struct {
     /// Per sequence, the pending rollback depth; 0 for none.
     rs_idx: std.ArrayList(u32) = .empty,
 
+    /// `[n_seq_max]` the largest rollback whose snapshot the sequence's
+    /// last ubatch wrote: snapshot d is exact for d <= the sequence's
+    /// tokens in that ubatch (d == n is the state before the ubatch).
+    rs_max: std.ArrayList(u32) = .empty,
+
     /// `[n_layer]` storage layer -> layer whose rows it holds (itself, or
     /// the source of a mirror).
     comp_il_src: std.ArrayList(i32) = .empty,
@@ -1528,6 +1517,8 @@ pub const KvCacheDsv4 = struct {
     /// `[n_layer]` layer -> layer whose compressed-KV storage it reads
     /// (itself, its V4.1 kv source or a mirror), -1 = none.
     comp_read: std.ArrayList(i32) = .empty,
+
+    comp_mirrors_stale: bool = false,
 
     kv_raw: ?*KvCacheIswa = null,
     kv_csa: ?*KvCache = null,
@@ -1538,7 +1529,7 @@ pub const KvCacheDsv4 = struct {
     lid_state: ?*CompState = null,
 
     /// Ports the constructor of `llama_kv_cache_dsv4`
-    /// (llama-kv-cache-dsv4.cpp:1243 @8642541b2).
+    /// (llama-kv-cache-dsv4.cpp:1225 @cd959bae9).
     ///
     /// Parameters mirror the C++'s; `filter` and `reuse` may be empty.
     ///
@@ -1574,6 +1565,7 @@ pub const KvCacheDsv4 = struct {
         };
         errdefer self.destroy();
         self.rs_idx.appendNTimes(allocator, 0, n_seq_max) catch oom();
+        self.rs_max.appendNTimes(allocator, 0, n_seq_max) catch oom();
 
         const filter_raw: FilterRaw = .{ .outer = filter };
 
@@ -1710,16 +1702,17 @@ pub const KvCacheDsv4 = struct {
         if (self.hca_state) |s| s.destroy();
         if (self.lid_state) |s| s.destroy();
         self.rs_idx.deinit(allocator);
+        self.rs_max.deinit(allocator);
         self.comp_il_src.deinit(allocator);
         self.comp_read.deinit(allocator);
         allocator.destroy(self);
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `init_batch` (llama-kv-cache-dsv4.cpp:1500
-    /// @8642541b2): the iSWA cache's simple split when neither the raw nor
-    /// the compressed state needs a per-sequence layout, then an equal split
-    /// -- or a sequence split, for coupled sequence sets, which serialize
-    /// until DSV4 has explicit shared-state handling for compressed streams.
+    /// Ports `llama_kv_cache_dsv4`'s `init_batch` (llama-kv-cache-dsv4.cpp:1483
+    /// @cd959bae9): an equal split, so independent sequences can share an
+    /// equal-length ubatch -- or a sequence split, for coupled sequence
+    /// sets, which serialize until DSV4 has explicit shared-state handling
+    /// for compressed streams.
     pub fn initBatch(self: *KvCacheDsv4, balloc: *batch.BatchAllocr, n_ubatch: u32, embd_all: bool) *Dsv4Context {
         _ = embd_all;
 
@@ -1733,27 +1726,6 @@ pub const KvCacheDsv4 = struct {
         const comp_per_seq = self.getCsaState().getNStream() > 1;
         const has_coupled = batchHasCoupled(balloc.getBatch());
 
-        // The iSWA cache's split, when the compressed state does not need a
-        // per-sequence graph layout.
-        if (!(raw_per_seq or comp_per_seq)) {
-            balloc.splitReset();
-
-            var ubatches: std.ArrayList(Ubatch) = .empty;
-            while (true) {
-                const ub = balloc.splitSimple(n_ubatch);
-                if (ub.n_tokens == 0) break;
-                ubatches.append(allocator, ub) catch oom();
-            }
-
-            if (balloc.getNUsed() >= balloc.getNTokens()) {
-                if (self.makeContext(ubatches)) |ctx| return ctx;
-            } else {
-                releaseAll(&ubatches);
-            }
-        }
-
-        // With per-sequence raw or compressed state, independent sequences
-        // can share an equal-length ubatch.
         {
             balloc.splitReset();
 
@@ -1853,8 +1825,8 @@ pub const KvCacheDsv4 = struct {
         self.clearCompressed(-1, true);
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `seq_rm` (llama-kv-cache-dsv4.cpp:1626
-    /// @8642541b2): only a tail can go. Past a sequence's end every cache
+    /// Ports `llama_kv_cache_dsv4`'s `seq_rm` (llama-kv-cache-dsv4.cpp:1582
+    /// @cd959bae9): only a tail can go. Past a sequence's end every cache
     /// drops it; within the last `n_rs_seq` positions the compressor states
     /// roll back to a snapshot on the next ubatch; from the start the whole
     /// sequence goes.
@@ -1880,10 +1852,8 @@ pub const KvCacheDsv4 = struct {
                 return res;
             }
 
-            if (self.n_rs_seq == 0) return false;
-
             const rollback: i32 = pos_max -% (p0 - 1);
-            if (rollback < 1 or rollback > @as(i32, @bitCast(self.n_rs_seq))) return false;
+            if (rollback < 1 or rollback > @as(i32, @bitCast(self.rs_max.items[@intCast(seq_id)]))) return false;
 
             // A pending rollback is single-use: stacked partial removals do
             // not compose.
@@ -1902,10 +1872,10 @@ pub const KvCacheDsv4 = struct {
         return res;
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `seq_cp` (llama-kv-cache-dsv4.cpp:1679
-    /// @8642541b2): whole sequences only.
+    /// Ports `llama_kv_cache_dsv4`'s `seq_cp` (llama-kv-cache-dsv4.cpp:1631
+    /// @cd959bae9): whole sequences only.
     pub fn seqCp(self: *KvCacheDsv4, seq_id_src: i32, seq_id_dst: i32, p0: i32, p1: i32) void {
-        impl.assert(p0 <= 0 and p1 < 0, file, 1680, "p0 <= 0 && p1 < 0 && \"DSV4 only supports full sequence copies\"");
+        impl.assert(p0 <= 0 and p1 < 0, file, 1632, "p0 <= 0 && p1 < 0 && \"DSV4 only supports full sequence copies\"");
 
         self.getRaw().seqCp(seq_id_src, seq_id_dst, p0, p1);
         self.getCsa().seqCp(seq_id_src, seq_id_dst, -1, -1);
@@ -1916,12 +1886,15 @@ pub const KvCacheDsv4 = struct {
         self.getHcaState().seqCp(seq_id_src, seq_id_dst);
         self.getLidState().seqCp(seq_id_src, seq_id_dst);
 
-        if (seq_id_src != seq_id_dst) self.rs_idx.items[@intCast(seq_id_dst)] = 0;
+        if (seq_id_src != seq_id_dst) {
+            self.rs_idx.items[@intCast(seq_id_dst)] = 0;
+            self.rs_max.items[@intCast(seq_id_dst)] = 0;
+        }
     }
 
     /// Ports `llama_kv_cache_dsv4`'s `seq_keep` (llama-kv-cache-dsv4.cpp:1649 @cd959bae9).
     pub fn seqKeep(self: *KvCacheDsv4, seq_id: i32) void {
-        impl.assert(seq_id >= 0 and @as(u32, @bitCast(seq_id)) < self.n_seq_max, file, 1697, "seq_id >= 0 && (uint32_t) seq_id < n_seq_max");
+        impl.assert(seq_id >= 0 and @as(u32, @bitCast(seq_id)) < self.n_seq_max, file, 1650, "seq_id >= 0 && (uint32_t) seq_id < n_seq_max");
 
         self.getRaw().seqKeep(seq_id);
 
@@ -2005,8 +1978,8 @@ pub const KvCacheDsv4 = struct {
         try self.getLidState().stateWrite(w, seq_id, flags, self.rs_idx.items, exc);
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `state_read` (llama-kv-cache-dsv4.cpp:1795
-    /// @8642541b2): a restored sequence has no rollback pending.
+    /// Ports `llama_kv_cache_dsv4`'s `state_read` (llama-kv-cache-dsv4.cpp:1748
+    /// @cd959bae9): a restored sequence has no rollback pending.
     pub fn stateRead(self: *KvCacheDsv4, r: io.Reader, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
         const magic = try r.readValue(u32, exc);
         const version = try r.readValue(u32, exc);
@@ -2030,6 +2003,10 @@ pub const KvCacheDsv4 = struct {
             try stateReadKCache(r, self.getCsa(), seq_id, flags, self.comp_il_src.items, exc);
             try stateReadKCache(r, self.getHca(), seq_id, flags, self.comp_il_src.items, exc);
             try stateReadKCache(r, self.getLid(), seq_id, flags, self.comp_il_src.items, exc);
+
+            // The io can defer the tensor reads until it is destroyed, so the
+            // mirrors are refilled before the next graph.
+            self.comp_mirrors_stale = true;
         }
 
         try self.getCsaState().stateRead(r, seq_id, flags, exc);
@@ -2037,10 +2014,12 @@ pub const KvCacheDsv4 = struct {
         try self.getLidState().stateRead(r, seq_id, flags, exc);
 
         if (seq_id >= 0) {
-            impl.assert(@as(u32, @bitCast(seq_id)) < self.n_seq_max, file, 1835, "(uint32_t) seq_id < n_seq_max");
+            impl.assert(@as(u32, @bitCast(seq_id)) < self.n_seq_max, file, 1791, "(uint32_t) seq_id < n_seq_max");
             self.rs_idx.items[@intCast(seq_id)] = 0;
+            self.rs_max.items[@intCast(seq_id)] = 0;
         } else {
             @memset(self.rs_idx.items, 0);
+            @memset(self.rs_max.items, 0);
         }
     }
 
@@ -2096,32 +2075,74 @@ pub const KvCacheDsv4 = struct {
         return self.rs_idx.items;
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `reset_rs_idx_for_ubatches`
-    /// (llama-kv-cache-dsv4.cpp:1882 @8642541b2): a ubatch that touches a
-    /// sequence consumes its pending rollback.
-    pub fn resetRsIdxForUbatches(self: *KvCacheDsv4, ubatches: []const Ubatch) void {
+    /// Ports `llama_kv_cache_dsv4`'s `update_rs_for_ubatches`
+    /// (llama-kv-cache-dsv4.cpp:1840 @cd959bae9): a ubatch that touches a
+    /// sequence consumes its pending rollback and leaves snapshots for its
+    /// own tokens only.
+    pub fn updateRsForUbatches(self: *KvCacheDsv4, ubatches: []const Ubatch) void {
         if (self.n_rs_seq == 0) return;
 
+        const n_seq_tokens = allocator.alloc(u32, self.n_seq_max) catch oom();
+        defer allocator.free(n_seq_tokens);
+
         for (ubatches) |*ubatch| {
+            @memset(n_seq_tokens, 0);
+
             for (0..ubatch.n_tokens) |i| {
                 var s: usize = 0;
                 while (s < @as(usize, @intCast(ubatch.n_seq_id[i]))) : (s += 1) {
                     const seq_id = ubatch.seq_id[i][s];
-                    if (seq_id >= 0 and @as(u32, @bitCast(seq_id)) < self.n_seq_max) self.rs_idx.items[@intCast(seq_id)] = 0;
+                    if (seq_id >= 0 and @as(u32, @bitCast(seq_id)) < self.n_seq_max) n_seq_tokens[@intCast(seq_id)] +%= 1;
+                }
+            }
+
+            for (0..self.n_seq_max) |seq_id| {
+                if (n_seq_tokens[seq_id] > 0) {
+                    self.rs_idx.items[seq_id] = 0;
+                    self.rs_max.items[seq_id] = @min(n_seq_tokens[seq_id], self.n_rs_seq);
                 }
             }
         }
     }
 
-    /// Ports `llama_kv_cache_dsv4`'s `clear_compressed` (llama-kv-cache-dsv4.cpp:1899
-    /// @8642541b2): every compressed cache and state, or one sequence's.
+    /// Ports `llama_kv_cache_dsv4`'s `refill_comp_mirrors`
+    /// (llama-kv-cache-dsv4.cpp:1869 @cd959bae9): after a state read, copy
+    /// the sources into their mirrors; a mirror gets the same rows as its
+    /// source, so a whole copy is exact.
+    pub fn refillCompMirrors(self: *KvCacheDsv4) void {
+        if (!self.comp_mirrors_stale) {
+            return;
+        }
+
+        self.comp_mirrors_stale = false;
+
+        for ([_]*KvCache{ self.getCsa(), self.getHca(), self.getLid() }) |kv| {
+            var layer_ids = kv.getLayerIds();
+            defer layer_ids.deinit(allocator);
+            for (layer_ids.items) |il| {
+                const src = self.comp_il_src.items[il];
+                if (src == @as(i32, @intCast(il))) {
+                    continue;
+                }
+
+                const t_src = kv.getKStorage(src);
+                const t_dst = kv.getKStorage(@intCast(il));
+                impl.assert(t_src.type == t_dst.type and c.ggml_are_same_shape(t_src, t_dst), file, 1886, "t_src->type == t_dst->type && ggml_are_same_shape(t_src, t_dst)");
+
+                c.ggml_backend_tensor_copy(t_src, t_dst);
+            }
+        }
+    }
+
+    /// Ports `llama_kv_cache_dsv4`'s `clear_compressed` (llama-kv-cache-dsv4.cpp:1893
+    /// @cd959bae9): every compressed cache and state, or one sequence's.
     fn clearCompressed(self: *KvCacheDsv4, seq_id: i32, data: bool) void {
         if (seq_id < 0) {
             self.getCsa().clear(data);
             self.getHca().clear(data);
             self.getLid().clear(data);
         } else {
-            impl.assert(@as(u32, @bitCast(seq_id)) < self.n_seq_max, file, 1905, "(uint32_t) seq_id < n_seq_max");
+            impl.assert(@as(u32, @bitCast(seq_id)) < self.n_seq_max, file, 1899, "(uint32_t) seq_id < n_seq_max");
 
             for ([_]*KvCache{ self.getCsa(), self.getHca(), self.getLid() }) |kv| {
                 _ = kv.seqRm(seq_id, -1, -1);
@@ -2143,8 +2164,10 @@ pub const KvCacheDsv4 = struct {
 
         if (seq_id >= 0) {
             self.rs_idx.items[@intCast(seq_id)] = 0;
+            self.rs_max.items[@intCast(seq_id)] = 0;
         } else {
             @memset(self.rs_idx.items, 0);
+            @memset(self.rs_max.items, 0);
         }
     }
 
@@ -2282,8 +2305,8 @@ fn buildFullSinfo(kv: *const KvCache) SlotInfo {
     return sinfo;
 }
 
-/// Ports `llama_kv_cache_dsv4_raw_context` (llama-kv-cache-dsv4.h:190
-/// @8642541b2): DSV4's raw attention uses only the SWA half of the raw
+/// Ports `llama_kv_cache_dsv4_raw_context` (llama-kv-cache-dsv4.h:199
+/// @cd959bae9): DSV4's raw attention uses only the SWA half of the raw
 /// cache. The base half is kept for the iSWA cache's bookkeeping, but has
 /// no DSV4 layers to expose.
 pub const RawContext = struct {
@@ -2431,9 +2454,9 @@ pub const RawContext = struct {
 
         const n_fanout: i64 = @intCast(sinfo.size() * sinfo.nStream());
 
-        impl.assert(sinfo.nStream() > 1, file, 2063, "sinfo.n_stream() > 1");
-        impl.assert(k_cur.ne[2] == @as(i64, @intCast(sinfo.size())), file, 2064, "k_cur->ne[2] == (int64_t) sinfo.size()");
-        impl.assert(k_idxs.ne[0] == n_fanout, file, 2065, "k_idxs->ne[0] == n_fanout");
+        impl.assert(sinfo.nStream() > 1, file, 2059, "sinfo.n_stream() > 1");
+        impl.assert(k_cur.ne[2] == @as(i64, @intCast(sinfo.size())), file, 2060, "k_cur->ne[2] == (int64_t) sinfo.size()");
+        impl.assert(k_idxs.ne[0] == n_fanout, file, 2061, "k_idxs->ne[0] == n_fanout");
 
         var res: ?*Tensor = null;
         for (0..sinfo.nStream()) |s| {
@@ -2458,9 +2481,9 @@ pub const RawContext = struct {
         return k_idxs;
     }
 
-    /// Ports `llama_kv_cache_dsv4_raw_context`'s `build_input_k_rot` (llama-kv-cache-dsv4.cpp:2090 @8642541b2).
-    pub fn buildInputKRot(self: *const RawContext, ctx: *c.ggml_context) ?*Tensor {
-        return self.kv_swa.buildInputKRot(ctx);
+    /// Ports `llama_kv_cache_dsv4_raw_context`'s `get_k_rot` (llama-kv-cache-dsv4.cpp:2086 @cd959bae9).
+    pub fn getKRot(self: *const RawContext) []const ?*Tensor {
+        return self.kv_swa.getKRot();
     }
 
     /// Ports `llama_kv_cache_dsv4_raw_context`'s `set_input_k_idxs` (llama-kv-cache-dsv4.cpp:2090 @cd959bae9).
@@ -2468,9 +2491,9 @@ pub const RawContext = struct {
         self.kv_swa.setInputKIdxs(dst, &self.ubatches_write.items[self.i_next], &self.sinfos_write.items[self.i_next]);
     }
 
-    /// Ports `llama_kv_cache_dsv4_raw_context`'s `set_input_kq_mask` (llama-kv-cache-dsv4.cpp:2098 @8642541b2).
-    pub fn setInputKqMask(self: *const RawContext, dst: *Tensor, ubatch: *const Ubatch, causal_attn: bool) void {
-        self.kv_swa.setInputKqMask(dst, ubatch, causal_attn);
+    /// Ports `llama_kv_cache_dsv4_raw_context`'s `set_input_attn_mask` (llama-kv-cache-dsv4.cpp:2094 @cd959bae9).
+    pub fn setInputAttnMask(self: *const RawContext, attn_mask: *const graph.AttnMask, ubatch: *const Ubatch, causal_attn: bool) void {
+        self.kv_swa.setInputAttnMask(attn_mask, ubatch, causal_attn);
     }
 
     /// Ports `llama_kv_cache_dsv4_raw_context`'s `get_prev_tokens`
@@ -2479,18 +2502,13 @@ pub const RawContext = struct {
     pub fn getPrevTokens(self: *const RawContext, ubatch: *const Ubatch, n: u32, res: *std.ArrayList(i32)) void {
         self.kv_swa.getPrevTokens(ubatch, n, res);
     }
-
-    /// Ports `llama_kv_cache_dsv4_raw_context`'s `set_input_k_rot` (llama-kv-cache-dsv4.cpp:2107 @8642541b2).
-    pub fn setInputKRot(self: *const RawContext, dst: *Tensor) void {
-        self.kv_swa.setInputKRot(dst);
-    }
 };
 
 // -----------------------------------------------------------------------------
 // llama_kv_cache_dsv4_comp_context
 
-/// Ports `llama_kv_cache_dsv4_comp_context` (llama-kv-cache-dsv4.h:251
-/// @8642541b2): compressed rows are graph outputs, not token writes, so
+/// Ports `llama_kv_cache_dsv4_comp_context` (llama-kv-cache-dsv4.h:259
+/// @cd959bae9): compressed rows are graph outputs, not token writes, so
 /// this exposes a compressed cache's K without `apply` semantics.
 pub const CompContext = struct {
     kv: *KvCache,
@@ -2554,14 +2572,9 @@ pub const CompContext = struct {
         return self.kv.cpyK(ctx, k_cur, k_idxs, il, &self.sinfos.items[self.i_cur]);
     }
 
-    /// Ports `llama_kv_cache_dsv4_comp_context`'s `build_input_k_rot` (llama-kv-cache-dsv4.cpp:2162 @8642541b2).
-    pub fn buildInputKRot(self: *const CompContext, ctx: *c.ggml_context) ?*Tensor {
-        return self.kv.buildInputKRot(ctx);
-    }
-
-    /// Ports `llama_kv_cache_dsv4_comp_context`'s `set_input_k_rot` (llama-kv-cache-dsv4.cpp:2166 @8642541b2).
-    pub fn setInputKRot(self: *const CompContext, dst: *Tensor) void {
-        self.kv.setInputKRot(dst);
+    /// Ports `llama_kv_cache_dsv4_comp_context`'s `get_k_rot` (llama-kv-cache-dsv4.cpp:2154 @cd959bae9).
+    pub fn getKRot(self: *const CompContext) []const ?*Tensor {
+        return self.kv.getKRot();
     }
 };
 
@@ -2571,7 +2584,7 @@ pub const CompContext = struct {
 /// The empty plan `get_csa_plan` and its siblings return without ubatches.
 const empty_plan: CompPlan = .{};
 
-/// Ports `llama_kv_cache_dsv4_context` (llama-kv-cache-dsv4.h:282 @8642541b2):
+/// Ports `llama_kv_cache_dsv4_context` (llama-kv-cache-dsv4.h:289 @cd959bae9):
 /// the DSV4 memory's view for one batch -- the raw context, a view of each
 /// compressed cache, the compressor states, and a plan per ubatch for each.
 pub const Dsv4Context = struct {
@@ -2609,7 +2622,7 @@ pub const Dsv4Context = struct {
 
     status: memory.Status,
 
-    kv: ?*const KvCacheDsv4 = null,
+    kv: ?*KvCacheDsv4 = null,
 
     /// Ports the status constructor of `llama_kv_cache_dsv4_context`
     /// (llama-kv-cache-dsv4.cpp:2162 @cd959bae9).
@@ -2678,8 +2691,9 @@ pub const Dsv4Context = struct {
     }
 
     /// Ports the batch constructor of `llama_kv_cache_dsv4_context`
-    /// (llama-kv-cache-dsv4.cpp:2221 @8642541b2): plans every ubatch for
-    /// each compressor, then consumes the rollbacks the ubatches touch.
+    /// (llama-kv-cache-dsv4.cpp:2209 @cd959bae9): plans every ubatch for
+    /// each compressor, then consumes the rollbacks the ubatches touch and
+    /// records the snapshots they leave.
     /// Takes every list.
     pub fn createBatch(
         kv: *KvCacheDsv4,
@@ -2709,7 +2723,7 @@ pub const Dsv4Context = struct {
 
         self.status = self.ctx_raw.?.getStatus();
 
-        kv.resetRsIdxForUbatches(ub);
+        kv.updateRsForUbatches(ub);
         return self;
     }
 
@@ -2748,9 +2762,10 @@ pub const Dsv4Context = struct {
         return self.i_next < self.ubatches.items.len;
     }
 
-    /// Ports `llama_kv_cache_dsv4_context`'s `apply` (llama-kv-cache-dsv4.cpp:2285
-    /// @8642541b2): without ubatches, an update, which also applies the
-    /// compressor states' queued stream copies.
+    /// Ports `llama_kv_cache_dsv4_context`'s `apply` (llama-kv-cache-dsv4.cpp:2273
+    /// @cd959bae9): without ubatches, an update, which also applies the
+    /// compressor states' queued stream copies; then the mirrors a state
+    /// read left stale are refilled.
     pub fn apply(self: *Dsv4Context) bool {
         std.debug.assert(!memory.statusIsFail(self.status));
 
@@ -2773,6 +2788,8 @@ pub const Dsv4Context = struct {
             self.hca_state.?.applyCopies(&self.sc_info_hca);
             self.lid_state.?.applyCopies(&self.sc_info_lid);
         }
+
+        self.kv.?.refillCompMirrors();
 
         return res;
     }

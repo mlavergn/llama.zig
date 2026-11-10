@@ -154,6 +154,11 @@ fn buildTarget(b: *std.Build, target: std.Build.ResolvedTarget) []const u8 {
 /// Adds `tools` (our ports, into `zig-out/bin`) and `tools-ref` (upstream's,
 /// into `zig-out/tools-ref/bin`).
 pub fn add(b: *std.Build, opts: Options) !void {
+    // Every upstream executable embeds this manifest on Windows since v0.9.0
+    // (`cmake/win-app.cmake`): a UTF-8 active code page, which replaced
+    // `common_params_parse`'s wide-argv repair, and long paths. Zig ignores
+    // it on other targets.
+    const win_app_manifest = b.path("llama.cpp/common/win-app.manifest");
     const tools_h = b.addTranslateC(.{
         .root_source_file = b.path("tools/common/c_import.h"),
         .target = opts.target,
@@ -239,7 +244,7 @@ pub fn add(b: *std.Build, opts: Options) !void {
         }
         llamacpp.addSdkPaths(b, mod, opts.sdk);
         llamacpp.addLibgcc(b, mod);
-        const exe = b.addExecutable(.{ .name = b.fmt("llama-{s}", .{t.name}), .root_module = mod });
+        const exe = b.addExecutable(.{ .name = b.fmt("llama-{s}", .{t.name}), .root_module = mod, .win32_manifest = win_app_manifest });
         tools_step.dependOn(&b.addInstallArtifact(exe, .{}).step);
     }
     // Our `llama-server` (Stage 10, Decision 65), over the same modules as
@@ -298,7 +303,7 @@ pub fn add(b: *std.Build, opts: Options) !void {
         llamacpp.addSdkPaths(b, mod, opts.sdk);
         llamacpp.addLibgcc(b, mod);
         llamacpp.addCudaRuntime(b, mod, opts.cuda);
-        const exe = b.addExecutable(.{ .name = b.fmt("llama-{s}", .{t.name}), .root_module = mod });
+        const exe = b.addExecutable(.{ .name = b.fmt("llama-{s}", .{t.name}), .root_module = mod, .win32_manifest = win_app_manifest });
         const install = b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .{ .custom = "tools-ref/bin" } } });
         ref_step.dependOn(&install.step);
         mtmd_ref_step.dependOn(&install.step);
@@ -382,7 +387,7 @@ pub fn add(b: *std.Build, opts: Options) !void {
         llamacpp.addSdkPaths(b, mod, opts.sdk);
         llamacpp.addLibgcc(b, mod);
         llamacpp.addCudaRuntime(b, mod, opts.cuda);
-        const exe = b.addExecutable(.{ .name = b.fmt("llama-{s}", .{t.name}), .root_module = mod });
+        const exe = b.addExecutable(.{ .name = b.fmt("llama-{s}", .{t.name}), .root_module = mod, .win32_manifest = win_app_manifest });
         ref_step.dependOn(&b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .{ .custom = "tools-ref/bin" } } }).step);
     }
 }

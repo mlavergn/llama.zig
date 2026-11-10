@@ -11,7 +11,7 @@
 //! - `llama.cpp/src/llama-mmap.h` -- `llama_mmap::ranges`,
 //!   `llama_memory_range` and `LLAMA_DIRECT_IO_BUFFER_SIZE`
 //!
-//! At v0.8.0 (`8642541b2`).
+//! At v0.9.0 (`cd959bae9`).
 //!
 //! # What each target compiles
 //!
@@ -190,7 +190,7 @@ pub const File = struct {
     pub fn open(fname: [:0]const u8, mode: [:0]const u8, use_direct_io: bool, exc: *Exception) Thrown!File {
         var f: File = .{ .fp = null, .owns_fp = true, .size = 0 };
         if (comptime is_windows) {
-            // llama-mmap.cpp:87 @8642541b2: `use_direct_io` is unused.
+            // llama-mmap.cpp:87 @cd959bae9: `use_direct_io` is unused.
             try f.initFp(fname, mode, exc);
             return f;
         }
@@ -265,7 +265,7 @@ pub const File = struct {
     /// Return: nothing.
     pub fn close(self: *File) void {
         if (comptime is_windows) {
-            // llama-mmap.cpp:178 @8642541b2.
+            // llama-mmap.cpp:178 @cd959bae9.
             if (self.owns_fp) if (self.fp) |fp| {
                 _ = c.fclose(fp);
             };
@@ -285,7 +285,7 @@ pub const File = struct {
     /// Return: the position, or `error.Thrown`.
     pub fn tell(self: *const File, exc: *Exception) Thrown!usize {
         if (comptime is_windows) {
-            // llama-mmap.cpp:106 @8642541b2.
+            // llama-mmap.cpp:106 @cd959bae9.
             var li: i64 = 0;
             if (win32.SetFilePointerEx(self.fp_win32, 0, &li, win32.FILE_CURRENT) == 0) {
                 return self.throwWin32(exc, "read error: {s}");
@@ -307,7 +307,7 @@ pub const File = struct {
     /// Return: nothing, or `error.Thrown`.
     pub fn seek(self: *const File, offset: usize, whence: c_int, exc: *Exception) Thrown!void {
         if (comptime is_windows) {
-            // llama-mmap.cpp:117 @8642541b2: `SEEK_SET`, `SEEK_CUR` and
+            // llama-mmap.cpp:117 @cd959bae9: `SEEK_SET`, `SEEK_CUR` and
             // `SEEK_END` are `FILE_BEGIN`, `FILE_CURRENT` and `FILE_END`.
             if (win32.SetFilePointerEx(self.fp_win32, @bitCast(offset), null, @intCast(whence)) == 0) {
                 return self.throwWin32(exc, "read error: {s}");
@@ -815,7 +815,7 @@ pub const Mlock = struct {
     /// Ports `llama_mlock`'s `impl`'s `lock_granularity` (llama-mmap.cpp:698 @cd959bae9).
     fn lockGranularity() usize {
         if (comptime is_windows) {
-            // llama-mmap.cpp:743 @8642541b2.
+            // llama-mmap.cpp:743 @cd959bae9.
             var si: win32.SYSTEM_INFO = undefined;
             win32.GetSystemInfo(&si);
             return si.dwPageSize;

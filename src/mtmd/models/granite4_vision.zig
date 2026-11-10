@@ -7,7 +7,7 @@
 //!
 //! Ports `llama.cpp/tools/mtmd/models/granite4-vision.cpp` and the
 //! `clip_graph_granite4_vision` declaration in
-//! `llama.cpp/tools/mtmd/models/models.h`, at v0.8.0 (`8642541b2`). Each
+//! `llama.cpp/tools/mtmd/models/models.h`, at v0.9.0 (`cd959bae9`). Each
 //! declaration names the C++ it replaces and the line it began at.
 
 const std = @import("std");

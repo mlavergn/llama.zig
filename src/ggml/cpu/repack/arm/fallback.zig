@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.8.0
-//! (`8642541b2`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.9.0
+//! (`cd959bae9`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # Why these are one line each
@@ -73,7 +73,7 @@ pub export fn ggml_gemm_q5_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
     ggml_gemm_q5_K_8x8_q8_K_generic(n, s, bs, vx, vy, nr, nc);
 }
 
-/// Ports `ggml_gemm_q6_K_8x8_q8_K` (arch/arm/repack.cpp:4865 @8642541b2).
+/// Ports `ggml_gemm_q6_K_8x8_q8_K` (arch/arm/repack.cpp:4984 @cd959bae9).
 pub export fn ggml_gemm_q6_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime mmla.enabled) return mmla.gemmQ6_K_8x8(n, s, bs, vx, vy, nr, nc);
     ggml_gemm_q6_K_8x8_q8_K_generic(n, s, bs, vx, vy, nr, nc);

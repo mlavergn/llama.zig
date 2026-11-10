@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-sampler.cpp` (v0.8.0, `8642541b2`).
+//! Ported from `llama.cpp/src/llama-sampler.cpp` (v0.9.0, `cd959bae9`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # The two C++-linkage entry points

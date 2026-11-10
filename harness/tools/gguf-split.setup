@@ -9,3 +9,18 @@ cut_tail "$ROOT/zig-out/arch-fixtures/qwen3-dense.gguf" "$DATA/trunc.gguf"
 cd "$DATA"
 "$ROOT/zig-out/tools-ref/bin/llama-gguf-split" --split-max-tensors 1000 "$ROOT/zig-out/arch-fixtures/mamba-dense.gguf" whole >/dev/null 2>&1
 cut_tail whole-00001-of-00001.gguf trunc-merge-00001-of-00001.gguf
+# v0.9.0's set checks: splits of two layouts of one model, crossed. llama-dense
+# has 64 tensors: lm is 32 + 32, l40 is 40 + 24, l3 is 22 + 22 + 20.
+split() { "$ROOT/zig-out/tools-ref/bin/llama-gguf-split" --split-max-tensors "$1" "$ROOT/zig-out/arch-fixtures/llama-dense.gguf" "$2" >/dev/null 2>&1; }
+split 32 lm
+split 40 l40
+split 22 l3
+# the second file of another count: split.count 3 where 2 is expected
+cp lm-00001-of-00002.gguf cnt-00001-of-00002.gguf
+cp l3-00002-of-00003.gguf cnt-00002-of-00002.gguf
+# the first file again as the second: split.no 0 where 1 is expected
+cp lm-00001-of-00002.gguf no-00001-of-00002.gguf
+cp lm-00001-of-00002.gguf no-00002-of-00002.gguf
+# a set whose numbering agrees and whose tensors do not: 32 + 24 of 64
+cp lm-00001-of-00002.gguf tc-00001-of-00002.gguf
+cp l40-00002-of-00002.gguf tc-00002-of-00002.gguf

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-backend.cpp` (v0.8.0, `8642541b2`),
+//! Ported from `llama.cpp/ggml/src/ggml-backend.cpp` (v0.9.0, `cd959bae9`),
 //! together with `src/ggml/backend_sched.zig`, which takes the scheduler. Each
 //! declaration below names the C++ it replaces and the line it began at. This
 //! file exports the same C symbols with the same signatures, so the C and C++
@@ -732,6 +732,229 @@ pub export fn ggml_backend_tensor_get_2d(
     buf.*.iface.get_tensor_2d.?(buf, tensor, data, offset, size, n_copies, stride_tensor, stride_data);
 }
 
+/// Ports `ggml_backend_tensor_buft_groups` (src/ggml-backend.cpp:406 @cd959bae9).
+///
+/// Splits `0..n_tensors` by the buffer type of each tensor's buffer, the
+/// groups in the order their buffer type first appears and each group's
+/// indices ascending. The C keys an `unordered_map` on the buffer type only
+/// to find a group's slot, so nothing reads its order; a scan does the same.
+///
+/// Parameters:
+/// - `n_tensors`: how many indices to split.
+/// - `ctx`, `getBuffer`: the buffer of index `i` is `getBuffer(ctx, i)`.
+///
+/// Return: the groups, owned by the caller; free with `freeBuftGroups`.
+fn tensorBuftGroups(n_tensors: usize, ctx: anytype, comptime getBuffer: fn (@TypeOf(ctx), usize) c.ggml_backend_buffer_t) []std.ArrayList(usize) {
+    var bufts: std.ArrayList(c.ggml_backend_buffer_type_t) = .empty;
+    defer bufts.deinit(allocator);
+    var groups: std.ArrayList(std.ArrayList(usize)) = .empty;
+    for (0..n_tensors) |i| {
+        const buft = getBuffer(ctx, i).*.buft;
+        const g = for (bufts.items, 0..) |b, k| {
+            if (b == buft) break k;
+        } else blk: {
+            bufts.append(allocator, buft) catch impl.abort("backend: out of memory");
+            groups.append(allocator, .empty) catch impl.abort("backend: out of memory");
+            break :blk groups.items.len - 1;
+        };
+        groups.items[g].append(allocator, i) catch impl.abort("backend: out of memory");
+    }
+    return groups.toOwnedSlice(allocator) catch impl.abort("backend: out of memory");
+}
+
+/// Frees what `tensorBuftGroups` returned.
+fn freeBuftGroups(groups: []std.ArrayList(usize)) void {
+    for (groups) |*g| g.deinit(allocator);
+    allocator.free(groups);
+}
+
+/// The buffer a tensor's data lives in: its view source's for a view.
+fn tensorBuffer(tensor: [*c]const c.ggml_tensor) c.ggml_backend_buffer_t {
+    return if (tensor.*.view_src != null) tensor.*.view_src.*.buffer else tensor.*.buffer;
+}
+
+/// Ports `ggml_backend_tensor_batch_is_2d` (src/ggml-backend.cpp:420 @cd959bae9).
+///
+/// True when a batch is one tensor written or read `n_tensors` times at a
+/// fixed stride on both sides with one size, which `set_2d`/`get_2d` can do
+/// in one call; the four outputs are then that call's arguments.
+fn tensorBatchIs2d(
+    tensors: [*c]const [*c]const c.ggml_tensor,
+    offsets: [*c]const usize,
+    sizes: [*c]const usize,
+    data_offsets: [*c]const usize,
+    n_tensors: usize,
+    base_offset: *usize,
+    size: *usize,
+    stride_tensor: *usize,
+    stride_data: *usize,
+) bool {
+    if (n_tensors <= 1) {
+        return false;
+    }
+
+    const tensor = tensors[0];
+    const size0 = sizes[0];
+
+    if (size0 == 0 or offsets[1] < offsets[0] or data_offsets[1] < data_offsets[0]) {
+        return false;
+    }
+
+    const stride_tensor0 = offsets[1] - offsets[0];
+    const stride_data0 = data_offsets[1] - data_offsets[0];
+
+    for (1..n_tensors) |i| {
+        if (tensors[i] != tensor or sizes[i] != size0) {
+            return false;
+        }
+        if (offsets[i] != offsets[0] +% i *% stride_tensor0 or data_offsets[i] != data_offsets[0] +% i *% stride_data0) {
+            return false;
+        }
+    }
+
+    base_offset.* = offsets[0];
+    size.* = size0;
+    stride_tensor.* = stride_tensor0;
+    stride_data.* = stride_data0;
+
+    return true;
+}
+
+/// The body `ggml_backend_tensor_set_n` and `ggml_backend_tensor_get_n`
+/// share, which in the C differ only in direction, constness and the bounds
+/// message. `is_set` picks the direction.
+fn tensorBatchIo(
+    comptime is_set: bool,
+    tensors: [*c]const [*c]c.ggml_tensor,
+    data: ?*anyopaque,
+    offsets: [*c]const usize,
+    sizes: [*c]const usize,
+    data_offsets: [*c]const usize,
+    n_tensors: usize,
+) void {
+    if (n_tensors == 0) {
+        return;
+    }
+
+    const data_ptrs = allocator.alloc(?*anyopaque, n_tensors) catch impl.abort("backend: out of memory");
+    defer allocator.free(data_ptrs);
+    for (0..n_tensors) |i| {
+        data_ptrs[i] = @as([*]u8, @ptrCast(data.?)) + data_offsets[i];
+    }
+
+    var buf: c.ggml_backend_buffer_t = null;
+    var same_buft = true;
+
+    for (0..n_tensors) |i| {
+        impl.assert(tensors[i] != null, "tensors[i] != NULL");
+        const tensor_buf = tensorBuffer(tensors[i]);
+        impl.assert(tensor_buf != null, "tensor buffer not set");
+        impl.assert(tensors[i].*.data != null, "tensor not allocated");
+        impl.assert(offsets[i] + sizes[i] <= c.ggml_nbytes(tensors[i]), if (is_set) "tensor write out of bounds" else "tensor read out of bounds");
+
+        if (buf == null) {
+            buf = tensor_buf;
+        } else if (buf.*.buft != tensor_buf.*.buft) {
+            same_buft = false;
+        }
+    }
+
+    if (is_set) {
+        if (same_buft and buf.*.iface.set_tensor_n != null) {
+            buf.*.iface.set_tensor_n.?(buf, @ptrCast(tensors), @ptrCast(data_ptrs.ptr), offsets, sizes, n_tensors);
+            return;
+        }
+    } else {
+        if (same_buft and buf.*.iface.get_tensor_n != null) {
+            buf.*.iface.get_tensor_n.?(buf, @ptrCast(tensors), @ptrCast(data_ptrs.ptr), offsets, sizes, n_tensors);
+            return;
+        }
+    }
+
+    if (!same_buft) {
+        const groups = tensorBuftGroups(n_tensors, tensors, struct {
+            fn get(ts: [*c]const [*c]c.ggml_tensor, i: usize) c.ggml_backend_buffer_t {
+                return tensorBuffer(ts[i]);
+            }
+        }.get);
+        defer freeBuftGroups(groups);
+
+        for (groups) |group| {
+            const n = group.items.len;
+            const g_tensors = allocator.alloc([*c]c.ggml_tensor, n) catch impl.abort("backend: out of memory");
+            defer allocator.free(g_tensors);
+            const g_sizes = allocator.alloc(usize, 3 * n) catch impl.abort("backend: out of memory");
+            defer allocator.free(g_sizes);
+            const g_offsets = g_sizes[0..n];
+            const g_size = g_sizes[n .. 2 * n];
+            const g_data_offsets = g_sizes[2 * n .. 3 * n];
+
+            for (group.items, 0..) |i, k| {
+                g_tensors[k] = tensors[i];
+                g_offsets[k] = offsets[i];
+                g_size[k] = sizes[i];
+                g_data_offsets[k] = data_offsets[i];
+            }
+
+            tensorBatchIo(is_set, g_tensors.ptr, data, g_offsets.ptr, g_size.ptr, g_data_offsets.ptr, n);
+        }
+        return;
+    }
+
+    var base_offset: usize = 0;
+    var size: usize = 0;
+    var stride_tensor: usize = 0;
+    var stride_data: usize = 0;
+    if (tensorBatchIs2d(@ptrCast(tensors), offsets, sizes, data_offsets, n_tensors, &base_offset, &size, &stride_tensor, &stride_data)) {
+        if (is_set) {
+            ggml_backend_tensor_set_2d(tensors[0], data_ptrs[0], base_offset, size, n_tensors, stride_tensor, stride_data);
+        } else {
+            ggml_backend_tensor_get_2d(tensors[0], data_ptrs[0], base_offset, size, n_tensors, stride_tensor, stride_data);
+        }
+        return;
+    }
+
+    for (0..n_tensors) |i| {
+        if (is_set) {
+            ggml_backend_tensor_set(tensors[i], data_ptrs[i], offsets[i], sizes[i]);
+        } else {
+            ggml_backend_tensor_get(tensors[i], data_ptrs[i], offsets[i], sizes[i]);
+        }
+    }
+}
+
+/// Ports `ggml_backend_tensor_set_n` (src/ggml-backend.cpp:605 @cd959bae9).
+///
+/// Writes `sizes[i]` bytes from `data + data_offsets[i]` to `tensors[i]` at
+/// `offsets[i]`, for every `i`: through the buffer's own `set_tensor_n` when
+/// every tensor shares one buffer type and the buffer has it, split by buffer
+/// type when they do not, as one `set_2d` when the batch is a fixed stride
+/// over one tensor, and one `set` at a time otherwise.
+pub export fn ggml_backend_tensor_set_n(
+    tensors: [*c]const [*c]c.ggml_tensor,
+    data: ?*const anyopaque,
+    offsets: [*c]const usize,
+    sizes: [*c]const usize,
+    data_offsets: [*c]const usize,
+    n_tensors: usize,
+) callconv(.c) void {
+    tensorBatchIo(true, tensors, @constCast(data), offsets, sizes, data_offsets, n_tensors);
+}
+
+/// Ports `ggml_backend_tensor_get_n` (src/ggml-backend.cpp:679 @cd959bae9).
+///
+/// `ggml_backend_tensor_set_n` in the other direction.
+pub export fn ggml_backend_tensor_get_n(
+    tensors: [*c]const [*c]const c.ggml_tensor,
+    data: ?*anyopaque,
+    offsets: [*c]const usize,
+    sizes: [*c]const usize,
+    data_offsets: [*c]const usize,
+    n_tensors: usize,
+) callconv(.c) void {
+    tensorBatchIo(false, @ptrCast(tensors), data, offsets, sizes, data_offsets, n_tensors);
+}
+
 /// Ports `ggml_backend_tensor_memset` (src/ggml-backend.cpp:753 @cd959bae9).
 ///
 /// Note the assertion order: unlike its neighbours this one tests `size == 0`
@@ -853,6 +1076,73 @@ pub export fn ggml_backend_tensor_copy(src: [*c]const c.ggml_tensor, dst: [*c]c.
         ggml_backend_tensor_get(src, data, 0, nbytes);
         ggml_backend_tensor_set(dst, data, 0, nbytes);
         std.c.free(data);
+    }
+}
+
+/// Ports `ggml_backend_tensor_copy_n` (src/ggml-backend.cpp:855 @cd959bae9).
+///
+/// `ggml_backend_tensor_copy` for `n_tensors` pairs: through the destination
+/// buffer's `cpy_tensor_n` when every destination shares one buffer type and
+/// the buffer does it -- a `false` from it means it copied nothing -- split
+/// by destination buffer type when they do not, and one copy at a time
+/// otherwise.
+pub export fn ggml_backend_tensor_copy_n(
+    srcs: [*c]const [*c]const c.ggml_tensor,
+    dsts: [*c]const [*c]c.ggml_tensor,
+    n_tensors: usize,
+) callconv(.c) void {
+    if (n_tensors == 0) {
+        return;
+    }
+
+    for (0..n_tensors) |i| {
+        impl.assert(impl.areSameLayout(&srcs[i].*, &dsts[i].*), "cannot copy tensors with different layouts");
+    }
+
+    const buf = tensorBuffer(dsts[0]);
+    var same_buft = true;
+    for (0..n_tensors) |i| {
+        const dst_buf = tensorBuffer(dsts[i]);
+        if (dst_buf.*.buft != buf.*.buft) {
+            same_buft = false;
+            break;
+        }
+    }
+
+    // if cpy_tensor_n returns false, it must not have performed any copies
+    if (same_buft and buf.*.iface.cpy_tensor_n != null) {
+        if (buf.*.iface.cpy_tensor_n.?(buf, @ptrCast(srcs), @ptrCast(dsts), n_tensors)) {
+            return;
+        }
+    }
+
+    if (!same_buft) {
+        const groups = tensorBuftGroups(n_tensors, dsts, struct {
+            fn get(ds: [*c]const [*c]c.ggml_tensor, i: usize) c.ggml_backend_buffer_t {
+                return tensorBuffer(ds[i]);
+            }
+        }.get);
+        defer freeBuftGroups(groups);
+
+        for (groups) |group| {
+            const n = group.items.len;
+            const g_srcs = allocator.alloc([*c]const c.ggml_tensor, n) catch impl.abort("backend: out of memory");
+            defer allocator.free(g_srcs);
+            const g_dsts = allocator.alloc([*c]c.ggml_tensor, n) catch impl.abort("backend: out of memory");
+            defer allocator.free(g_dsts);
+
+            for (group.items, 0..) |i, k| {
+                g_srcs[k] = srcs[i];
+                g_dsts[k] = dsts[i];
+            }
+
+            ggml_backend_tensor_copy_n(g_srcs.ptr, g_dsts.ptr, n);
+        }
+        return;
+    }
+
+    for (0..n_tensors) |i| {
+        ggml_backend_tensor_copy(srcs[i], dsts[i]);
     }
 }
 
@@ -1116,7 +1406,7 @@ fn multiBufferClear(buffer: c.ggml_backend_buffer_t, value: u8) callconv(.c) voi
     }
 }
 
-/// Ports `ggml_backend_multi_buffer_i` (src/ggml-backend.cpp:844 @8642541b2).
+/// Ports `ggml_backend_multi_buffer_i` (src/ggml-backend.cpp:1101 @cd959bae9).
 const multi_buffer_i: c.ggml_backend_buffer_i = .{
     .free_buffer = multiBufferFreeBuffer,
     .get_base = null,
@@ -1129,6 +1419,9 @@ const multi_buffer_i: c.ggml_backend_buffer_i = .{
     .cpy_tensor = null,
     .clear = multiBufferClear,
     .reset = null,
+    .set_tensor_n = null,
+    .get_tensor_n = null,
+    .cpy_tensor_n = null,
 };
 
 /// Ports `ggml_backend_multi_buffer_alloc_buffer` (src/ggml-backend.cpp:1118 @cd959bae9).
@@ -1596,7 +1889,7 @@ fn cpuBufferClear(buffer: c.ggml_backend_buffer_t, value: u8) callconv(.c) void 
     @memset(@as([*]u8, @ptrCast(buffer.*.context))[0..buffer.*.size], value);
 }
 
-/// Ports `ggml_backend_cpu_buffer_i` (src/ggml-backend.cpp:2523 @8642541b2).
+/// Ports `ggml_backend_cpu_buffer_i` (src/ggml-backend.cpp:2783 @cd959bae9).
 const cpu_buffer_i: c.ggml_backend_buffer_i = .{
     .free_buffer = cpuBufferFreeBuffer,
     .get_base = cpuBufferGetBase,
@@ -1609,9 +1902,12 @@ const cpu_buffer_i: c.ggml_backend_buffer_i = .{
     .cpy_tensor = cpuBufferCpyTensor,
     .clear = cpuBufferClear,
     .reset = null,
+    .set_tensor_n = null,
+    .get_tensor_n = null,
+    .cpy_tensor_n = null,
 };
 
-/// Ports `ggml_backend_cpu_buffer_from_ptr_i` (src/ggml-backend.cpp:2537 @8642541b2).
+/// Ports `ggml_backend_cpu_buffer_from_ptr_i` (src/ggml-backend.cpp:2800 @cd959bae9).
 ///
 /// Identical to `cpu_buffer_i` but for `free_buffer`: the pointer is the
 /// caller's and must not be freed.
@@ -1627,6 +1923,9 @@ const cpu_buffer_from_ptr_i: c.ggml_backend_buffer_i = .{
     .cpy_tensor = cpuBufferCpyTensor,
     .clear = cpuBufferClear,
     .reset = null,
+    .set_tensor_n = null,
+    .get_tensor_n = null,
+    .cpy_tensor_n = null,
 };
 
 // -----------------------------------------------------------------------------

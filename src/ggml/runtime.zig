@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.8.0, `8642541b2`), which is
+//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.9.0, `cd959bae9`), which is
 //! 8,067 lines and split across several files here. This one covers the
 //! preamble, roughly lines 36-630 and 8036-8067: the pieces that talk to the
 //! operating system rather than to tensors. Each function names the C function
@@ -64,7 +64,7 @@ extern fn posix_memalign(memptr: *?*anyopaque, alignment: usize, size: usize) c_
 /// `CLOCKS_PER_SEC` on macOS, and on glibc.
 const clocks_per_sec: i64 = 1_000_000;
 
-/// Mach VM interface, used by `ggml_aligned_malloc` on macOS. The C reaches
+/// Mach VM interface, used by `ggml_aligned_malloc` on Apple OSes. The C reaches
 /// for `vm_allocate` there rather than `posix_memalign` so that large tensor
 /// buffers come straight from the kernel, page-aligned and untouched by malloc.
 extern var mach_task_self_: c_uint;
@@ -341,18 +341,21 @@ export fn ggml_log_set(log_callback: c.ggml_log_callback, user_data: ?*anyopaque
 const tsan_enabled = builtin.sanitize_thread;
 
 /// True where `ggml_aligned_malloc` and `ggml_aligned_free` take the C's
-/// `#elif TARGET_OS_OSX && !defined(GGML_TSAN_ENABLED)` arm, the Mach VM.
-const use_vm_allocate = builtin.os.tag == .macos and !tsan_enabled;
+/// `#elif defined(__APPLE__) && !defined(GGML_TSAN_ENABLED)` arm, the Mach VM.
+/// Every Apple OS since v0.9.0; through v0.8.0 it was `TARGET_OS_OSX`, macOS
+/// alone, and iOS took `posix_memalign`.
+const use_vm_allocate = builtin.os.tag.isDarwin() and !tsan_enabled;
 
-/// Ports `ggml_aligned_malloc` (ggml.c:343 @8642541b2).
+/// Ports `ggml_aligned_malloc` (ggml.c:343 @cd959bae9).
 ///
-/// On macOS this goes to the Mach VM rather than `posix_memalign`, which is
-/// what the C does under `TARGET_OS_OSX` without the thread sanitizer. The alignment argument is unused on
+/// On every Apple OS this goes to the Mach VM rather than `posix_memalign`,
+/// which is what the C does under `__APPLE__` without the thread sanitizer:
+/// libmalloc can keep freed pages in the process footprint, and
+/// `vm_deallocate` returns them at once. The alignment argument is unused on
 /// that path because `vm_allocate` always returns page-aligned memory. Every
-/// other target -- iOS included, since `TARGET_OS_OSX` is false there -- takes
-/// the C's `#else` arm, `posix_memalign` at 64 bytes. MinGW takes the first
-/// arm, `_aligned_malloc` at 64 bytes, which has neither the zero-size warning
-/// nor the failure log.
+/// other target takes the C's `#else` arm, `posix_memalign` at 64 bytes.
+/// MinGW takes the first arm, `_aligned_malloc` at 64 bytes, which has
+/// neither the zero-size warning nor the failure log.
 ///
 /// Return: the allocation, or null on failure after logging why.
 export fn ggml_aligned_malloc(size: usize) ?*anyopaque {
@@ -390,7 +393,7 @@ export fn ggml_aligned_malloc(size: usize) ?*anyopaque {
     return @ptrFromInt(address);
 }
 
-/// The failure branch of `ggml_aligned_malloc` (ggml.c:343 @8642541b2), shared
+/// The failure branch of `ggml_aligned_malloc` (ggml.c:343 @cd959bae9), shared
 /// by both allocation arms. `EINVAL` and `ENOMEM` are 22 and 12 on Darwin and
 /// Linux alike.
 fn logAllocFailure(result: c_int, size: usize) void {
@@ -406,9 +409,9 @@ fn logAllocFailure(result: c_int, size: usize) void {
     });
 }
 
-/// Ports `ggml_aligned_free` (ggml.c:399 @8642541b2).
+/// Ports `ggml_aligned_free` (ggml.c:400 @cd959bae9).
 ///
-/// On macOS `size` is required, not decorative: `vm_deallocate` needs the
+/// On an Apple OS `size` is required, not decorative: `vm_deallocate` needs the
 /// length that was allocated, so this cannot be a plain `free`. Elsewhere it
 /// is the C's plain `free`, or on MinGW `_aligned_free`, and `size` is unused.
 export fn ggml_aligned_free(ptr: ?*anyopaque, size: usize) void {
@@ -499,22 +502,22 @@ export fn ggml_fp16_to_fp32_row(x: [*]const c.ggml_fp16_t, y: [*]f32, n: i64) vo
     for (0..@intCast(n)) |i| y[i] = impl.fp16ToFp32(x[i]);
 }
 
-/// Ports `ggml_fp32_to_fp16_row` (ggml.c:486 @8642541b2).
+/// Ports `ggml_fp32_to_fp16_row` (ggml.c:487 @cd959bae9).
 export fn ggml_fp32_to_fp16_row(x: [*]const f32, y: [*]c.ggml_fp16_t, n: i64) void {
     for (0..@intCast(n)) |i| y[i] = impl.fp32ToFp16(x[i]);
 }
 
-/// Ports `ggml_bf16_to_fp32_row` (ggml.c:493 @8642541b2).
+/// Ports `ggml_bf16_to_fp32_row` (ggml.c:493 @cd959bae9).
 export fn ggml_bf16_to_fp32_row(x: [*]const c.ggml_bf16_t, y: [*]f32, n: i64) void {
     for (0..@intCast(n)) |i| y[i] = impl.bf16ToFp32(x[i].bits);
 }
 
-/// Ports `ggml_fp32_to_bf16_row_ref` (ggml.c:500 @8642541b2).
+/// Ports `ggml_fp32_to_bf16_row_ref` (ggml.c:499 @cd959bae9).
 export fn ggml_fp32_to_bf16_row_ref(x: [*]const f32, y: [*]c.ggml_bf16_t, n: i64) void {
     for (0..@intCast(n)) |i| y[i] = .{ .bits = impl.fp32ToBf16(x[i]) };
 }
 
-/// Ports `ggml_fp32_to_bf16_row` (ggml.c:506 @8642541b2).
+/// Ports `ggml_fp32_to_bf16_row` (ggml.c:505 @cd959bae9).
 ///
 /// The C has an AVX512-BF16 fast path here; on ARM it falls through to the
 /// same scalar loop as the reference version.

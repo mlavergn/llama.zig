@@ -68,17 +68,14 @@
 # legacy and activation tensors, a bad in_sum -- shown and saved again.
 -m $DATA/tied.gguf -f $DATA/ascii.txt -c 32 --chunks 2 --process-output -o tied.gguf
 -m $PLAIN --in-file $DATA/gen-nextn.gguf -o rounded.gguf
-# v0.7.0: upstream's imatrix aborts on every NextN and draft collection:
-# the MTP graph now requires a state embedding (llama-graph.cpp:155,
-# GGML_ASSERT(ubatch->embd_state)) and imatrix.cpp does not set one
-# (unchanged since v0.6.0). The port aborts alike; the statistics cases
-# over their outputs then fail to read them. Kept as failure cases until
-# upstream fixes imatrix.
-!fail -m $DATA/qwen35-mtp.gguf -f $DATA/ascii.txt -c 32 -b 32 --chunks 2 --nextn -o mtp.gguf
-!fail -m $DATA/qwen35-mtp.gguf -f $DATA/ascii.txt -c 32 -b 32 --chunks 2 --nextn --process-output -o mtpo.gguf
-!fail -m $DATA/qwen35-mtp.gguf -f $DATA/ascii.txt -c 64 -b 32 --chunks 2 --nextn -o mtp2.gguf
-!fail -m $DATA/qwen35.gguf -md $DATA/qwen35-draft.gguf -f $DATA/ascii.txt -c 32 -b 32 --chunks 2 -o md.gguf
-!fail -m $DATA/qwen35.gguf -md $DATA/qwen35-draft.gguf -f $DATA/ascii.txt -c 32 -b 32 --chunks 2 --output-format dat -o md.dat
+# v0.7.0 to v0.8.0: upstream's imatrix aborted on every NextN and draft
+# collection, the MTP graph requiring a state embedding imatrix.cpp did not
+# set. v0.9.0 sets it (set_embd_state, imatrix.cpp:1392), and they collect.
+-m $DATA/qwen35-mtp.gguf -f $DATA/ascii.txt -c 32 -b 32 --chunks 2 --nextn -o mtp.gguf
+-m $DATA/qwen35-mtp.gguf -f $DATA/ascii.txt -c 32 -b 32 --chunks 2 --nextn --process-output -o mtpo.gguf
+-m $DATA/qwen35-mtp.gguf -f $DATA/ascii.txt -c 64 -b 32 --chunks 2 --nextn -o mtp2.gguf
+-m $DATA/qwen35.gguf -md $DATA/qwen35-draft.gguf -f $DATA/ascii.txt -c 32 -b 32 --chunks 2 -o md.gguf
+-m $DATA/qwen35.gguf -md $DATA/qwen35-draft.gguf -f $DATA/ascii.txt -c 32 -b 32 --chunks 2 --output-format dat -o md.dat
 !fail -m $DATA/qwen35-mtp.gguf -f $DATA/ascii.txt -c 32 -b 64 --chunks 2 --nextn -o mtpb.gguf
 -m $DATA/qwen35.gguf -f $DATA/ascii.txt -c 32 -b 32 --chunks 2 --nextn -o nonextn.gguf
 !fail -m $DATA/qwen35-mtp.gguf -md $DATA/qwen35-draft.gguf -f $DATA/ascii.txt -c 32 -b 32 --chunks 2 -o x1.gguf
@@ -87,11 +84,11 @@
 !fail -m $DATA/qwen35.gguf -md $DATA/qwen35.gguf -f $DATA/ascii.txt -c 32 -b 32 --chunks 2 -o x4.gguf
 !fail -m $DATA/qwen35.gguf -md /nonexistent.gguf -f $DATA/ascii.txt -c 32 -b 32 --chunks 2 -o x5.gguf
 !fail -m $DATA/qwen35.gguf -md $DATA/qwen35-draft.gguf --spec-type ngram-simple -f $DATA/ascii.txt -c 32 -b 32 --chunks 2 -o x6.gguf
-!fail -m $PLAIN --show-statistics --in-file mtp.gguf
-!fail -m $PLAIN --show-statistics --in-file mtpo.gguf
-!fail -m $PLAIN --show-statistics --in-file md.gguf
-!fail -m $PLAIN --show-statistics --in-file md.dat
-!fail -m $PLAIN --in-file md.gguf,mtp.gguf -o mdmtp.gguf
+-m $PLAIN --show-statistics --in-file mtp.gguf
+-m $PLAIN --show-statistics --in-file mtpo.gguf
+-m $PLAIN --show-statistics --in-file md.gguf
+-m $PLAIN --show-statistics --in-file md.dat
+-m $PLAIN --in-file md.gguf,mtp.gguf -o mdmtp.gguf
 -m $PLAIN --show-statistics --in-file $DATA/gen-nextn.gguf
 -m $PLAIN --show-statistics --in-file $DATA/gen-nextn-nokey.gguf
 -m $PLAIN --show-statistics --in-file $DATA/gen-chunk64.gguf

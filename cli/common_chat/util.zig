@@ -7,7 +7,7 @@
 //! lets one exception type propagate through another layer's code; the
 //! string helpers port `string_starts_with`, `string_ends_with` and
 //! `string_replace_all` from `llama.cpp/common/common.h` and
-//! `llama.cpp/common/common.cpp` (llama.cpp v0.8.0, `8642541b2`), each
+//! `llama.cpp/common/common.cpp` (llama.cpp v0.9.0, `cd959bae9`), each
 //! cited where it is defined.
 
 const std = @import("std");

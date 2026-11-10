@@ -4,7 +4,7 @@
 //! **Not a port.** Upstream gives each architecture a class deriving from
 //! `llama_model_base` and overriding three virtuals -- `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph` (llama-model.h:986, 987, 988
-//! @cd959bae9) -- and `llama_model_mapping` (llama-model.cpp:43 @8642541b2) picks the
+//! @cd959bae9) -- and `llama_model_mapping` (llama-model.cpp:43 @cd959bae9) picks the
 //! class. Here a class is a file exporting those three functions, and
 //! `forArch` is the mapping. An architecture with no entry is one the port
 //! has not reached: loading it stops at `error.Unported`, which
@@ -38,6 +38,7 @@ pub const chameleon = @import("chameleon.zig");
 pub const chatglm = @import("chatglm.zig");
 pub const clef = @import("clef.zig");
 pub const clip = @import("clip.zig");
+pub const clover_moe = @import("clover_moe.zig");
 pub const codeshell = @import("codeshell.zig");
 pub const cogvlm = @import("cogvlm.zig");
 pub const cohere2 = @import("cohere2.zig");
@@ -108,6 +109,7 @@ pub const lfm2 = @import("lfm2.zig");
 pub const lfm2moe = @import("lfm2moe.zig");
 pub const lfm3 = @import("lfm3.zig");
 pub const lfm_base = @import("lfm_base.zig");
+pub const limite = @import("limite.zig");
 pub const llada = @import("llada.zig");
 pub const llada_moe = @import("llada_moe.zig");
 pub const llama = @import("llama.zig");
@@ -125,8 +127,10 @@ pub const minicpm3 = @import("minicpm3.zig");
 pub const minimax_01 = @import("minimax_01.zig");
 pub const minimax_m2 = @import("minimax_m2.zig");
 pub const minimax_m3 = @import("minimax_m3.zig");
+pub const metis16 = @import("metis16.zig");
 pub const mistral3 = @import("mistral3.zig");
 pub const mistral4 = @import("mistral4.zig");
+pub const mistral_large4 = @import("mistral_large4.zig");
 pub const modern_bert = @import("modern_bert.zig");
 pub const mpt = @import("mpt.zig");
 pub const muse_glimmer = @import("muse_glimmer.zig");
@@ -229,6 +233,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .chatglm => entryOf(chatglm),
         .clef => entryOf(clef),
         .clip => entryOf(clip),
+        .clover_moe => entryOf(clover_moe),
         .codeshell => entryOf(codeshell),
         .cogvlm => entryOf(cogvlm),
         .cohere2 => entryOf(cohere2),
@@ -297,6 +302,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .lfm2 => entryOf(lfm2),
         .lfm2moe => entryOf(lfm2moe),
         .lfm3 => entryOf(lfm3),
+        .limite => entryOf(limite),
         .llada => entryOf(llada),
         .llada_moe => entryOf(llada_moe),
         .llama => entryOf(llama),
@@ -314,8 +320,10 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .minimax_01 => entryOf(minimax_01),
         .minimax_m2 => entryOf(minimax_m2),
         .minimax_m3 => entryOf(minimax_m3),
+        .metis16 => entryOf(metis16),
         .mistral3 => entryOf(mistral3),
         .mistral4 => .{ .loadArchHparams = deepseek2.loadArchHparams, .loadArchTensors = deepseek2.loadArchTensors, .buildArchGraph = mistral4.buildArchGraph },
+        .mistral_large4 => entryOf(mistral_large4),
         .modern_bert => entryOf(modern_bert),
         .mpt => entryOf(mpt),
         .muse_glimmer => entryOf(muse_glimmer),

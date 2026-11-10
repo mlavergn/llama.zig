@@ -6,8 +6,8 @@
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-buffers.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-debug.cpp`, and
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.8.0
-//! (`8642541b2`). Upstream split `ggml-vulkan.cpp` into those files at
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.9.0
+//! (`cd959bae9`). Upstream split `ggml-vulkan.cpp` into those files at
 //! v0.5.0. A `vk_buffer` is a `std::shared_ptr` whose destructor frees the
 //! memory; here it is reference counted by hand, and only the holders the
 //! C++'s lifetimes depend on take a reference.
@@ -573,6 +573,12 @@ pub fn tensorBuffer(tensor: *const c.ggml_tensor) *Buffer {
     return bufCtx(tensor.buffer).dev_buffer.?;
 }
 
+/// The device buffer behind a ggml buffer of this backend: the C++'s
+/// `((ggml_backend_vk_buffer_context *) buffer->context)->dev_buffer`.
+pub fn devBuffer(buffer: c.ggml_backend_buffer_t) *Buffer {
+    return bufCtx(buffer).dev_buffer.?;
+}
+
 /// Ports `ggml_backend_vk_buffer_free_buffer` (ggml-vulkan.cpp:13125 @cd959bae9).
 fn bufferFreeBuffer(buffer: c.ggml_backend_buffer_t) callconv(.c) void {
     logMemory("ggml_backend_vk_buffer_free_buffer()", .{});
@@ -654,7 +660,7 @@ fn bufferClear(buffer: c.ggml_backend_buffer_t, value: u8) callconv(.c) void {
     m.submit.bufferMemset(bufCtx(buffer).dev_buffer.?, 0, value, buffer.*.size);
 }
 
-/// Ports `ggml_backend_vk_buffer_interface` (ggml-vulkan-buffers.cpp:828 @8642541b2).
+/// Ports `ggml_backend_vk_buffer_interface` (ggml-vulkan-buffers.cpp:828 @cd959bae9).
 const buffer_iface: c.struct_ggml_backend_buffer_i = .{
     .free_buffer = &bufferFreeBuffer,
     .get_base = &bufferGetBase,
@@ -667,6 +673,9 @@ const buffer_iface: c.struct_ggml_backend_buffer_i = .{
     .cpy_tensor = &bufferCpyTensor,
     .clear = &bufferClear,
     .reset = null,
+    .set_tensor_n = null,
+    .get_tensor_n = null,
+    .cpy_tensor_n = null,
 };
 
 fn buftCtx(buft: c.ggml_backend_buffer_type_t) *BufferTypeCtx {

@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.8.0 (`8642541b2`).
+//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.9.0 (`cd959bae9`).
 //!
 //! Scores are summed in `double`, as there -- "to make tokenization results
 //! exactly the same as in the HF tokenizer". Nothing is multiplied, so no

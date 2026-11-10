@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/mmvf.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/mmvf.cuh` at v0.8.0 (`8642541b2`), the host
+//! `llama.cpp/ggml/src/ggml-cuda/mmvf.cuh` at v0.9.0 (`cd959bae9`), the host
 //! half. The kernel, `mul_mat_vec_f`, stays CUDA.
 //!
 //! `ggml_cuda_op_mul_mat_vec_f`, the row-split entry point, is not ported:
@@ -308,7 +308,7 @@ pub fn mulMatVecF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor
     }
 }
 
-/// Ports `ggml_cuda_should_use_mmvf` (mmvf.cu:791 @8642541b2), NVIDIA arms;
+/// Ports `ggml_cuda_should_use_mmvf` (mmvf.cu:791 @cd959bae9), NVIDIA arms;
 /// every other vendor's arm ends in `ne11 <= MMVF_MAX_BATCH_SIZE`. Since
 /// v0.6.0 it takes the warp size, to ask `mmf.zig` whether MMF can take a
 /// small F16 or BF16 matrix: MMF needs whole row tiles, and where it

@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! **Not a port of a file.** Each function reproduces one Intel intrinsic
-//! `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` (v0.8.0, `8642541b2`)
+//! `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` (v0.9.0, `cd959bae9`)
 //! calls, at both widths -- `_mm256_maddubs_epi16` and
 //! `_mm512_maddubs_epi16` are `Wide(256).maddubs_epi16` and
 //! `Wide(512).maddubs_epi16` -- plus `join`, which names how the AVX-512

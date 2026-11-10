@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/solve_tri.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/solve_tri.cuh` at v0.8.0 (`8642541b2`).
+//! `llama.cpp/ggml/src/ggml-cuda/solve_tri.cuh` at v0.9.0 (`cd959bae9`).
 //! The kernels, `get_batch_pointers` and `solve_tri_f32_fast`, stay CUDA.
 //!
 //! `ggml_cuda_op_solve_tri` calls `ggml_is_contiguous` on both sources and

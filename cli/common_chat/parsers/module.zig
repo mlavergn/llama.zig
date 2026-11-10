@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/parsers/parsers.h` and
-//! `llama.cpp/common/parsers/parsers.cpp` (llama.cpp v0.8.0, `8642541b2`):
+//! `llama.cpp/common/parsers/parsers.cpp` (llama.cpp v0.9.0, `cd959bae9`):
 //! `foreach_function` and `foreach_parameter`. Each per-model file names its
 //! own source; `common_chat_try_specialized_template` in `../templates.zig`
 //! chooses between them.

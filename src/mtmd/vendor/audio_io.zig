@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Ports the memory read, seek and tell callbacks of
-//! `llama.cpp/vendor/miniaudio/miniaudio.h` (miniaudio v0.11.25) at v0.8.0
-//! (`8642541b2`): `ma_dr_wav__on_read_memory` and friends, the dr_flac and
+//! `llama.cpp/vendor/miniaudio/miniaudio.h` (miniaudio v0.11.26) at v0.9.0
+//! (`cd959bae9`): `ma_dr_wav__on_read_memory` and friends, the dr_flac and
 //! dr_mp3 equivalents, and `ma_decoder__on_read_memory` and friends.
 //!
 //! They are not interchangeable, which is why this is one type with a mode:

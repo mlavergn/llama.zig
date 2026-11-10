@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/sum.cu` at v0.8.0 (`8642541b2`),
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/sum.cu` at v0.9.0 (`cd959bae9`),
 //! the `GGML_CUDA_USE_CUB` arm. `cub::DeviceReduce::Sum` is reached through
 //! `cub_shim.cu` (PLAN.md, Decision 47).
 

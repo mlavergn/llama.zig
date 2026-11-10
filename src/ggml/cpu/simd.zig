@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/simd-mappings.h` at v0.8.0
-//! (`8642541b2`): the `GGML_SIMD` block, each arm chosen at comptime on
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/simd-mappings.h` at v0.9.0
+//! (`cd959bae9`): the `GGML_SIMD` block, each arm chosen at comptime on
 //! `builtin.cpu` as the C's `#if` chooses it. Each declaration names the macro
 //! it replaces and the line it is defined on.
 //!

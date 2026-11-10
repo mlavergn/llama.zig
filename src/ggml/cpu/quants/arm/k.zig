@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.8.0,
-//! `8642541b2`), the `__ARM_NEON` arms of the dot products at lines 1685,
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.9.0,
+//! `cd959bae9`), the `__ARM_NEON` arms of the dot products at lines 1685,
 //! 2018, 2334, 2864 and 2964. Each function names the C it replaces and the
 //! line it began at.
 //!

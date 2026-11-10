@@ -1,0 +1,3 @@
+{{ 'xyxhelloxyx'|trim(chars='xy') }}|{{ missing|trim(chars='xy') }}|{{ 'hello'.strip('h') }}|{{ ['a  ']|map('trim', 'x')|join }}|{{ arr|join(d='-', attribute='name') }}|{{ [{'name': 'a'}, {'name': 'b'}]|join(d='-', attribute='name') }}|{% filter upper %}hi{% endfilter %}
+{% for m in messages %}{% if m.content is string %}{{ m.content|trim(chars='.!? ') }}{% endif %}
+{% endfor %}

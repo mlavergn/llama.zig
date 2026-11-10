@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/qwen3-coder.cpp` (llama.cpp v0.8.0,
-//! `8642541b2`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/qwen3-coder.cpp` (llama.cpp v0.9.0,
+//! `cd959bae9`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -52,17 +52,24 @@ const Build = struct {
         const b = &p.b;
         const generation_prompt = try b.literal(gen_prefix);
 
+        // The template strips the newline before </think>, so leave it out of the reasoning
+        const think_body = try b.untilOneOf(&.{ "\n</think>", "</think>", "<tool_call>" });
+        const think_close = try b.orr(try b.orr(try b.literal("\n</think>"), try b.literal("</think>")), try b.peek(try b.literal("<tool_call>")));
+
+        const reasoning_extracted = try b.optional(try b.plus(try b.plus(try b.litPlus("<think>", try b.space()), try p.reasoning(think_body)), think_close));
+        const reasoning_skipped = try b.optional(try b.plus(try b.plus(try b.litPlus("<think>", try b.space()), think_body), think_close));
+
         var reasoning = try b.eps();
         if (self.supports_reasoning and self.extract_reasoning) {
-            var r = try b.litPlus("<think>", try b.space());
-            // The template strips the newline before </think>, so leave it out of the reasoning
-            r = try b.plus(r, try p.reasoning(try b.untilOneOf(&.{ "\n</think>", "</think>", "<tool_call>" })));
-            r = try b.plus(r, try b.orr(try b.orr(try b.literal("\n</think>"), try b.literal("</think>")), try b.peek(try b.literal("<tool_call>"))));
-            reasoning = try b.optional(r);
+            reasoning = reasoning_extracted;
         }
 
         // Response format parser
         if (self.has_response_format) {
+            // The answer must be bare JSON, so the think block is consumed even when it is not extracted
+            if (self.supports_reasoning and !self.extract_reasoning) {
+                reasoning = reasoning_skipped;
+            }
             const content = try p.content(try b.schemaJson(try b.json(), "response-format", &self.inputs.json_schema, false));
             return b.plus(generation_prompt, try b.shl(reasoning, content));
         }
@@ -183,7 +190,7 @@ const Starts = struct {
     }
 };
 
-/// Ports `common_chat_params_init_qwen3_coder` (qwen3-coder.cpp:3 @8642541b2).
+/// Ports `common_chat_params_init_qwen3_coder` (qwen3-coder.cpp:3 @cd959bae9).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

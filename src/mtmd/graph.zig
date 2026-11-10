@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/mtmd/clip-graph.h` and the `clip_graph` methods of
-//! `llama.cpp/tools/mtmd/clip.cpp` at v0.8.0 (`8642541b2`). Each declaration
+//! `llama.cpp/tools/mtmd/clip.cpp` at v0.9.0 (`cd959bae9`). Each declaration
 //! names what it ports and the line it began at.
 //!
 //! # A class hierarchy, flattened
@@ -214,7 +214,7 @@ pub const Graph = struct {
         return pos_embd;
     }
 
-    /// Ports `build_vit` (mtmd/clip.cpp:333 @8642541b2), a member of `clip_graph`: the vision
+    /// Ports `build_vit` (mtmd/clip.cpp:334 @cd959bae9), a member of `clip_graph`: the vision
     /// transformer most models use.
     pub fn buildVit(
         self: *Graph,
@@ -282,13 +282,13 @@ pub const Graph = struct {
 
                     if (layer.q_norm != null) {
                         impl.ggmlAssert(ne(layer.q_norm, 0) == ne(Qcur, 0), "clip.cpp", 408, "layer.q_norm->ne[0] == Qcur->ne[0]");
-                        Qcur = self.buildNorm(Qcur, layer.q_norm, null, norm_t, self.eps, il);
+                        Qcur = self.buildNorm(Qcur, layer.q_norm, layer.q_norm_b, norm_t, self.eps, il);
                         self.cb(Qcur, "Qcur_norm", il);
                     }
 
                     if (layer.k_norm != null) {
                         impl.ggmlAssert(ne(layer.k_norm, 0) == ne(Kcur, 0), "clip.cpp", 414, "layer.k_norm->ne[0] == Kcur->ne[0]");
-                        Kcur = self.buildNorm(Kcur, layer.k_norm, null, norm_t, self.eps, il);
+                        Kcur = self.buildNorm(Kcur, layer.k_norm, layer.k_norm_b, norm_t, self.eps, il);
                         self.cb(Kcur, "Kcur_norm", il);
                     }
                 } else {
@@ -307,11 +307,11 @@ pub const Graph = struct {
 
                     if (!norm_per_head) {
                         if (layer.q_norm != null) {
-                            Qcur = self.buildNorm(Qcur, layer.q_norm, null, norm_t, self.eps, il);
+                            Qcur = self.buildNorm(Qcur, layer.q_norm, layer.q_norm_b, norm_t, self.eps, il);
                             self.cb(Qcur, "Qcur_norm", il);
                         }
                         if (layer.k_norm != null) {
-                            Kcur = self.buildNorm(Kcur, layer.k_norm, null, norm_t, self.eps, il);
+                            Kcur = self.buildNorm(Kcur, layer.k_norm, layer.k_norm_b, norm_t, self.eps, il);
                             self.cb(Kcur, "Kcur_norm", il);
                         }
                     }
@@ -322,11 +322,11 @@ pub const Graph = struct {
 
                     if (norm_per_head) {
                         if (layer.q_norm != null) {
-                            Qcur = self.buildNorm(Qcur, layer.q_norm, null, norm_t, self.eps, il);
+                            Qcur = self.buildNorm(Qcur, layer.q_norm, layer.q_norm_b, norm_t, self.eps, il);
                             self.cb(Qcur, "Qcur_norm_per_head", il);
                         }
                         if (layer.k_norm != null) {
-                            Kcur = self.buildNorm(Kcur, layer.k_norm, null, norm_t, self.eps, il);
+                            Kcur = self.buildNorm(Kcur, layer.k_norm, layer.k_norm_b, norm_t, self.eps, il);
                             self.cb(Kcur, "Kcur_norm_per_head", il);
                         }
                     }

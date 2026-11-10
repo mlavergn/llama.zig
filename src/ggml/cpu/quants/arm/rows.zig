@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.8.0,
-//! `8642541b2`), the row functions at lines 41, 85 and 134. Each function names
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c` (v0.9.0,
+//! `cd959bae9`), the row functions at lines 41, 85 and 134. Each function names
 //! the C it replaces and the line it began at.
 //!
 //! # These are live, and they feed everything

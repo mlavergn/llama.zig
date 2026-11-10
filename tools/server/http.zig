@@ -6,7 +6,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/server/server-http.cpp` and
-//! `llama.cpp/tools/server/server-http.h` (v0.8.0, `8642541b2`), with
+//! `llama.cpp/tools/server/server-http.h` (v0.9.0, `cd959bae9`), with
 //! `common_http_parse_url` and `common_http_format_host` from
 //! `llama.cpp/common/http.h`, and `format_error_response` and
 //! `safe_json_to_str` from `llama.cpp/tools/server/server-common.cpp`, which
@@ -625,7 +625,7 @@ pub const Context = struct {
     }
 
     /// Ports the destructor (`~server_http_context`, server-http.cpp:42
-    /// @8642541b2): stops and joins, in case an exit path forgot to, then
+    /// @cd959bae9): stops and joins, in case an exit path forgot to, then
     /// frees the servers.
     pub fn deinit(self: *Context) void {
         self.stop();

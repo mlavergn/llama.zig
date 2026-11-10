@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.8.0 (`8642541b2`): the
+//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.9.0 (`cd959bae9`): the
 //! tokenizer and its pattern table, the session, and the two sessions that
 //! extend it, `hybriddna` and `whitespace`.
 //!
@@ -48,7 +48,7 @@ const Patterns = struct {
 };
 
 /// Ports `llm_tokenizer_bpe`'s constructor's `switch` (llama-vocab.cpp:284
-/// @8642541b2), generated.
+/// @cd959bae9), generated.
 fn patterns(pre: PreType) Patterns {
     return switch (pre) {
         .flint => .{ .exprs = &.{
@@ -125,6 +125,9 @@ fn patterns(pre: PreType) Patterns {
         }, .byte_encode = true },
         .tekken, .nemotron_3_5_embd => .{ .exprs = &.{
             "[^\\r\\n\\p{L}\\p{N}]?((?=[\\p{L}\\p{M}])([^a-z]))*((?=[\\p{L}\\p{M}])([^A-Z]))+|[^\\r\\n\\p{L}\\p{N}]?((?=[\\p{L}\\p{M}])([^a-z]))+((?=[\\p{L}\\p{M}])([^A-Z]))*|\\p{N}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n/]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+",
+        }, .byte_encode = true },
+        .tekken_num3 => .{ .exprs = &.{
+            "[^\\r\\n\\p{L}\\p{N}]?((?=[\\p{L}\\p{M}])([^a-z]))*((?=[\\p{L}\\p{M}])([^A-Z]))+|[^\\r\\n\\p{L}\\p{N}]?((?=[\\p{L}\\p{M}])([^a-z]))+((?=[\\p{L}\\p{M}])([^A-Z]))*|\\p{N}{1,3}(?=(?:\\p{N}{3})*(?!\\p{N}))|\\p{N}{1,2}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n/]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+",
         }, .byte_encode = true },
         .chameleon => .{ .exprs = &.{
             "<sentinel:[0-9]+>",
@@ -208,7 +211,7 @@ fn patterns(pre: PreType) Patterns {
     };
 }
 
-/// Ports `llm_tokenizer_bpe` (llama-vocab.cpp:281 @8642541b2).
+/// Ports `llm_tokenizer_bpe` (llama-vocab.cpp:281 @cd959bae9).
 pub const Tokenizer = struct {
     regex_exprs: []const []const u8,
     /// GPT-2 byte encoding; false for SPM-style BPE over raw UTF-8.

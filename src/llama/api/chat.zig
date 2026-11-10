@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-chat.cpp` (v0.8.0, `8642541b2`):
+//! Ported from `llama.cpp/src/llama-chat.cpp` (v0.9.0, `cd959bae9`):
 //! `llama_chat_builtin_templates`, its one unmangled export. The template
 //! table is `chat.zig`'s. `llama_chat_apply_template` is defined in
 //! `llama.cpp/src/llama.cpp`, so it is in `api/llama.zig`.

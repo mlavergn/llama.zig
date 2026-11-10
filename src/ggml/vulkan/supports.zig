@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.8.0
-//! (`8642541b2`): `ggml_backend_vk_device_supports_op`. The device vtable
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.9.0
+//! (`cd959bae9`): `ggml_backend_vk_device_supports_op`. The device vtable
 //! answers this AND-ed with `ops.ported`, so the scheduler sends nothing to
 //! host code the port does not have yet.
 
@@ -38,7 +38,7 @@ const quant_types = [_]c.ggml_type{
 /// The types a CPY converts f32 to and from.
 const cpy_types = [_]c.ggml_type{ c.GGML_TYPE_Q1_0, c.GGML_TYPE_Q2_0, c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q4_1, c.GGML_TYPE_Q5_0, c.GGML_TYPE_Q5_1, c.GGML_TYPE_Q8_0, c.GGML_TYPE_IQ4_NL };
 
-/// Ports `ggml_backend_vk_device_supports_op` (ggml-vulkan.cpp:15505 @8642541b2).
+/// Ports `ggml_backend_vk_device_supports_op` (ggml-vulkan.cpp:15533 @cd959bae9).
 pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
     const device = m.device.getDevice(dev_idx);
 
@@ -51,11 +51,12 @@ pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
             return true;
         }
     }.f;
-    // reject any tensors larger than the max buffer size
+    // non-compute ops are never executed here; their size is bounded by the buffer allocation limit
+    const non_compute = impl.opIsEmpty(op.op);
     for (0..c.GGML_MAX_SRC) |i| {
-        if (op.src[i]) |src| if (!sizeOk(device, uses_bda, c.ggml_nbytes(src))) return false;
+        if (op.src[i]) |src| if (!non_compute and !sizeOk(device, uses_bda, c.ggml_nbytes(src))) return false;
     }
-    if (!sizeOk(device, uses_bda, c.ggml_nbytes(op))) return false;
+    if (!non_compute and !sizeOk(device, uses_bda, c.ggml_nbytes(op))) return false;
 
     switch (op.op) {
         c.GGML_OP_UNARY => switch (c.ggml_get_unary_op(op)) {
@@ -116,6 +117,8 @@ pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
             return true;
         },
         c.GGML_OP_FLASH_ATTN_EXT => {
+            // K/V row lists (ggml_flash_attn_ext_rows) are not supported
+            if (op.src[5] != null) return false;
             const HSK = m.ops.u32Of(s(op, 1).ne[0]);
             const HSV = m.ops.u32Of(s(op, 2).ne[0]);
             if (HSK % 8 != 0 or HSV % 8 != 0) return false;

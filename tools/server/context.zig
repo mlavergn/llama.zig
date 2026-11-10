@@ -4,8 +4,8 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/server/server-context.cpp` and
-//! `llama.cpp/tools/server/server-context.h` (llama.cpp v0.8.0,
-//! `8642541b2`) up to the public `server_context` and `get_meta`:
+//! `llama.cpp/tools/server/server-context.h` (llama.cpp v0.9.0,
+//! `cd959bae9`) up to the public `server_context` and `get_meta`:
 //! `server_output_limits`, `server_sample_and_accept_synth`, `slot_state`,
 //! `server_batch`, `server_slot`, `process_mtmd_chunk`,
 //! `server_context_impl` and `server_context`. The routes and the response
@@ -1365,7 +1365,7 @@ pub const StateCallback = struct {
     }
 };
 
-/// Ports `server_context_meta` (server-context.h:16 @8642541b2): what the
+/// Ports `server_context_meta` (server-context.h:16 @cd959bae9): what the
 /// routes read without touching the context, valid during sleep.
 pub const Meta = struct {
     build_info: []const u8,
@@ -1381,6 +1381,7 @@ pub const Meta = struct {
     has_cap_chat: bool,
     has_cap_tts: bool,
     has_audio_stream: bool, // realtime transcription, see mtmd_support_audio_stream()
+    tts_voices: []const []const u8, // predefined voices of the audio generation model
     json_ui_settings: *const Value,
     slot_n_ctx: c_int,
     pooling_type: c.enum_llama_pooling_type,
@@ -1426,7 +1427,7 @@ const LoadProgress = struct {
     t_last_load_progress_ms: i64 = 0,
 };
 
-/// Ports `server_context_impl` (server-context.cpp:1016 @8642541b2).
+/// Ports `server_context_impl` (server-context.cpp:1016 @cd959bae9).
 pub const Impl = struct {
     // only use these pointers outside of this class:
     //  - when not in sleeping state
@@ -5671,7 +5672,7 @@ pub const Impl = struct {
         return true;
     }
 
-    /// The `accept_special_token` lambda of `post_decode` (server-context.cpp:4797 @8642541b2).
+    /// The `accept_special_token` lambda of `post_decode` (server-context.cpp:4797 @cd959bae9).
     fn acceptSpecialToken(self: *const Impl, slot: *const Slot, token: Token) bool {
         if (self.params_base.special) return true;
         for (slot.taskRef().params.sampling.preserved_tokens.items) |t| {
@@ -5681,7 +5682,7 @@ pub const Impl = struct {
     }
 
     /// The sampling step of `post_decode` (server-context.cpp:4797
-    /// @8642541b2), one slot.
+    /// @cd959bae9), one slot.
     fn sampleSlot(self: *Impl, slot: *Slot, off: i32, n_batch_tokens: i32, a: Allocator) !void {
         const batch_view = &self.batch.view;
         // optionally send prompt processing progress
@@ -5781,7 +5782,9 @@ pub const Impl = struct {
     }
 
     /// The speculative step of `post_decode` (server-context.cpp:4797
-    /// @8642541b2), one slot: the main model samples and accepts.
+    /// @cd959bae9), one slot: the main model samples and accepts. A
+    /// recurrent target restores its checkpoint when the draft is longer
+    /// than its snapshots cover, however much of it was accepted.
     fn acceptDraft(self: *Impl, slot: *Slot, a: Allocator) !void {
         const func = "operator()";
         if (slot.state != .generating or !slot.canSpeculate() or
@@ -5830,8 +5833,9 @@ pub const Impl = struct {
 
             const n_rollback: u32 = @intCast(slot.spec_draft.items.len + 1 - accepted.len);
 
+            // the recurrent snapshots are only guaranteed for batches of up to n_rs_seq + 1 tokens, so a longer draft uses its checkpoint
             const use_ckpt_tgt = self.ctx_tgt_seq_rm_type == .full or
-                (self.ctx_tgt_seq_rm_type == .rs and n_rollback > c.llama_n_rs_seq(self.ctx_tgt));
+                (self.ctx_tgt_seq_rm_type == .rs and n_draft > c.llama_n_rs_seq(self.ctx_tgt));
 
             // check for partial draft acceptance
             if (n_rollback > 0) {
@@ -5849,10 +5853,10 @@ pub const Impl = struct {
 
                     slt(.dbg, func, slot, "restoring speculative checkpoint (pos_min = %d, pos_max = %d, size = %zu)\n", .{ ckpt.pos_min, ckpt.pos_max, ckpt.size() });
 
-                    ggmlAssert(ckpt.loadTgt(slot.ctx_tgt, slot.id, c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY), 4980, "ckpt.load_tgt(slot.ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY)");
+                    ggmlAssert(ckpt.loadTgt(slot.ctx_tgt, slot.id, c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY), 4981, "ckpt.load_tgt(slot.ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY)");
 
                     if (slot.ctx_dft != null) {
-                        ggmlAssert(ckpt.loadDft(slot.ctx_dft, slot.id, c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY), 4983, "ckpt.load_dft(slot.ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY)");
+                        ggmlAssert(ckpt.loadDft(slot.ctx_dft, slot.id, c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY), 4984, "ckpt.load_dft(slot.ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY)");
                     }
 
                     slot.mem.seqRm(slot.id, ckpt.pos_max + 1, -1);
@@ -5938,7 +5942,7 @@ pub const Impl = struct {
         slt(.dbg, func, slot, "accepted %d/%d draft tokens, new n_tokens = %d\n", .{ @as(c_int, @intCast(n_accepted)), @as(c_int, @intCast(n_draft)), slot.prompt.nTokens() });
     }
 
-    /// Ports `server_context_impl`'s `post_decode` (server-context.cpp:4797 @8642541b2).
+    /// Ports `server_context_impl`'s `post_decode` (server-context.cpp:4797 @cd959bae9).
     fn postDecode(self: *Impl, n_batch_tokens: i32, off: i32) !void {
         var tmp = std.heap.ArenaAllocator.init(gpa);
         defer tmp.deinit();
@@ -6160,8 +6164,8 @@ pub const ServerContext = struct {
         self.impl.callback_state = callback;
     }
 
-    /// Ports `server_context`'s `get_meta` (server-context.cpp:5219
-    /// @8642541b2): read-only metadata, after `loadModel`.
+    /// Ports `server_context`'s `get_meta` (server-context.cpp:5220
+    /// @cd959bae9): read-only metadata, after `loadModel`.
     ///
     /// Return: strings owned by `a`, or by the context for its lifetime.
     pub fn getMeta(self: *const ServerContext, a: Allocator) !Meta {
@@ -6172,6 +6176,14 @@ pub const ServerContext = struct {
         const eos_token_str: []const u8 = if (eos_id != token_null) try tc.common.tokenToPiece(a, impl.vocab, eos_id, true) else "";
 
         const ftype_name = std.mem.span(c.llama_ftype_name(c.llama_model_ftype(impl.model_tgt)));
+
+        var tts_voices: std.ArrayList([]const u8) = .empty;
+        if (impl.mctx) |mctx| {
+            var i: i32 = 0;
+            while (i < c.mtmd_gen_audio_get_info(mctx).n_voices) : (i += 1) {
+                try tts_voices.append(a, try a.dupe(u8, std.mem.span(c.mtmd_gen_audio_voice_name(mctx, i))));
+            }
+        }
 
         const tmpls = &impl.tmpls.?;
         return .{
@@ -6188,6 +6200,7 @@ pub const ServerContext = struct {
             .has_cap_chat = impl.hasCapChat(),
             .has_cap_tts = impl.hasCapTts(),
             .has_audio_stream = impl.mtmd_cap.audio_stream,
+            .tts_voices = tts_voices.items,
             .json_ui_settings = &impl.json_ui_settings,
             .slot_n_ctx = impl.nCtxSlot(),
             .pooling_type = c.llama_pooling_type(impl.ctx_tgt),

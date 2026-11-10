@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.8.0
-//! (`8642541b2`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.9.0
+//! (`cd959bae9`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # The codebook is a table-lookup instruction
@@ -76,7 +76,9 @@ inline fn colScales(comptime fmt: Fmt, bl: anytype) f32x4 {
 }
 
 /// Ports `ggml_gemv_iq4_nl_4x4_q8_0` and `ggml_gemv_mxfp4_4x4_q8_0`
-/// (arch/arm/repack.cpp:449, 519 @8642541b2).
+/// (arch/arm/repack.cpp:449, 519 @cd959bae9).
+/// The `__ARM_FEATURE_SVE` arm v0.9.0 added to the mxfp4 one is not ported:
+/// no Apple core has SVE.
 fn gemv(comptime fmt: Fmt, comptime BlockX: type, n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void {
     _ = bs;
     _ = nr;

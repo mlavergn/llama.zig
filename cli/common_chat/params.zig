@@ -5,7 +5,7 @@
 //!
 //! Ports `common_chat_params` from `llama.cpp/common/chat.h` and
 //! `common_grammar_trigger` with its type from `llama.cpp/common/common.h`
-//! (llama.cpp v0.8.0, `8642541b2`). Each declaration names what it ports and
+//! (llama.cpp v0.9.0, `cd959bae9`). Each declaration names what it ports and
 //! the line it began at.
 //!
 //! # Ownership

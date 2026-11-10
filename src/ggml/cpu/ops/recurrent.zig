@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.8.0 (`8642541b2`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.9.0 (`cd959bae9`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! `solve_tri` sits between `gla` and `gated_delta_net` in the C; it belongs to
@@ -806,7 +806,7 @@ pub export fn ggml_compute_forward_dsv4_hc_post(params: *const ComputeParams, ds
     }
 }
 
-/// Ports `ggml_compute_forward_rwkv_wkv7_f32` (ops.cpp:11712 @8642541b2), the
+/// Ports `ggml_compute_forward_rwkv_wkv7_f32` (ops.cpp:11748 @cd959bae9), the
 /// `GGML_SIMD` arm without SVE or RVV.
 ///
 /// Two reductions over `j` per `(t, h, ii)`: `sa = a · state_prev[ii]` and

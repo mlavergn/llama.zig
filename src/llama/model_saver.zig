@@ -11,7 +11,7 @@
 //!   nests, for the order `add_tensors_from_model` walks them in
 //! - `llama.cpp/src/llama-vocab.cpp` -- `llama_vocab::get_bpe_merges`
 //!
-//! All at v0.8.0 (`8642541b2`). `llama_model_save_to_file`, which lives in
+//! All at v0.9.0 (`cd959bae9`). `llama_model_save_to_file`, which lives in
 //! `llama.cpp/src/llama.cpp`, is `api/quant.zig`'s.
 //!
 //! # Scope
@@ -69,36 +69,45 @@ fn oom() noreturn {
 }
 
 /// `add_tensors_from_model`'s model-level tensors, in its order
-/// (llama-model-saver.cpp:475 @8642541b2), after `tok_embd`.
+/// (llama-model-saver.cpp:505 @cd959bae9), after `tok_embd`.
 const model_fields = [_][]const u8{
-    "type_embd",      "pos_embd",        "tok_norm",        "tok_norm_b",   "output_norm",   "output_norm_b",
-    "output",         "output_b",        "output_norm_enc", "output_s",     "output_in_s",   "output_res_score",
-    "nextn_proj_pre", "nextn_proj_post", "cls",             "cls_b",        "cls_out",       "cls_out_b",
-    "cls_norm",       "hrm_z_l_init",    "hc_head_fn",      "hc_head_base", "hc_head_scale", "per_layer_tok_embd",
-    "hc_head_norm",   "hc_head_down",    "hc_head_up",
+    "type_embd",             "pos_embd",              "tok_norm",                "tok_norm_b",
+    "output_norm",           "output_norm_b",         "output",                  "output_b",
+    "output_norm_enc",       "output_s",              "output_in_s",             "output_res_score",
+    "nextn_proj_pre",        "nextn_proj_post",       "cls",                     "cls_b",
+    "cls_out",               "cls_out_b",             "cls_norm",                "hrm_z_l_init",
+    "stream_embd",           "depth_mem_state_write", "depth_mem_meta_write",    "depth_mem_entry_bias",
+    "depth_mem_query",       "depth_mem_query_b",     "depth_mem_key",           "depth_mem_key_b",
+    "depth_mem_value",       "depth_mem_value_b",     "depth_mem_out",           "depth_mem_out_b",
+    "depth_mem_route_state", "depth_mem_route_retr",  "depth_mem_route_diff",    "depth_mem_route_hist",
+    "depth_mem_route_b",     "depth_mem_stream_gate", "depth_mem_stream_gate_b", "cont_hidden_state",
+    "cont_hidden_retr",      "cont_hidden_diff",      "cont_hidden_route",       "cont_hidden_b",
+    "cont_output",           "cont_output_b",         "hc_head_fn",              "hc_head_base",
+    "hc_head_scale",         "per_layer_tok_embd",    "per_layer_model_proj",    "per_layer_proj_norm",
+    "value_embd",            "hc_head_norm",          "hc_head_down",            "hc_head_up",
 };
 
-/// `llama_model`'s tensors (llama-model.h:716 @8642541b2) that
+/// `llama_model`'s tensors (llama-model.h:746 @cd959bae9) that
 /// `add_tensors_from_model` does not write.
 const model_unsaved = [_][]const u8{
-    "conv1d",                   "conv1d_b",                   "altup_proj",                  "altup_unembd_proj",
-    "per_layer_model_proj",     "per_layer_proj_norm",        "fc",                          "fc_s",
-    "fc_in_s",                  "d2t",                        "dspark_markov_w1",            "dspark_markov_w2",
-    "dspark_markov_w2_s",       "dspark_conf_proj",           "dspark_conf_proj_b",          "dflash_selector_prev",
-    "dflash_selector_next",     "dflash_selector_hidden",     "dense_2_out_layers",          "dense_2_out_layers_b",
-    "dense_3_out_layers",       "cls_norm_b",
+    "conv1d",                      "conv1d_b",                     "altup_proj",               "altup_unembd_proj",
+    "fc",                          "fc_s",                         "fc_in_s",                  "d2t",
+    "dspark_markov_w1",            "dspark_markov_w2",             "dspark_markov_w2_s",       "dspark_conf_proj",
+    "dspark_conf_proj_b",          "dflash_selector_prev",         "dflash_selector_next",     "dflash_selector_hidden",
+    "dense_2_out_layers",          "dense_2_out_layers_b",         "dense_3_out_layers",       "cls_norm_b",
     // v0.7.0: DFlash's LiliCorr heads (models/dflash.cpp), not written either.
-                    "lilicorr_token_proj",         "lilicorr_token_proj_b",
-    "lilicorr_token_proj_s",    "lilicorr_pass_hidden_proj",  "lilicorr_pass_hidden_proj_b", "lilicorr_pass_hidden_proj_s",
-    "lilicorr_feature_norm",    "lilicorr_feature_norm_b",    "lilicorr_feature_mlp_1",      "lilicorr_feature_mlp_1_b",
-    "lilicorr_feature_mlp_3",   "lilicorr_feature_mlp_3_b",   "lilicorr_slot_embedding",     "lilicorr_rank_embedding",
-    "lilicorr_attention_bias",  "lilicorr_context_proj",      "lilicorr_context_proj_b",     "lilicorr_context_proj_s",
-    "lilicorr_output_norm",     "lilicorr_anchor_norm",       "lilicorr_factor_input_proj",  "lilicorr_factor_input_proj_b",
-    "lilicorr_out_head",        "lilicorr_out_head_b",        "lilicorr_in_head",            "lilicorr_in_head_b",
-    "lilicorr_anchor_out_head", "lilicorr_anchor_out_head_b",
+    "lilicorr_token_proj",         "lilicorr_token_proj_b",        "lilicorr_token_proj_s",    "lilicorr_pass_hidden_proj",
+    "lilicorr_pass_hidden_proj_b", "lilicorr_pass_hidden_proj_s",  "lilicorr_feature_norm",    "lilicorr_feature_norm_b",
+    "lilicorr_feature_mlp_1",      "lilicorr_feature_mlp_1_b",     "lilicorr_feature_mlp_3",   "lilicorr_feature_mlp_3_b",
+    "lilicorr_slot_embedding",     "lilicorr_rank_embedding",      "lilicorr_attention_bias",  "lilicorr_context_proj",
+    "lilicorr_context_proj_b",     "lilicorr_context_proj_s",      "lilicorr_output_norm",     "lilicorr_anchor_norm",
+    "lilicorr_factor_input_proj",  "lilicorr_factor_input_proj_b", "lilicorr_out_head",        "lilicorr_out_head_b",
+    "lilicorr_in_head",            "lilicorr_in_head_b",           "lilicorr_anchor_out_head", "lilicorr_anchor_out_head_b",
+    // v0.9.0: DSpark's joint projection and slot masks (models/dflash.cpp), not written either.
+    "dspark_joint_proj",           "dspark_joint_proj_b",          "dspark_mask_embd",
 };
 
-/// Mirrors `llama_layer` (llama-model.h:264 @8642541b2) read as an array of
+/// Mirrors `llama_layer` (llama-model.h:265 @cd959bae9) read as an array of
 /// tensor pointers, with its nested `llama_layer_posnet` (llama-model.h:172
 /// @cd959bae9), `llama_layer_convnext` (llama-model.h:207 @cd959bae9),
 /// `llama_layer_shortconv` (llama-model.h:223 @cd959bae9),
@@ -106,95 +115,101 @@ const model_unsaved = [_][]const u8{
 /// `llama_layer_switch_lora` (llama-model.h:247 @cd959bae9) in place.
 pub const layer_fields = [_][]const u8{
     // BEGIN layer_fields
-    "attn_norm",                   "attn_norm_b",              "attn_norm_2",             "attn_norm_2_b",
-    "attn_q_norm",                 "attn_q_norm_b",            "attn_k_norm",             "attn_k_norm_b",
-    "attn_out_norm",               "attn_out_norm_b",          "attn_q_a_norm",           "attn_kv_a_norm",
-    "attn_sub_norm",               "attn_post_norm",           "ffn_sub_norm",            "attn_norm_cross",
-    "attn_norm_enc",               "ssm_norm",                 "ssm_dt_norm",             "ssm_b_norm",
-    "ssm_c_norm",                  "wq",                       "wk",                      "wv",
-    "wo",                          "wqkv",                     "wg",                      "wq_a",
-    "wq_b",                        "wkv_a_mqa",                "wkv_b",                   "wkv",
-    "wk_b",                        "wv_b",                     "wqkv_b",                  "wo_a",
-    "wo_b",                        "wq_cross",                 "wk_cross",                "wv_cross",
-    "wo_cross",                    "wq_enc",                   "wk_enc",                  "wv_enc",
-    "wo_enc",                      "wqkv_gate",                "wqkv_gate_b",             "attn_v_gate",
-    "attn_v_gate_b",               "attn_v_exps",              "attn_rel_b",              "attn_rel_b_enc",
-    "attn_rel_b_cross",            "ffn_norm",                 "ffn_norm_b",              "ffn_post_norm",
-    "ffn_post_norm_1",             "ffn_post_norm_2",          "ffn_pre_norm_2",          "ffn_norm_ada_down",
-    "ffn_norm_ada_up",             "layer_out_norm",           "layer_out_norm_b",        "ffn_norm_exps",
-    "ffn_norm_enc",                "ffn_gate",                 "ffn_down",                "ffn_up",
-    "ffn_gate_enc",                "ffn_down_enc",             "ffn_up_enc",              "ffn_gate_inp",
-    "ffn_gate_inp_s",              "ffn_gate_exps",            "ffn_down_exps",           "ffn_up_exps",
-    "ffn_gate_up_exps",            "ffn_gate_inp_b",           "ffn_gate_exps_b",         "ffn_down_exps_b",
-    "ffn_up_exps_b",               "ffn_gate_up_exps_b",       "ffn_gate_exps_s",         "ffn_down_exps_s",
-    "ffn_up_exps_s",               "ffn_latent_down",          "ffn_latent_up",           "ffn_pre_exp_norm",
-    "ffn_post_exp_norm",           "attn_resid_alpha",         "attn_resid_beta",         "ffn_resid_alpha",
-    "ffn_resid_beta",              "ffn_gate_inp_shexp",       "ffn_gate_shexp",          "ffn_down_shexp",
-    "ffn_up_shexp",                "ffn_gate_chexps",          "ffn_down_chexps",         "ffn_up_chexps",
-    "ffn_gate_b",                  "ffn_down_b",               "ffn_up_b",                "ffn_act",
-    "ffn_exp_probs_b",             "ffn_exp_probs_b_vl",       "ffn_gate_tid2eid",        "dflash_attn_conv_base",
-    "dflash_attn_conv_proj",       "dflash_ffn_conv_base",     "dflash_ffn_conv_proj",    "lilicorr_attn_norm",
-    "lilicorr_mlp_norm",           "lilicorr_attn_in_proj",    "lilicorr_attn_in_proj_b", "lilicorr_attn_out_proj",
-    "lilicorr_attn_out_proj_b",    "lilicorr_attn_out_proj_s", "lilicorr_mlp_0",          "lilicorr_mlp_0_b",
-    "lilicorr_mlp_0_s",            "lilicorr_mlp_2",           "lilicorr_mlp_2_b",        "lilicorr_mlp_2_s",
-    "ssm_in",                      "ssm_x",                    "ssm_dt",                  "ssm_out",
-    "ssm_conv1d",                  "ssm_a",                    "ssm_d",                   "ssm_conv1d_b",
-    "ssm_dt_b",                    "ssm_beta_alpha",           "ssm_alpha",               "time_mix_w1",
-    "time_mix_w2",                 "time_mix_lerp_x",          "time_mix_lerp_w",         "time_mix_lerp_k",
-    "time_mix_lerp_v",             "time_mix_lerp_r",          "time_mix_lerp_g",         "time_mix_lerp_fused",
-    "time_mix_first",              "time_mix_decay",           "time_mix_decay_w1",       "time_mix_decay_w2",
-    "time_mix_key",                "time_mix_key_b",           "time_mix_value",          "time_mix_value_b",
-    "time_mix_receptance",         "time_mix_receptance_b",    "time_mix_gate",           "time_mix_w0",
-    "time_mix_a0",                 "time_mix_a1",              "time_mix_a2",             "time_mix_v0",
-    "time_mix_v1",                 "time_mix_v2",              "time_mix_g1",             "time_mix_g2",
-    "time_mix_k_k",                "time_mix_k_a",             "time_mix_r_k",            "time_mix_ln",
-    "time_mix_ln_b",               "time_mix_output",          "channel_mix_lerp_k",      "channel_mix_lerp_r",
-    "channel_mix_key",             "channel_mix_receptance",   "channel_mix_value",       "rope_long",
-    "rope_short",                  "rope_freqs",               "wq_s",                    "wk_s",
-    "wv_s",                        "wo_s",                     "wqkv_s",                  "wqkv_gate_s",
-    "ffn_gate_s",                  "ffn_up_s",                 "ffn_down_s",              "ffn_gate_shexp_s",
-    "ffn_up_shexp_s",              "ffn_down_shexp_s",         "ssm_in_s",                "ssm_out_s",
-    "ssm_alpha_s",                 "ssm_beta_s",               "wq_in_s",                 "wk_in_s",
-    "wv_in_s",                     "wo_in_s",                  "wqkv_in_s",               "wqkv_gate_in_s",
-    "ffn_gate_in_s",               "ffn_up_in_s",              "ffn_down_in_s",           "ffn_gate_exps_in_s",
-    "ffn_down_exps_in_s",          "ffn_up_exps_in_s",         "ffn_gate_shexp_in_s",     "ffn_up_shexp_in_s",
-    "ffn_down_shexp_in_s",         "ssm_in_in_s",              "ssm_out_in_s",            "ssm_alpha_in_s",
-    "ssm_beta_in_s",               "per_layer_inp_gate",       "per_layer_proj",          "per_layer_post_norm",
-    "altup_correct_coef",          "altup_correct_scale",      "altup_predict_coef",      "altup_router",
-    "altup_router_norm",           "laurel_l",                 "laurel_r",                "laurel_post_norm",
-    "attn_sinks",                  "attn_kv_norm",             "hc_attn_fn",              "hc_attn_base",
-    "hc_attn_scale",               "hc_ffn_fn",                "hc_ffn_base",             "hc_ffn_scale",
-    "attn_comp_wkv",               "attn_comp_wgate",          "attn_comp_ape",           "attn_comp_norm",
-    "indexer_comp_wkv",            "indexer_comp_wgate",       "indexer_comp_ape",        "indexer_comp_norm",
-    "visexp_attn_wqkv",            "visexp_attn_wo",           "visexp_ffn_gate",         "visexp_ffn_down",
-    "visexp_ffn_up",               "ffn_act_alpha_n",          "ffn_act_alpha_p",         "ffn_act_beta",
-    "ffn_act_eps",                 "ssm_q_conv",               "ssm_k_conv",              "ssm_v_conv",
-    "ssm_f_a",                     "ssm_f_b",                  "ssm_beta",                "ssm_g_a",
-    "ssm_g_b",                     "ssm_o_norm",               "ssm_g",                   "attn_res_score",
-    "ffn_res_score",               "ffn_routed_down",          "ffn_routed_up",           "ffn_routed_norm",
-    "indexer_k_norm",              "indexer_k_norm_b",         "indexer_proj",            "indexer_attn_k",
-    "indexer_attn_q_b",            "indexer_kpool_gate",       "indexer_kpool_ape",       "engram_kv",
-    "engram_gate",                 "index_q_proj",             "index_k_proj",            "index_q_norm",
-    "index_k_norm",                "hc_attn_norm",             "hc_attn_down",            "hc_attn_up",
-    "hc_attn_inject",              "hc_ffn_norm",              "hc_ffn_down",             "hc_ffn_up",
-    "hc_ffn_inject",               "hc_attn_down_inject",      "hc_ffn_down_inject",      "wqkv_z",
-    "ssm_beta_alpha_cat",          "ple_key",                  "ple_value",               "ple_norm_key",
-    "ple_norm_query",              "ple_norm_conv",            "ple_conv1d",              "out_scale",
-    "posnet.norm1",                "posnet.norm1_b",           "posnet.conv1",            "posnet.conv1_b",
-    "posnet.norm2",                "posnet.norm2_b",           "posnet.conv2",            "posnet.conv2_b",
-    "posnet.attn_norm",            "posnet.attn_norm_b",       "posnet.attn_q",           "posnet.attn_q_b",
-    "posnet.attn_k",               "posnet.attn_k_b",          "posnet.attn_v",           "posnet.attn_v_b",
-    "posnet.attn_o",               "posnet.attn_o_b",          "posnet.norm",             "posnet.norm_b",
-    "convnext.dw",                 "convnext.dw_b",            "convnext.norm",           "convnext.norm_b",
-    "convnext.pw1",                "convnext.pw1_b",           "convnext.pw2",            "convnext.pw2_b",
-    "convnext.gamma",              "shortconv.in_proj",        "shortconv.conv",          "shortconv.out_proj",
-    "nextn.eh_proj",               "nextn.eh_proj_s",          "nextn.eh_proj_in_s",      "nextn.embed_tokens",
-    "nextn.enorm",                 "nextn.hnorm",              "nextn.shared_head_head",  "nextn.shared_head_head_s",
-    "nextn.shared_head_head_in_s", "nextn.shared_head_norm",   "nextn.hc_head_norm",      "nextn.hc_head_down",
-    "nextn.hc_head_up",            "switch_lora.a_q",          "switch_lora.b_q",         "switch_lora.a_k",
-    "switch_lora.b_k",             "switch_lora.a_v",          "switch_lora.b_v",         "switch_lora.a_o",
-    "switch_lora.b_o",             "switch_lora.a_gate",       "switch_lora.b_gate",      "switch_lora.a_up",
-    "switch_lora.b_up",            "switch_lora.a_down",       "switch_lora.b_down",
+    "attn_norm",                "attn_norm_b",              "attn_norm_2",              "attn_norm_2_b",
+    "attn_q_norm",              "attn_q_norm_b",            "attn_k_norm",              "attn_k_norm_b",
+    "attn_out_norm",            "attn_out_norm_b",          "attn_q_a_norm",            "attn_kv_a_norm",
+    "attn_sub_norm",            "attn_post_norm",           "ffn_sub_norm",             "attn_norm_cross",
+    "attn_norm_enc",            "ssm_norm",                 "ssm_dt_norm",              "ssm_b_norm",
+    "ssm_c_norm",               "wq",                       "wk",                       "wv",
+    "wo",                       "wqkv",                     "wg",                       "wq_a",
+    "wq_b",                     "wkv_a_mqa",                "wkv_b",                    "wkv",
+    "wk_b",                     "wv_b",                     "wqkv_b",                   "wo_a",
+    "wo_b",                     "wq_cross",                 "wk_cross",                 "wv_cross",
+    "wo_cross",                 "wq_enc",                   "wk_enc",                   "wv_enc",
+    "wo_enc",                   "wqkv_gate",                "wqkv_gate_b",              "attn_v_gate",
+    "attn_v_gate_b",            "attn_v_exps",              "attn_rel_b",               "attn_rel_b_enc",
+    "attn_rel_b_cross",         "ffn_norm",                 "ffn_norm_b",               "ffn_post_norm",
+    "ffn_post_norm_1",          "ffn_post_norm_2",          "ffn_pre_norm_2",           "ffn_norm_ada_down",
+    "ffn_norm_ada_up",          "layer_out_norm",           "layer_out_norm_b",         "ffn_norm_exps",
+    "ffn_norm_enc",             "ffn_gate",                 "ffn_down",                 "ffn_up",
+    "ffn_gate_enc",             "ffn_down_enc",             "ffn_up_enc",               "ffn_gate_inp",
+    "ffn_gate_inp_s",           "ffn_gate_exps",            "ffn_down_exps",            "ffn_up_exps",
+    "ffn_gate_up_exps",         "ffn_gate_inp_b",           "ffn_gate_exps_b",          "ffn_down_exps_b",
+    "ffn_up_exps_b",            "ffn_gate_up_exps_b",       "ffn_gate_exps_s",          "ffn_down_exps_s",
+    "ffn_up_exps_s",            "ffn_latent_down",          "ffn_latent_up",            "ffn_pre_exp_norm",
+    "ffn_post_exp_norm",        "attn_resid_alpha",         "attn_resid_beta",          "ffn_resid_alpha",
+    "ffn_resid_beta",           "ffn_gate_inp_shexp",       "ffn_gate_shexp",           "ffn_down_shexp",
+    "ffn_up_shexp",             "ffn_gate_chexps",          "ffn_down_chexps",          "ffn_up_chexps",
+    "ffn_gate_b",               "ffn_down_b",               "ffn_up_b",                 "ffn_act",
+    "ffn_exp_probs_b",          "ffn_exp_probs_b_vl",       "ffn_gate_tid2eid",         "dflash_attn_conv_base",
+    "dflash_attn_conv_proj",    "dflash_ffn_conv_base",     "dflash_ffn_conv_proj",     "lilicorr_attn_norm",
+    "lilicorr_mlp_norm",        "lilicorr_attn_in_proj",    "lilicorr_attn_in_proj_b",  "lilicorr_attn_out_proj",
+    "lilicorr_attn_out_proj_b", "lilicorr_attn_out_proj_s", "lilicorr_mlp_0",           "lilicorr_mlp_0_b",
+    "lilicorr_mlp_0_s",         "lilicorr_mlp_2",           "lilicorr_mlp_2_b",         "lilicorr_mlp_2_s",
+    "ssm_in",                   "ssm_x",                    "ssm_dt",                   "ssm_out",
+    "ssm_conv1d",               "ssm_a",                    "ssm_d",                    "ssm_conv1d_b",
+    "ssm_dt_b",                 "ssm_beta_alpha",           "ssm_alpha",                "time_mix_w1",
+    "time_mix_w2",              "time_mix_lerp_x",          "time_mix_lerp_w",          "time_mix_lerp_k",
+    "time_mix_lerp_v",          "time_mix_lerp_r",          "time_mix_lerp_g",          "time_mix_lerp_fused",
+    "time_mix_first",           "time_mix_decay",           "time_mix_decay_w1",        "time_mix_decay_w2",
+    "time_mix_key",             "time_mix_key_b",           "time_mix_value",           "time_mix_value_b",
+    "time_mix_receptance",      "time_mix_receptance_b",    "time_mix_gate",            "time_mix_w0",
+    "time_mix_a0",              "time_mix_a1",              "time_mix_a2",              "time_mix_v0",
+    "time_mix_v1",              "time_mix_v2",              "time_mix_g1",              "time_mix_g2",
+    "time_mix_k_k",             "time_mix_k_a",             "time_mix_r_k",             "time_mix_ln",
+    "time_mix_ln_b",            "time_mix_output",          "channel_mix_lerp_k",       "channel_mix_lerp_r",
+    "channel_mix_key",          "channel_mix_receptance",   "channel_mix_value",        "rope_long",
+    "rope_short",               "rope_freqs",               "wq_s",                     "wk_s",
+    "wv_s",                     "wo_s",                     "wqkv_s",                   "wqkv_gate_s",
+    "ffn_gate_s",               "ffn_up_s",                 "ffn_down_s",               "ffn_gate_shexp_s",
+    "ffn_up_shexp_s",           "ffn_down_shexp_s",         "ssm_in_s",                 "ssm_out_s",
+    "ssm_alpha_s",              "ssm_beta_s",               "wq_in_s",                  "wk_in_s",
+    "wv_in_s",                  "wo_in_s",                  "wqkv_in_s",                "wqkv_gate_in_s",
+    "ffn_gate_in_s",            "ffn_up_in_s",              "ffn_down_in_s",            "ffn_gate_exps_in_s",
+    "ffn_down_exps_in_s",       "ffn_up_exps_in_s",         "ffn_gate_shexp_in_s",      "ffn_up_shexp_in_s",
+    "ffn_down_shexp_in_s",      "ssm_in_in_s",              "ssm_out_in_s",             "ssm_alpha_in_s",
+    "ssm_beta_in_s",            "per_layer_inp_gate",       "per_layer_proj",           "per_layer_post_norm",
+    "altup_correct_coef",       "altup_correct_scale",      "altup_predict_coef",       "altup_router",
+    "altup_router_norm",        "laurel_l",                 "laurel_r",                 "laurel_post_norm",
+    "attn_sinks",               "attn_kv_norm",             "hc_attn_fn",               "hc_attn_base",
+    "hc_attn_scale",            "hc_ffn_fn",                "hc_ffn_base",              "hc_ffn_scale",
+    "attn_comp_wkv",            "attn_comp_wgate",          "attn_comp_ape",            "attn_comp_norm",
+    "indexer_comp_wkv",         "indexer_comp_wgate",       "indexer_comp_ape",         "indexer_comp_norm",
+    "visexp_attn_wqkv",         "visexp_attn_wo",           "visexp_ffn_gate",          "visexp_ffn_down",
+    "visexp_ffn_up",            "ffn_act_alpha_n",          "ffn_act_alpha_p",          "ffn_act_beta",
+    "ffn_act_eps",              "ssm_q_conv",               "ssm_k_conv",               "ssm_v_conv",
+    "ssm_f_a",                  "ssm_f_b",                  "ssm_beta",                 "ssm_g_a",
+    "ssm_g_b",                  "ssm_o_norm",               "ssm_g",                    "attn_res_score",
+    "ffn_res_score",            "ffn_routed_down",          "ffn_routed_up",            "ffn_routed_norm",
+    "indexer_k_norm",           "indexer_k_norm_b",         "indexer_proj",             "indexer_attn_k",
+    "indexer_attn_q_b",         "indexer_q_norm",           "indexer_q_norm_b",         "attn_ssmax_s",
+    "attn_ssmax_b",             "indexer_ssmax_s",          "indexer_ssmax_b",          "indexer_kpool_gate",
+    "indexer_kpool_ape",        "engram_kv",                "engram_gate",              "index_q_proj",
+    "index_k_proj",             "index_q_norm",             "index_k_norm",             "hc_attn_norm",
+    "hc_attn_down",             "hc_attn_up",               "hc_attn_inject",           "hc_ffn_norm",
+    "hc_ffn_down",              "hc_ffn_up",                "hc_ffn_inject",            "hc_attn_down_inject",
+    "hc_ffn_down_inject",       "wqkv_z",                   "ssm_beta_alpha_cat",       "ple_key",
+    "ple_value",                "ple_norm_key",             "ple_norm_query",           "ple_norm_conv",
+    "ple_conv1d",               "out_scale",                "hc_attn_mix",              "hc_attn_read",
+    "hc_attn_write",            "hc_ffn_mix",               "hc_ffn_read",              "hc_ffn_write",
+    "attn_pass_lora_down",      "attn_pass_lora_up",        "attn_pass_gate",           "ffn_exp_embd",
+    "attn_ve_gate",             "attn_xsa_alpha",           "attn_resid_scale",         "ffn_resid_scale",
+    "mudd_down",                "mudd_up",                  "mudd_up_b",                "posnet.norm1",
+    "posnet.norm1_b",           "posnet.conv1",             "posnet.conv1_b",           "posnet.norm2",
+    "posnet.norm2_b",           "posnet.conv2",             "posnet.conv2_b",           "posnet.attn_norm",
+    "posnet.attn_norm_b",       "posnet.attn_q",            "posnet.attn_q_b",          "posnet.attn_k",
+    "posnet.attn_k_b",          "posnet.attn_v",            "posnet.attn_v_b",          "posnet.attn_o",
+    "posnet.attn_o_b",          "posnet.norm",              "posnet.norm_b",            "convnext.dw",
+    "convnext.dw_b",            "convnext.norm",            "convnext.norm_b",          "convnext.pw1",
+    "convnext.pw1_b",           "convnext.pw2",             "convnext.pw2_b",           "convnext.gamma",
+    "shortconv.in_proj",        "shortconv.conv",           "shortconv.out_proj",       "nextn.eh_proj",
+    "nextn.eh_proj_s",          "nextn.eh_proj_in_s",       "nextn.embed_tokens",       "nextn.enorm",
+    "nextn.hnorm",              "nextn.shared_head_head",   "nextn.shared_head_head_s", "nextn.shared_head_head_in_s",
+    "nextn.shared_head_norm",   "nextn.hc_head_norm",       "nextn.hc_head_down",       "nextn.hc_head_up",
+    "switch_lora.a_q",          "switch_lora.b_q",          "switch_lora.a_k",          "switch_lora.b_k",
+    "switch_lora.a_v",          "switch_lora.b_v",          "switch_lora.a_o",          "switch_lora.b_o",
+    "switch_lora.a_gate",       "switch_lora.b_gate",       "switch_lora.a_up",         "switch_lora.b_up",
+    "switch_lora.a_down",       "switch_lora.b_down",
     // END layer_fields
 };
 
@@ -389,7 +404,7 @@ pub const Saver = struct {
         c.gguf_add_tensor(self.gguf_ctx, t);
     }
 
-    /// Ports `add_kv_from_model` (llama-model-saver.cpp:124 @8642541b2). The
+    /// Ports `add_kv_from_model` (llama-model-saver.cpp:124 @cd959bae9). The
     /// precision policy's names are written in `prec_src1`'s order, which
     /// in the C++ is a pointer-keyed `std::unordered_map`'s and so not
     /// reproducible from run to run; here it is the order the loader found
@@ -459,6 +474,7 @@ pub const Saver = struct {
         self.addScalar(.context_length, hp.n_ctx_train);
         self.addScalar(.embedding_length, hp.n_embd);
         if (hp.n_embd_out_impl > 0) self.addScalar(.embedding_length_out, hp.n_embd_out_impl);
+        if (hp.n_embd_per_layer > 0) self.addScalar(.embedding_length_per_layer, hp.n_embd_per_layer);
         self.addScalar(.block_count, hp.n_layer_all);
         self.addScalar(.leading_dense_block_count, hp.n_layer_dense_lead);
         self.addArr(.feed_forward_length, u32, &hp.n_ff_arr, true);
@@ -501,6 +517,18 @@ pub const Saver = struct {
         self.addScalar(.hrm_h_cycles, hp.n_hrm_h_cycles);
         self.addScalar(.hrm_l_cycles, hp.n_hrm_l_cycles);
         self.addScalar(.hrm_prefix_lm, hp.hrm_prefix_lm);
+        self.addScalar(.metis_pass_count, hp.metis_n_pass);
+        self.addScalar(.metis_memory_length, hp.metis_n_mem);
+        self.addScalar(.metis_route_length, hp.metis_n_route);
+        self.addScalar(.metis_continuation_logit_limit, hp.metis_cont_limit);
+        if (hp.final_logit_sigmoid_capping[0] != 0.0) {
+            self.addArr(.final_logit_sigmoid_capping, f32, &hp.final_logit_sigmoid_capping, false);
+        }
+        self.addScalar(.mudd_feed_forward_length, hp.n_mudd_ff);
+        self.addScalar(.mudd_tap_count, hp.n_mudd_taps);
+        if (hp.n_mudd_taps > 0) {
+            self.addArr(.mudd_tap_indices, i32, hp.mudd_tap_idx[0 .. hp.nLayer() *% hp.n_mudd_taps], false);
+        }
         self.addScalar(.token_shift_count, hp.token_shift_count);
         self.addScalar(.interleave_moe_layer_step, hp.n_moe_layer_step);
 
@@ -532,6 +560,7 @@ pub const Saver = struct {
             self.addArr(.attention_sliding_window_pattern, u32, hp.is_swa_impl[0..hp.n_layer_all], false);
         }
         self.addScalar(.attention_scale, hp.f_attention_scale);
+        self.addScalar(.attention_xsa_eps, hp.f_xsa_eps);
         self.addScalar(.attention_output_scale, hp.f_attn_out_scale);
         self.addScalar(.attention_value_scale, hp.f_attn_value_scale);
         self.addScalar(.attention_temperature_length, hp.attn_temp_length);
@@ -551,9 +580,21 @@ pub const Saver = struct {
         self.addScalar(.attention_indexer_kpool_select_tail, hp.indexer_kpool_select_tail);
         self.addScalar(.attention_indexer_local_blocks, hp.indexer_local_blocks);
         self.addArr(.attention_indexer_types, u32, &hp.is_indexer_full_impl, true);
+        if (hp.n_layer_kv_from_start >= 0) {
+            self.addScalar(.attention_shared_kv_layers, hp.n_layer_all -% @as(u32, @bitCast(hp.n_layer_kv_from_start)));
+        } else {
+            var il: u32 = 0;
+            while (il < hp.nLayer()) : (il += 1) {
+                if (hp.kvSource(il) != il) {
+                    self.addArr(.attention_kv_source_map, u32, &hp.kv_source_impl, true);
+                    break;
+                }
+            }
+        }
         self.addArr(.attention_recurrent_layers, u32, &hp.is_recr_impl, true);
         self.addScalar(.attention_output_group_count, hp.dsv4_o_group_count);
         self.addScalar(.attention_output_lora_rank, hp.dsv4_o_lora_rank);
+        self.addScalar(.attention_pass_lora_rank, hp.metis_pass_lora_rank);
         self.addScalar(.attention_compress_rope_freq_base, hp.dsv4_compress_rope_base);
         if (model.arch == .deepseek4 or hp.dsv4_hc_mult > 0) {
             // The loader wants one ratio per layer, nextn layers included.
@@ -644,6 +685,7 @@ pub const Saver = struct {
         self.addScalar(.ssm_time_step_rank, hp.ssm_dt_rank);
         self.addScalar(.ssm_group_count, hp.ssm_n_group);
         self.addScalar(.ssm_dt_b_c_rms, hp.ssm_dt_b_c_rms);
+        self.addScalar(.ssm_norm_eps, hp.ssm_norm_eps);
 
         self.addScalar(.kda_head_dim, hp.n_embd_head_kda);
         self.addScalar(.kda_safe_gate, hp.kda_safe_gate);
@@ -715,7 +757,7 @@ pub const Saver = struct {
         self.addScalar(.dense_3_feat_out, hp.dense_3_feat_out);
     }
 
-    /// Ports `add_tensors_from_model` (llama-model-saver.cpp:475 @8642541b2).
+    /// Ports `add_tensors_from_model` (llama-model-saver.cpp:505 @cd959bae9).
     /// Looped architectures alias physical tensors across cache slots, so
     /// each layer tensor is saved once, by pointer.
     ///

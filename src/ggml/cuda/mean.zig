@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/mean.cu` at v0.8.0
-//! (`8642541b2`). The kernels, `reduce_rows_f32<true>` and
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/mean.cu` at v0.9.0
+//! (`cd959bae9`). The kernels, `reduce_rows_f32<true>` and
 //! `reduce_rows_f32_strided<true>` from `reduce_rows.cuh`, stay CUDA.
 //!
 //! A single long row (`nrows == 1` and more than 65536 columns, or more than

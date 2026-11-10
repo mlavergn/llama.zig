@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.8.0, `8642541b2`),
-//! `ggml_get_n_tasks` at line 2220 and `ggml_graph_plan` at line 2781. Each
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.9.0, `cd959bae9`),
+//! `ggml_get_n_tasks` at line 2267 and `ggml_graph_plan` at line 2830. Each
 //! function names the C it replaces and the line it began at.
 //!
 //! # The work buffer is one buffer, sized for the worst node
@@ -164,7 +164,7 @@ pub fn getNTasks(node: *Tensor, n_threads: c_int) c_int {
     return n_tasks;
 }
 
-/// Ports `ggml_graph_plan` (ggml-cpu.c:2821 @8642541b2).
+/// Ports `ggml_graph_plan` (ggml-cpu.c:2830 @cd959bae9).
 ///
 /// Parameters:
 /// - `cgraph`: the graph to plan.
@@ -258,7 +258,7 @@ fn nodeWorkSize(node: *const Tensor, n_tasks: i64) usize {
 
         c.GGML_OP_ADD, c.GGML_OP_ADD_ID, c.GGML_OP_ADD1 => {
             const src0 = impl.one(Tensor, node.src[0]);
-            if (types.ggml_is_quantized(src0.type)) {
+            if (types.ggml_is_quantized(src0.type) or src0.type == c.GGML_TYPE_F8_E4M3) {
                 return f32_size * @as(usize, @intCast(src0.ne[0] * n_tasks));
             }
             return 0;
@@ -322,7 +322,9 @@ fn nodeWorkSize(node: *const Tensor, n_tasks: i64) usize {
 
         c.GGML_OP_OUT_PROD => {
             const src0 = impl.one(Tensor, node.src[0]);
-            if (types.ggml_is_quantized(src0.type) or src0.type == c.GGML_TYPE_F16) {
+            if (types.ggml_is_quantized(src0.type) or src0.type == c.GGML_TYPE_F8_E4M3 or
+                src0.type == c.GGML_TYPE_F16)
+            {
                 return f32_size * @as(usize, @intCast(src0.ne[0] * n_tasks));
             }
             return 0;

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.8.0 (`8642541b2`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.9.0 (`cd959bae9`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # Two different state updates, on purpose
@@ -131,7 +131,7 @@ pub export fn ggml_compute_forward_ssm_conv(params: *const ComputeParams, dst: *
 // -----------------------------------------------------------------------------
 // ssm_scan
 
-/// Ports `ggml_compute_forward_ssm_scan_f32` (ops.cpp:9977 @8642541b2). The
+/// Ports `ggml_compute_forward_ssm_scan_f32` (ops.cpp:10013 @cd959bae9). The
 /// Mamba-2 arm is the `GGML_SIMD` NEON one; the Mamba-1 arm is the
 /// non-SVE scalar loop.
 fn ssmScanF32(params: *const ComputeParams, dst: *Tensor) void {

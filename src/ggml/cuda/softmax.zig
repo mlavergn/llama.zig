@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/softmax.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/softmax.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/softmax.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels -- `soft_max_f32`, `soft_max_f32_parallelize_cols`,
 //! `soft_max_back_f32` -- stay CUDA.
 //!

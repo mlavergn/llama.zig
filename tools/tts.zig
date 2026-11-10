@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/tts/tts.cpp` at v0.8.0 (`8642541b2`). Each
+//! Ported from `llama.cpp/tools/tts/tts.cpp` at v0.9.0 (`cd959bae9`). Each
 //! declaration names the C++ it replaces and the line it began at.
 //!
 //! The C++ holds the mtmd context, the speaker bitmap and the generation
@@ -84,6 +84,11 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     // always enable embd, so that we can pass hidden states to the audio generation helper
     params.embedding = true;
 
+    // for chatterbox multilingual: its cfg pairs slot i with sequence n_parallel + i in a unified kv cache
+    // TODO: this applies to every model, find a better way for a pipeline to request extra sequences
+    params.n_parallel *= 2;
+    params.kv_unified = true;
+
     c.llama_backend_init();
     c.llama_numa_init(params.numa);
 
@@ -131,6 +136,31 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
         speaker_bitmap = wrapper.bitmap;
     }
 
+    // a model with predefined voices needs one, the first by default; other models name the voice in the prompt
+    if (c.mtmd_gen_audio_get_info(mctx).n_voices > 0 and (params.tts_voice.len != 0 or speaker_bitmap == null)) {
+        if (speaker_bitmap != null) {
+            log.err("--tts-voice and --tts-speaker-file cannot be used together\n", .{});
+            return 1;
+        }
+        if (params.tts_voice.len == 0) {
+            params.tts_voice = std.mem.span(c.mtmd_gen_audio_voice_name(mctx, 0));
+            log.wrn("no --tts-voice given, speaking with \"%s\"\n", .{c.mtmd_gen_audio_voice_name(mctx, 0)});
+        }
+        const voice_name = try a.dupeSentinel(u8, params.tts_voice, 0);
+        speaker_bitmap = c.mtmd_gen_audio_get_voice(mctx, voice_name.ptr);
+        if (speaker_bitmap == null) {
+            log.err("unknown voice \"%s\", the model has:", .{voice_name.ptr});
+            var i: i32 = 0;
+            while (true) : (i += 1) {
+                const name = c.mtmd_gen_audio_voice_name(mctx, i);
+                if (name == null) break;
+                log.out(" %s", .{name});
+            }
+            log.out("\n", .{});
+            return 1;
+        }
+    }
+
     // a model with a "tts" chat template (e.g. LFM3-Audio) speaks the prompt rendered from it
     var info = try chat.templates.modelInfo(a, @ptrCast(model.?));
     var tmpls = try chat.templates.init(a, &info, "", "", "");
@@ -141,14 +171,12 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     defer c.mtmd_helper_gen_audio_free(gen);
     const prompt = try a.dupeSentinel(u8, prompt_str, 0);
     const lang = try a.dupeSentinel(u8, params.tts_lang, 0);
-    const voice = try a.dupeSentinel(u8, params.tts_voice, 0);
     var inp = c.mtmd_helper_gen_audio_inp_default();
     inp.seq_id = 0;
     inp.prompt = prompt.ptr;
     inp.prompt_len = prompt.len;
     inp.speaker_ref = speaker_bitmap;
     inp.lang = lang.ptr;
-    inp.voice = voice.ptr;
     inp.top_k = params.sampling.top_k;
     inp.top_p = params.sampling.top_p;
     inp.seed = params.sampling.seed;
@@ -240,7 +268,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     return 0;
 }
 
-/// Ports `main` (tts.cpp:46 @8642541b2).
+/// Ports `main` (tts.cpp:46 @cd959bae9).
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);

@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/ssm-scan.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/ssm-scan.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/ssm-scan.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels -- `ssm_scan_f32`, `ssm_scan_f32_group` and the four
 //! `ssm_ssd_*` kernels -- stay CUDA. The SSD arm is the C's
 //! `!defined(GGML_USE_HIP)` one (v0.6.0 dropped its MUSA exclusion), which

@@ -10,8 +10,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/glm-dsa.cpp` at v0.8.0
-//! (`8642541b2`): `GLM_5_2_DEFAULT_INDEXER_TYPES`, `llama_model_glm_dsa`'s
+//! Ported from `llama.cpp/src/models/glm-dsa.cpp` at v0.9.0
+//! (`cd959bae9`): `GLM_5_2_DEFAULT_INDEXER_TYPES`, `llama_model_glm_dsa`'s
 //! `load_arch_hparams`, `load_arch_tensors` and `build_arch_graph`, and its
 //! `graph` and `graph_mtp`.
 
@@ -235,7 +235,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports the constructor of `llama_model_glm_dsa`'s `graph`
-/// (models/glm-dsa.cpp:186 @8642541b2): DeepSeek V3.2's, with the indexer
+/// (models/glm-dsa.cpp:186 @cd959bae9): DeepSeek V3.2's, with the indexer
 /// roped in the normal layout and the shared indexer layers reusing the
 /// previous full layer's top-k.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {

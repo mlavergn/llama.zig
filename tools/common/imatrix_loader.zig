@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/imatrix-loader.cpp` and the struct and keys of
-//! `common/imatrix-loader.h` (v0.8.0, `8642541b2`). Each declaration names
+//! `common/imatrix-loader.h` (v0.9.0, `cd959bae9`). Each declaration names
 //! what it ports and the line it began at.
 //!
 //! # `std::map` order

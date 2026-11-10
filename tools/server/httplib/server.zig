@@ -6,7 +6,7 @@
 //!
 //! Ports `Server` from `llama.cpp/vendor/cpp-httplib/httplib.cpp` and its
 //! declaration in `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib
-//! 0.62.0, vendored at v0.8.0, `8642541b2`), as far as
+//! 0.64.0, vendored at v0.9.0, `cd959bae9`), as far as
 //! `llama.cpp/tools/server/server-http.cpp` reaches it. Each declaration
 //! names what it ports and the line it began at.
 //!
@@ -200,7 +200,9 @@ pub const WebSocketHandler = struct {
 /// subprotocol selector.
 const WebSocketRoute = struct { matcher: Matcher, handler: WebSocketHandler };
 
-/// Ports `Server` (httplib.h:2238 @8642541b2).
+/// Ports `Server` (httplib.h:2250 @cd959bae9). `compress_` (0.64.0's
+/// `set_compress`) is not a member: no content coding is compiled in, so
+/// `encoding_type` answers `None` whatever it says.
 pub const Server = struct {
     allocator: std.mem.Allocator,
     new_task_queue: ?TaskQueueFactory = null,
@@ -601,11 +603,13 @@ pub const Server = struct {
         return true;
     }
 
-    /// Ports `process_request` (httplib.cpp:10152 @8642541b2), a member of
+    /// Ports `process_request` (httplib.cpp:10186 @cd959bae9), a member of
     /// `Server`: one request off `strm` and its response back. `100
     /// Continue` is owed here and sent only when the body is read
     /// (`read_content_core`). A response that says `Connection: close`
-    /// ends the connection, whichever path wrote it.
+    /// ends the connection, whichever path wrote it. A body the handlers
+    /// left unread is drained up to `CPPHTTPLIB_UNREAD_PAYLOAD_MAX_LENGTH`
+    /// within the read timeout, or the connection closes.
     ///
     /// Return: whether the connection may carry another request; an error
     /// is an exception escaping outside `routing`.
@@ -619,7 +623,8 @@ pub const Server = struct {
 
         // The read timeout bounds the request line and headers as a whole, so a
         // client sending them a byte at a time cannot hold the worker any longer.
-        strm.setMaxTimeout(self.read_timeout_sec * 1000 + @divTrunc(self.read_timeout_usec, 1000));
+        const read_timeout_msec = self.read_timeout_sec * 1000 + @divTrunc(self.read_timeout_usec, 1000);
+        strm.setMaxTimeout(read_timeout_msec);
 
         if (!try line_reader.getline()) return false;
 
@@ -665,6 +670,15 @@ pub const Server = struct {
             res.status = StatusCode.bad_request_400;
             return self.writeResponse(strm, close_connection, &req, &res);
         }
+        // RFC 9112 6.1: a lone "chunked" is the only transfer coding implemented
+        if (req.hasHeader("Transfer-Encoding") and
+            (req.headers.count("Transfer-Encoding") != 1 or
+                !detail.caseIgnoreEqual(req.getHeaderValue("Transfer-Encoding"), "chunked")))
+        {
+            connection_closed.* = true;
+            res.status = StatusCode.not_implemented_501;
+            return self.writeResponse(strm, close_connection, &req, &res);
+        }
         // RFC 9112 §6.1: a Transfer-Encoding alongside a Content-Length, or in an
         // HTTP/1.0 request, is honoured, but the connection closes after the
         // response.
@@ -701,7 +715,8 @@ pub const Server = struct {
                 return self.writeResponse(strm, close_connection, &req, &res);
             }
         }
-        if (req.hasHeader("Range")) {
+        // RFC 9110 14.2: range handling is defined only for GET (and so for HEAD)
+        if ((std.mem.eql(u8, req.method, "GET") or std.mem.eql(u8, req.method, "HEAD")) and req.hasHeader("Range")) {
             const range_header_value = req.getHeaderValue("Range");
             if (!try detail.parseRangeHeader(a, range_header_value, &req.ranges)) {
                 connection_closed.* = true;
@@ -726,42 +741,48 @@ pub const Server = struct {
         // An upgrade request has been through pre-routing before it reaches routing()
         const is_upgrade = detail.isWebsocketUpgrade(req.method, &req.headers);
         if (is_upgrade) {
-            if (self.pre_routing_handler) |h| {
-                if (try h.func(h.ctx, &req, &res) == .handled) {
-                    if (res.status == -1) res.status = StatusCode.ok_200;
-                    return self.writeResponseCore(strm, close_after_response, &req, &res, true);
+            // A response given here leaves the body unread, and it would be parsed as
+            // the next request.
+            const close_if_answered = close_after_response or message.hasFramedBody(&req);
+
+            // no pre-request handler is set, and no route has a subprotocol selector
+            var ws_route: ?*const WebSocketRoute = null;
+            const answered = self.answerBeforeUpgrade(&req, &res, &ws_route) catch |err| answered: {
+                if (!try self.handleException(&req, &res, err)) {
+                    return self.writeResponse(strm, close_if_answered, &req, &res);
                 }
+                break :answered true;
+            };
+            if (answered) {
+                if (res.status == -1) res.status = StatusCode.ok_200;
+                return self.writeResponseCore(strm, close_if_answered, &req, &res, true);
             }
-            // Find matching WebSocket handler
-            for (self.websocket_handlers.items) |*entry| {
-                if (try entry.matcher.match(&req)) {
-                    req.matched_route = entry.matcher.pattern();
 
-                    // Compute accept key
-                    var accept_buf: [28]u8 = undefined;
-                    const accept_key = ws_mod.websocketAcceptKey(req.getHeaderValue("Sec-WebSocket-Key"), &accept_buf);
+            if (ws_route) |entry| {
+                // Compute accept key
+                var accept_buf: [28]u8 = undefined;
+                const accept_key = ws_mod.websocketAcceptKey(req.getHeaderValue("Sec-WebSocket-Key"), &accept_buf);
 
-                    // Send 101 Switching Protocols
-                    const handshake_response = try std.mem.concat(a, u8, &.{
-                        "HTTP/1.1 101 Switching Protocols\r\n",
-                        "Upgrade: websocket\r\n",
-                        "Connection: Upgrade\r\n",
-                        "Sec-WebSocket-Accept: ",
-                        accept_key,
-                        "\r\n\r\n",
-                    });
-                    if (strm.write(handshake_response) < 0) return false;
+                // Send 101 Switching Protocols
+                const handshake_response = try std.mem.concat(a, u8, &.{
+                    "HTTP/1.1 101 Switching Protocols\r\n",
+                    "Upgrade: websocket\r\n",
+                    "Connection: Upgrade\r\n",
+                    "Sec-WebSocket-Accept: ",
+                    accept_key,
+                    "\r\n\r\n",
+                });
+                if (strm.write(handshake_response) < 0) return false;
 
-                    connection_closed.* = true;
+                connection_closed.* = true;
 
-                    // Use WebSocket-specific read timeout instead of HTTP timeout
-                    strm.setReadTimeout(ws_mod.server_read_timeout_second, 0);
-                    var ws: ws_mod.WebSocket = undefined;
-                    ws.init(self.allocator, strm, true);
-                    defer ws.deinit();
-                    entry.handler.func(entry.handler.ctx, &req, &ws);
-                    return true;
-                }
+                // Use WebSocket-specific read timeout instead of HTTP timeout
+                strm.setReadTimeout(ws_mod.server_read_timeout_second, 0);
+                var ws: ws_mod.WebSocket = undefined;
+                ws.init(self.allocator, strm, true);
+                defer ws.deinit();
+                entry.handler.func(entry.handler.ctx, &req, &ws);
+                return true;
             }
             // No WebSocket route: route it as a plain HTTP request
         }
@@ -770,12 +791,7 @@ pub const Server = struct {
         if (self.routing(&req, &res, strm, is_upgrade)) |r| {
             routed = r;
         } else |err| {
-            if (self.exception_handler) |h| {
-                try h.func(h.ctx, &req, &res, err);
-                routed = true;
-            } else {
-                res.status = StatusCode.internal_server_error_500;
-            }
+            routed = try self.handleException(&req, &res, err);
         }
 
         var ret = false;
@@ -798,19 +814,55 @@ pub const Server = struct {
         }
 
         // A body read in part cannot be drained from where it stopped, so the
-        // connection closes.
+        // connection closes, as it does when the body is longer than the drain
+        // limit or does not arrive within the read timeout.
         if (!req.body_consumed and message.hasFramedBody(&req) and
             !detail.hasHeaderToken(&res.headers, "Connection", "close"))
         {
+            strm.setMaxTimeout(read_timeout_msec);
             const Discard = struct {
                 pub fn receive(_: @This(), _: []const u8) !bool {
                     return true;
                 }
             };
             var dummy_status: c_int = 0;
-            if (req.body_read_started or !try message.readContent(strm, &req, self.payload_max_length, &dummy_status, Discard{}, false)) connection_closed.* = true;
+            if (req.body_read_started or !try message.readContent(strm, &req, detail.unread_payload_max_length, &dummy_status, Discard{}, false)) connection_closed.* = true;
         }
         return ret;
+    }
+
+    /// The `answer_before_upgrade` lambda of `process_request`
+    /// (httplib.cpp:10186 @cd959bae9): the pre-routing handler, then the
+    /// first WebSocket route that matches. No pre-request handler is set and
+    /// no route has a subprotocol selector, so neither runs.
+    ///
+    /// Return: whether a handler answered the request itself; otherwise
+    /// `ws_route` is the route to upgrade on, or null for none. An error is
+    /// an exception thrown before the upgrade.
+    fn answerBeforeUpgrade(self: *Server, req: *Request, res: *Response, ws_route: *?*const WebSocketRoute) !bool {
+        if (self.pre_routing_handler) |h| {
+            if (try h.func(h.ctx, req, res) == .handled) return true;
+        }
+        for (self.websocket_handlers.items) |*entry| {
+            if (!try entry.matcher.match(req)) continue;
+            req.matched_route = entry.matcher.pattern();
+            ws_route.* = entry;
+            return false;
+        }
+        return false;
+    }
+
+    /// Ports `handle_exception` (httplib.cpp:9827 @cd959bae9), a member of
+    /// `Server`, called where the C catches: the response is a 500 unless
+    /// the exception handler sets another status.
+    ///
+    /// Return: whether the exception handler ran; an error is one it
+    /// raised, which escapes as the C's would.
+    fn handleException(self: *Server, req: *Request, res: *Response, err: anyerror) !bool {
+        res.status = StatusCode.internal_server_error_500;
+        const h = self.exception_handler orelse return false;
+        try h.func(h.ctx, req, res, err);
+        return true;
     }
 
     /// Ports `routing` (httplib.cpp:9835 @cd959bae9), a member of `Server`:
@@ -912,11 +964,10 @@ pub const Server = struct {
         return false;
     }
 
-    /// Ports `read_content_core` (httplib.cpp:9390 @8642541b2), a member of
+    /// Ports `read_content_core` (httplib.cpp:9448 @cd959bae9), a member of
     /// `Server`: a body framed by chunks or `Content-Length`, after the owed
-    /// `100 Continue`; with neither, none -- unless the connection will not
-    /// persist and bytes are already waiting, which are then read to the end
-    /// of the stream so the payload limit still applies.
+    /// `100 Continue`; with neither, none (RFC 9112 6), whether or not the
+    /// connection persists.
     fn readContentCore(self: *Server, strm: *SocketStream, req: *Request, res: *Response, sink: anytype) !bool {
         var parser: message.FormDataParser = .{ .a = req.a };
         const multipart = try req.isMultipartFormData();
@@ -938,14 +989,8 @@ pub const Server = struct {
         };
         const out: Out = .{ .multipart = multipart, .parser = &parser, .sink = sink };
 
-        if (!req.hasHeader("Content-Length") and !detail.isChunkedTransferEncoding(&req.headers)) {
-            if (!message.isConnectionPersistent(req) and self.payload_max_length > 0 and self.payload_max_length < std.math.maxInt(usize)) {
-                var has_data = strm.isReadable();
-                if (!has_data) has_data = socket.selectRead(strm.sock, 0, 0) > 0;
-                if (has_data) return message.readContent(strm, req, self.payload_max_length, &res.status, out, true);
-            }
-            return true;
-        }
+        // RFC 9112 §6: no Transfer-Encoding and no Content-Length means no body.
+        if (!req.hasHeader("Content-Length") and !detail.isChunkedTransferEncoding(&req.headers)) return true;
 
         // A second read would start where the first one stopped, or in the next
         // request.
@@ -977,9 +1022,9 @@ pub const Server = struct {
         return self.writeResponseCore(strm, close_connection, req, res, false);
     }
 
-    /// Ports `apply_ranges` (httplib.cpp:10007 @8642541b2), a member of
+    /// Ports `apply_ranges` (httplib.cpp:10045 @cd959bae9), a member of
     /// `Server`: a 206's range or ranges cut from the body. No content coding
-    /// is compiled in, so none is applied, and nothing here is a known-length
+    /// is compiled in, so none is applied whatever `set_compress` says, and nothing here is a known-length
     /// provider a range can reach (`range_error` drops the ranges of a
     /// streamed body), so that arm of the C is not live.
     fn applyRanges(req: *const Request, res: *Response) !void {
@@ -1012,8 +1057,9 @@ pub const Server = struct {
         }
     }
 
-    /// Ports `write_response_core` (httplib.cpp:9151 @8642541b2), a member
-    /// of `Server`: the error handler for a status from 400, the ranges, the
+    /// Ports `write_response_core` (httplib.cpp:9204 @cd959bae9), a member
+    /// of `Server`: the error handler for a status from 400, the fields
+    /// `set_header` would refuse dropped, the ranges, the
     /// connection and framing headers, the head and a body under
     /// `CPPHTTPLIB_SEND_BUFSIZ` in one write, a larger one in a second, then
     /// a streamed body. The small-file arm is not live: only
@@ -1028,6 +1074,10 @@ pub const Server = struct {
                 if (try h.func(h.ctx, req, res) == .handled) need_apply_ranges = true;
             }
         }
+
+        // Before anything below reads res.headers, which the handlers may have
+        // filled directly
+        detail.eraseInvalidFields(&res.headers);
 
         if (!message.bodyAllowedForStatus(res.status)) res.clearContent();
         res.preferAssignedBody();

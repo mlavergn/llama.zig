@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/chat-auto-parser-generator.cpp` (llama.cpp
-//! v0.8.0, `8642541b2`): `peg_generator`'s `generate_parser`,
+//! v0.9.0, `cd959bae9`): `peg_generator`'s `generate_parser`,
 //! `autoparser`'s `build_parser` and the three analyzers' `build_parser`
 //! methods with their helpers. Each declaration names what it ports and the
 //! line it began at.

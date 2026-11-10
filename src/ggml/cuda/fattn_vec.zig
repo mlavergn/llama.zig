@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from the host half of
-//! `llama.cpp/ggml/src/ggml-cuda/fattn-vec.cuh` at v0.8.0 (`8642541b2`).
+//! `llama.cpp/ggml/src/ggml-cuda/fattn-vec.cuh` at v0.9.0 (`cd959bae9`).
 //! The kernel stays CUDA, one instantiation set per (K type, V type) in
 //! `template-instances/fattn-vec-instance-<K>-<V>.cu`, which every
 //! `ggml_cuda_flash_attn_ext_vec_case` is declared `extern` against.

@@ -4,7 +4,7 @@
 //!
 //! Ports `common_cpu_get_num_physical_cores`, `common_cpu_get_num_math` and
 //! the x86 Linux hybrid-core probe from `llama.cpp/common/common.cpp`
-//! (v0.8.0, `8642541b2`). Each declaration names what it ports and the line
+//! (v0.9.0, `cd959bae9`). Each declaration names what it ports and the line
 //! it began at. The AIX arm is not ported, and Windows takes the MinGW
 //! path upstream's own `#if` takes: `hardware_concurrency` halved.
 
@@ -113,8 +113,9 @@ fn countMathCpus(n_cpu: usize) i32 {
     return result;
 }
 
-/// Ports `common_cpu_get_num_math` (common/common.cpp:206 @8642541b2): the CPUs
-/// useful for math.
+/// Ports `common_cpu_get_num_math` (common/common.cpp:206 @cd959bae9): the CPUs
+/// useful for math. Its `__riscv` and `__powerpc__` arms are not ported: the
+/// port builds for neither.
 pub fn numMath() i32 {
     if (comptime builtin.cpu.arch == .x86_64 and builtin.os.tag == .linux and builtin.abi != .android) {
         const n_cpu = hardwareConcurrency();

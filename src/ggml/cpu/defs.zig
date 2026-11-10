@@ -11,7 +11,7 @@
 //! - `llama.cpp/ggml/src/ggml-cpu/ops.h`           — `CACHE_LINE_SIZE`
 //! - `llama.cpp/ggml/include/ggml.h`               — the tensor-locals macros
 //!
-//! all at v0.8.0 (`8642541b2`). Each declaration names the C it came from and
+//! all at v0.9.0 (`cd959bae9`). Each declaration names the C it came from and
 //! the line it began at, using the bare filename.
 //!
 //! # Why these are hand-written

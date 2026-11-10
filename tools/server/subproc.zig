@@ -8,8 +8,8 @@
 //! Ports `server_subproc`, `server_subproc::waiter`,
 //! `server_subproc_stream` and `server_reserve_stdout` from
 //! `llama.cpp/tools/server/server-common.cpp` and
-//! `llama.cpp/tools/server/server-common.h` (llama.cpp v0.8.0,
-//! `8642541b2`), their POSIX arms. Each declaration names what it ports
+//! `llama.cpp/tools/server/server-common.h` (llama.cpp v0.9.0,
+//! `cd959bae9`), their POSIX arms. Each declaration names what it ports
 //! and the line it began at.
 //!
 //! # Generic over `common_subproc`

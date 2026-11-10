@@ -11,8 +11,8 @@
 //! embedding added, each ending in the classifier, so the output is one
 //! score per question type.
 //!
-//! Ported from `llama.cpp/src/models/modern-bert.cpp` at v0.8.0
-//! (`8642541b2`): `N_DECISION_TYPES`, `llama_model_modern_bert`'s
+//! Ported from `llama.cpp/src/models/modern-bert.cpp` at v0.9.0
+//! (`cd959bae9`): `N_DECISION_TYPES`, `llama_model_modern_bert`'s
 //! `load_arch_hparams`, `load_arch_tensors` and `build_arch_graph`, and
 //! its `graph` with `build_decision_head`; and from
 //! `llama.cpp/src/llama-model.cpp`, `llm_ffn_op_type_from_string`, which

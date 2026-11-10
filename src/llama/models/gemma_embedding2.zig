@@ -7,8 +7,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gemma-embedding2.cpp` at v0.8.0
-//! (`8642541b2`): `llama_model_gemma_embedding2`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/gemma-embedding2.cpp` at v0.9.0
+//! (`cd959bae9`): `llama_model_gemma_embedding2`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` with
 //! `build_inp_per_layer`.
 

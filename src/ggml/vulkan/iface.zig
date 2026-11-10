@@ -6,8 +6,8 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-buffers.cpp`, and
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.8.0
-//! (`8642541b2`). Upstream split `ggml-vulkan.cpp` into those files at
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.9.0
+//! (`cd959bae9`). Upstream split `ggml-vulkan.cpp` into those files at
 //! v0.5.0.
 
 const std = @import("std");
@@ -328,7 +328,7 @@ pub fn bufferFromHostPtr(device: *m.device.Device, ptr: ?*anyopaque, size: usize
     };
 }
 
-/// Ports `ggml_backend_vk_device_buffer_from_host_ptr` (ggml-vulkan.cpp:16259 @8642541b2).
+/// Ports `ggml_backend_vk_device_buffer_from_host_ptr` (ggml-vulkan.cpp:16292 @cd959bae9).
 pub fn deviceBufferFromHostPtr(dev: c.ggml_backend_dev_t, dev_idx: usize, ptr: ?*anyopaque, size: usize) c.ggml_backend_buffer_t {
     const device = m.device.getDevice(dev_idx);
     const buf = bufferFromHostPtr(device, ptr, size) orelse return null;

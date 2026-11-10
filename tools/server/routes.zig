@@ -4,8 +4,8 @@
 //! # Provenance
 //!
 //! Ports the rest of `llama.cpp/tools/server/server-context.cpp` and
-//! `llama.cpp/tools/server/server-context.h` (llama.cpp v0.8.0,
-//! `8642541b2`): `server_res_generator`, `server_routes` with every handler
+//! `llama.cpp/tools/server/server-context.h` (llama.cpp v0.9.0,
+//! `cd959bae9`): `server_res_generator`, `server_routes` with every handler
 //! of `init_routes`, `handle_completions_impl`, the slot actions, the
 //! embeddings and token-count handlers, `update_cached_responses`, and
 //! `get_res_model_info`, `get_res_models` and `get_res_props`. Each
@@ -271,8 +271,8 @@ pub const Routes = struct {
         }.call };
     }
 
-    /// Ports `server_routes`'s `init_routes` (server-context.cpp:5712
-    /// @8642541b2). IMPORTANT: all handlers must start with
+    /// Ports `server_routes`'s `init_routes` (server-context.cpp:5724
+    /// @cd959bae9). IMPORTANT: all handlers must start with
     /// `createResponse`, so that the sleeping case is handled correctly.
     fn initRoutes(self: *Routes) void {
         self.get_health = self.handler(getHealth);
@@ -383,7 +383,7 @@ pub const Routes = struct {
                 return &res.base;
             }
 
-            ggmlAssert(result.kind == .metrics, 5780, "res_task != nullptr");
+            ggmlAssert(result.kind == .metrics, 5792, "res_task != nullptr");
 
             const a = res.alloc();
             try res.base.setHeader("Process-Start-Time-Unix", try std.fmt.allocPrint(a, "{d}", .{result.kind.metrics.metrics.t_start}));
@@ -414,7 +414,7 @@ pub const Routes = struct {
         // get the result
         const result = (try res.rd.next(ReqStop{ .req = req })) orelse {
             // connection was closed
-            ggmlAssert(req.should_stop.call(), 5809, "req.should_stop()");
+            ggmlAssert(req.should_stop.call(), 5821, "req.should_stop()");
             return &res.base;
         };
         defer result.destroy(gpa);
@@ -425,7 +425,7 @@ pub const Routes = struct {
             return &res.base;
         }
 
-        ggmlAssert(result.kind == .slots, 5819, "res_task != nullptr");
+        ggmlAssert(result.kind == .slots, 5831, "res_task != nullptr");
 
         // optionally return "fail_on_no_slot" error
         if (req.getParam("fail_on_no_slot", "").len != 0) {
@@ -729,7 +729,7 @@ pub const Routes = struct {
         }
 
         const result = (try res.rd.next(ReqStop{ .req = req })) orelse {
-            ggmlAssert(req.should_stop.call(), 6042, "req.should_stop()");
+            ggmlAssert(req.should_stop.call(), 6054, "req.should_stop()");
             return &res.base;
         };
         defer result.destroy(gpa);
@@ -981,7 +981,7 @@ pub const Routes = struct {
             if (decision.isJoint()) {
                 // one result with the scores of all the questions, in order
                 const result = all_results.results[0];
-                ggmlAssert(result != null and result.?.kind == .decision and i_score + question.options.len <= result.?.kind.decision.scores.len, 6665, "result != nullptr && i_score + question.options.size() <= result->scores.size()");
+                ggmlAssert(result != null and result.?.kind == .decision and i_score + question.options.len <= result.?.kind.decision.scores.len, 6700, "result != nullptr && i_score + question.options.size() <= result->scores.size()");
                 const sc = result.?.kind.decision.scores;
                 try scores.append(a, sc[i_score .. i_score + question.options.len]);
                 i_score += question.options.len;
@@ -991,7 +991,7 @@ pub const Routes = struct {
             while (!decision.isJoint() and variant < decision.nVariants(question)) : (variant += 1) {
                 const result = all_results.results[i_result];
                 i_result += 1;
-                ggmlAssert(result != null and result.?.kind == .decision, 6672, "result != nullptr");
+                ggmlAssert(result != null and result.?.kind == .decision, 6707, "result != nullptr");
                 try scores.append(a, result.?.kind.decision.scores);
                 n_tokens += result.?.kind.decision.n_tokens;
             }
@@ -1156,7 +1156,7 @@ pub const Routes = struct {
             return &res.base;
         } else {
             for (all_results.results) |r| {
-                ggmlAssert(r.?.kind == .rerank, 7102, "dynamic_cast<server_task_result_rerank*>(res.get()) != nullptr");
+                ggmlAssert(r.?.kind == .rerank, 7137, "dynamic_cast<server_task_result_rerank*>(res.get()) != nullptr");
                 try responses.pushBack(a, try r.?.toJson(a));
             }
         }
@@ -1168,7 +1168,9 @@ pub const Routes = struct {
         return &res.base;
     }
 
-    /// The `post_tts` lambda (server-context.cpp:6434 @8642541b2).
+    /// The `post_tts` lambda (server-context.cpp:6446 @cd959bae9). A model
+    /// with predefined voices speaks only with one of them: the one asked
+    /// for, or the first.
     fn postTts(self: *Routes, req: *const http.Req) anyerror!*http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -1220,9 +1222,18 @@ pub const Routes = struct {
         const lang = common.jsonValue(&body, "lang", []const u8, "");
         const voice = common.jsonValue(&body, "voice", []const u8, "");
         const tts_prompt = try chat.templates.getTtsPrompt(a, self.metaRef().chat_params.tmpls, prompt, lang, voice);
+        // a model with predefined voices only speaks with one of them
+        var voice_ref: ?*c.mtmd_bitmap = null;
+        defer if (voice_ref) |bmp| c.mtmd_bitmap_free(bmp);
+        if (voice.len != 0 and info.n_voices > 0) {
+            voice_ref = c.mtmd_gen_audio_get_voice(self.ctx_server.mctx, (try a.dupeSentinel(u8, voice, 0)).ptr);
+            if (voice_ref == null) {
+                try res.errMsg(try std.mem.concat(a, u8, &.{ "unknown voice \"", voice, "\", see \"voices\" in GET /props" }), .invalid_request);
+                return &res.base;
+            }
+        }
         task.tts_inp.prompt_str = try ta.dupeSentinel(u8, if (tts_prompt.len == 0) prompt else tts_prompt, 0);
         task.tts_inp.lang_str = try ta.dupeSentinel(u8, lang, 0);
-        task.tts_inp.voice_str = try ta.dupeSentinel(u8, voice, 0);
         task.tts_inp.data.stream = do_stream;
         task.tts_inp.data.out_type = if (is_pcm) c.MTMD_HELPER_GEN_AUDIO_OUTTYPE_PCM else c.MTMD_HELPER_GEN_AUDIO_OUTTYPE_WAV;
         // note: -1 is clamped to 0 by the sampler, it will disable the penalty
@@ -1253,12 +1264,28 @@ pub const Routes = struct {
         }
 
         if (speaker_ref.len > 0) {
+            if (voice_ref != null) {
+                try res.errMsg("\"voice\" and \"speaker_ref\" cannot be used together", .invalid_request);
+                return &res.base;
+            }
+            if (!c.mtmd_support_audio(self.ctx_server.mctx)) {
+                try res.errMsg("this model has no voice encoder, \"speaker_ref\" cannot be used", .invalid_request);
+                return &res.base;
+            }
             const wrapper = c.mtmd_helper_bitmap_init_from_buf(self.ctx_server.mctx, speaker_ref.ptr, speaker_ref.len, false, self.ctx_server.init_opt);
             if (wrapper.bitmap == null) {
                 try res.errMsg("failed to decode \"speaker_ref\"", .invalid_request);
                 return &res.base;
             }
             task.tts_inp.setSpeakerRef(wrapper.bitmap);
+        } else if (voice_ref) |bmp| {
+            task.tts_inp.setSpeakerRef(bmp);
+            voice_ref = null;
+        } else if (info.n_voices > 0) {
+            // without a voice prompt the model produces near silence: the first voice is the default
+            const first = c.mtmd_gen_audio_voice_name(self.ctx_server.mctx, 0);
+            srv(.wrn, "operator()", "no voice given, speaking with \"%s\"\n", .{first});
+            task.tts_inp.setSpeakerRef(c.mtmd_gen_audio_get_voice(self.ctx_server.mctx, first));
         } else {
             srv(.wrn, "operator()", "%s", .{@as([*:0]const u8, "no speaker reference provided, the model may behave randomly\n")});
         }
@@ -1275,7 +1302,7 @@ pub const Routes = struct {
 
         if (!do_stream) {
             const result = (try res.rd.next(ReqStop{ .req = req })) orelse {
-                ggmlAssert(req.should_stop.call(), 6540, "req.should_stop()");
+                ggmlAssert(req.should_stop.call(), 6575, "req.should_stop()");
                 return &res.base; // connection is closed
             };
             defer result.destroy(gpa);
@@ -1284,7 +1311,7 @@ pub const Routes = struct {
                 try res.err(&j);
                 return &res.base;
             }
-            ggmlAssert(result.kind == .tts, 6548, "tts_res != nullptr");
+            ggmlAssert(result.kind == .tts, 6583, "tts_res != nullptr");
             res.base.status = 200;
             res.base.content_type = content_type;
             try res.base.setData(result.kind.tts.audio);
@@ -1292,7 +1319,7 @@ pub const Routes = struct {
         }
 
         const first_result = (try res.rd.next(ReqStop{ .req = req })) orelse {
-            ggmlAssert(req.should_stop.call(), 6556, "req.should_stop()");
+            ggmlAssert(req.should_stop.call(), 6591, "req.should_stop()");
             return &res.base; // connection is closed
         };
         defer first_result.destroy(gpa);
@@ -1301,7 +1328,7 @@ pub const Routes = struct {
             try res.err(&j);
             return &res.base;
         }
-        ggmlAssert(first_result.kind == .tts, 6564, "first_tts_res != nullptr");
+        ggmlAssert(first_result.kind == .tts, 6599, "first_tts_res != nullptr");
 
         res.base.status = 200;
         res.base.content_type = content_type;
@@ -1343,7 +1370,7 @@ pub const Routes = struct {
         if (result.isError()) {
             return false;
         }
-        ggmlAssert(result.kind == .tts, 6594, "tts_res != nullptr");
+        ggmlAssert(result.kind == .tts, 6629, "tts_res != nullptr");
         try output.appendSlice(oa, result.kind.tts.audio);
         res_this.tts_is_done = result.kind.tts.final;
         return true;
@@ -1507,7 +1534,7 @@ pub const Routes = struct {
 
         const result = (try res.rd.next(ReqStop{ .req = req })) orelse {
             // connection was closed
-            ggmlAssert(req.should_stop.call(), 6776, "req.should_stop()");
+            ggmlAssert(req.should_stop.call(), 6811, "req.should_stop()");
             return &res.base;
         };
         defer result.destroy(gpa);
@@ -1661,7 +1688,7 @@ pub const Routes = struct {
             return &res.base;
         } else {
             for (all_results.results) |r| {
-                ggmlAssert(r.?.kind == .embd, 6959, "dynamic_cast<server_task_result_embd*>(res.get()) != nullptr");
+                ggmlAssert(r.?.kind == .embd, 6994, "dynamic_cast<server_task_result_embd*>(res.get()) != nullptr");
                 try responses.pushBack(a, try r.?.toJson(a));
             }
         }
@@ -1734,7 +1761,7 @@ pub const Routes = struct {
     /// Ports `server_routes`'s `handle_completions_impl` (server-context.cpp:5308 @cd959bae9).
     /// `chat_session`: the request's, or null for the default one.
     fn handleCompletionsImpl(self: *Routes, req: *const http.Req, ty: TaskType, data: *Value, files: []const []u8, res_type: ResponseType, chat_session: ?*const chat.session.Session) !*http.Res {
-        ggmlAssert(ty == .completion or ty == .infill, 5306, "type == SERVER_TASK_TYPE_COMPLETION || type == SERVER_TASK_TYPE_INFILL");
+        ggmlAssert(ty == .completion or ty == .infill, 5315, "type == SERVER_TASK_TYPE_COMPLETION || type == SERVER_TASK_TYPE_INFILL");
 
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -1772,10 +1799,10 @@ pub const Routes = struct {
             } else {
                 var arr = Value.emptyArray();
                 for (all_results.results) |r| {
-                    ggmlAssert(r.?.kind == .cmpl_final, 5404, "dynamic_cast<server_task_result_cmpl_final*>(res.get()) != nullptr");
+                    ggmlAssert(r.?.kind == .cmpl_final, 5413, "dynamic_cast<server_task_result_cmpl_final*>(res.get()) != nullptr");
                     try arr.pushBack(a, try r.?.toJson(a));
                 }
-                ggmlAssert(arr.array.items.len != 0, 5407, "!arr.empty() && \"empty results\"");
+                ggmlAssert(arr.array.items.len != 0, 5416, "!arr.empty() && \"empty results\"");
                 if (arr.array.items.len == 1) {
                     // if single request, return single object instead of array
                     try res.ok(&arr.array.items[0]);
@@ -1808,7 +1835,7 @@ pub const Routes = struct {
             // this is to match the OAI API behavior
             // ref: https://github.com/ggml-org/llama.cpp/pull/16486#discussion_r2419657309
             const first_result = (try res.rd.next(ReqStop{ .req = req })) orelse {
-                ggmlAssert(req.should_stop.call(), 5439, "req.should_stop()");
+                ggmlAssert(req.should_stop.call(), 5448, "req.should_stop()");
                 return &res.base; // connection is closed
             };
             defer first_result.destroy(gpa);
@@ -1819,7 +1846,7 @@ pub const Routes = struct {
                 return &res.base;
             }
 
-            ggmlAssert(first_result.kind == .cmpl_partial or first_result.kind == .cmpl_final, 5448, "dynamic_cast<server_task_result_cmpl_partial*>(first_result.get()) != nullptr || dynamic_cast<server_task_result_cmpl_final*>  (first_result.get()) != nullptr");
+            ggmlAssert(first_result.kind == .cmpl_partial or first_result.kind == .cmpl_final, 5457, "dynamic_cast<server_task_result_cmpl_partial*>(first_result.get()) != nullptr || dynamic_cast<server_task_result_cmpl_final*>  (first_result.get()) != nullptr");
 
             // next responses are streamed
             // to be sent immediately
@@ -2022,7 +2049,7 @@ pub const Routes = struct {
 
         const result = result_opt orelse {
             srv(.dbg, func, "%s", .{@as([*:0]const u8, "stopping streaming due to should_stop condition\n")});
-            ggmlAssert(res_this.shouldStop(), 5537, "effective_should_stop()");
+            ggmlAssert(res_this.shouldStop(), 5546, "effective_should_stop()");
             return false; // should_stop condition met
         };
         defer result.destroy(gpa);
@@ -2038,7 +2065,7 @@ pub const Routes = struct {
             srv(.dbg, func, "%s", .{@as([*:0]const u8, "error received during streaming, terminating stream\n")});
             return false; // terminate on error
         } else {
-            ggmlAssert(result.kind == .cmpl_partial or result.kind == .cmpl_final, 5548, "dynamic_cast<server_task_result_cmpl_partial*>(result.get()) != nullptr || dynamic_cast<server_task_result_cmpl_final*>(result.get()) != nullptr");
+            ggmlAssert(result.kind == .cmpl_partial or result.kind == .cmpl_final, 5557, "dynamic_cast<server_task_result_cmpl_partial*>(result.get()) != nullptr || dynamic_cast<server_task_result_cmpl_final*>(result.get()) != nullptr");
             var res_json = try result.toJson(a);
             if (res_type == .anthropic) {
                 try output.appendSlice(oa, try common.formatAnthropicSse(a, &res_json));
@@ -2176,7 +2203,7 @@ fn getResModels(a: Allocator, meta: *const Meta) !Value {
     return o.done();
 }
 
-/// Ports `get_res_props` (server-context.cpp:5657 @8642541b2): do NOT use
+/// Ports `get_res_props` (server-context.cpp:5666 @cd959bae9): do NOT use
 /// the context here, so it works during sleep.
 fn getResProps(a: Allocator, meta: *const Meta, params: *const Params, is_sleeping: bool) !Value {
     var tparams = try task_mod.TaskParams.init(a);
@@ -2215,6 +2242,9 @@ fn getResProps(a: Allocator, meta: *const Meta, params: *const Params, is_sleepi
 
     if (params.server_connect_code.len != 0) {
         try props.put("connect_code", params.server_connect_code);
+    }
+    if (meta.tts_voices.len != 0) {
+        try props.put("voices", meta.tts_voices);
     }
     if (params.use_jinja) {
         if (tmpl_tools.len != 0) {

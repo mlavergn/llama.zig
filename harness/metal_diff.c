@@ -29,6 +29,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Ours, and the reference's with its six exports renamed by -D. */
@@ -58,6 +59,7 @@ EXTRA(ggml_metal_op_flash_attn_ext_extra_blk)
 EXTRA(ggml_metal_op_flash_attn_ext_extra_tmp)
 EXTRA(ggml_metal_op_flash_attn_ext_extra_kv_f16)
 EXTRA(ggml_metal_op_flash_attn_ext_extra_idx)
+EXTRA(ggml_metal_op_flash_attn_ext_extra_rows)
 EXTRA(ggml_metal_op_argmax_extra)
 #undef EXTRA
 extern bool ggml_metal_op_flash_attn_ext_use_vec(const struct ggml_tensor *);
@@ -1087,6 +1089,137 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
     }
 }
 
+/* The three batched buffer slots (v0.9.0): `set_tensor_n`, `get_tensor_n`
+ * and `cpy_tensor_n`. translate-c defaults an omitted slot to null, so an
+ * iface that forgot them would still compile and `ggml-backend.cpp` would
+ * quietly fall back to one call per tensor -- same bytes, other path. So
+ * each side's buffer is asked which slots it has, and then driven through
+ * them: a scattered write, a read back, a copy between two buffers of the
+ * same type, and a copy from a CPU buffer, which `cpy_tensor_n` must
+ * refuse before copying anything. Every byte is compared with what was
+ * written, and the two sides' answers with each other. */
+static void tensor_n_side(ggml_backend_buffer_type_t bt, long out[16], uint8_t *got, size_t ngot) {
+    struct ggml_init_params ip = { 16u * 1024u * 1024u, NULL, true };
+    struct ggml_context *ctx = ggml_init(ip);
+    struct ggml_tensor *t[4], *u[4];
+    for (int i = 0; i < 4; i++) {
+        t[i] = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024 + 256*i);
+        u[i] = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024 + 256*i);
+    }
+    ggml_backend_buffer_t buf  = ggml_backend_alloc_ctx_tensors_from_buft(ctx, bt);
+    struct ggml_context *ctx2 = ggml_init(ip);
+    struct ggml_tensor *w[4], *h[4];
+    for (int i = 0; i < 4; i++) {
+        w[i] = ggml_new_tensor_1d(ctx2, GGML_TYPE_F32, 1024 + 256*i);
+    }
+    ggml_backend_buffer_t buf2 = ggml_backend_alloc_ctx_tensors_from_buft(ctx2, bt);
+    struct ggml_context *ctx3 = ggml_init(ip);
+    for (int i = 0; i < 4; i++) {
+        h[i] = ggml_new_tensor_1d(ctx3, GGML_TYPE_F32, 1024 + 256*i);
+    }
+    ggml_backend_buffer_t bufh = ggml_backend_alloc_ctx_tensors_from_buft(ctx3, ggml_backend_cpu_buffer_type());
+
+    out[0] = buf->iface.set_tensor_n != NULL;
+    out[1] = buf->iface.get_tensor_n != NULL;
+    out[2] = buf->iface.cpy_tensor_n != NULL;
+    out[3] = ggml_backend_buffer_is_host(buf);
+
+    ggml_backend_buffer_clear(buf, 0x11);
+    ggml_backend_buffer_clear(buf2, 0x22);
+
+    /* scattered write: tensor i gets bytes [offs[i], offs[i]+sizes[i]) from data at doffs[i] */
+    uint8_t data[32768];
+    for (size_t i = 0; i < sizeof data; i++) data[i] = (uint8_t) (i*131 + 7);
+    size_t offs[4]  = { 0, 64, 1000, 4 };
+    size_t sizes[4] = { 4096, 0, 2048, 777*4 };
+    size_t doffs[4] = { 100, 0, 9000, 20000 };
+    ggml_backend_tensor_set_n(t, data, offs, sizes, doffs, 4);
+
+    /* read back whole tensors */
+    size_t roffs[4] = { 0, 0, 0, 0 }, rsizes[4], rdoffs[4];
+    size_t at = 0;
+    for (int i = 0; i < 4; i++) { rsizes[i] = ggml_nbytes(t[i]); rdoffs[i] = at; at += rsizes[i]; }
+    if (at > ngot) at = ngot;
+    memset(got, 0, ngot);
+    ggml_backend_tensor_get_n((const struct ggml_tensor * const *) t, got, roffs, rsizes, rdoffs, 4);
+
+    long ok = 1;
+    for (int i = 0; i < 4; i++) {
+        for (size_t b = 0; b < rsizes[i]; b++) {
+            uint8_t want = (b >= offs[i] && b < offs[i] + sizes[i]) ? data[doffs[i] + b - offs[i]] : 0x11;
+            if (got[rdoffs[i] + b] != want) { ok = 0; break; }
+        }
+    }
+    out[4] = ok;
+
+    /* copy within the Metal buffer type, then read the copies back */
+    ggml_backend_tensor_copy_n((const struct ggml_tensor * const *) t, w, 4);
+    uint8_t *got2 = got + ngot/2;
+    ggml_backend_tensor_get_n((const struct ggml_tensor * const *) w, got2, roffs, rsizes, rdoffs, 4);
+    out[5] = memcmp(got, got2, at) == 0;
+
+    /* a CPU source: the Metal `cpy_tensor_n` refuses, the generic path copies */
+    for (int i = 0; i < 4; i++) memset(h[i]->data, 0x5a + i, ggml_nbytes(h[i]));
+    out[6] = buf->iface.cpy_tensor_n ? buf->iface.cpy_tensor_n(buf, (const struct ggml_tensor * const *) h, t, 4) : -1;
+    ggml_backend_tensor_copy_n((const struct ggml_tensor * const *) h, t, 4);
+    ggml_backend_tensor_get_n((const struct ggml_tensor * const *) t, got, roffs, rsizes, rdoffs, 4);
+    ok = 1;
+    for (int i = 0; i < 4; i++) {
+        for (size_t b = 0; b < rsizes[i]; b++) {
+            if (got[rdoffs[i] + b] != (uint8_t) (0x5a + i)) { ok = 0; break; }
+        }
+    }
+    out[7] = ok;
+
+    /* `cpy_tensor_n` itself, Metal to Metal */
+    ggml_backend_buffer_clear(buf2, 0x33);
+    out[8] = buf->iface.cpy_tensor_n ? buf2->iface.cpy_tensor_n(buf2, (const struct ggml_tensor * const *) t, w, 4) : -1;
+    ggml_backend_tensor_get_n((const struct ggml_tensor * const *) w, got2, roffs, rsizes, rdoffs, 4);
+    out[9] = memcmp(got, got2, at) == 0;
+
+    ggml_backend_buffer_free(bufh);
+    ggml_backend_buffer_free(buf2);
+    ggml_backend_buffer_free(buf);
+    ggml_free(ctx3);
+    ggml_free(ctx2);
+    ggml_free(ctx);
+    (void) u;
+}
+
+static void tensor_n_diff(ggml_backend_dev_t dev_a, ggml_backend_dev_t dev_b) {
+    static uint8_t got_a[65536], got_b[65536];
+    static const char * what[10] = {
+        "set_tensor_n present", "get_tensor_n present", "cpy_tensor_n present", "is_host",
+        "set_tensor_n/get_tensor_n round trip", "tensor_copy_n Metal->Metal",
+        "cpy_tensor_n from CPU refused", "tensor_copy_n CPU->Metal",
+        "cpy_tensor_n Metal->Metal", "cpy_tensor_n bytes",
+    };
+    /* the device's own buffer type: shared on this machine, private when
+     * the script reruns this part under GGML_METAL_SHARED_BUFFERS_DISABLE
+     * (the device reads it once per process), so both ifaces are reached */
+    ggml_backend_buffer_type_t bts[2][1] = {
+        { ggml_backend_dev_buffer_type(dev_a) },
+        { ggml_backend_dev_buffer_type(dev_b) },
+    };
+    for (int k = 0; k < 1; k++) {
+        long a[16] = {0}, b[16] = {0};
+        tensor_n_side(bts[0][k], a, got_a, sizeof got_a);
+        tensor_n_side(bts[1][k], b, got_b, sizeof got_b);
+        for (int i = 0; i < 10; i++) {
+            char lbl[96];
+            snprintf(lbl, sizeof lbl, "%s %s", ggml_backend_buft_name(bts[1][k]), what[i]);
+            cmp_i(lbl, a[i], b[i]);
+        }
+        /* every functional answer must also be the right one */
+        const int must[] = { 4, 5, 7, 9 };
+        for (int j = 0; j < 4; j++) {
+            char lbl[96];
+            snprintf(lbl, sizeof lbl, "%s %s (correct)", ggml_backend_buft_name(bts[1][k]), what[must[j]]);
+            cmp_i(lbl, a[must[j]], 1);
+        }
+    }
+}
+
 int main(void) {
     ggml_backend_reg_t reg_a = ggml_backend_metal_reg();
     ggml_backend_reg_t reg_b = ref_ggml_backend_metal_reg();
@@ -1099,6 +1232,17 @@ int main(void) {
 
     ggml_backend_dev_t dev_a = ggml_backend_reg_dev_get(reg_a, 0);
     ggml_backend_dev_t dev_b = ggml_backend_reg_dev_get(reg_b, 0);
+
+    if (getenv("METAL_DIFF_TENSOR_N_ONLY")) {
+        tensor_n_diff(dev_a, dev_b);
+        printf("\n");
+        if (fails == 0) {
+            printf("PASS: %d batched buffer-slot answers identical, ported vs reference\n", checks);
+            return 0;
+        }
+        printf("FAIL: %d of %d batched buffer-slot answers differ\n", fails, checks);
+        return 1;
+    }
 
     cmp_s("dev get_name", ggml_backend_dev_name(dev_a), ggml_backend_dev_name(dev_b));
     cmp_s("dev get_description", ggml_backend_dev_description(dev_a), ggml_backend_dev_description(dev_b));
@@ -1242,6 +1386,49 @@ int main(void) {
     }
 
     {
+        /* FLASH_ATTN_EXT over K/V row lists (`ggml_flash_attn_ext_rows`,
+         * v0.9.0): the gathered-rows scratch is K's rows plus V's, unless V
+         * is a view of K; zero without `src[5]`. Several streams (q->ne[3])
+         * since the lists are one per stream; the KV types `supports_op`
+         * accepts and two it refuses; V a view of K at the same and at a
+         * different offset; a batch on each side of the vec threshold; and
+         * a sparse hint, which the row lists switch off. */
+        const enum ggml_type kt[] = { GGML_TYPE_F16, GGML_TYPE_Q8_0, GGML_TYPE_Q4_0, GGML_TYPE_BF16,
+                                      GGML_TYPE_F16, GGML_TYPE_F16, GGML_TYPE_Q4_1, GGML_TYPE_F16,
+                                      GGML_TYPE_F16, GGML_TYPE_F32 };
+        const int64_t dks[]  = { 128, 128,  64, 128, 576, 576,  96, 128, 128, 64 };
+        const int64_t dvs[]  = { 128, 128,  64, 128, 512, 512,  96, 128,  98, 64 };
+        const int64_t n01s[] = {   1,  32,  64,   1,   1,  32,   8,  40,   1, 1 };
+        const int64_t n3s[]  = {   1,   2,   3,   1,   1,   2,   4,   1,   1, 1 };
+        const int64_t nrws[] = { 256, 512, 768, 256, 256, 512, 256, 1024, 256, 256 };
+        /* 0 separate V, 1 V a view of K at K's offset, 2 a view at another offset */
+        const int     vkind[] = { 0, 0, 0, 0, 1, 2, 0, 0, 0, 0 };
+        const int32_t nkv[]   = { 0, 0, 0, 0, 0, 0, 0, 256, 0, 0 };
+        for (int i = 0; i < 10; i++) {
+            struct ggml_tensor *q = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, dks[i], n01s[i], 8, n3s[i]);
+            struct ggml_tensor *k = ggml_new_tensor_4d(ctx, kt[i], dks[i], 4096, 2, 1);
+            struct ggml_tensor *v;
+            if (vkind[i] == 0) {
+                v = ggml_new_tensor_4d(ctx, kt[i], dvs[i], 4096, 2, 1);
+            } else {
+                v = ggml_view_4d(ctx, k, dvs[i], 4096, 2, 1, k->nb[1], k->nb[2], k->nb[3],
+                                 vkind[i] == 1 ? 0 : 64*ggml_type_size(kt[i]));
+            }
+            struct ggml_tensor *m  = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, nrws[i], n01s[i], 1, n3s[i]);
+            struct ggml_tensor *kr = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, nrws[i], n3s[i]);
+            struct ggml_tensor *t  = ggml_flash_attn_ext_rows(ctx, q, k, v, m, kr, 1.0f/8.0f, 0.0f, 0.0f);
+            if (t) {
+                if (nkv[i]) ggml_flash_attn_ext_set_n_kv_max(t, nkv[i]);
+                static char buf[10][80];
+                snprintf(buf[i], sizeof buf[i], "FLASH_ATTN_EXT rows %s dk=%lld dv=%lld ne01=%lld ne3=%lld v=%d nkv=%d",
+                         ggml_type_name(kt[i]), (long long) dks[i], (long long) dvs[i], (long long) n01s[i],
+                         (long long) n3s[i], vkind[i], nkv[i]);
+                probes[n] = t; labels[n] = buf[i]; n++;
+            }
+        }
+    }
+
+    {
         /* TOP_K_MASK (v0.8.0), each optional source on and off: no scratch,
          * and `supports_op`'s arm is the `.m`'s. */
         for (int bits = 0; bits < 16; bits++) {
@@ -1293,6 +1480,7 @@ int main(void) {
             CMP_EXTRA(ggml_metal_op_flash_attn_ext_extra_tmp)
             CMP_EXTRA(ggml_metal_op_flash_attn_ext_extra_kv_f16)
             CMP_EXTRA(ggml_metal_op_flash_attn_ext_extra_idx)
+            CMP_EXTRA(ggml_metal_op_flash_attn_ext_extra_rows)
             snprintf(lbl, sizeof lbl, "flash_attn_ext_use_vec(%s)", labels[i]);
             cmp_i(lbl, ggml_metal_op_flash_attn_ext_use_vec(probes[i]), ref_ggml_metal_op_flash_attn_ext_use_vec(probes[i]));
         }
@@ -1322,6 +1510,7 @@ int main(void) {
         }
     }
 
+    tensor_n_diff(dev_a, dev_b);
     mma_predicates_diff();
     mul_mat_id_extra_diff(bt_a, bt_b);
     argmax_extra_diff(bt_a, bt_b);

@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.8.0, `8642541b2`), lines
+//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.9.0, `cd959bae9`), lines
 //! 7911-8030. Each function names the C function it replaces and the line it
 //! began at.
 //!
@@ -41,7 +41,7 @@ extern fn iq2xs_free_impl(t: c.enum_ggml_type) void;
 extern fn iq3xs_init_impl(grid_size: c_int) void;
 extern fn iq3xs_free_impl(grid_size: c_int) void;
 
-/// The `switch` in `ggml_quantize_chunk` (ggml.c:8153 @8642541b2), as a table.
+/// The `switch` in `ggml_quantize_chunk` (ggml.c:8198 @cd959bae9), as a table.
 ///
 /// The C spells out one `case` per type, each an identical call differing only
 /// in the routine's name. Listing the pairs instead keeps the mapping readable
@@ -60,6 +60,7 @@ const quantizers = .{
     .{ c.GGML_TYPE_Q8_0, "quantize_q8_0" },
     .{ c.GGML_TYPE_MXFP4, "quantize_mxfp4" },
     .{ c.GGML_TYPE_NVFP4, "quantize_nvfp4" },
+    .{ c.GGML_TYPE_F8_E4M3, "quantize_f8_e4m3" },
     .{ c.GGML_TYPE_Q2_K, "quantize_q2_K" },
     .{ c.GGML_TYPE_Q3_K, "quantize_q3_K" },
     .{ c.GGML_TYPE_Q4_K, "quantize_q4_K" },
@@ -136,7 +137,7 @@ pub export fn ggml_quantize_requires_imatrix(t: c.enum_ggml_type) bool {
         t == c.GGML_TYPE_IQ1_S;
 }
 
-/// Ports `ggml_quantize_chunk` (ggml.c:8153 @8642541b2).
+/// Ports `ggml_quantize_chunk` (ggml.c:8198 @cd959bae9).
 ///
 /// Quantizes `nrows` rows starting at element `start`, which must fall on both
 /// a block boundary and a row boundary.

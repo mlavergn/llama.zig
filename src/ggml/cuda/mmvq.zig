@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/mmvq.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/mmvq.cuh` at v0.8.0 (`8642541b2`), the host
+//! `llama.cpp/ggml/src/ggml-cuda/mmvq.cuh` at v0.9.0 (`cd959bae9`), the host
 //! half; the `VDR_*_MMVQ` constants are `vecdotq.cuh`'s. The kernels,
 //! `mul_mat_vec_q` and `mul_mat_vec_q_moe`, stay CUDA.
 //!
@@ -57,8 +57,8 @@ fn getVdrMmvq(comptime ty: c.enum_ggml_type) comptime_int {
 /// Ports `mmvq_parameter_table_id` (mmvq.cu:96 @cd959bae9).
 const TableId = enum(c_int) { generic = 0, turing, gcn, rdna2, rdna3_0, rdna4, gb10 };
 
-/// Ports the host `get_device_table_id` (mmvq.cu:124 @8642541b2), NVIDIA
-/// arms. Since v0.6.0 Volta takes the Turing table too.
+/// Ports the host `get_device_table_id` (mmvq.cu:124 @cd959bae9), NVIDIA
+/// arms (v0.9.0's RDNA4_M is AMD). Since v0.6.0 Volta takes the Turing table too.
 fn getDeviceTableId(x: c_int) TableId {
     const h = common.highestCompiledArch(x);
     if (common.cc.isNvidia(x) and h >= common.cc.volta and h < common.cc.ampere) return .turing;
@@ -108,7 +108,7 @@ fn mmidMaxBatchTuringPlus(ty: c.enum_ggml_type) c_int {
     };
 }
 
-/// Ports `get_mmvq_mmid_max_batch` (mmvq.cu:285 @8642541b2), NVIDIA arms.
+/// Ports `get_mmvq_mmid_max_batch` (mmvq.cu:285 @cd959bae9), NVIDIA arms.
 /// v0.7.0 added the P100 (`cc == GGML_CUDA_CC_PASCAL`) to the always-MMVQ
 /// set; the device side's `get_mmvq_mmid_max_batch_for_device` moved with it.
 pub fn getMmidMaxBatch(ty: c.enum_ggml_type, x: c_int) c_int {

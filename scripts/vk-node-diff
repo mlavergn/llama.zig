@@ -60,7 +60,7 @@ for lib in "$REF/libggml.a" "$PORT/libggml.a"; do
 done
 [ -n "${VK_REF_DIR:-}" ] || nm -A "$REF/libggml.a" 2>/dev/null | grep -q '/ggml-vulkan\.o:' \
     || { echo "FAIL: $REF/libggml.a has no upstream ggml-vulkan.o -- build it with -Dvulkan-port=false" >&2; exit 1; }
-if [ -z "${VK_PORT_DIR:-}" ] && nm -A "$PORT/libggml.a" 2>/dev/null | grep -qE '/ggml-vulkan(-buffers|-debug)?\.o:'; then
+if [ -z "${VK_PORT_DIR:-}" ] && nm -A "$PORT/libggml.a" 2>/dev/null | grep -qE '/ggml-vulkan(-buffers|-comm|-debug)?\.o:'; then
     echo "FAIL: $PORT/libggml.a contains upstream's ggml-vulkan objects -- build it with -Dvulkan-port" >&2; exit 1
 fi
 

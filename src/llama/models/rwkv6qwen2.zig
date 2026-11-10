@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/rwkv6qwen2.cpp` at v0.8.0
-//! (`8642541b2`): `llama_model_rwkv6qwen2`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/rwkv6qwen2.cpp` at v0.9.0
+//! (`cd959bae9`): `llama_model_rwkv6qwen2`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`. The time
 //! mix is in `rwkv6_base.zig`.
 

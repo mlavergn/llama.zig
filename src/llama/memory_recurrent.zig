@@ -9,7 +9,7 @@
 //!   its `mem_cell`, and `llama_memory_recurrent_context`
 //! - `llama.cpp/src/llama-memory-recurrent.cpp` -- their bodies
 //!
-//! All at v0.8.0 (`8642541b2`).
+//! All at v0.9.0 (`cd959bae9`).
 //!
 //! # A cell's sequences
 //!
@@ -46,7 +46,7 @@ fn oom() noreturn {
 
 const SeqSet = std.bit_set.StaticBitSet(cparams_mod.max_seq);
 
-/// Mirrors `llama_memory_recurrent`'s `mem_cell` (llama-memory-recurrent.h:89 @8642541b2).
+/// Mirrors `llama_memory_recurrent`'s `mem_cell` (llama-memory-recurrent.h:89 @cd959bae9).
 pub const MemCell = struct {
     pos: i32 = -1,
     /// Where the state is copied from.
@@ -54,6 +54,10 @@ pub const MemCell = struct {
     /// Like `src`, but only for setting the inputs, so a state copies once.
     src0: i32 = -1,
     tail: i32 = -1,
+    /// The largest rollback whose snapshot the last ubatch guarantees: a
+    /// ubatch of n <= n_rs_seq + 1 tokens writes snapshots 0..n-1, a longer
+    /// one only the final state (`ggml_gated_delta_net`).
+    rs_max: u32 = 0,
     seq_id: SeqSet = SeqSet.empty,
 
     pub fn hasSeqId(self: *const MemCell, id: i32) bool {
@@ -65,7 +69,7 @@ pub const MemCell = struct {
     }
 };
 
-/// Ports `llama_memory_recurrent` (llama-memory-recurrent.h:17 @8642541b2).
+/// Ports `llama_memory_recurrent` (llama-memory-recurrent.h:17 @cd959bae9).
 pub const MemoryRecurrent = struct {
     /// Where the batch will be placed in the cache.
     head: u32 = 0,
@@ -235,13 +239,14 @@ pub const MemoryRecurrent = struct {
         allocator.destroy(self);
     }
 
-    /// Ports `llama_memory_recurrent`'s `clear` (llama-memory-recurrent.cpp:145 @8642541b2).
+    /// Ports `llama_memory_recurrent`'s `clear` (llama-memory-recurrent.cpp:145 @cd959bae9).
     pub fn clear(self: *MemoryRecurrent, data: bool) void {
         for (self.cells.items[0..self.size]) |*cell| {
             cell.pos = -1;
             cell.seq_id = SeqSet.empty;
             cell.src = -1;
             cell.tail = -1;
+            cell.rs_max = 0;
         }
         self.head = 0;
         self.used = 0;
@@ -251,7 +256,7 @@ pub const MemoryRecurrent = struct {
         @memset(self.rs_idx.items, 0);
     }
 
-    /// Ports `llama_memory_recurrent`'s `seq_rm` (llama-memory-recurrent.cpp:165 @8642541b2).
+    /// Ports `llama_memory_recurrent`'s `seq_rm` (llama-memory-recurrent.cpp:166 @cd959bae9).
     pub fn seqRm(self: *MemoryRecurrent, seq_id: i32, p0_: i32, p1_: i32) bool {
         var new_head = self.size;
         const p0 = if (p0_ < 0) 0 else p0_;
@@ -272,7 +277,8 @@ pub const MemoryRecurrent = struct {
             const tail_id = &self.cells.items[@intCast(seq_id)].tail;
             if (tail_id.* >= 0) {
                 const cell = &self.cells.items[@intCast(tail_id.*)];
-                // A partial rollback through a snapshot, bounded by n_rs_seq.
+                // A partial rollback through a snapshot, bounded by the
+                // snapshots of the last ubatch.
                 if (0 < p0 and p0 <= cell.pos and p1 > cell.pos) {
                     // A cell shared by several sequences cannot move back
                     // for only one of them.
@@ -288,7 +294,7 @@ pub const MemoryRecurrent = struct {
                     const rollback = cell.pos - (p0 - 1);
                     // A pending rollback is single-use.
                     const pending = self.rs_idx.items[@intCast(seq_id)] != 0;
-                    if (!pending and rollback >= 1 and rollback <= @as(i32, @intCast(self.n_rs_seq))) {
+                    if (!pending and rollback >= 1 and rollback <= @as(i32, @bitCast(cell.rs_max))) {
                         self.setRsIdx(seq_id, @intCast(rollback));
                         cell.pos = p0 - 1;
                         return true;
@@ -499,8 +505,8 @@ pub const MemoryRecurrent = struct {
         return success;
     }
 
-    /// Ports `llama_memory_recurrent`'s `find_slot` (llama-memory-recurrent.cpp:514
-    /// @8642541b2): every sequence gets a cell of its own, contiguous for
+    /// Ports `llama_memory_recurrent`'s `find_slot` (llama-memory-recurrent.cpp:515
+    /// @cd959bae9): every sequence gets a cell of its own, contiguous for
     /// the ubatch, and each cell records where its state comes from.
     pub fn findSlot(self: *MemoryRecurrent, ubatch: *const Ubatch) bool {
         const n_seq_tokens = ubatch.n_seq_tokens;
@@ -625,6 +631,7 @@ pub const MemoryRecurrent = struct {
                 impl.logWarn("%s: non-consecutive token position %d after %d for sequence %d with %u new tokens\n", .{ "find_slot", last_pos, cell.pos, ubatch.seq_id[i][0], n_seq_tokens });
             }
             cell.pos = last_pos;
+            cell.rs_max = if (n_seq_tokens <= self.n_rs_seq +% 1) n_seq_tokens -% 1 else 0;
             cell.seq_id = SeqSet.empty;
             for (0..@intCast(ubatch.n_seq_id[i])) |j| {
                 const seq_id = ubatch.seq_id[i][j];

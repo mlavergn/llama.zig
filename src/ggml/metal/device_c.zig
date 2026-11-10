@@ -9,7 +9,7 @@
 //! - `llama.cpp/ggml/src/ggml-metal/ggml-metal-context.h`
 //! - `llama.cpp/ggml/src/ggml-metal/ggml-metal-ops.h`
 //!
-//! all at v0.8.0 (`8642541b2`).
+//! all at v0.9.0 (`cd959bae9`).
 //!
 //! # Why these are hand-written rather than imported
 //!
@@ -246,7 +246,10 @@ pub extern fn ggml_metal_buffer_is_shared(buf: *Buffer) bool;
 pub extern fn ggml_metal_buffer_memset_tensor(buf: *Buffer, tensor: *Tensor, value: u8, offset: usize, size: usize) void;
 pub extern fn ggml_metal_buffer_set_tensor(buf: *Buffer, tensor: *Tensor, data: ?*const anyopaque, offset: usize, size: usize) void;
 pub extern fn ggml_metal_buffer_get_tensor(buf: *Buffer, tensor: *const Tensor, data: ?*anyopaque, offset: usize, size: usize) void;
+pub extern fn ggml_metal_buffer_set_tensor_n(buf: *Buffer, tensors: [*c]const [*c]Tensor, data: [*c]const ?*const anyopaque, offsets: [*c]const usize, sizes: [*c]const usize, n_tensors: usize) void;
+pub extern fn ggml_metal_buffer_get_tensor_n(buf: *Buffer, tensors: [*c]const [*c]const Tensor, data: [*c]const ?*anyopaque, offsets: [*c]const usize, sizes: [*c]const usize, n_tensors: usize) void;
 pub extern fn ggml_metal_buffer_cpy_tensor(buf: *Buffer, src: *const Tensor, dst: *Tensor) bool;
+pub extern fn ggml_metal_buffer_cpy_tensor_n(buf: *Buffer, srcs: [*c]const [*c]const Tensor, dsts: [*c]const [*c]Tensor, n_tensors: usize) bool;
 pub extern fn ggml_metal_buffer_clear(buf: *Buffer, value: u8) void;
 
 // -----------------------------------------------------------------------------
@@ -278,6 +281,7 @@ pub extern fn ggml_metal_op_flash_attn_ext_extra_blk(op: *const Tensor) usize;
 pub extern fn ggml_metal_op_flash_attn_ext_extra_tmp(op: *const Tensor) usize;
 pub extern fn ggml_metal_op_flash_attn_ext_extra_kv_f16(op: *const Tensor) usize;
 pub extern fn ggml_metal_op_flash_attn_ext_extra_idx(op: *const Tensor) usize;
+pub extern fn ggml_metal_op_flash_attn_ext_extra_rows(op: *const Tensor) usize;
 pub extern fn ggml_metal_op_argmax_extra(op: *const Tensor) usize;
 
 // -----------------------------------------------------------------------------

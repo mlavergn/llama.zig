@@ -8,8 +8,8 @@
 //! `process_mtmd_prompt`), the server's `base64_decode`, and
 //! `format_prompt_infill` and `format_prompt_rerank` from
 //! `llama.cpp/tools/server/server-common.cpp` and
-//! `llama.cpp/tools/server/server-common.h` (llama.cpp v0.8.0,
-//! `8642541b2`). Each declaration names what it ports and the line it
+//! `llama.cpp/tools/server/server-common.h` (llama.cpp v0.9.0,
+//! `cd959bae9`). Each declaration names what it ports and the line it
 //! began at.
 //!
 //! # Ownership

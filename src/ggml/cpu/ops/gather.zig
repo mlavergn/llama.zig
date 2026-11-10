@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.8.0 (`8642541b2`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.9.0 (`cd959bae9`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # `assert` versus `GGML_ASSERT`
@@ -100,7 +100,7 @@ fn getRows(comptime kind: RowKind, params: *const ComputeParams, dst: *Tensor) v
     }
 }
 
-/// Ports `ggml_compute_forward_get_rows` (ops.cpp:5340 @8642541b2).
+/// Ports `ggml_compute_forward_get_rows` (ops.cpp:5354 @cd959bae9).
 pub export fn ggml_compute_forward_get_rows(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -115,6 +115,7 @@ pub export fn ggml_compute_forward_get_rows(params: *const ComputeParams, dst: *
         c.GGML_TYPE_Q8_1,
         c.GGML_TYPE_MXFP4,
         c.GGML_TYPE_NVFP4,
+        c.GGML_TYPE_F8_E4M3,
         c.GGML_TYPE_Q2_K,
         c.GGML_TYPE_Q3_K,
         c.GGML_TYPE_Q4_K,

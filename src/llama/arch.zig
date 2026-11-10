@@ -10,7 +10,7 @@
 //!   predicates and `llama_arch_supports_save`
 //! - `llama.cpp/src/llama-arch.h` -- `LLM_KV`, `LLM_TN_IMPL`
 //!
-//! All at v0.8.0 (`8642541b2`). The four tables those functions read are
+//! All at v0.9.0 (`cd959bae9`). The four tables those functions read are
 //! generated into `arch_table.zig`.
 //!
 //! # Formatting
@@ -177,7 +177,7 @@ pub fn isRecurrent(arch: Arch) bool {
     };
 }
 
-/// Ports `llm_arch_is_hybrid` (llama-arch.cpp:1247 @8642541b2).
+/// Ports `llm_arch_is_hybrid` (llama-arch.cpp:1345 @cd959bae9).
 pub fn isHybrid(arch: Arch) bool {
     return switch (arch) {
         .jamba,
@@ -189,6 +189,7 @@ pub fn isHybrid(arch: Arch) bool {
         .lfm3,
         .nemotron_h,
         .nemotron_h_moe,
+        .metis16,
         .qwen3next,
         .kimi_linear,
         .bailingmoe3,
@@ -196,6 +197,7 @@ pub fn isHybrid(arch: Arch) bool {
         .glm5_next,
         .qwen35,
         .qwen35moe,
+        .clover_moe,
         .qwen4exp,
         .deepseek4,
         .deepseek41,
@@ -213,28 +215,29 @@ pub fn isDiffusion(arch: Arch) bool {
     };
 }
 
-/// Ports `llm_arch_supports_rs_rollback` (llama-arch.cpp:1287 @8642541b2).
+/// Ports `llm_arch_supports_rs_rollback` (llama-arch.cpp:1387 @cd959bae9).
 pub fn supportsRsRollback(arch: Arch) bool {
     return switch (arch) {
-        .kimi_k3, .qwen35, .qwen35moe, .qwen4exp, .deepseek4, .deepseek41, .glm5_next, .nemotron_h, .nemotron_h_moe, .lfm2, .lfm2moe, .lfm3, .bailingmoe3 => true,
+        .kimi_k3, .qwen35, .qwen35moe, .clover_moe, .qwen4exp, .deepseek4, .deepseek41, .glm5_next, .nemotron_h, .nemotron_h_moe, .lfm2, .lfm2moe, .lfm3, .bailingmoe3 => true,
         else => false,
     };
 }
 
-/// Ports `llm_arch_supports_mixed_batch` (llama-arch.cpp:1309 @8642541b2):
+/// Ports `llm_arch_supports_mixed_batch` (llama-arch.cpp:1410 @cd959bae9):
 /// whether a batch may mix token and embedding entries. The architectures
 /// it refuses pick weights, routing or the input's meaning per ubatch from
 /// whether the input is tokens or embeddings.
 pub fn supportsMixedBatch(arch: Arch) bool {
     return switch (arch) {
-        .cogvlm, .deepseek4, .deepseek41, .granite_switch, .eagle3, .dflash, .gemma4_assistant => false,
+        .cogvlm, .deepseek4, .deepseek41, .granite_switch, .eagle3, .dflash, .gemma4_assistant, .limite => false,
         else => true,
     };
 }
 
-/// Ports `llm_arch_supports_sm_tensor` (llama-arch.cpp:1324 @8642541b2).
+/// Ports `llm_arch_supports_sm_tensor` (llama-arch.cpp:1426 @cd959bae9).
 pub fn supportsSmTensor(arch: Arch) bool {
     return switch (arch) {
+        .clover_moe,
         .grok,
         .mpt,
         .plamo2,
@@ -256,19 +259,19 @@ pub fn supportsSmTensor(arch: Arch) bool {
         .nemotron_h,
         .nemotron_h_moe,
         .granite_hybrid,
-        .lfm3,
         .minimax_01,
         .minimax_m2,
         .minimax_m3,
         .mistral4,
+        .mistral_large4,
         .mellum, // [TAG_MOE_AMAX_SCALE]
         .flint, // [TAG_MOE_AMAX_SCALE]
         .laguna, // [TAG_MOE_AMAX_SCALE]
         .kimi_linear,
         .bailingmoe3,
         .kimi_k3,
-        .glm5_next,
         .qwen3tts,
+        .limite,
         => false,
         else => true,
     };

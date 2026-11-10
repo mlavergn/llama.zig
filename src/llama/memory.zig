@@ -11,7 +11,7 @@
 //!   `llama_memory_status_is_fail`, `llama_memory_bufs`'s bodies,
 //!   `llama_memory_buffers_writer` and `llama_memory_get_buffers`
 //!
-//! All at v0.8.0 (`8642541b2`).
+//! All at v0.9.0 (`cd959bae9`).
 //!
 //! # Interfaces, not classes
 //!

@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/diagmask.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/diagmask.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/diagmask.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernel, `diag_mask_inf_f32`, stays CUDA.
 //!
 //! The block is `(1, 32, 1)` and the grid `(nrows, ceil(ncols / 32), 1)`:

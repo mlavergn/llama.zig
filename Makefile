@@ -31,7 +31,7 @@ LINT_FILES := $(filter-out $(LINT_EXCLUDE),build.zig $(shell find $(LINT_DIRS) -
 # the checkout may live under a path with one ("/Volumes/Macintosh HD").
 CMAKE ?= $(or $(shell ls -d "$(CURDIR)"/.tools/cmake-*/CMake.app/Contents/bin/cmake 2>/dev/null | head -1),cmake)
 
-MACOS_FLAGS = -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_OSX_SYSROOT=macosx -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DCMAKE_BUILD_TYPE=Release -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=OFF -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF -DBUILD_SHARED_LIBS=OFF -DLLAMA_CURL=OFF
+MACOS_FLAGS = -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_OSX_SYSROOT=macosx -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=26.0 -DCMAKE_BUILD_TYPE=Release -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=OFF -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF -DBUILD_SHARED_LIBS=OFF -DLLAMA_CURL=OFF
 
 ZIG_CC  = $(CURDIR)/scripts/zigcc
 ZIG_CXX = $(CURDIR)/scripts/zigcxx
@@ -115,7 +115,7 @@ xcframework-check:
 # Build llama.cpp for iOS with CMake.
 buildios:
 	-mkdir cmake-build
-	cd cmake-build; cmake ../llama.cpp -G "Unix Makefiles" -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=OFF -DGGML_OPENMP=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF -DLLAMA_CURL=OFF
+	cd cmake-build; cmake ../llama.cpp -G "Unix Makefiles" -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=26.0 -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=OFF -DGGML_OPENMP=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF -DLLAMA_CURL=OFF
 	cd cmake-build; make -j
 
 # Build llama.cpp for macOS with Apple clang; the control build.
@@ -220,7 +220,7 @@ test:
 	@# reaches; nothing else would notice until the xcframework next builds.
 	@# The xcframework's iOS device slice: libggml with BLAS, libmtmd with
 	@# libllama inside, for the A7 upstream's framework is built for.
-	zig build xcframework -Dblas -Dtarget=aarch64-ios.16.4 -Dcpu=apple_a7 --release=fast --prefix zig-out/ios-check
+	zig build xcframework -Dblas -Dtarget=aarch64-ios.26.0 -Dcpu=apple_a7 --release=fast --prefix zig-out/ios-check
 	@printf '\n== upstream citations ==\n'
 	./scripts/port-links
 	@printf '\n== scheduler diff vs reference ==\n'

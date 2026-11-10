@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/paddleocr.cpp` at v0.8.0 (`8642541b2`).
+//! Ports `llama.cpp/tools/mtmd/models/paddleocr.cpp` at v0.9.0 (`cd959bae9`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -12,12 +12,14 @@ const graph = @import("../graph.zig");
 const dotsocr = @import("dotsocr.zig");
 const c = impl.c;
 
-/// Ports `build` (mtmd/models/paddleocr.cpp:3 @8642541b2), a member of `clip_graph_paddleocr`.
+/// Ports `build` (mtmd/models/paddleocr.cpp:3 @cd959bae9), a member of `clip_graph_paddleocr`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
     const hparams = g.hparams;
+    impl.ggmlAssert(@rem(g.img.nx(), g.patch_size * model.hparams.n_merge) == 0, "paddleocr.cpp", 4, "img.nx() % (patch_size * model.hparams.n_merge) == 0");
+    impl.ggmlAssert(@rem(g.img.ny(), g.patch_size * model.hparams.n_merge) == 0, "paddleocr.cpp", 5, "img.ny() % (patch_size * model.hparams.n_merge) == 0");
     const n_pos = g.n_patches;
     const num_position_ids = n_pos * 4; // m-rope requires 4 dim per position
 

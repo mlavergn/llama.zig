@@ -7,7 +7,7 @@
 //! - `llama.cpp/src/llama-cparams.h` -- `LLAMA_MAX_SEQ` and `llama_cparams`
 //! - `llama.cpp/src/llama-cparams.cpp` -- `llama_max_parallel_sequences`
 //!
-//! All at v0.8.0 (`8642541b2`).
+//! All at v0.9.0 (`cd959bae9`).
 
 const std = @import("std");
 const impl = @import("impl.zig");
@@ -22,7 +22,7 @@ pub fn maxParallelSequences() usize {
     return max_seq;
 }
 
-/// Mirrors `llama_cparams` (llama-cparams.h:10 @8642541b2).
+/// Mirrors `llama_cparams` (llama-cparams.h:10 @cd959bae9).
 pub const Cparams = struct {
     /// Context size used during inference.
     n_ctx: u32 = 0,
@@ -74,6 +74,10 @@ pub const Cparams = struct {
     /// Use the fused top-k sparse attention mask.
     fused_top_k_mask: bool = false,
     auto_ftkm: bool = false,
+    /// A unified cache attends to the cells of each sequence only
+    /// (`ggml_flash_attn_ext_rows`).
+    fused_kv_rows: bool = false,
+    auto_fkvr: bool = false,
     no_perf: bool = false,
     warmup: bool = false,
     op_offload: bool = false,
@@ -91,6 +95,9 @@ pub const Cparams = struct {
     /// vector into every graph's parameters, and nothing writes it after
     /// the context is built.
     embeddings_layer_inp: []const bool = &.{},
+    /// Write the enabled layer inputs to a device buffer instead of host
+    /// memory.
+    embeddings_layer_inp_dev: bool = false,
 
     ctx_type: c.enum_llama_context_type = 0,
     /// The RoPE scaling the context resolved: the parameter, or the

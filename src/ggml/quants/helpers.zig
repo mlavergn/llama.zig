@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.8.0, `8642541b2`), lines
+//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.9.0, `cd959bae9`), lines
 //! 619-889. Each function names the C function it replaces and the line it
 //! began at.
 //!
@@ -103,7 +103,7 @@ pub inline fn nearestInt(fval: f32) i32 {
     return (i & 0x007fffff) - 0x00400000;
 }
 
-/// Ports `make_qx_quants` (ggml-quants.c:628 @8642541b2).
+/// Ports `make_qx_quants` (ggml-quants.c:637 @cd959bae9).
 ///
 /// Fits a symmetric scale for `n` weights quantized to `[-nmax, nmax-1]`,
 /// searching 19 candidate scales around the naive one and keeping whichever
@@ -284,7 +284,7 @@ pub fn makeQ3Quants(n: usize, nmax: i32, x: [*]const f32, l_out: [*]i8, do_rmse:
     return 1 / iscale;
 }
 
-/// Ports `make_qkx2_quants` (ggml-quants.c:799 @8642541b2).
+/// Ports `make_qkx2_quants` (ggml-quants.c:808 @cd959bae9).
 ///
 /// The asymmetric fit, for the formats storing both a scale and a min. It tries
 /// `nstep + 1` candidate scales and, for each, solves the weighted least
@@ -404,7 +404,7 @@ pub fn makeQkx2Quants(
     return scale;
 }
 
-/// Ports `make_qkx3_quants` (ggml-quants.c:993 @8642541b2).
+/// Ports `make_qkx3_quants` (ggml-quants.c:1002 @cd959bae9).
 ///
 /// `makeQkx2Quants`'s sibling, with two differences that matter:
 ///

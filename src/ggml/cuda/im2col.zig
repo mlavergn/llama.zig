@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/im2col.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/im2col.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/im2col.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels, `im2col_kernel` and `im2col_3d_kernel`, stay CUDA.
 
 const std = @import("std");

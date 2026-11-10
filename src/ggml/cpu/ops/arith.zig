@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.8.0 (`8642541b2`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.9.0 (`cd959bae9`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # Accelerate is live here
@@ -38,7 +38,7 @@ extern fn vDSP_vadd(a: [*]const f32, ia: Stride, b: [*]const f32, ib: Stride, ds
 /// reads like the C's, which calls it across a translation-unit boundary too.
 extern fn ggml_compute_forward_add_non_quantized(params: *const ComputeParams, dst: *Tensor) void;
 
-/// Ports `ggml_compute_forward_add_q_f32` (ops.cpp:578 @8642541b2).
+/// Ports `ggml_compute_forward_add_q_f32` (ops.cpp:588 @cd959bae9).
 fn addQF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -66,8 +66,9 @@ fn addQF32(params: *const ComputeParams, dst: *Tensor) void {
     impl.assert(l.nb1 <= l.nb2, "nb1 <= nb2");
     impl.assert(l.nb2 <= l.nb3, "nb2 <= nb3");
 
-    impl.assert(c.ggml_is_quantized(src0.type), "ggml_is_quantized(src0->type)");
+    impl.assert(c.ggml_is_quantized(src0.type) or src0.type == c.GGML_TYPE_F8_E4M3, "ggml_is_quantized(src0->type) || src0->type == GGML_TYPE_F8_E4M3");
     impl.assert(src1.type == c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    impl.assert(@rem(l.ne00, c.ggml_blck_size(@"type")) == 0, "ne00 % ggml_blck_size(type) == 0");
 
     const dr = @divTrunc(nr + nth - 1, nth);
     const ir0 = dr * ith;
@@ -114,7 +115,7 @@ fn addQF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_add` (ops.cpp:654 @8642541b2).
+/// Ports `ggml_compute_forward_add` (ops.cpp:663 @cd959bae9).
 pub export fn ggml_compute_forward_add(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -129,6 +130,7 @@ pub export fn ggml_compute_forward_add(params: *const ComputeParams, dst: *Tenso
         c.GGML_TYPE_Q8_0,
         c.GGML_TYPE_MXFP4,
         c.GGML_TYPE_NVFP4,
+        c.GGML_TYPE_F8_E4M3,
         c.GGML_TYPE_Q2_K,
         c.GGML_TYPE_Q3_K,
         c.GGML_TYPE_Q4_K,
@@ -323,7 +325,7 @@ fn add1Narrow(comptime T: type, comptime scalar_is_f32: bool, params: *const Com
     }
 }
 
-/// Ports `ggml_compute_forward_add1_q_f32` (ops.cpp:926 @8642541b2).
+/// Ports `ggml_compute_forward_add1_q_f32` (ops.cpp:936 @cd959bae9).
 fn add1QF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -353,7 +355,7 @@ fn add1QF32(params: *const ComputeParams, dst: *Tensor) void {
     impl.assert(l.nb1 <= l.nb2, "nb1 <= nb2");
     impl.assert(l.nb2 <= l.nb3, "nb2 <= nb3");
 
-    impl.assert(c.ggml_is_quantized(src0.type), "ggml_is_quantized(src0->type)");
+    impl.assert(c.ggml_is_quantized(src0.type) or src0.type == c.GGML_TYPE_F8_E4M3, "ggml_is_quantized(src0->type) || src0->type == GGML_TYPE_F8_E4M3");
     impl.assert(dst.type == src0.type, "dst->type == src0->type");
     impl.assert(src1.type == c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
 
@@ -391,7 +393,7 @@ fn add1QF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_add1` (ops.cpp:1087 @8642541b2).
+/// Ports `ggml_compute_forward_add1` (ops.cpp:1097 @cd959bae9).
 pub export fn ggml_compute_forward_add1(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -426,6 +428,7 @@ pub export fn ggml_compute_forward_add1(params: *const ComputeParams, dst: *Tens
         c.GGML_TYPE_Q8_1,
         c.GGML_TYPE_MXFP4,
         c.GGML_TYPE_NVFP4,
+        c.GGML_TYPE_F8_E4M3,
         c.GGML_TYPE_Q2_K,
         c.GGML_TYPE_Q3_K,
         c.GGML_TYPE_Q4_K,
@@ -533,7 +536,7 @@ fn accF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_acc` (ops.cpp:1241 @8642541b2).
+/// Ports `ggml_compute_forward_acc` (ops.cpp:1252 @cd959bae9).
 pub export fn ggml_compute_forward_acc(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 

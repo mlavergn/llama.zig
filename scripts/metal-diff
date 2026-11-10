@@ -130,4 +130,10 @@ zig cc -mcpu=baseline harness/metal_diff.c -o "$tmp/metal_diff" -std=c11 -O2 \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }
 
-"$tmp/metal_diff"
+"$tmp/metal_diff" || exit 1
+
+# The batched buffer slots again (v0.9.0), through the private buffer iface:
+# the device decides shared or private once per process, from this variable.
+echo
+echo "=== batched buffer slots, private buffers ==="
+GGML_METAL_SHARED_BUFFERS_DISABLE=1 METAL_DIFF_TENSOR_N_ONLY=1 "$tmp/metal_diff"

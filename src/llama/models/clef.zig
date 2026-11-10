@@ -12,7 +12,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/clef.cpp` at v0.8.0 (`8642541b2`):
+//! Ported from `llama.cpp/src/models/clef.cpp` at v0.9.0 (`cd959bae9`):
 //! `llama_model_clef`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, `clef_spans` and `clef_get_spans`, the graph inputs
 //! `input_decision` and `llm_graph_input_attn_clef`, and its `graph` with
@@ -424,7 +424,7 @@ const InpDecision = struct {
     }
 };
 
-/// Ports `llm_graph_input_attn_clef` (models/clef.cpp:319 @8642541b2): a
+/// Ports `llm_graph_input_attn_clef` (models/clef.cpp:319 @cd959bae9): a
 /// causal mask by batch order, since the tokens of an image share one
 /// position. The C++ derives from `llm_graph_input_attn_no_cache` and
 /// overrides `set_input`; here the base is a member the attention reads.
@@ -442,12 +442,12 @@ const InpAttnClef = struct {
     }
 
     /// Ports `llm_graph_input_attn_clef`'s `set_input` (models/clef.cpp:323
-    /// @8642541b2): the mask is `n_kv` wide, padded past the batch.
+    /// @cd959bae9): the mask is `n_kv` wide, padded past the batch.
     pub fn setInput(self: *InpAttnClef, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
-        const m = self.base.self_kq_mask.?;
+        const m = self.base.self_attn_mask.raw.?;
         const n_kv: usize = @intCast(m.ne[0]);
-        impl.assert(c.ggml_backend_buffer_is_host(m.buffer), "models/clef.cpp", 336, "ggml_backend_buffer_is_host(self_kq_mask->buffer)");
+        impl.assert(c.ggml_backend_buffer_is_host(m.buffer), "models/clef.cpp", 336, "ggml_backend_buffer_is_host(self_attn_mask.raw->buffer)");
         if (m.type == c.GGML_TYPE_F16) {
             fillMask(u16, @ptrCast(@alignCast(m.data)), ubatch, n_kv, c.ggml_fp32_to_fp16(0.0), c.ggml_fp32_to_fp16(-std.math.inf(f32)));
         } else {
@@ -460,7 +460,7 @@ const InpAttnClef = struct {
 // The graph
 
 /// Ports `llama_model_clef::graph`'s `build_attn_inp_causal`
-/// (models/clef.cpp:346 @8642541b2): `build_attn_inp_no_cache` with a
+/// (models/clef.cpp:346 @cd959bae9): `build_attn_inp_no_cache` with a
 /// causal mask even when the batch takes the encoder path.
 fn buildAttnInpCausal(b: *const graph.Builder) *graph.InpAttnNoCache {
     const inp = allocator.create(InpAttnClef) catch oom();
@@ -470,11 +470,9 @@ fn buildAttnInpCausal(b: *const graph.Builder) *graph.InpAttnNoCache {
 
     // `GGML_PAD(n_tokens, 256)`.
     const n_kv: i64 = @divTrunc(b.n_tokens + 255, 256) * 256;
-    inp.base.self_kq_mask = c.ggml_new_tensor_4d(b.ctx0, type_mask, n_kv, b.n_tokens, 1, 1);
-    c.ggml_set_input(inp.base.self_kq_mask);
-    b.cb(inp.base.self_kq_mask.?, "self_kq_mask", -1);
-
-    inp.base.self_kq_mask_cnv = inp.base.self_kq_mask;
+    inp.base.self_attn_mask.raw = c.ggml_new_tensor_4d(b.ctx0, type_mask, n_kv, b.n_tokens, 1, 1);
+    c.ggml_set_input(inp.base.self_attn_mask.raw);
+    b.cb(inp.base.self_attn_mask.raw.?, "self_kq_mask", -1);
 
     return &b.res.addInput(InpAttnClef, inp).base;
 }

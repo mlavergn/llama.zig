@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/sumrows.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/sumrows.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/sumrows.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels, `reduce_rows_f32<false>` and `reduce_rows_f32_strided<false>`
 //! from `reduce_rows.cuh`, stay CUDA.
 //!

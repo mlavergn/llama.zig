@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! **Mostly not a port.** Upstream's `llama-cli` (v0.8.0, `8642541b2`) is a
+//! **Mostly not a port.** Upstream's `llama-cli` (v0.9.0, `cd959bae9`) is a
 //! client of a `llama-server` it runs in-process: it posts the conversation
 //! to `/v1/chat/completions` and prints the `reasoning_content` and `content`
 //! deltas of the stream (`llama.cpp/tools/cli/cli-context.cpp`). This file

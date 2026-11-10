@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` (v0.8.0, `8642541b2`): the
+//! Ported from `llama.cpp/src/llama-vocab.cpp` (v0.9.0, `cd959bae9`): the
 //! C API at the end of the file, from `llama_vocab_n_tokens` through
 //! `llama_detokenize` -- its 49 unmangled exports -- with the forwarding
 //! members of `llama_vocab` they go through. The vocabulary is

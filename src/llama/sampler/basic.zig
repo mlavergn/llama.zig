@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-sampler.cpp` (v0.8.0, `8642541b2`):
+//! Ported from `llama.cpp/src/llama-sampler.cpp` (v0.9.0, `cd959bae9`):
 //! greedy, dist, top-k, top-p, min-p, typical, temp, temp-ext, XTC and
 //! top-n-sigma, with the backend graph builders of those that have one. Each
 //! declaration below names the C++ it replaces and the line it began at.

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/llama.cpp` at v0.8.0 (`8642541b2`):
+//! Ported from `llama.cpp/src/models/llama.cpp` at v0.9.0 (`cd959bae9`):
 //! `llama_model_llama`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph<embed>`; and from
 //! `llama.cpp/src/models/llama-embed.cpp`, `llama_model_llama_embed`'s

@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-model.cpp` (v0.8.0, `8642541b2`): the
+//! Ported from `llama.cpp/src/llama-model.cpp` (v0.9.0, `cd959bae9`): the
 //! C API at the end of the file, from `llama_model_default_params` through
 //! `llama_model_is_diffusion` -- its unmangled exports. The loading entry
 //! points are `llama.cpp/src/llama.cpp`'s, in `api/llama.zig`.
@@ -159,7 +159,7 @@ pub fn llama_n_head(model: ?*const c.struct_llama_model) callconv(.c) i32 {
     return llama_model_n_head(model);
 }
 
-/// Ports `llama_model_rope_type` (llama-model.cpp:3504 @8642541b2); the
+/// Ports `llama_model_rope_type` (llama-model.cpp:3601 @cd959bae9); the
 /// table is `Model.ropeType`'s.
 pub fn llama_model_rope_type(model: ?*const c.struct_llama_model) callconv(.c) c.enum_llama_rope_type {
     return modelOf(model).ropeType();

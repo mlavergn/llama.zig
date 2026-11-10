@@ -13263,3 +13263,307 @@ over as a second commit object, `0f36bbc`. What it found:
 - **The 26 CUDA and Vulkan injections**: 23 caught, 2 inert, `CONV_3D`'s
   256x128 tile unreachable on the GB10's driver; the gates' two holes they
   found are closed ("Injections", above).
+
+## Upstream sync v0.8.0 → v0.9.0
+
+The seventh sync. The pin moved from `v0.8.0` (`8642541b2`, `b11960`) to
+`v0.9.0` (`cd959bae9`, `b12110`), ggml from 0.28.0 to 0.29.0, and the port's
+version with it: `0.9.0`. v0.9.0 is upstream's latest release (published
+2026-11-04), so this sync makes the port current. `llama.cpp.zmake` moved
+first (`a2239a0`): `ggml-vulkan-comm.cpp` joins the Vulkan sources; later in
+the sync its `addExecutable` began embedding `common/win-app.manifest`.
+
+### What moved
+
+150 commits; 419 files, +71,165 / −22,339 overall, 223 files and
++33,382 / −4,814 in the ported paths. `scripts/upstream-map` gave **584
+touched citations**, **278 unmapped hunks** and **43 uncited files**; the
+`begin` commit (`9908032`) repinned **11,020** unchanged citations and
+`upstream-relines` moved **594** line literals.
+
+The lead ran every generator, then ported what every reference tool needed
+to link: ggml.c's strided `ggml_new_tensor_impl` and views,
+`ggml_flash_attn_ext_rows`, the `GGML_TYPE_F8_E4M3` traits and quantizers,
+and ggml-backend.cpp's `ggml_backend_tensor_set_n`/`_get_n`/`_copy_n` with
+the three new `ggml_backend_buffer_i` slots. The work then went to **eleven**
+agents with disjoint files -- ggml and the CPU, Metal, CUDA, Vulkan,
+libllama's core, libllama's model/vocabulary, the architectures, libmtmd, the
+mtmd decoders, `common/` with the CLI and the tools, and the server -- coordinating
+through one append-only log and the `zlock` lock. No STOPGAP and no
+`@8642541b2` citation was left in `src cli tools` at the end;
+`port-links` resolves 12,424 citations in 682 files, all at `cd959bae9`.
+
+**What was ported, by area:**
+
+- **ggml and the CPU**: `GGML_TYPE_F8_E4M3` (`ggml_table_f32_f8_e4m3`, the
+  `type_traits_cpu` entry, `quantize_row_f8_e4m3`,
+  `ggml_vec_dot_f8_e4m3_f32`, dup/add/add1/out_prod/get_rows, the plan's work
+  terms); flash attention over `kv_rows` (`src[5]`) on both the one-chunk and
+  tiled paths, split-KV kept off; the meta backend's permuted-view and slab
+  arms, ARANGE mirrored; gguf's host-buffer fast path; the IQ4_NL
+  quantizer's `best_index_iq4nl` rewrite (bit-identical on every golden).
+  **The f8 dot product's scalar tail has a measured shape**: the table lookup
+  stops clang vectorizing it, but it still groups products as a strict
+  in-order reduction -- 4 on Apple A14+, 2 at `generic` and A7–A13, all fused
+  on x86 -- `f8_tail_group`, an unmeasured CPU a compile error. The three ARM
+  repack additions are SVE arms, not ported. ggml.c 389 → 390 exports,
+  ggml-quants.c 79 → 82, ggml-cpu.c 65 → 66, ggml-cpu/quants.c 45 → 47,
+  ggml-backend.cpp 107 → 110.
+- **Metal**: the batched slots on both buffer types; FA over `kv_rows`
+  (`get_pipeline_flash_attn_ext_rows`, the gather pass, `extra_rows`
+  scratch, `has_rows` on the vec kernel); unary/binary threadgroups up to 256,
+  GLU rows split over threadgroups; MXFP4's smem dropped.
+  ggml-metal-device.cpp 86 → 87, ggml-metal-ops.cpp 71 → 72. F8_E4M3 has no
+  Metal kernel; device.m refuses it, unmodified.
+- **CUDA**, ported blind and type-checked for aarch64 Linux: FA over
+  `kv_rows` (a `KV_rows` argument on every vec/tile/mma FA kernel, MMA-only
+  routing, the CDNA sparse arms), the batched slots, `batch-get.cu`'s host
+  side (`batch_get.zig`; 72 top-level `.cu` files), MMQ gate/up/GLU fusion for
+  MUL_MAT_ID, the CUDA-graph eviction rework. `comm_init_rank` is
+  NCCL-only -- deferred.
+- **Vulkan**, ported blind: `ggml-vulkan-comm.cpp` → `src/ggml/vulkan/comm.zig`,
+  the all-reduce (bridge and sync_fd paths) reached through
+  `get_proc_address` -- no unmangled export, so the contract stays at 9 C
+  symbols; ready-value submission waits, pooled binary semaphores,
+  `VK_KHR_external_semaphore_fd`, `supports_op` refusing FA with `src[5]`.
+  `gen-vk-push` reproduces 53 structs byte for byte.
+- **libllama core**: the graph's attention-mask refactor (`AttnMask`), per-layer
+  K/V rotations owned by the KV cache, `build_attn_mha`'s `kv_rows` path
+  through `ggml_flash_attn_ext_rows`; per-sequence cell rows in the KV cache;
+  recurrent and DSV4 rollback limits (`rs_max`); the layer-input device buffer
+  and `embd_row` batches for DFlash/DSpark (`llama_set_embeddings_layer_inp_dev`,
+  `llama_supports_embd_row`, `llama_batch_ext_add_embd_row` -- llama-ext.h,
+  not exported: 28 → 31 there); state I/O batched through the new
+  `tensor_*_n` calls. `llama.h` exports unchanged at 255.
+- **libllama model and vocabulary**: `hparams.kv_source` (cross-layer KV
+  sharing); `load_tensors`'s output scales; Mistral Large 4's DSA memory;
+  the loader's reused staging buffer; F8_E4M3 ftype; limite/metis16/LFM3
+  quantizer rules; the saver's new keys; the `tekken-num3` pre-tokenizer.
+- **Architectures**: four new -- `clover_moe`, `limite`, `metis16`,
+  `mistral_large4` -- 168 `llama_model_mapping` entries, 172 files; DFlash's
+  +387 lines (Mistral Large 4's DSpark, the RNN Markov head); 19 models moved
+  to the new graph API.
+- **libmtmd**: three projector types -- `nemotron_transcribe`, `chatterbox`,
+  `chatterbox_spkenc` (CAMPPlus, host LSTM and perceiver, FMA placement read
+  off the reference's disassembly) -- the voice API (`mtmd_*` 107 → 112),
+  the qwen3vl preprocessor. **The mtmd decoders**: miniaudio 0.11.25 →
+  0.11.26 (32-bit FLAC through int64 buffers, stricter WAV/MP3 headers, a new
+  8-bit WAV formula).
+- **`common/`, the CLI, the tools**: `common_batch` embedding rows, DFlash
+  device features, MTP state on shared memory, control vectors bounded by
+  `n_layer`, the reasoning budget's end tag ending forcing, the gpt-oss and
+  qwen3-coder parsers, gguf-split set checks, export-lora BF16, imatrix's
+  embedding state (upstream fixed its NextN collection: the v0.7.0 deferral
+  is gone), tts predefined voices; `win-app.manifest` embedded in every
+  executable (llama-cli, the tools, zmake's reference). zigjinja `5b2472e`
+  (v3.1.9): map-by-filter, string coercion with arguments, builtin argument
+  checks.
+- **The server**: cpp-httplib 0.62 → 0.64 (Transfer-Encoding 501s, Range
+  only on GET/HEAD, the unread-body drain limit, dot segments in redirects);
+  TTS voices; the Responses API's `extra_params`; the decision prefix cap;
+  `use_ckpt_tgt` on the draft length.
+- **Apple minimum OS 26.0** on every platform (PLAN.md Decision 66, from
+  Marc mid-sync): the xcframework's slices, `Package.swift`, the reference
+  CMake builds. `verify.sh compat` holds the slices to `COMPAT_MINOS`
+  instead of upstream's minimums.
+
+### What the tooling got wrong
+
+- **`gen-hparams` stopped** on `std::array<float, 3> ... = {}`; it now takes
+  `= {}` as value-initialization. **`gen-layer`** did not write
+  `model_saver.zig`'s `layer_fields`, a hand-kept copy of the same order, and
+  the new layer members stopped the build there; it writes that block now.
+  **`types-golden`** did not print the traits checksum, which F8_E4M3 moved;
+  `harness/types_golden.c` computes it from the stock C now.
+- **The repin missed** wrapped headers (`v0.8.0` / `(\`8642541b2\`)` over
+  two lines), `rwkv7.zig`, and every `harness/` citation; agents and the lead
+  moved them by hand, each checked unchanged at B.
+- **`upstream-literals` misses literals behind wrappers** --
+  `assertC(cond, N, ...)` in `tools/common`, the server's `ggmlAssert` -- and
+  `relines` left ten stale in `kv_cache_dsv4.zig`; all fixed by hand, the
+  DSV4 ten mapped through a line-level diff of the file (two of its own
+  guesses were wrong). Its remaining five reports are false positives
+  (multi-line messages, a throw, a duplicated message).
+- **`upstream-map` gives A's line ranges and cannot see inlining**:
+  `dr_mp3`'s seek inlines the changed brute-force seek under an unchanged
+  citation; found by reading the diff.
+- **`zlock` had no queue**: `context-diff` waited 33 minutes and lost every
+  handoff, and holders killed by the tool's background time limit left the
+  lock behind. It now queues FIFO (tickets in `zlock.q/`) and clears a lock
+  whose holder pid is dead.
+- `cmake-build/apple`'s cache came from the pre-move path
+  (`/Users/mlavergn/src/mlavergn/llamazig`); it was moved aside and rebuilt.
+- Something staged 789 files in git's index mid-run (index only, nothing
+  committed); the tree was staged deliberately at commit.
+
+### Gates that were wrong
+
+- **The DFlash fixtures were silently lost**: at B the recipe's
+  `attention.kv_lora_rank` selects Mistral Large 4's DSpark branch, and all
+  11 failed to write; `df_meta` drops the key now.
+- **`context-diff`'s "layer inputs, device" aborted the C++ under
+  `LLAMA_SPLIT_MODE_TENSOR`**: the device buffer is a one-tensor meta buffer
+  with a 16-view headroom (ggml-backend-meta.cpp:1810) and the case enables
+  all 24 Qwen3.5 layers. `tensor_ok = false` for it, and a new
+  "layer inputs, device, 8" runs everywhere.
+- **The DSV4 family lost most of `arch-model-diff`'s coverage to two
+  upstream aborts** (below, "Upstream behaviour kept"). The harness now skips
+  only the steps that cannot run there: the embeddings toggle on `deepseek4`
+  and `qwen4exp` (`embd_out_wider_archs`) and `saveState`'s `seq 3` probe on
+  a multi-sequence DSV4 cache (`dsv4_cache_archs`). deepseek4-moe went from 4
+  cases + 23 aborts to 23 + 4, qwen4exp's three fixtures likewise, and
+  deepseek41-moe runs all 27 cases with no abort; every newly reached step
+  matches.
+- **`use_ckpt_tgt` escaped `server-diff spec`**: with the n-gram drafters
+  `n_rs_seq` is 0 and old and new rules agree. A new block drives the MTP
+  fixture `qwen35-mtp-dense` with `draft-mtp,ngram-simple` and token-id
+  prompts built from the fixture's own 7-token loop, so 6-token drafts are
+  accepted 4/6 and 5/6; v0.8.0's rule injected fails 3 of 53.
+- **`tools-diff server`'s mask** missed one shape of upstream's logger race:
+  the direct `error:` line landing between the timestamp and the level letter,
+  a bare `T ` left behind (1 run in 4 under load). `s/^(T )?([WIE] )?//`.
+- **The new compat helper wrote its reason to stderr**, which the gate does
+  not capture, so the tvOS `vtool` negative test failed for another reason;
+  the reason goes to stdout now.
+- **The ggml agent's first f8 tail injection escaped**: every product was
+  exact (4-bit f8 times at most 16-bit inputs). Cases with `src1` scaled by
+  1/3 make the products round, and showed `generic`'s tail shape.
+
+### Bugs found
+
+- **libmtmd's `Context.create`** registered `errdefer deinitMembers` before
+  `errdefer gpa.destroy`, so a failed load freed the context and then
+  deinitialized it -- pre-existing, a write-after-free once v0.9.0's
+  `gen_ref.deinit()` arrived. It showed as an intermittent port-only Metal
+  crash in `mtmd-diff`'s chatterbox cases (1 run in 4); libgmalloc caught it
+  on the `/nonexistent.gguf` probe.
+
+### Upstream behaviour kept
+
+- **DeepSeek V4 and Qwen4-Exp cannot return token embeddings**:
+  `models/deepseek4.cpp:45` and `models/qwen4exp.cpp:54` set
+  `n_embd_out_impl = dsv4_hc_mult * n_embd`, the MTP hidden state's width,
+  while `t_embd` is `result_norm`, `n_embd` wide; `decode` asks for 4x the
+  tensor and `ggml_backend_tensor_get_async` aborts (ggml-backend.cpp:479).
+  Shown on pure upstream under lldb (`result_embd_pooled` `[512, 1]`, 8192
+  bytes asked) and with upstream's own `llama-embedding` on
+  `test-llama-archs -a deepseek4` -- it dies in the warmup decode. Present
+  since at least v0.8.0 and still on master (`7592b61d3`). Reported upstream
+  as issue #32036; a fix (an `n_embd_nextn` width for the MTP hidden state,
+  `llama_model_n_embd_nextn()` in llama-ext.h) is on the fork branch
+  `mlavergn/issue-32036`. The port mirrors upstream until a release fixes it.
+- **The DSV4 cache asserts on an out-of-range sequence id**: with more than
+  one sequence it keeps exactly `n_seq_max` streams, and `state_write`
+  (llama-kv-cache-dsv4.cpp:1728) hands the id to `seq_pos_max`
+  (llama-kv-cache.cpp:735), where other memories answer an empty state.
+- **Every parakeet mmproj aborts at load**: parakeet.cpp's relative-shift
+  `ggml_view_3d` reaches past its source, which ggml.c's new view bound
+  (`bbb02c93e`, #31584) asserts on; the warmup always takes it. The fixture
+  is expect-fail.
+- Mistral Large 4's DSpark with a reduced draft vocabulary aborts upstream
+  (its logits are never scattered); its fixture uses the full vocabulary.
+- The meta backend's 16-view headroom (above) limits the layer-input device
+  buffer under tensor split.
+
+### The gates
+
+The combined pass ran on one tree after every area had finished, serially
+(`make validate` first, the fixtures, the five-CPU matrix, every other Mac
+gate, then `xcframework-check`), with a follow-up for the three items it
+could not pass on the first run (`parity-port`, which the runner called
+without its model; the full `context-diff`; `tools-diff server`).
+
+| Gate | Result |
+|---|---|
+| `make validate` | unit tests 540/542 (2 skipped), `test-port` 419 debug and 420 release, `test-llama` 342, `test-mtmd` 107, every gate `make test` runs; `port-coverage` every unit 100% (`ggml.c` 390/390) |
+| `make probe` | both runs |
+| `ops-diff`, `repack-diff`, `node-diff`, `parity-port`, `parity-port-cpu` | identical at `baseline`, `apple_m3`, `generic`, `apple_a7` and `apple_a12`: 1,688 op results (1,676 at the three without dotprod), 141 repack checks, 2,862 nodes and 33 fused decodes at 1 and 4 threads, 6/6 and 6/6 |
+| `node-diff --gpu` | 2,862 nodes and 33 fused decodes identical |
+| `graph-diff` | 320 nodes and 46 assertion checks |
+| `backend-ops` | 26,751 op configurations, both backends; `--diff` 32,120 lines identical |
+| `sched-diff` | 20 assignments and 12 callback calls |
+| `metal-diff`, `metal-ops-diff` | 82,278 answers and 16 batched-slot answers (also on private buffers); 859 op results on the GPU |
+| `tuning-diff` | 10,291,540 lookups |
+| `struct-layout` | 3,365 `kargs` facts and 348 more |
+| `abi-check` | 34 entry points |
+| `sampler-diff` | 40,825 records |
+| `libcxx-diff`, `regex-diff` | 453,010 and 43,537,552 results |
+| `unicode-diff`, `vocab-diff`, `arch-diff` | 9,554,020; 128,461,414 (104 files); 243,331 |
+| `loader-diff` | 538,606 results |
+| `batch-diff` | 242,364 results, 19,901,786 checks |
+| `api-diff` | 85,854,577 checks (llama-core's area run) |
+| `context-diff` | 6,469,132 checks, 0 failures (the follow-up, after the tensor-split fix) |
+| `moe-slru-diff` | 5,555,840 results |
+| `arch-fixtures`, `mmproj-fixtures` | 229 fixtures (142 through `test-llama-archs`, 87 extra; 210 top-level and 19 in `mtp/`; the same four "no fixture" as v0.8.0); 212 of 212 mmproj checks |
+| `arch-model-diff` | 208 pass, 0 fail, the two `REF-ABORT`s known since v0.3.0; then the DSV4 family 5/5 after the harness fix |
+| `mtp-diff` | 37 pass, 1 aborting alike |
+| `gemma4-assistant-diff` | dense and MoE, Metal and CPU |
+| `mtmd-gates` | `mtmd-diff` 424 identical (18 aborting alike), 13,116 image cases, 5,757 audio cases (328M checks; also at `generic` and `apple_a7`), 1,076 decoder files; 112 exports |
+| `adapter-diff` | 106,617 checks |
+| `quant-diff` | 262,454,534 checks |
+| `opt-diff`, `opt-llama-diff` | 89,924 checks; the 6 abort cases alike |
+| `meta-diff` | 93,614 end-to-end lines |
+| `blas-diff`, `blas-node-diff` | identical; 390 nodes, 367 computed differently without BLAS |
+| `host-arms-diff` | 18 scenarios |
+| `json-diff`, `schema-diff`, `peg-diff` | 9,548,891; 752,482 over 165,898 cases; 5,148,455 over 3,818 cases |
+| `chat-parse-diff`, `chat-msg-diff`, `chat-diff` | 62,764 records, 515,717 lines; 1,525 records, 18,563 lines; 957,368 results |
+| `jinja-diff` | 189 templates × 8 conversations, 20,400 probe renders, both time zones |
+| `cnv-diff` | 36 identical, 28 turns kept a prefix |
+| `fit-diff` | 68 cases, ReleaseFast and ReleaseSafe |
+| `spec-diff` | 64 cases, 267,675 lines |
+| `server-task-diff` | 7,449 records, 234,386 lines |
+| `http-diff` | 463 checks |
+| `parity-cli` | 13/13 |
+| `tools-diff` | gguf-split 37, quantize 46, tokenize 51, fit-params 19, export-lora 22, batched-bench 11, cvector-generator 13, imatrix 75, perplexity 36, bench 66, `llama-tts` 47, `llama-mtmd-cli` 75, `llama-server` 195 (all with `$PLAIN`) |
+| `server-diff` | 28 files, 2,206 checks, then `spec` 53 with the new block |
+| `xcframework-check` | everything: every slice built at minimum 26.0 and verified, every negative caught by its own message, the macOS smoke 6/6 on GPU and CPU, the iOS, tvOS and visionOS simulator smokes 6/6, `compat` (91 files byte-identical, 11,594 header-declared exports); upstream's generic-CPU macOS slice against ours, reported and not a gate, differs on 2 of 6 prompts as at v0.8.0 |
+
+### Injections
+
+Every area made its new cases fail before trusting them, restoring each
+injection by reverse replacement and checking the file byte-identical.
+
+- **ggml and the CPU**: `graph-diff` 6/6, `ops-diff` 13/13 (after the f8
+  tail gate fix above), `meta-diff` 4/4.
+- **Metal**: 17/17 (`metal-diff` 6, `metal-ops-diff` 11). Inert, explained:
+  MXFP4's smem size; the old one-thread unary dispatch, which still computes
+  correct bits.
+- **Vulkan**: one unit-test injection caught; the 7 `ask_allreduce` and 2
+  `supports_extra` injections are the GB10's.
+- **CUDA**: the type-check caught its injection; 3 `cuda-backend-diff`
+  injections are the GB10's.
+- **libllama core**: 9, 7 caught; inert: `set_token_embd_row`'s `has_embd`
+  check (no other caller), the rotation matrices never uploaded (the
+  backends never read a matrix marked `GGML_HINT_SRC0_IS_HADAMARD`). The
+  unified-cache slice escape closed with multi-sequence batches.
+- **libllama model**: 16, 15 caught, 1 inert and replaced.
+- **Architectures**: 12/12, in a private copy of `src/llama` against a
+  library snapshot.
+- **libmtmd**: 23 caught across the lead and its three helpers; inert:
+  double FMAs in SineGen and iSTFT, the LSTM cell and perceiver unfusing (the
+  disassembly is the only oracle there).
+- **The mtmd decoders**: 35 caught; escapes each explained (a Xing bound
+  inert behind a later one, two cursor formulas equivalent, a callbacks-only
+  reset).
+- **`common/`**: zigjinja 5/5, `chat-parse-diff` 2/2, `spec-diff` 7,
+  `tools-diff` 7/7; escapes: MTP's `masked` flag (same rows read), and
+  `cli/reasoning_budget.zig`'s match (no `cnv-diff` scenario forces an end
+  tag mid-sequence; the tools copy is caught by `spec-diff`).
+- **The server**: `http-diff` 11 caught, 2 inert; `server-task-diff` 2
+  caught, 1 inert; `server-diff` 5/5, plus the `use_ckpt_tgt` block above.
+  Uncovered: the "no voice encoder" refusal (every TTS fixture has an audio
+  encoder).
+- **The lead**: the `use_ckpt_tgt` block (3 of 53 fail), the compat helpers
+  (nine synthetic cases, failure messages included).
+
+### Pickups
+
+`PLAN.md`, "Pickup for the v0.9.0 sync". The GB10 carries every CUDA and
+Vulkan gate -- both host layers were ported blind -- and the Linux sets;
+DESKTOP-BR7J5S9 the x86 gates, including the f8 dot product's x86 arms;
+JWHLPTOP stays excluded. The CUDA type-check rig (a fake toolkit over
+NVIDIA's aarch64 PyPI headers -- cuda-runtime 13.0.96, cublas 13.0.2.14,
+cuda-crt 13.0.88, cuda-cccl 13.0.85 -- with `nvcc`, `cuobjdump` and
+`cu++filt` stand-ins answering from the port's own 7,307 harvested kernel
+keys) lived in the session's scratch directory; the next blind CUDA sync
+rebuilds it from that description.

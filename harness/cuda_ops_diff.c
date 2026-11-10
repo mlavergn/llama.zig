@@ -516,7 +516,7 @@ static struct ggml_tensor * build_mmid_q4_k_8(struct ggml_context * c, struct gg
 static struct ggml_tensor * build_mmid_q4_k_9(struct ggml_context * c, struct ggml_tensor ** t) { return build_mmid(c, t, GGML_TYPE_Q4_K, 9); }
 
 /* MUL_MAT at one column (MMVQ) at the K where `get_vdr_mmvq`'s value
- * decides `should_halve_iters` (mmvq.cu:1180 @8642541b2) and the doubled
+ * decides `should_halve_iters` (mmvq.cu:1180 @cd959bae9) and the doubled
  * block has real work: on the GB10 (`MMVQ_PARAMETERS_GB10`, four warps)
  * that doubles the warps per row, which splits the K sum differently. The
  * other choice `vdr` feeds, `should_use_small_k`, only moves rows between

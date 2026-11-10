@@ -10,7 +10,7 @@
 //! - `llama.cpp/ggml/src/ggml-cpu/common.h`      — `type_conversion_table`
 //!                                                 and `get_thread_range`
 //!
-//! Both at v0.8.0 (`8642541b2`). Each declaration below names the C++ it
+//! Both at v0.9.0 (`cd959bae9`). Each declaration below names the C++ it
 //! replaces and the line it began at. This file exports the same 23 C symbols
 //! with the same signatures.
 //!
@@ -76,7 +76,7 @@ extern fn fmaxf(x: f32, y: f32) f32;
 // -----------------------------------------------------------------------------
 // The scalar operations
 //
-// Ports `op_abs` through `op_trunc` (unary-ops.cpp:3 to :96 @8642541b2). The
+// Ports `op_abs` through `op_trunc` (unary-ops.cpp:3 to :96 @cd959bae9). The
 // C++ passes each as a function-pointer template argument; an enum selects
 // them at comptime here, as in `binary_ops.zig`.
 
@@ -392,7 +392,7 @@ fn unaryOpFunctor(params: *const ComputeParams, dst: *Tensor, op: anytype) void 
 // The exported entry points
 //
 // Ports `ggml_compute_forward_abs` through `ggml_compute_forward_trunc`
-// (unary-ops.cpp:237 to :321 @8642541b2), each a one-line call into `unaryOp`.
+// (unary-ops.cpp:237 to :321 @cd959bae9), each a one-line call into `unaryOp`.
 // Generated from the enum so the list cannot drift out of step with it; the
 // C writes all twenty-two out by hand.
 

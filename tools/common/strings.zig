@@ -4,7 +4,7 @@
 //!
 //! Ports `string_remove_suffix`, `string_strip`, `string_parse_kv_override`
 //! and the `std::string` specialisation of `string_split` from
-//! `llama.cpp/common/common.cpp` and `common/common.h` (v0.8.0, `8642541b2`).
+//! `llama.cpp/common/common.cpp` and `common/common.h` (v0.9.0, `cd959bae9`).
 //! Each declaration names what it ports and the line it began at.
 
 const std = @import("std");

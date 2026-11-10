@@ -8,7 +8,7 @@
 // each projector type's keys and tensor shapes here are read off
 // `llama.cpp/tools/mtmd/clip.cpp` (`load_hparams`, `load_tensors`,
 // `clip_n_mmproj_embd`) and the graph builders under `models/`, at
-// v0.8.0 (`8642541b2`). Weights are small and random (fixed seed per
+// v0.9.0 (`cd959bae9`). Weights are small and random (fixed seed per
 // type), so a fixture checks plumbing and numerics, not output quality.
 //
 // Every projector targets n_embd 256, the arch fixtures' width. The text
@@ -23,7 +23,8 @@
 //
 // Manifest: one fixture per line, tab-separated:
 //   projector  mmproj-path  text-model-path  modality  inputs
-// where modality is vision|audio|vision+audio|tts-qwen3|tts-pocket|tts-soprano|tts-lfm3a, or
+// where modality is vision|audio|vision+audio|tts-qwen3|tts-pocket|tts-soprano|tts-lfm3a|
+// tts-chatterbox|tts-chatterbox-mtl, or
 // expect-fail for a type upstream declares but cannot load, and inputs lists
 // what to feed, `;`-separated: `img:WxH,...` for images, `vid:WxHxN,...` for
 // N mergeable frames of one video (v0.7.0), `aud:N,...` audio sample counts,
@@ -258,6 +259,273 @@ struct Fixture {
     std::string inputs;
     std::function<void(G &)> build;
 };
+
+// v0.9.0: chatterbox's speaker side (audio modality, CHATTERBOX_SPKENC:
+// CAMPPlus, the voice encoder, the conditioning encoder and, when `mtl`,
+// its perceiver), beside the gen side `chatterbox_gen_fixture` writes.
+// The widths the graph and the host code fix are kept (80 fbank mels, 32
+// FCM channels so 320 after it, 512 before the statistics pooling, a
+// 192 x-vector, the voice encoder's 40 mels and 256 hidden, the talker's
+// N_TEXT); the CAM blocks are one or two layers with a 32-wide bottleneck.
+// The dense batchnorm is affine-free, as CAMPPlus's is; the voice encoder's
+// matrices are F16 (clip_cbx_read_tensor's F16 path).
+static void cbx_spkenc_fixture(G & g, bool mtl) {
+    const ggml_type H = GGML_TYPE_F16;
+    g.b(KEY_HAS_AUDIO_ENC, true);
+    g.str(KEY_AUDIO_PROJ_TYPE, "chatterbox_spkenc");
+    g.u32(KEY_A_NUM_MEL_BINS, 80);
+    hp(g, "audio", 64, 128, 2, 1, N_TEXT);
+
+    auto bn = [&](const std::string & p, int n, bool affine = true) {
+        g.bias(p + ".running_mean", n);
+        g.t(p + ".running_var", {n}, 0.2f, 1.0f);
+        if (affine) {
+            g.norm(p + ".weight", n);
+            g.bias(p + ".bias", n);
+        }
+    };
+    auto conv2d = [&](const std::string & p, int k, int in, int out) {
+        g.t(p, {k, k, in, out}, 1.0f / std::sqrt((float) (k * k * in)));
+    };
+    auto conv1d = [&](const std::string & p, int k, int in, int out, bool bias = false) {
+        g.t(p + ".weight", {k, in, out}, 1.0f / std::sqrt((float) (k * in)));
+        if (bias) g.bias(p + ".bias", out);
+    };
+    auto res2d = [&](const std::string & p, bool shortcut) {
+        conv2d(p + ".conv1.weight", 3, 32, 32);
+        bn(p + ".bn1", 32);
+        conv2d(p + ".conv2.weight", 3, 32, 32);
+        bn(p + ".bn2", 32);
+        if (shortcut) {
+            conv2d(p + ".shortcut.0.weight", 1, 32, 32);
+            bn(p + ".shortcut.1", 32);
+        }
+    };
+    // returns the block's output channels before its transit
+    auto cam_block = [&](const std::string & bp, const std::string & tp, int c_in, int n_layers, int c_out) {
+        const int growth = 32, bott = 32;
+        int c = c_in;
+        for (int li = 1; li <= n_layers; li++) {
+            const std::string p = bp + ".tdnnd" + std::to_string(li);
+            bn(p + ".nonlinear1.batchnorm", c);
+            conv1d(p + ".linear1", 1, c, bott);
+            bn(p + ".nonlinear2.batchnorm", bott);
+            conv1d(p + ".cam_layer.linear_local", 3, bott, growth);
+            conv1d(p + ".cam_layer.linear1", 1, bott, bott / 2, true);
+            conv1d(p + ".cam_layer.linear2", 1, bott / 2, growth, true);
+            c += growth;
+        }
+        bn(tp + ".nonlinear.batchnorm", c);
+        conv1d(tp + ".linear", 1, c, c_out);
+    };
+
+    // CAMPPlus: the FCM front, then the x-vector TDNN and CAM blocks
+    conv2d("a.spk.head.conv1.weight", 3, 1, 32);
+    bn("a.spk.head.bn1", 32);
+    res2d("a.spk.head.layer1.0", true);
+    res2d("a.spk.head.layer1.1", false);
+    res2d("a.spk.head.layer2.0", true);
+    res2d("a.spk.head.layer2.1", false);
+    conv2d("a.spk.head.conv2.weight", 3, 32, 32);
+    bn("a.spk.head.bn2", 32);
+    conv1d("a.spk.xvector.tdnn.linear", 5, 320, 128);
+    bn("a.spk.xvector.tdnn.nonlinear.batchnorm", 128);
+    cam_block("a.spk.xvector.block1", "a.spk.xvector.transit1", 128, 2, 96);
+    cam_block("a.spk.xvector.block2", "a.spk.xvector.transit2", 96, 1, 64);
+    cam_block("a.spk.xvector.block3", "a.spk.xvector.transit3", 64, 2, 512);
+    bn("a.spk.xvector.out_nonlinear.batchnorm", 512);
+    conv1d("a.spk.xvector.dense.linear", 1, 1024, 192);
+    bn("a.spk.xvector.dense.nonlinear.batchnorm", 192, false);
+
+    // the voice encoder (3-layer lstm, read on the host)
+    const int n_h = 256;
+    for (int l = 0; l < 3; l++) {
+        const std::string s = std::to_string(l);
+        const int n_in = l == 0 ? 40 : n_h;
+        g.t("a.ve.lstm.weight_ih_l" + s, {n_in, 4 * n_h}, 1.0f / std::sqrt((float) n_in), 0.0f, H);
+        g.t("a.ve.lstm.weight_hh_l" + s, {n_h, 4 * n_h}, 1.0f / std::sqrt((float) n_h), 0.0f, H);
+        g.t("a.ve.lstm.bias_ih_l" + s, {4 * n_h}, 0.1f);
+        g.t("a.ve.lstm.bias_hh_l" + s, {4 * n_h}, 0.1f);
+    }
+    g.t("a.ve.proj.weight", {n_h, n_h}, 1.0f / std::sqrt((float) n_h), 0.0f, H);
+    g.bias("a.ve.proj.bias", n_h);
+
+    // the conditioning encoder: the speaker projection, and on mtl the perceiver
+    g.t("a.cenc.spkr_enc.weight", {n_h, N_TEXT}, 1.0f / std::sqrt((float) n_h));
+    g.bias("a.cenc.spkr_enc.bias", N_TEXT);
+    if (mtl) {
+        const int n_q = 4;
+        g.t("a.cenc.perceiver.pre_attention_query", {N_TEXT, n_q}, 0.5f);
+        g.norm("a.cenc.perceiver.attn.norm.weight", N_TEXT);
+        g.bias("a.cenc.perceiver.attn.norm.bias", N_TEXT);
+        for (const char * m : { "to_q", "to_k", "to_v", "proj_out" }) {
+            const std::string p = std::string("a.cenc.perceiver.attn.") + m;
+            g.w(p + ".weight", N_TEXT, N_TEXT);
+            g.bias(p + ".bias", N_TEXT);
+        }
+        g.t("a.cenc.emotion_adv_fc.weight", {1, N_TEXT}, 0.5f);
+    }
+}
+
+// v0.9.0: chatterbox's gen side (models/chatterbox-gen.cpp, clip.cpp's
+// CHATTERBOX load_tensors arm): flow encoder, CFM estimator, HiFT vocoder,
+// S3 tokenizer, the host tables and two predefined voices. The widths the
+// graph fixes are kept (512 in the flow encoder, 1280 in the S3 tokenizer,
+// 80 mels, 192 x-vector, 18 STFT bins); the rest are small. Turbo has the
+// meanflow mixer (2 euler steps, no cfg); `mtl` the 10-step cfg solver and
+// the T3 position tables the multilingual pipeline reads.
+static void chatterbox_gen_fixture(G & g, bool mtl) {
+    const int NC = 4300;      // speech codebook: turbo's silence tail is code 4299
+    const int FF = 512, C = 64, TD = 64, C0 = 32, CF = 32;
+    const ggml_type H = GGML_TYPE_F16;
+    g.b(KEY_HAS_GEN_AUDIO_ENC, true);
+    g.str(KEY_GEN_AUDIO_PROJ_TYPE, "chatterbox");
+    hp(g, "gen.audio", 64, 128, 2, 1, N_TEXT);
+    auto lin = [&](const std::string & p, int in, int out, bool bias = true, ggml_type type = GGML_TYPE_F32) {
+        g.t(p + ".weight", {in, out}, 1.0f / std::sqrt((float) in), 0.0f, type);
+        if (bias) g.bias(p + ".bias", out);
+    };
+    auto conv = [&](const std::string & p, int k, int in, int out, ggml_type type = GGML_TYPE_F32) {
+        g.t(p + ".weight", {k, in, out}, 1.0f / std::sqrt((float) (k * in)), 0.0f, type);
+        g.bias(p + ".bias", out);
+    };
+    auto ln = [&](const std::string & p, int n) {
+        g.norm(p + ".weight", n);
+        g.bias(p + ".bias", n);
+    };
+    auto enc_layer = [&](const std::string & p) {
+        ln(p + ".norm_mha", 512);
+        lin(p + ".self_attn.linear_q", 512, 512, true, H);
+        lin(p + ".self_attn.linear_k", 512, 512, true, H);
+        lin(p + ".self_attn.linear_v", 512, 512, true, H);
+        lin(p + ".self_attn.linear_pos", 512, 512, false, H);
+        g.t(p + ".self_attn.pos_bias_u", {64, 8}, 0.1f);
+        g.t(p + ".self_attn.pos_bias_v", {64, 8}, 0.1f);
+        lin(p + ".self_attn.linear_out", 512, 512, true, H);
+        ln(p + ".norm_ff", 512);
+        lin(p + ".feed_forward.w_1", 512, FF);
+        lin(p + ".feed_forward.w_2", FF, 512);
+    };
+    auto causal = [&](const std::string & p, int in, int out) {
+        conv(p + ".block.0", 3, in, out);
+        ln(p + ".block.2", out);
+    };
+    auto resnet = [&](const std::string & p, int in) {
+        causal(p + ".block1", in, C);
+        causal(p + ".block2", C, C);
+        lin(p + ".mlp.1", TD, C);
+        conv(p + ".res_conv", 1, in, C);
+    };
+    auto tfm = [&](const std::string & p) {
+        ln(p + ".norm1", C);
+        lin(p + ".attn1.to_q", C, 512, false);
+        lin(p + ".attn1.to_k", C, 512, false);
+        lin(p + ".attn1.to_v", C, 512, false);
+        lin(p + ".attn1.to_out.0", 512, C);
+        ln(p + ".norm3", C);
+        lin(p + ".ff.net.0.proj", C, 4 * C);
+        lin(p + ".ff.net.2", 4 * C, C);
+    };
+    // a snake resblock of three units, dilations 1/3/5 on convs1
+    auto hres = [&](const std::string & p, int ch, int k) {
+        for (int j = 0; j < 3; j++) {
+            g.t(fmt("%s.activations1.%d.alpha", p.c_str(), j), {ch}, 0.2f, 1.0f);
+            g.t(fmt("%s.activations2.%d.alpha", p.c_str(), j), {ch}, 0.2f, 1.0f);
+            conv(fmt("%s.convs1.%d", p.c_str(), j), k, ch, ch);
+            conv(fmt("%s.convs2.%d", p.c_str(), j), k, ch, ch);
+        }
+    };
+
+    // flow encoder
+    g.t("a.gen.flow.input_embedding.weight", {512, NC}, 0.5f, 0.0f, H);
+    lin("a.gen.flow.spk_embed_affine_layer", 192, 80);
+    lin("a.gen.fenc.embed.out.0", 512, 512, true, H);
+    ln("a.gen.fenc.embed.out.1", 512);
+    conv("a.gen.fenc.pre_lookahead_layer.conv1", 4, 512, 512, H);
+    conv("a.gen.fenc.pre_lookahead_layer.conv2", 3, 512, 512, H);
+    enc_layer("a.gen.fenc.encoders.0");
+    conv("a.gen.fenc.up_layer.conv", 5, 512, 512, H);
+    lin("a.gen.fenc.up_embed.out.0", 512, 512, true, H);
+    ln("a.gen.fenc.up_embed.out.1", 512);
+    enc_layer("a.gen.fenc.up_encoders.0");
+    ln("a.gen.fenc.after_norm", 512);
+    lin("a.gen.flow.encoder_proj", 512, 80);
+
+    // cfm estimator: [noise, mu, spks, cond] = 320 channels in
+    lin("a.gen.est.time_mlp.linear_1", 320, TD);
+    lin("a.gen.est.time_mlp.linear_2", TD, TD);
+    if (!mtl) g.w("a.gen.est.time_embed_mixer.weight", 2 * TD, TD);
+    resnet("a.gen.est.down_blocks.0.0", 320);
+    tfm("a.gen.est.down_blocks.0.1.0");
+    conv("a.gen.est.down_blocks.0.2", 3, C, C);
+    resnet("a.gen.est.mid_blocks.0.0", C);
+    tfm("a.gen.est.mid_blocks.0.1.0");
+    resnet("a.gen.est.up_blocks.0.0", 2 * C);
+    tfm("a.gen.est.up_blocks.0.1.0");
+    tfm("a.gen.est.up_blocks.0.1.1");
+    conv("a.gen.est.up_blocks.0.2", 3, C, C);
+    causal("a.gen.est.final_block", C, C);
+    conv("a.gen.est.final_proj", 1, C, 80);
+
+    // hift vocoder: upsample x8, x5, x3 (120 samples / 4 hop = one stft frame per mel sample),
+    // the source stft strided down to each stage
+    conv("a.gen.hift.conv_pre", 7, 80, C0);
+    const int up_k[3] = { 16, 11, 7 };
+    const int src_k[3] = { 30, 6, 1 };
+    for (int i = 0; i < 3; i++) {
+        const int ci = C0 >> i, co = C0 >> (i + 1);
+        g.t(fmt("a.gen.hift.ups.%d.weight", i), {up_k[i], co, ci}, 1.0f / std::sqrt((float) (up_k[i] * ci)));
+        g.bias(fmt("a.gen.hift.ups.%d.bias", i), co);
+        conv(fmt("a.gen.hift.source_downs.%d", i), src_k[i], 18, co);
+        hres(fmt("a.gen.hift.source_resblocks.%d", i), co, 7);
+        hres(fmt("a.gen.hift.resblocks.%d", 3 * i), co, 3);
+        hres(fmt("a.gen.hift.resblocks.%d", 3 * i + 1), co, 5);
+        hres(fmt("a.gen.hift.resblocks.%d", 3 * i + 2), co, 7);
+    }
+    conv("a.gen.hift.conv_post", 7, C0 >> 3, 18);
+    for (int i = 0; i < 5; i++) conv(fmt("a.gen.hift.f0_predictor.condnet.%d", 2 * i), 3, i == 0 ? 80 : CF, CF);
+    // f0 around the voiced threshold (10 Hz), so the source has both voiced and unvoiced samples
+    g.t("a.gen.hift.f0_predictor.classifier.weight", {CF, 1}, 0.6f);
+    g.t("a.gen.hift.f0_predictor.classifier.bias", {1}, 0.5f, 10.5f);
+    // read on the host: the harmonic source merge, and the speech table rows a TOKENIZE gives
+    g.t("a.gen.hift.m_source.l_linear.weight", {9, 1}, 0.3f);
+    g.bias("a.gen.hift.m_source.l_linear.bias", 1);
+    g.t("a.gen.code.out_embd.weight", {N_TEXT, 6561}, 0.2f, 0.0f, H);
+    if (mtl) {
+        g.t("a.gen.t3.text_pos_emb", {N_TEXT, 64}, 0.05f);
+        g.t("a.gen.t3.speech_pos_emb", {N_TEXT, 64}, 0.05f);
+    }
+
+    // s3 tokenizer: 1280 wide (20 heads of 64), one block
+    conv("a.s3tok.encoder.conv1", 3, 128, 1280, H);
+    conv("a.s3tok.encoder.conv2", 3, 1280, 1280, H);
+    {
+        const std::string p = "a.s3tok.encoder.blocks.0";
+        ln(p + ".attn_ln", 1280);
+        lin(p + ".attn.query", 1280, 1280, true, H);
+        lin(p + ".attn.key", 1280, 1280, false, H);
+        lin(p + ".attn.value", 1280, 1280, true, H);
+        g.t(p + ".attn.fsmn_block.weight", {5, 1, 1280}, 0.2f);
+        lin(p + ".attn.out", 1280, 1280, true, H);
+        ln(p + ".mlp_ln", 1280);
+        lin(p + ".mlp.0", 1280, 256);
+        lin(p + ".mlp.2", 256, 1280);
+    }
+    lin("a.s3tok.quantizer._codebook.project_down", 1280, 8);
+
+    // predefined voices: talker rows of the backbone width, and the flow
+    // decoder reference (ids as exact F32, two mel frames a token); a
+    // capital sorts first in the voice map
+    auto voice = [&](const std::string & name, int n_rows, std::vector<float> ids) {
+        g.t("voice." + name, {N_TEXT, n_rows}, 0.5f);
+        ggml_tensor * t = g.t("voice." + name + ".ref_tokens", {(int64_t) ids.size()});
+        std::copy(ids.begin(), ids.end(), (float *) t->data);
+        g.t("voice." + name + ".ref_feat", {80, 2 * (int64_t) ids.size()}, 1.0f);
+        g.t("voice." + name + ".ref_spk", {192}, 1.0f);
+    };
+    voice("alba", 4, { 7, 4299, 12 });
+    voice("Bob", 2, { 1, 2 });
+}
 
 static std::vector<Fixture> fixtures() {
     std::vector<Fixture> f;
@@ -1359,7 +1627,16 @@ static std::vector<Fixture> fixtures() {
         g.w(fmt(TN_MM_AUDIO_MLP, 3, "weight"), H, N_TEXT);
         g.bias(fmt(TN_MM_AUDIO_MLP, 3, "bias"), N_TEXT);
     }});
-    f.push_back({"parakeet", "qwen3", "audio", AUD, [](G & g) {
+    // v0.9.0: expect-fail. ggml's views are now bounded by the bytes their
+    // strides reach (ggml.c, bbb02c93e "bound views by the bytes their strides
+    // reach"), and parakeet.cpp's global-attention relative shift views
+    // [n_frame, pos_window] at row stride pos_window over a head of
+    // n_frame * (pos_window + 1): with pos_window = 2 * n_time - 1 the last head
+    // always reaches past its source. Every context takes that path in warmup
+    // (3000 frames, below PARAKEET_LOCAL_ATTN_THRESHOLD), so upstream itself
+    // aborts in mtmd_init_from_file for every parakeet model; the port aborts
+    // alike, which mtmd-diff compares.
+    f.push_back({"parakeet", "qwen3", "expect-fail", AUD, [](G & g) {
         // NeMo FastConformer: mel filters and window ship as tensors, the
         // depthwise conv kernel is 9, batch norm is unfolded (mean / var)
         const int E = 64, NH = 4, DH = 16, F = 128, NM = 32, C = 16, H = 128, K = 9;
@@ -1840,6 +2117,10 @@ static std::vector<Fixture> fixtures() {
             g.w(fmt(TN_FFN_DOWN, p, il, "weight"), Ft, D);
             g.t(fmt(TN_LS_2, p, il, "weight"), {D}, 0.05f, 0.1f);
         }
+        // v0.9.0: predefined voices, rows of the backbone width; a capital
+        // sorts first in the voice map, and the lookup ignores case
+        g.t("voice.alba", {N_TEXT, 4}, 0.5f);
+        g.t("voice.Bob", {N_TEXT, 2}, 0.5f);
     }});
 
     (void) IMG;
@@ -2345,6 +2626,105 @@ static std::vector<Fixture> fixtures() {
         g.u32(KEY_PREPROC_IMAGE_SIZE, 96);
     }});
 
+    // --- v0.9.0: nemotron transcribe (models/nemotron-transcribe.cpp), NeMo's
+    // ParallelExpertEncoder: an ASR and a speaker transformer over stacked
+    // log-mel frames, a Sortformer head and the fusion. 700000 samples is two
+    // 40 s windows, 1300000 three: the speaker cache fills, is compressed and
+    // fed to the next window. The test audio is stationary, so each
+    // speaker's prediction barely moves from frame to frame: `fc2_b` sets
+    // which speakers are active (the logits without it were measured per
+    // fixture), and with it which arms of `spk_compress_cache` run.
+    auto nemotron_tr = [](G & g, const float * fc2_b) {
+        const int E = 64, NH = 4, DH = 16, F = 128, NM = 32, SUB = 8;
+        const int SE = 32, SH = 2, SF = 64, DTF = 16, HH = 32, NSPK = 4;
+        audio(g, "nemotron_transcribe", NM);
+        hp(g, "audio", E, F, NH, 2, N_TEXT, 1e-5f);
+        g.u32(KEY_AUDIO_SUBSMPL_FACTOR, SUB);
+        g.u32(KEY_A_ROPE_DIMS, 8);
+        g.u32(KEY_A_SPK_N_BLOCK, 2);
+        g.u32(KEY_A_SPK_N_HEAD, SH);
+        g.t(TN_MEL_FILTERS, {257, NM}, 0.01f, 0.01f);
+        g.t(TN_WINDOW, {400}, 0.5f, 0.5f);
+        // ASR expert: fused qkv with per-head q/k layer norms (weight and bias), partial rotary
+        g.w(fmt(TN_INP_PROJ, "weight"), NM * SUB, E);
+        g.norm(fmt(TN_LN_PRE, "a", "weight"), E);
+        g.bias(fmt(TN_LN_PRE, "a", "bias"), E);
+        VitOpts o;
+        o.qkv = true;
+        o.qk_norm = 2;
+        vit_layers(g, "a", 2, E, F, NH, o);
+        for (int il = 0; il < 2; il++) {
+            g.bias(fmt(TN_ATTN_Q_NORM, "a", il, "bias"), DH);
+            g.bias(fmt(TN_ATTN_K_NORM, "a", il, "bias"), DH);
+        }
+        g.norm(fmt(TN_LN_POST, "a", "weight"), E);
+        g.bias(fmt(TN_LN_POST, "a", "bias"), E);
+        // speaker expert: fused qkv without bias, full rotary
+        const char * sp = "a.spk";
+        g.w(fmt(TN_A_SPK_INP_PROJ, "weight"), NM * SUB, SE);
+        g.norm(fmt(TN_LN_PRE, sp, "weight"), SE);
+        g.bias(fmt(TN_LN_PRE, sp, "bias"), SE);
+        g.norm(fmt(TN_LN_POST, sp, "weight"), SE);
+        g.bias(fmt(TN_LN_POST, sp, "bias"), SE);
+        for (int il = 0; il < 2; il++) {
+            g.norm(fmt(TN_LN_1, sp, il, "weight"), SE);
+            g.bias(fmt(TN_LN_1, sp, il, "bias"), SE);
+            g.w(fmt(TN_ATTN_QKV, sp, il, "weight"), SE, 3 * SE);
+            g.w(fmt(TN_ATTN_OUTPUT, sp, il, "weight"), SE, SE);
+            g.bias(fmt(TN_ATTN_OUTPUT, sp, il, "bias"), SE);
+            g.norm(fmt(TN_LN_2, sp, il, "weight"), SE);
+            g.bias(fmt(TN_LN_2, sp, il, "bias"), SE);
+            g.w(fmt(TN_FFN_UP, sp, il, "weight"), SE, SF);
+            g.bias(fmt(TN_FFN_UP, sp, il, "bias"), SF);
+            g.w(fmt(TN_FFN_DOWN, sp, il, "weight"), SF, SE);
+            g.bias(fmt(TN_FFN_DOWN, sp, il, "bias"), SE);
+        }
+        // Sortformer head
+        g.w(fmt(TN_A_SPK_HEAD, "proj", "weight"), SE, DTF);
+        g.bias(fmt(TN_A_SPK_HEAD, "proj", "bias"), DTF);
+        g.t(fmt(TN_A_SPK_HEAD, "upsample", "weight"), {3, DTF, SUB * DTF}, 0.15f);
+        g.bias(fmt(TN_A_SPK_HEAD, "upsample", "bias"), SUB * DTF);
+        g.w(fmt(TN_A_SPK_HEAD, "fc1", "weight"), DTF, HH);
+        g.bias(fmt(TN_A_SPK_HEAD, "fc1", "bias"), HH);
+        g.t(fmt(TN_A_SPK_HEAD, "fc2", "weight"), {HH, NSPK}, 4.0f);
+        ggml_tensor * b2 = g.t(fmt(TN_A_SPK_HEAD, "fc2", "bias"), {NSPK}, 0.3f);
+        for (int i = 0; i < NSPK; i++) ((float *) b2->data)[i] = fc2_b[i];
+        g.t(TN_A_SPK_SIL_EMB, {SE}, 0.5f);
+        // fusion and projection
+        g.norm(fmt(TN_A_FUSION_NORM, "asr_norm", "weight"), E);
+        g.bias(fmt(TN_A_FUSION_NORM, "asr_norm", "bias"), E);
+        g.norm(fmt(TN_A_FUSION_NORM, "spk_norm", "weight"), NSPK);
+        g.bias(fmt(TN_A_FUSION_NORM, "spk_norm", "bias"), NSPK);
+        g.w(TN_A_FUSION_KERNEL, NSPK, E);
+        g.w(fmt(TN_MM_AUDIO_FC, "weight"), E, N_TEXT);
+        g.bias(fmt(TN_MM_AUDIO_FC, "bias"), N_TEXT);
+    };
+    // three speakers active on every frame, none scoring above 1: they
+    // compete for the cache through the boosts
+    f.push_back({"nemotron_transcribe", "qwen3", "audio", "aud:16000,40000,700000,1300000", [nemotron_tr](G & g) {
+        static const float b[4] = {0.85f, 0.38f, 0.46f, -1.27f};
+        nemotron_tr(g, b);
+    }});
+    // --- v0.9.0: chatterbox, turbo and multilingual (models/chatterbox-gen.cpp)
+    f.push_back({"chatterbox", "qwen3-cbx", "tts-chatterbox", "tts:4", [](G & g) {
+        cbx_spkenc_fixture(g, false);
+        chatterbox_gen_fixture(g, false);
+    }});
+    f.push_back({"chatterbox-mtl", "qwen3-cbx", "tts-chatterbox-mtl", "tts:4", [](G & g) {
+        cbx_spkenc_fixture(g, true);
+        chatterbox_gen_fixture(g, true);
+    }});
+    // the voice loader's two throws: a voice without its reference, and a
+    // reference tensor of the wrong width
+    variant("chatterbox", "chatterbox-voice-incomplete", [](G & g) { g.t("voice.zed", {N_TEXT, 2}, 0.5f); });
+    variant("chatterbox", "chatterbox-voice-invalid", [](G & g) { g.t("voice.alba2.ref_feat", {81, 2}, 0.5f); });
+    // nemotron transcribe with one dominant speaker scoring above 1 on every
+    // frame: `spk_compress_cache`'s min_pos arm
+    f.push_back({"nemotron_transcribe-dominant", "qwen3", "audio", "aud:700000,1300000", [nemotron_tr](G & g) {
+        static const float b[4] = {-2.97f, 1.89f, -3.14f, -1.34f};
+        nemotron_tr(g, b);
+    }});
+
     return f;
 }
 
@@ -2386,9 +2766,16 @@ static const std::vector<std::string> k_specials_soprano = { "[TEXT]", "[START]"
 // voxtral realtime's pad (mtmd.cpp's stream init)
 static const std::vector<std::string> k_specials_voxtral = { "[STREAMING_PAD]" };
 
+// v0.9.0: chatterbox's fused vocabulary, text then the speech tokens
+// (mtmd-helper-gen.cpp's ensure_cache), filled past the specials
+static const std::vector<std::string> k_specials_cbx = {};
+
+// `n_vocab` widens the vocabulary past the arch fixture's (token_embd and
+// output gain rows, random in the range of the existing ones); `fill` names
+// the tokens that fill it, as `codec` fills with codec tokens
 static bool write_text_model(const std::string & in, const std::string & out, bool codec, int deepstack = 0, bool mrope = false,
                              const std::vector<std::string> * extra = nullptr, int delay = 0, const char * tmpl = nullptr,
-                             const char * tmpl_tts = nullptr) {
+                             const char * tmpl_tts = nullptr, int n_vocab = 0, const char * fill = nullptr) {
     ggml_context * ctx = nullptr;
     gguf_init_params ip = { false, &ctx };
     gguf_context * src = gguf_init_from_file(in.c_str(), ip);
@@ -2398,7 +2785,8 @@ static bool write_text_model(const std::string & in, const std::string & out, bo
     }
     const char * arch = gguf_get_val_str(src, gguf_find_key(src, "general.architecture"));
     const int64_t kv = gguf_find_key(src, (std::string(arch) + ".vocab_size").c_str());
-    const int N = kv >= 0 ? (int) gguf_get_val_u32(src, kv) : 128;
+    const int N0 = kv >= 0 ? (int) gguf_get_val_u32(src, kv) : 128;
+    const int N = n_vocab > N0 ? n_vocab : N0;
 
     std::vector<std::string> text;
     std::vector<int32_t> types;
@@ -2423,6 +2811,10 @@ static bool write_text_model(const std::string & in, const std::string & out, bo
         // qwen3-tts samples codec_0 + code: the rest of the vocabulary
         int i = 0;
         while ((int) text.size() < N) add(fmt("<|codec_%d|>", i++), 3);
+    }
+    if (fill) {
+        int i = 0;
+        while ((int) text.size() < N) add(fmt(fill, i++), 3);
     }
     while ((int) text.size() < N) add(fmt("<unused%d>", (int) text.size()), 5);
     if ((int) text.size() > N) {
@@ -2456,13 +2848,38 @@ static bool write_text_model(const std::string & in, const std::string & out, bo
     if (delay > 0) gguf_set_val_u32(dst, (std::string(arch) + ".realtime_delay_tokens").c_str(), delay);
     if (tmpl) gguf_set_val_str(dst, "tokenizer.chat_template", tmpl);
     if (tmpl_tts) gguf_set_val_str(dst, "tokenizer.chat_template.tts", tmpl_tts);
+    ggml_context * wide = nullptr;
+    if (N > N0) {
+        gguf_set_val_u32(dst, (std::string(arch) + ".vocab_size").c_str(), N);
+        ggml_init_params wp = { (size_t) 64 * 1024 * 1024, nullptr, false };
+        wide = ggml_init(wp);
+    }
+    std::mt19937 wrng(4321);
     for (int64_t i = 0; i < gguf_get_n_tensors(src); i++) {
-        gguf_add_tensor(dst, ggml_get_tensor(ctx, gguf_get_tensor_name(src, i)));
+        ggml_tensor * t = ggml_get_tensor(ctx, gguf_get_tensor_name(src, i));
+        const std::string tn = t->name;
+        if (wide && (tn == "token_embd.weight" || tn == "output.weight") && t->ne[1] == N0) {
+            if (t->type != GGML_TYPE_F32) {
+                fprintf(stderr, "%s: cannot widen %s of type %s\n", in.c_str(), tn.c_str(), ggml_type_name(t->type));
+                return false;
+            }
+            ggml_tensor * x = ggml_new_tensor_2d(wide, GGML_TYPE_F32, t->ne[0], N);
+            ggml_set_name(x, tn.c_str());
+            const float * s = (const float *) t->data;
+            float * d = (float *) x->data;
+            float m = 0.0f;
+            for (int64_t j = 0; j < ggml_nelements(t); j++) m = std::max(m, std::fabs(s[j]));
+            std::uniform_real_distribution<float> ud(-m, m);
+            for (int64_t j = 0; j < ggml_nelements(x); j++) d[j] = j < ggml_nelements(t) ? s[j] : ud(wrng);
+            t = x;
+        }
+        gguf_add_tensor(dst, t);
     }
     const bool ok = gguf_write_to_file(dst, out.c_str(), false);
     gguf_free(dst);
     gguf_free(src);
     ggml_free(ctx);
+    if (wide) ggml_free(wide);
     return ok;
 }
 
@@ -2470,6 +2887,7 @@ static int cmd_gen(const std::string & arch_dir, const std::string & out_dir, co
     struct Text {
         const char * key; const char * fixture; bool codec; int deepstack; bool mrope = false;
         const std::vector<std::string> * extra = nullptr; int delay = 0; const char * tmpl = nullptr; const char * tmpl_tts = nullptr;
+        int n_vocab = 0; const char * fill = nullptr;
     };
     const char * lfm3_chat = "{% for m in messages %}<|im_start|>{{ m.role }}\n{{ m.content }}<|im_end|>\n{% endfor %}"
                              "{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}";
@@ -2493,10 +2911,14 @@ static int cmd_gen(const std::string & arch_dir, const std::string & out_dir, co
         { "qwen3-lfm3", "qwen3-dense", false, 0, false, &k_specials_lfm3, 0, lfm3_chat, lfm3_tts },
         { "qwen3-soprano", "qwen3-dense", false, 0, false, &k_specials_soprano },
         { "mistral3-rt", "mistral3-dense", false, 0, false, &k_specials_voxtral, 6 },
+        // v0.9.0: chatterbox's speech tokens after the text ones; 320 rows, as
+        // the multilingual prompt opens with token 255
+        { "qwen3-cbx", "qwen3-dense", false, 0, false, &k_specials_cbx, 0, nullptr, nullptr, 320, "<|speech_%d|>" },
     };
     for (const auto & t : texts) {
         const std::string out = out_dir + "/text-" + t.key + ".gguf";
-        if (!write_text_model(arch_dir + "/" + t.fixture + ".gguf", out, t.codec, t.deepstack, t.mrope, t.extra, t.delay, t.tmpl, t.tmpl_tts)) return 1;
+        if (!write_text_model(arch_dir + "/" + t.fixture + ".gguf", out, t.codec, t.deepstack, t.mrope, t.extra, t.delay, t.tmpl, t.tmpl_tts,
+                              t.n_vocab, t.fill)) return 1;
     }
 
     FILE * man = fopen((out_dir + "/manifest.txt").c_str(), "w");
@@ -2649,15 +3071,19 @@ static std::string run_stream(mtmd_context * mctx, llama_model * model, int n, b
     return err;
 }
 
-static std::string run_tts(mtmd_context * mctx, llama_model * model, const std::string & modality, int steps) {
+// (`clip`: chatterbox clones the speaker clip instead of a predefined voice)
+static std::string run_tts(mtmd_context * mctx, llama_model * model, const std::string & modality, int steps, bool clip = false) {
     const bool qwen = modality == "tts-qwen3";
     const bool soprano = modality == "tts-soprano";
     const bool lfm3a = modality == "tts-lfm3a" || modality == "tts-lfm3a-eos";
     const bool may_end_silent = modality == "tts-lfm3a-eos";
+    // v0.9.0: chatterbox's multilingual cfg pairs seq 0 with n_seq_max / 2
+    const bool cbx = modality.rfind("tts-chatterbox", 0) == 0;
     llama_context_params cp = llama_context_default_params();
     cp.n_ctx = 512;
     cp.n_batch = 512;
     cp.embeddings = true;
+    if (cbx) cp.n_seq_max = 2;
     llama_context * lctx = llama_init_from_model(model, cp);
     if (!lctx) return "context failed";
     std::string err;
@@ -2675,6 +3101,8 @@ static std::string run_tts(mtmd_context * mctx, llama_model * model, const std::
     inp.prompt = lfm3a ? "hello<|audio_start|>" : "hello there, test.";
     inp.prompt_len = strlen(inp.prompt);
     inp.speaker_ref = soprano ? nullptr : spk_bm;
+    mtmd_bitmap * voice_bm = cbx && !clip ? mtmd_gen_audio_get_voice(mctx, "alba") : nullptr;
+    if (cbx && !clip) inp.speaker_ref = voice_bm;
     inp.lang = "";
     inp.top_k = 8;
     inp.top_p = 1.0f;
@@ -2688,13 +3116,13 @@ static std::string run_tts(mtmd_context * mctx, llama_model * model, const std::
     }
     const llama_vocab * vocab = llama_model_get_vocab(model);
     llama_token codec_0 = LLAMA_TOKEN_NULL;
-    for (llama_token t = 0; t < llama_vocab_n_tokens(vocab) && qwen; t++) {
-        if (std::string(llama_vocab_get_text(vocab, t)) == "<|codec_0|>") { codec_0 = t; break; }
+    for (llama_token t = 0; t < llama_vocab_n_tokens(vocab) && (qwen || cbx); t++) {
+        if (std::string(llama_vocab_get_text(vocab, t)) == (cbx ? "<|speech_0|>" : "<|codec_0|>")) { codec_0 = t; break; }
     }
     const float * h = llama_get_embeddings_ith(lctx, -1);
     for (int s = 0; err.empty() && s < steps; s++) {
-        // the backbone's token: a codec token for qwen3-tts, none for pocket-tts
-        const llama_token sampled = qwen ? codec_0 + 7 * (s + 1) : soprano ? 10 + s : LLAMA_TOKEN_NULL;
+        // the backbone's token: a codec token for qwen3-tts, a speech token for chatterbox, none for pocket-tts
+        const llama_token sampled = qwen ? codec_0 + 7 * (s + 1) : cbx ? codec_0 + 5 * s + 3 : soprano ? 10 + s : LLAMA_TOKEN_NULL;
         const float * h_next = nullptr;
         bool stop = false;
         if (mtmd_helper_gen_audio_step_gen(gen, sampled, h, &h_next, &stop) != 0) {
@@ -2724,6 +3152,7 @@ static std::string run_tts(mtmd_context * mctx, llama_model * model, const std::
         }
     }
     mtmd_bitmap_free(spk_bm);
+    if (voice_bm) mtmd_bitmap_free(voice_bm);
     mtmd_helper_gen_audio_free(gen);
     llama_free(lctx);
     return err;
@@ -2799,6 +3228,11 @@ static std::string check_one(const std::vector<std::string> & m, bool gpu) {
             }
         } else if (kv[0] == "tts") {
             err = run_tts(mctx, model, modality, atoi(kv[1].c_str()));
+            // chatterbox clones a speaker clip too, once the mmproj has the speaker side
+            if (err.empty() && modality.rfind("tts-chatterbox", 0) == 0 && mtmd_support_audio(mctx)) {
+                err = run_tts(mctx, model, modality, atoi(kv[1].c_str()), true);
+                if (!err.empty()) err = "clip: " + err;
+            }
         } else if (kv[0] == "strm") {
             for (const auto & ns : split(kv[1], ',')) {
                 err = run_stream(mctx, model, atoi(ns.c_str()), false);

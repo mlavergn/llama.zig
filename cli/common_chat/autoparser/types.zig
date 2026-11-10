@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports the data half of `llama.cpp/common/chat-auto-parser.h` (llama.cpp
-//! v0.8.0, `8642541b2`): `template_params`, `diff_split`,
+//! v0.9.0, `cd959bae9`): `template_params`, `diff_split`,
 //! `compare_variants_result`, the four mode enums with their names, the
 //! four analysis sub-structs, the three analyzers' fields, `autoparser`'s
 //! fields, `segment_type` and `segment`. The analyzers' and the parser

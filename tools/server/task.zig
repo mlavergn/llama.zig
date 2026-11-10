@@ -12,7 +12,7 @@
 //! `llama.cpp/tools/server/server-task.h`; `common_grammar_value` and
 //! `common_prompt_checkpoint` from
 //! `llama.cpp/common/common.h` and `llama.cpp/common/common.cpp`
-//! (llama.cpp v0.8.0, `8642541b2`). The result types are `result.zig`.
+//! (llama.cpp v0.9.0, `cd959bae9`). The result types are `result.zig`.
 //! Each declaration names what it ports and the line it began at.
 //!
 //! # The chat parse
@@ -643,14 +643,14 @@ pub fn cloneDiff(a: Allocator, d: chat.MsgDiff) Error!chat.MsgDiff {
 // -----------------------------------------------------------------------------
 // server_task
 
-/// Ports `gen_audio`'s `inp` (mtmd-helper.h:344 @8642541b2), the RAII wrapper
+/// Ports `gen_audio`'s `inp` (mtmd-helper.h:344 @cd959bae9), the RAII wrapper
 /// of `mtmd_helper_gen_audio_inp`. A `set_*` keeps its own
-/// copy; `get` hands out pointers valid as long as this is alive.
+/// copy; `get` hands out pointers valid as long as this is alive. Since
+/// v0.9.0 a voice is a speaker reference (a voice bitmap), not a string.
 pub const TtsInp = struct {
     data: c.mtmd_helper_gen_audio_inp = undefined,
     prompt_str: [:0]const u8 = "",
     lang_str: [:0]const u8 = "",
-    voice_str: [:0]const u8 = "",
     speaker_ref_ptr: ?*c.mtmd_bitmap = null,
 
     /// The C++'s default member initializer.
@@ -669,7 +669,6 @@ pub const TtsInp = struct {
         self.data.prompt = self.prompt_str.ptr;
         self.data.prompt_len = self.prompt_str.len;
         self.data.lang = if (self.lang_str.len == 0) null else self.lang_str.ptr;
-        self.data.voice = if (self.voice_str.len == 0) null else self.voice_str.ptr;
         self.data.speaker_ref = self.speaker_ref_ptr;
         return &self.data;
     }

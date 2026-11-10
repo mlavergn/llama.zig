@@ -6,8 +6,8 @@
 //! # Provenance
 //!
 //! Ports parts of `llama.cpp/vendor/cpp-httplib/httplib.cpp` and
-//! `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib 0.62.0, vendored
-//! at v0.8.0, `8642541b2`). Each declaration names what it ports and the
+//! `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib 0.64.0, vendored
+//! at v0.9.0, `cd959bae9`). Each declaration names what it ports and the
 //! line it began at.
 //!
 //! # Memory
@@ -361,18 +361,20 @@ fn parseTrailers(a: std.mem.Allocator, lr: *LineReader, dest: *Headers, src_head
 /// Ports `ReadContentResult` (httplib.cpp:3767 @cd959bae9).
 const ReadContentResult = enum { success, payload_too_large, err };
 
-/// Ports `ChunkedDecoder` (httplib.h:4011 @8642541b2): a chunked body's
+/// Ports `ChunkedDecoder` (httplib.h:4061 @cd959bae9): a chunked body's
 /// payload, one chunk-size line and its data at a time.
 const ChunkedDecoder = struct {
     strm: *SocketStream,
     chunk_remaining: usize = 0,
     finished: bool = false,
     line_buf: [64]u8 = undefined,
+    overhead: usize = 0,
 
-    /// Ports `read_payload` (httplib.cpp:11216 @8642541b2), a member of
+    /// Ports `read_payload` (httplib.cpp:11268 @cd959bae9), a member of
     /// `ChunkedDecoder`. The chunk-size line is read up to its terminator,
     /// never past it: only a chunk extension of visible characters, spaces
-    /// and tabs may follow the size.
+    /// and tabs may follow the size. The bytes around the data are counted
+    /// apart, and more of them than one header field fails the body.
     ///
     /// Return: bytes read into `buf`, 0 after the last chunk, -1 on a
     /// framing error.
@@ -413,6 +415,16 @@ const ChunkedDecoder = struct {
             while (p < eol) : (p += 1) {
                 if (!detail.isSpaceOrTab(s[p]) and !detail.isFieldVchar(s[p])) return -1;
             }
+
+            // The bytes around the data are no payload, so they are counted on their
+            // own, as Go does: each chunk may spend 16 bytes and twice its data on
+            // them, which lets a stream send a byte at a time, and what goes past that
+            // in padding, leading zeros and extensions builds up to one header field.
+            self.overhead += line.len + 2;
+            self.overhead = if (self.overhead > 16) self.overhead - 16 else 0;
+            self.overhead = if (chunk_len > self.overhead / 2) 0 else self.overhead - 2 * chunk_len;
+            if (self.overhead > detail.header_max_length) return -1;
+
             if (chunk_len == 0) {
                 self.chunk_remaining = 0;
                 self.finished = true;
@@ -444,8 +456,8 @@ const ChunkedDecoder = struct {
 };
 
 /// Ports `read_content_with_length` (httplib.cpp:3773 @cd959bae9), with
-/// the `BodyReader` it reads through (`BodyReader::read`, httplib.cpp:7549
-/// @8642541b2): `len` bytes, failing past `payload_max_length`.
+/// the `BodyReader` it reads through (`BodyReader::read`, httplib.cpp:7579
+/// @cd959bae9): `len` bytes, failing past `payload_max_length`.
 fn readContentWithLength(strm: *SocketStream, len: usize, out: anytype, payload_max_length: usize) !ReadContentResult {
     var buf: [detail.recv_bufsiz]u8 = undefined;
     var bytes_read: usize = 0;
@@ -507,8 +519,8 @@ fn readContentChunked(strm: *SocketStream, req: anytype, payload_max_length: usi
 /// `prepare_content_receiver` (httplib.cpp:3927 @cd959bae9): a body framed
 /// by chunks, by `Content-Length`, or by the end of the stream. With
 /// `decompress`, a coding this build cannot decode answers 415 -- no
-/// decompressor is compiled in (`create_decompressor`, httplib.cpp:3459
-/// @8642541b2), so every one it knows is such a coding.
+/// decompressor is compiled in (`create_decompressor`, httplib.cpp:3455
+/// @cd959bae9), so every one it knows is such a coding.
 ///
 /// `out` has `receive([]const u8) !bool`. `req` is any message with `a`,
 /// `headers` and `trailers`: a server's request, or a client's response
@@ -559,13 +571,6 @@ pub fn readContent(strm: *SocketStream, req: anytype, payload_max_length: usize,
 /// Ports `has_framed_body` (httplib.cpp:5538 @cd959bae9).
 pub fn hasFramedBody(req: *const Request) bool {
     return detail.isChunkedTransferEncoding(&req.headers) or req.getHeaderValueU64("Content-Length") > 0;
-}
-
-/// Ports `is_connection_persistent` (httplib.cpp:5542 @8642541b2).
-pub fn isConnectionPersistent(req: *const Request) bool {
-    if (detail.hasHeaderToken(&req.headers, "Connection", "close")) return false;
-    if (std.mem.eql(u8, req.version, "HTTP/1.0") and !detail.hasHeaderToken(&req.headers, "Connection", "keep-alive")) return false;
-    return true;
 }
 
 /// Ports `expect_content` (httplib.cpp:5543 @cd959bae9).
@@ -985,12 +990,13 @@ pub fn writeResponseLine(strm: anytype, status: c_int) isize {
     return strm.write(s);
 }
 
-/// Ports `write_headers` (httplib.cpp:4057 @8642541b2): each valid field as
-/// its own write, then the blank line; an invalid one is skipped.
+/// Ports `write_headers` (httplib.cpp:4065 @cd959bae9): each field as its
+/// own write, then the blank line. Since 0.64.0 it writes what it is given:
+/// the server drops invalid fields first (`erase_invalid_fields`), and a
+/// client checks its own before writing.
 pub fn writeHeaders(a: std.mem.Allocator, strm: anytype, headers: *const Headers) error{OutOfMemory}!isize {
     var write_len: isize = 0;
     for (headers.entries.items) |x| {
-        if (!detail.isFieldValid(x.key, x.value)) continue;
         const s = try std.mem.concat(a, u8, &.{ x.key, ": ", x.value, "\r\n" });
         defer a.free(s);
         const len = strm.write(s);
@@ -1016,7 +1022,7 @@ pub fn writeData(strm: anytype, d: []const u8) bool {
 }
 
 /// Ports `write_content_chunked` (httplib.cpp:4294 @cd959bae9) with the
-/// identity coder (`nocompressor::compress`, httplib.cpp:3175 @8642541b2):
+/// identity coder (`nocompressor::compress`, httplib.cpp:3171 @cd959bae9):
 /// calls the provider until it says `done`, each non-empty write as one
 /// chunk, then `0\r\n\r\n`. Before each call the peer must still be there.
 ///
@@ -1072,8 +1078,8 @@ pub fn writeContentChunked(a: std.mem.Allocator, strm: *SocketStream, provider: 
 /// Ports `write_content_with_progress` (httplib.cpp:4095 @cd959bae9), as
 /// `write_content` (httplib.cpp:4181 @cd959bae9) calls it with no progress: a
 /// body framed by `length`, written raw. The server reaches it with a
-/// chunked provider (through `ContentProviderAdapter`, httplib.cpp:5672
-/// @8642541b2, which drops the length) once its error handler gave a
+/// chunked provider (through `ContentProviderAdapter`, httplib.cpp:5664
+/// @cd959bae9, which drops the length) once its error handler gave a
 /// streamed response a body, and so a `Content-Length` (Stage 10 step 6:
 /// a 404 through the CORS proxy).
 ///

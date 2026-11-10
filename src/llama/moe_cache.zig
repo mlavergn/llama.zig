@@ -9,7 +9,7 @@
 //!   layer helpers and `llama_moe_cache::impl`, whose members `MoeCache`
 //!   holds directly (the C++'s pimpl is only a compile firewall)
 //!
-//! Both at v0.8.0 (`8642541b2`).
+//! Both at v0.9.0 (`cd959bae9`).
 //!
 //! # How it works
 //!

@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/dsv4-hc.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/dsv4-hc.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/dsv4-hc.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels -- `dsv4_hc_comb_f32`, `dsv4_hc_pre_f32<gated>`,
 //! `dsv4_hc_post_f32<has_comb, gated>` -- stay CUDA. All three launch through
 //! `ggml_cuda_kernel_launch` (PDL).

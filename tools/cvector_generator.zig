@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/tools/cvector-generator/cvector-generator.cpp`,
-//! `pca.hpp` and `mean.hpp` at v0.8.0 (`8642541b2`). Each declaration names
+//! `pca.hpp` and `mean.hpp` at v0.9.0 (`cd959bae9`). Each declaration names
 //! the C++ it replaces and the line it began at.
 //!
 //! # The PCA starts from the clock

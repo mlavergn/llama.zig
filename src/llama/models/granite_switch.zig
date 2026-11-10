@@ -11,8 +11,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/granite-switch.cpp` at v0.8.0
-//! (`8642541b2`): `llama_model_granite_switch`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/granite-switch.cpp` at v0.9.0
+//! (`cd959bae9`): `llama_model_granite_switch`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, its `graph` with
 //! `build_switched_lora_delta`, `build_switched_lora_mm`,
 //! `build_attention_layer` and `build_layer_ffn`, and the graph input

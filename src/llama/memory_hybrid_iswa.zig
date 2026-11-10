@@ -11,7 +11,7 @@
 //!   and `llama_memory_hybrid_iswa_context`
 //! - `llama.cpp/src/llama-memory-hybrid-iswa.cpp` -- their bodies
 //!
-//! All at v0.8.0 (`8642541b2`). The shape follows `memory_hybrid.zig`,
+//! All at v0.9.0 (`cd959bae9`). The shape follows `memory_hybrid.zig`,
 //! with `kv_cache_iswa.zig` in place of the single KV cache.
 
 const std = @import("std");

@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/ssm-conv.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/ssm-conv.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/ssm-conv.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels, `ssm_conv_f32` and `ssm_conv_long_token_f32`, stay CUDA.
 //!
 //! The short-sequence kernel goes through `ggml_cuda_kernel_launch` (PDL);

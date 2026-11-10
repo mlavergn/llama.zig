@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/fattn.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/fattn.cuh` at v0.8.0 (`8642541b2`); the
+//! `llama.cpp/ggml/src/ggml-cuda/fattn.cuh` at v0.9.0 (`cd959bae9`); the
 //! sparse K/V path (`compactMask`, `mmaF16ShallUseSparse`) is new at v0.4.1
 //! (`b29c606e2`), and since v0.5.0 a query tile of `ncols1` queries shares
 //! one index list, the union of what its queries see. The
@@ -48,11 +48,12 @@ const kq_stride = fattn_common.kq_stride;
 /// `sizeof(half)`.
 const sizeof_half = 2;
 
-/// Ports `ggml_cuda_flash_attn_ext_compact_mask` (fattn.cu:106 @8642541b2),
-/// the non-HIP, non-MUSA arm: for every group of `ncols1` queries, the
+/// Ports `ggml_cuda_flash_attn_ext_compact_mask` (fattn.cu:117 @cd959bae9),
+/// the non-MUSA arm (since v0.9.0 HIP compiles it too, the kernel sized to
+/// the physical warp): for every group of `ncols1` queries, the
 /// indices of the mask columns any of them can see, at most `n_kv_max` of
 /// them, padded with -1, and in `counts` how many there are. The kernel,
-/// `flash_attn_mask_to_sparse_indices` (fattn.cu:12 @8642541b2), stays
+/// `flash_attn_mask_to_sparse_indices` (fattn.cu:13 @cd959bae9), stays
 /// CUDA, a template over `ncols1` and `oob`, which is set when the last
 /// group is partial.
 /// It is in this translation unit whichever instance file's `launch_fattn`
@@ -85,32 +86,43 @@ pub fn compactMask(mask: *const Tensor, indices: ?[*]i32, counts: ?[*]i32, n_que
     common.cudaCheck(common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
 }
 
-/// Ports `ggml_cuda_flash_attn_ext_mma_f16_shall_use_sparse` (fattn.cu:128 @8642541b2),
-/// the non-HIP, non-MUSA arm: whether a node takes the sparse-gather
+/// Ports `ggml_cuda_flash_attn_ext_mma_f16_shall_use_sparse` (fattn.cu:139 @cd959bae9),
+/// the non-MUSA arm: whether a node takes the sparse-gather
 /// kernel at `ncols1` x `ncols2`, given an instantiation that has one
 /// (`fattn_mma.mayUseSparse`). The gather must beat the dense kernel, which
-/// handles up to `64/ncols2` queries per K/V pass.
+/// handles up to `64/ncols2` queries per K/V pass. Since v0.9.0 never with
+/// `kv_rows` (`src[5]`), and CDNA takes it for DKQ 576; the CDNA arms are
+/// false on a CUDA device.
 pub fn mmaF16ShallUseSparse(cc: c_int, dst: *const Tensor, ncols1: c_int, ncols2: c_int) bool {
     const Q = impl.one(Tensor, dst.src[0]);
     const K = impl.one(Tensor, dst.src[1]);
+    const V = impl.one(Tensor, dst.src[2]);
     const mask_opt: ?*const Tensor = dst.src[3];
 
     const max_bias = impl.getOpParamsF32(dst, 1);
     const logit_softcap = impl.getOpParamsF32(dst, 2);
+
+    // On CDNA only the DKQ=576 kernel variant with ncols2=16 is compiled with sparse support.
+    if (fattn_common.amdMfmaAvailable(cc) and !fattn_mma.mayUseSparse(@truncate(Q.ne[0]), @truncate(V.ne[0]), 1, 16)) {
+        return false;
+    }
 
     const n_kv_max = impl.getOpParamsI32(dst, 4);
 
     // the dense kernel handles up to 64/ncols2 queries per K/V pass, the single-query gather has to beat that
     const n_gather: i64 = (if (ncols1 == 1) @min(Q.ne[1], @as(i64, @divTrunc(64, ncols2))) else @as(i64, ncols1)) * @as(i64, n_kv_max);
 
+    if (!((common.cc.isNvidia(cc) and common.turingMmaAvailable(cc)) or fattn_common.amdMfmaAvailable(cc)) or dst.src[5] != null) {
+        return false;
+    }
     const mask = mask_opt orelse return false;
-    return common.cc.isNvidia(cc) and common.turingMmaAvailable(cc) and
-        n_kv_max > 0 and max_bias == 0.0 and logit_softcap == 0.0 and
+    return n_kv_max > 0 and max_bias == 0.0 and logit_softcap == 0.0 and
         mask.ne[0] == K.ne[1] and mask.ne[1] >= Q.ne[1] and mask.ne[2] == 1 and
-        K.ne[1] >= @max(@as(i64, 4096), 2 * n_gather);
+        K.ne[1] >= @max(@as(i64, 4096), if (common.cc.isNvidia(cc)) 2 * n_gather else 2 * @as(i64, n_kv_max));
 }
 
-/// Ports `ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1` (fattn.cu:155 @8642541b2).
+/// Ports `ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1` (fattn.cu:172 @cd959bae9).
+/// The sparse arm is under `!GGML_USE_MUSA` (HIP since v0.9.0).
 fn mmaF16SwitchNcols1(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols2: comptime_int, ctx: *common.Context, dst: *Tensor) void {
     const cc = common.info().devices[@intCast(common.getDevice())].cc;
     const Q = impl.one(Tensor, dst.src[0]);
@@ -169,7 +181,8 @@ fn gqaOpt(base: bool, Q: *const Tensor, K: *const Tensor, V: *const Tensor, mask
     return use_gqa_opt;
 }
 
-/// Ports `ggml_cuda_flash_attn_ext_mma_f16_switch_ncols2` (fattn.cu:194 @8642541b2).
+/// Ports `ggml_cuda_flash_attn_ext_mma_f16_switch_ncols2` (fattn.cu:211 @cd959bae9).
+/// Since v0.9.0 the K/V length is the mask's column count under `kv_rows`.
 fn mmaF16SwitchNcols2(comptime DKQ: comptime_int, comptime DV: comptime_int, ctx: *common.Context, dst: *Tensor) void {
     const cc = common.info().devices[@intCast(common.getDevice())].cc;
     const KQV = dst;
@@ -178,11 +191,15 @@ fn mmaF16SwitchNcols2(comptime DKQ: comptime_int, comptime DV: comptime_int, ctx
     const V = impl.one(Tensor, dst.src[2]);
     const mask: ?*const Tensor = dst.src[3];
 
+    // with kv_rows the kernel iterates over the mask columns
+    const kv_rows: ?*const Tensor = dst.src[5];
+    const n_kv: i64 = if (kv_rows) |r| r.ne[0] else K.ne[1];
+
     const max_bias = impl.getOpParamsF32(KQV, 1);
 
     // Edge cases like no mask, ALiBi, unpadded K/V, or misaligned addresses for large data transfers
     //     are put into the template specialization without GQA optimizations.
-    const use_gqa_opt = gqaOpt(mask != null and max_bias == 0.0 and @rem(K.ne[1], kq_stride) == 0, Q, K, V, mask);
+    const use_gqa_opt = gqaOpt(mask != null and max_bias == 0.0 and @rem(n_kv, kq_stride) == 0, Q, K, V, mask);
 
     impl.assert(@rem(Q.ne[2], K.ne[2]) == 0, "Q->ne[2] % K->ne[2] == 0");
     const gqa_ratio: c_int = @truncate(@divTrunc(Q.ne[2], K.ne[2]));
@@ -252,7 +269,7 @@ fn mmaF16SwitchNcols2(comptime DKQ: comptime_int, comptime DV: comptime_int, ctx
     }
 }
 
-/// Ports `ggml_cuda_flash_attn_ext_mma_f16` (fattn.cu:288 @8642541b2).
+/// Ports `ggml_cuda_flash_attn_ext_mma_f16` (fattn.cu:308 @cd959bae9).
 fn mmaF16(ctx: *common.Context, dst: *Tensor) void {
     const cc = common.info().devices[@intCast(common.getDevice())].cc;
     const KQV = dst;
@@ -328,7 +345,9 @@ fn mmaF16(ctx: *common.Context, dst: *Tensor) void {
 
             impl.assert(@rem(Q.ne[2], K.ne[2]) == 0, "Q->ne[2] % K->ne[2] == 0");
             const gqa_ratio: c_int = @truncate(@divTrunc(Q.ne[2], K.ne[2]));
-            if (gqa_ratio == 20 and common.cc.isNvidia(cc)) { // GLM 4.7 Flash
+            if (fattn_common.amdMfmaAvailable(cc) and mmaF16ShallUseSparse(cc, dst, 1, 16)) {
+                mmaF16SwitchNcols1(576, 512, 16, ctx, dst);
+            } else if (gqa_ratio == 20 and common.cc.isNvidia(cc)) { // GLM 4.7 Flash
                 if (cc >= common.cc.dgx_spark) {
                     if (Q.ne[1] <= 8) {
                         mmaF16SwitchNcols1(576, 512, 16, ctx, dst);
@@ -506,13 +525,19 @@ fn kvTypeSupported(t: c.enum_ggml_type) bool {
     };
 }
 
-/// Ports `ggml_cuda_get_best_fattn_kernel` (fattn.cu:540 @8642541b2).
+/// Ports `ggml_cuda_get_best_fattn_kernel` (fattn.cu:562 @cd959bae9). Since
+/// v0.9.0 a node with `kv_rows` (`src[5]`, `ggml_flash_attn_ext_rows`) takes
+/// the MMA kernel or none.
 fn getBestKernel(device: c_int, dst: *const Tensor) BestKernel {
     const KQV = dst;
     const Q = impl.one(Tensor, dst.src[0]);
     const K = impl.one(Tensor, dst.src[1]);
     const V = impl.one(Tensor, dst.src[2]);
     const mask: ?*const Tensor = dst.src[3];
+    const kv_rows: ?*const Tensor = dst.src[5];
+
+    // with kv_rows the kernel iterates over the mask columns
+    const n_kv: i64 = if (kv_rows) |r| r.ne[0] else K.ne[1];
 
     const gqa_ratio: c_int = @truncate(@divTrunc(Q.ne[2], K.ne[2]));
     impl.assert(@rem(Q.ne[2], K.ne[2]) == 0, "Q->ne[2] % K->ne[2] == 0");
@@ -521,7 +546,7 @@ fn getBestKernel(device: c_int, dst: *const Tensor) BestKernel {
 
     // The effective batch size for the kernel can be increased by gqa_ratio.
     // The kernel versions without this optimization are also used for ALiBi, if there is no mask, or if the KV cache is not padded,
-    const gqa_opt_applies = gqaOpt(gqa_ratio >= 2 and mask != null and max_bias == 0.0 and @rem(K.ne[1], kq_stride) == 0, Q, K, V, mask);
+    const gqa_opt_applies = gqaOpt(gqa_ratio >= 2 and mask != null and max_bias == 0.0 and @rem(n_kv, kq_stride) == 0, Q, K, V, mask);
 
     const cc = common.info().devices[@intCast(device)].cc;
 
@@ -574,6 +599,14 @@ fn getBestKernel(device: c_int, dst: *const Tensor) BestKernel {
         return .none;
     }
 
+    // only the MMA kernel reads K/V through kv_rows
+    if (kv_rows != null) {
+        return if (common.cc.isNvidia(cc) and common.turingMmaAvailable(cc) and mask != null and Q.ne[0] != 40 and Q.ne[0] != 72)
+            .mma_f16
+        else
+            .none;
+    }
+
     // For small batch sizes the vector kernel may be preferable over the kernels optimized for large batch sizes:
     // 192 satisfies % 64 == 0 but has no vec instance (DKQ != DV); force it onto the MMA path.
     const can_use_vector_kernel = Q.ne[0] <= 256 and @rem(Q.ne[0], 64) == 0 and Q.ne[0] != 192 and @rem(K.ne[1], kq_stride) == 0;
@@ -622,6 +655,11 @@ fn getBestKernel(device: c_int, dst: *const Tensor) BestKernel {
         if (Q.ne[1] * gqa_ratio_eff <= 16) {
             return .tile; // On Volta tensor cores are only faster for sufficiently large matrices.
         }
+        return .mma_f16;
+    }
+
+    // On CDNA, the sparse MMA kernel is used for DKQ=576 regardless of the head size heuristics.
+    if (fattn_common.amdMfmaAvailable(cc) and mmaF16ShallUseSparse(cc, dst, 1, 16)) {
         return .mma_f16;
     }
 

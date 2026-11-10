@@ -711,8 +711,11 @@ static int run_decode(common_params & params) {
                 }
             }
         } else {
+            // SPEC_PREFILL_LAST_OUT: an output on each sequence's last prefill token, as the
+            // server's prompt batch has (v0.9.0's MTP keeps only that row on a shared memory)
+            const bool last_out = getenv("SPEC_PREFILL_LAST_OUT") != nullptr;
             for (int s = 0; s < n_seq; s++) {
-                for (size_t i = 0; i + 1 < inp[s].size(); i++) b.add(inp[s][i], (llama_pos) i, s, false);
+                for (size_t i = 0; i + 1 < inp[s].size(); i++) b.add(inp[s][i], (llama_pos) i, s, last_out && i + 2 == inp[s].size());
             }
         }
         int rc = llama_process(ctx_tgt, LLAMA_PROCESS_TYPE_DECODE, b.get());

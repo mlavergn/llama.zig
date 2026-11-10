@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/gemma4a.cpp` at v0.8.0 (`8642541b2`).
+//! Ports `llama.cpp/tools/mtmd/models/gemma4a.cpp` at v0.9.0 (`cd959bae9`).
 //! Each declaration names what it ports and the line it began at.
 //!
 //! Upstream overrides the virtual `build_mm`; here `build` installs

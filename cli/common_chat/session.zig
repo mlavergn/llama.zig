@@ -8,7 +8,7 @@
 //! members from `llama.cpp/common/chat.h` and `llama.cpp/common/chat.cpp`,
 //! and `common_sampling_add_preserved_tokens` and
 //! `common_sampling_add_grammar_triggers` from
-//! `llama.cpp/common/sampling.cpp` (llama.cpp v0.8.0, `8642541b2`), which
+//! `llama.cpp/common/sampling.cpp` (llama.cpp v0.9.0, `cd959bae9`), which
 //! the session's constructor calls. Those two live here because
 //! `tools_common` does not import this module; `tools/common/sampling.zig`
 //! has its own over its own sampling parameters. Each declaration names

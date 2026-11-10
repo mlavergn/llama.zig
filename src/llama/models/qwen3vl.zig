@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/qwen3vl.cpp` at v0.8.0 (`8642541b2`):
+//! Ported from `llama.cpp/src/models/qwen3vl.cpp` at v0.9.0 (`cd959bae9`):
 //! `llama_model_qwen3vl`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`. `llama_model_qwen3tts`
 //! (`llama.cpp/src/models/qwen3tts.cpp`) adds nothing of its own, so the

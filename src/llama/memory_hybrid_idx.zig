@@ -11,7 +11,7 @@
 //!   `kpool_layout`, `kpool_state`, `kpool_access`, `kpool_pad`,
 //!   `kpool_rank` and `llama_memory_hybrid_idx_ns`
 //!
-//! All at v0.8.0 (`8642541b2`).
+//! All at v0.9.0 (`cd959bae9`).
 //!
 //! # A side buffer over the attention cells
 //!

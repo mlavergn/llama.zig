@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/ngram-map.h` and `llama.cpp/common/ngram-map.cpp`
-//! at v0.8.0 (`8642541b2`). Each declaration names the C++ it replaces and
+//! at v0.9.0 (`cd959bae9`). Each declaration names the C++ it replaces and
 //! the line it began at.
 //!
 //! # Two algorithms

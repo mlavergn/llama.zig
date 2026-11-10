@@ -7,7 +7,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gemma4.cpp` at v0.8.0 (`8642541b2`):
+//! Ported from `llama.cpp/src/models/gemma4.cpp` at v0.9.0 (`cd959bae9`):
 //! `llama_model_gemma4`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `graph` and the graph's helpers, and
 //! `llm_graph_input_gemma4_ple`.
@@ -26,7 +26,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_gemma4`'s `load_arch_hparams` (models/gemma4.cpp:4 @8642541b2).
+/// Ports `llama_model_gemma4`'s `load_arch_hparams` (models/gemma4.cpp:4 @cd959bae9).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -40,6 +40,16 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     // `uint32_t - int32_t` is unsigned in the C++, then narrowed.
     hp.n_layer_kv_from_start = @bitCast(hp.n_layer_all -% n_kv_shared_layers);
     hp.f_attention_scale = 1.0; // Gemma4 uses self.scaling = 1.0 (no pre-attn scaling)
+
+    // Shared layers read the KV of the last layer with its own KV and the
+    // same SWA type.
+    impl.assert(hp.n_layer_kv_from_start >= 2, "models/gemma4.cpp", 15, "hparams.n_layer_kv_from_start >= 2");
+    {
+        var il: u32 = @bitCast(hp.n_layer_kv_from_start);
+        while (il < hp.n_layer_all) : (il += 1) {
+            hp.kv_source_impl[il] = @bitCast(hp.n_layer_kv_from_start -% @as(i32, if (hp.isSwa(il)) 2 else 1));
+        }
+    }
 
     if (try meta.getKey(f32, .rope_freq_base_swa, false, exc)) |v| hp.rope_freq_base_train_swa = v;
     _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, false, exc);
@@ -64,7 +74,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_gemma4`'s `load_arch_tensors` (models/gemma4.cpp:37 @8642541b2).
+/// Ports `llama_model_gemma4`'s `load_arch_tensors` (models/gemma4.cpp:43 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -80,13 +90,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
         return exc.throw(.runtime_error, "Gemma 4 requires n_embd_head_k_swa == n_embd_head_v_swa", .{});
     }
 
+    self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
+
     self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, nr, exc);
     // Without an output, the input token embedding is used.
     if (self.output == null) {
         self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
     }
-
-    self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
     if (n_embd_per_layer > 0) {
         self.per_layer_tok_embd = try self.createTensor(.{ .tensor = .per_layer_token_embd, .suffix = "weight" }, &.{ n_embd_per_layer * l.n_layer, l.n_vocab }, loader.tensor_read_lazy, exc);
@@ -184,11 +194,11 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
     g.build();
 }
 
-/// Ports `gemma4_view_2d_slice` (models/gemma4.cpp:149 @8642541b2): the 2D
+/// Ports `gemma4_view_2d_slice` (models/gemma4.cpp:155 @cd959bae9): the 2D
 /// slice of a 3D tensor at `idx` along its third dimension.
 fn view2dSlice(ctx: *c.ggml_context, x: *Tensor, idx: c_int) *Tensor {
     impl.assert(idx < @as(c_int, @intCast(x.ne[2])), "models/gemma4.cpp", 156, "idx < (int) x->ne[2]");
-    return c.ggml_view_2d(ctx, x, x.ne[0], x.ne[1], c.ggml_row_size(x.type, x.ne[0]), @intCast(idx * x.ne[0] * x.ne[1] * @as(i64, @intCast(c.ggml_element_size(x)))));
+    return c.ggml_view_2d(ctx, x, x.ne[0], x.ne[1], x.nb[1], @as(usize, @intCast(idx)) * x.nb[2]);
 }
 
 /// Ports `llm_graph_input_gemma4_ple` (models/gemma4.cpp:480 @cd959bae9):
@@ -243,7 +253,7 @@ const Graph = struct {
     n_embd_per_layer: i64,
 
     /// Ports the constructor of `llama_model_gemma4`'s `graph`
-    /// (models/gemma4.cpp:155 @8642541b2).
+    /// (models/gemma4.cpp:160 @cd959bae9).
     fn build(self: *const Graph) void {
         const model = self.model;
         const b = self.b;
@@ -267,14 +277,19 @@ const Graph = struct {
         b.cb(inpL, "inp_scaled", -1);
 
         // The positions.
-        const inp_pos = b.buildInpPos();
+        var inp_pos = b.buildInpPos();
 
-        const inp_attn = b.buildAttnInpKvIswa();
+        var inp_attn = b.buildAttnInpKvIswa();
+
+        const inp_attn_full = inp_attn.*;
+        var inp_attn_prune = inp_attn.*;
 
         const inp_out_ids = b.buildInpOutIds();
 
         if (inp_per_layer) |ipl_| {
-            const tok_embd_scale = impl.sqrtf(@floatFromInt(self.n_embd_per_layer));
+            // per_layer_input_scale (1/sqrt(2)) from project_per_layer_inputs
+            // is folded into tok_embd_scale.
+            const tok_embd_scale = impl.sqrtf(@floatFromInt(self.n_embd_per_layer)) / impl.sqrtf(2.0);
 
             var ipl: *Tensor = c.ggml_scale(ctx, ipl_, tok_embd_scale);
             ipl = c.ggml_reshape_3d(ctx, ipl, self.n_embd_per_layer, b.n_layer, ipl.ne[1]);
@@ -283,8 +298,43 @@ const Graph = struct {
             inp_per_layer = self.projectPerLayerInputs(inpL, ipl);
         }
 
+        // KV-shared layers do not write to the KV cache, so the non-output
+        // token rows are pruned before the first KV-shared layer.
+        var prune_shared = b.cropBeforeNextn(inp_out_ids) and
+            hp.n_layer_kv_from_start > 0 and hp.n_layer_kv_from_start < b.n_layer and
+            !cp.embeddings and cp.n_seq_max == 1;
+        {
+            var jl: i64 = hp.n_layer_kv_from_start;
+            while (prune_shared and jl <= b.n_layer) : (jl += 1) {
+                const ju: usize = @intCast(jl);
+                prune_shared = !(ju < cp.embeddings_layer_inp.len and cp.embeddings_layer_inp[ju]);
+            }
+        }
+
+        var n_rows: i64 = n_tokens;
+
         var il: c_int = 0;
         while (il < b.n_layer) : (il += 1) {
+            if (prune_shared and il == hp.n_layer_kv_from_start) {
+                inpL = c.ggml_get_rows(ctx, inpL, inp_out_ids);
+                inp_pos = c.ggml_reshape_1d(ctx, c.ggml_get_rows(ctx, c.ggml_reshape_2d(ctx, inp_pos, 1, n_tokens), inp_out_ids), b.n_outputs);
+
+                // Upstream's TODO: instead of get_rows here, extend llm_attn_mask
+                // with an `out` mask built in set_input holding just the pruned
+                // output cells, which would allow pruning with more than one
+                // sequence, with unified and split KV caches alike
+                // (ref: https://github.com/ggml-org/llama.cpp/pull/31356#discussion_r4455286628).
+                inp_attn_prune.self_attn_mask.raw = c.ggml_get_rows(ctx, inp_attn_full.self_attn_mask.raw, inp_out_ids);
+                inp_attn_prune.self_attn_mask_swa.raw = c.ggml_get_rows(ctx, inp_attn_full.self_attn_mask_swa.raw, inp_out_ids);
+
+                inp_attn_prune.self_attn_mask.raw = c.ggml_cast(ctx, inp_attn_prune.self_attn_mask.raw, c.GGML_TYPE_F16);
+                inp_attn_prune.self_attn_mask_swa.raw = c.ggml_cast(ctx, inp_attn_prune.self_attn_mask_swa.raw, c.GGML_TYPE_F16);
+
+                n_rows = b.n_outputs;
+
+                inp_attn = &inp_attn_prune;
+            }
+
             const layer = &model.layers[@intCast(il)];
             const ilu: u32 = @intCast(il);
             const n_embd_head: i64 = hp.nEmbdHeadK(ilu);
@@ -318,14 +368,14 @@ const Graph = struct {
                 qkv_fused = f;
                 b.cb(f, "wqkv", il);
                 const q_dim = n_embd_head * n_head;
-                Qcur = c.ggml_cont(ctx, c.ggml_view_2d(ctx, f, q_dim, n_tokens, f.nb[1], 0));
+                Qcur = c.ggml_cont(ctx, c.ggml_view_2d(ctx, f, q_dim, n_rows, f.nb[1], 0));
             } else {
                 Qcur = b.buildLoraMm(layer.wq.?, cur, layer.wq_s);
             }
             {
                 b.cb(Qcur, "Qcur", il);
 
-                Qcur = c.ggml_reshape_3d(ctx, Qcur, n_embd_head, n_head, n_tokens);
+                Qcur = c.ggml_reshape_3d(ctx, Qcur, n_embd_head, n_head, n_rows);
 
                 Qcur = b.buildNorm(Qcur, layer.attn_q_norm, null, .rms, il);
                 b.cb(Qcur, "Qcur_normed", il);
@@ -372,11 +422,9 @@ const Graph = struct {
                 cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, null, null, null, null, null, hp.f_attention_scale, il);
             }
 
-            // TODO @ngxson : strip unused token right after the last KV layer
-            // to speed up prompt processing. Keep all rows when extracting
-            // unmasked nextn embeddings: the MTP target needs the hidden
-            // state for every token.
-            if (il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids)) {
+            // Keep all rows when extracting unmasked nextn embeddings: the
+            // MTP target needs the hidden state for every token.
+            if (!prune_shared and il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids)) {
                 cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
                 inpL = c.ggml_get_rows(ctx, inpL, inp_out_ids);
             }
@@ -405,7 +453,7 @@ const Graph = struct {
                 var tmp: *Tensor = c.ggml_rms_norm(ctx, attn_out, hp.f_norm_rms_eps);
                 tmp = c.ggml_scale(ctx, tmp, 1.0 / impl.sqrtf(@floatFromInt(b.n_embd)));
                 tmp = c.ggml_mul(ctx, tmp, layer.ffn_gate_inp_s);
-                const logits = b.buildLoraMm(layer.ffn_gate_inp.?, tmp, null); // [n_expert, n_tokens]
+                const logits = b.buildLoraMm(layer.ffn_gate_inp.?, tmp, null); // [n_expert, n_rows]
                 b.cb(logits, "ffn_moe_logits", il);
 
                 cur_moe = b.buildMoeFfn(cur_moe, .{
@@ -449,18 +497,17 @@ const Graph = struct {
                 const pe_in = cur;
                 b.cb(cur, "pe_in", il);
 
-                cur = b.buildLoraMm(layer.per_layer_inp_gate.?, cur, null); // [n_embd_per_layer, n_tokens]
+                cur = b.buildLoraMm(layer.per_layer_inp_gate.?, cur, null); // [n_embd_per_layer, n_rows]
                 cur = c.ggml_gelu(ctx, cur);
 
                 var inp_this_layer = view2dSlice(ctx, ipl, il); // [n_embd_per_layer, n_tokens]
 
-                // TODO @ngxson : improve this
-                if (il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids)) {
+                if ((prune_shared and !hp.hasKv(ilu)) or (il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids))) {
                     inp_this_layer = c.ggml_get_rows(ctx, inp_this_layer, inp_out_ids);
                 }
 
                 cur = c.ggml_mul(ctx, cur, inp_this_layer);
-                cur = b.buildLoraMm(layer.per_layer_proj.?, cur, null); // [n_embd, n_tokens]
+                cur = b.buildLoraMm(layer.per_layer_proj.?, cur, null); // [n_embd, n_rows]
                 cur = b.buildNorm(cur, layer.per_layer_post_norm, null, .rms, il);
                 b.cb(cur, "per_layer_embd_out", il);
 
@@ -557,7 +604,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_gemma4`'s `graph`'s `project_per_layer_inputs`
-    /// (models/gemma4.cpp:514 @8642541b2): equivalent to the Python code's
+    /// (models/gemma4.cpp:550 @cd959bae9): equivalent to the Python code's
     /// `project_per_layer_inputs()`, the per-layer inputs with `n_layer` as
     /// the last dimension, from `inp_batch` `[n_embd, n_tokens]` and
     /// `build_inp_per_layer`'s `[n_embd_per_layer, n_layer, n_tokens]`.
@@ -570,19 +617,24 @@ const Graph = struct {
         const per_layer_input_scale = 1.0 / impl.sqrtf(2.0);
 
         // This product is computed in the input layer, i.e. on the CPU.
+        // per_layer_input_scale is folded into proj_norm_w, and
+        // per_layer_projection_scale into proj_eps.
+        const proj_norm_w: *Tensor = c.ggml_scale(ctx, self.model.per_layer_proj_norm, per_layer_input_scale);
+        c.ggml_build_forward_expand(b.gf, proj_norm_w);
+
         var per_layer_proj: *Tensor = c.ggml_mul_mat(ctx, self.model.per_layer_model_proj, inp_batch);
-        per_layer_proj = c.ggml_scale(ctx, per_layer_proj, per_layer_projection_scale);
         per_layer_proj = c.ggml_reshape_3d(ctx, per_layer_proj, self.n_embd_per_layer, b.n_layer, b.n_tokens);
 
-        per_layer_proj = b.buildNorm(per_layer_proj, self.model.per_layer_proj_norm, null, .rms, -1);
+        const proj_eps = b.hparams.f_norm_rms_eps / (per_layer_projection_scale * per_layer_projection_scale);
+        per_layer_proj = c.ggml_rms_norm(ctx, per_layer_proj, proj_eps);
+        per_layer_proj = c.ggml_mul(ctx, per_layer_proj, proj_norm_w);
         b.cb(per_layer_proj, "per_layer_proj", -1);
 
         var inp_per_layer: *Tensor = c.ggml_add(ctx, per_layer_proj, inp_per_layer_);
-        inp_per_layer = c.ggml_scale(ctx, inp_per_layer, per_layer_input_scale);
         b.cb(inp_per_layer, "inp_per_layer", -1);
 
         // Permute to [n_embd_per_layer, n_tokens, n_layer].
-        inp_per_layer = c.ggml_cont(ctx, c.ggml_permute(ctx, inp_per_layer, 0, 2, 1, 3));
+        inp_per_layer = c.ggml_permute(ctx, inp_per_layer, 0, 2, 1, 3);
         return inp_per_layer;
     }
 };

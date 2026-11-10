@@ -75,6 +75,7 @@ struct ref_ubatch {
     llama_token  *  token;
     float        *  embd;
     float        *  embd_state;
+    int32_t      *  embd_row;
     llama_pos    *  pos;
     int32_t      *  n_seq_id;
     llama_seq_id ** seq_id;
@@ -94,6 +95,7 @@ struct ref_ext_token {
     uint64_t     embd_off;
     int32_t      has_state;
     uint64_t     state_off;
+    int32_t      embd_row;
     int32_t      output;
     int32_t      decision_order;
     llama_pos    pos[4];
@@ -112,6 +114,7 @@ static void export_ubatch(const llama_ubatch & u, ref_ubatch * out) {
     out->token        = h->token;
     out->embd         = h->embd;
     out->embd_state   = h->embd_state;
+    out->embd_row     = h->embd_row;
     out->pos          = h->pos;
     out->n_seq_id     = h->n_seq_id;
     out->seq_id       = h->seq_id;
@@ -151,6 +154,11 @@ int ref_ext_set_decision_order(llama_batch_ext * b, int32_t idx, int32_t order) 
     return llama_batch_ext_set_decision_order(b, idx, (llama_decision_order) order) ? 1 : 0;
 }
 
+// v0.9.0: llama-ext.h declares it with C++ linkage.
+int32_t ref_ext_add_embd_row(llama_batch_ext * b, llama_seq_id seq_id, int32_t row) {
+    return llama_batch_ext_add_embd_row(b, seq_id, row);
+}
+
 size_t ref_ext_n_tokens(const llama_batch_ext * b) { return b->tokens.size(); }
 
 // v0.7.0's state width: the test constructor sets none, the context
@@ -177,6 +185,7 @@ void ref_ext_token(const llama_batch_ext * b, size_t i, ref_ext_token * out) {
     out->embd_off = t.embd_off;
     out->has_state = t.has_state;
     out->state_off = t.state_off;
+    out->embd_row = t.embd_row;
     out->output = t.output;
     out->decision_order = t.decision_order;
     for (int j = 0; j < 4; ++j) out->pos[j] = t.pos[j];

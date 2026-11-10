@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/add-id.cu` at v0.8.0
-//! (`8642541b2`). The kernel, `add_id_kernel`, stays CUDA.
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/add-id.cu` at v0.9.0
+//! (`cd959bae9`). The kernel, `add_id_kernel`, stays CUDA.
 
 const std = @import("std");
 const impl = @import("../impl.zig");

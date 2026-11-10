@@ -5,8 +5,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` and
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.8.0
-//! (`8642541b2`). Upstream split `ggml-vulkan.cpp` into those files at
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.9.0
+//! (`cd959bae9`). Upstream split `ggml-vulkan.cpp` into those files at
 //! v0.5.0.
 
 const std = @import("std");
@@ -246,34 +246,44 @@ pub fn getDequantizeMulMatVecId(ctx: *BackendCtx, a_type: c.ggml_type, b_type: c
     return dev.pipeline_dequant_mul_mat_vec_id_f32[wg][t];
 }
 
-/// Ports `ggml_vk_guess_split_k` (ggml-vulkan.cpp:5916 @8642541b2).
+/// Ports `ggml_vk_guess_split_k` (ggml-vulkan.cpp:5930 @cd959bae9).
 pub fn guessSplitK(ctx: *const BackendCtx, mm: u32, n: u32, k: u32, disable_split_k: bool, pipeline: *const Pipeline) u32 {
     if (disable_split_k) return 1;
 
     const cores = ctx.device.shader_core_count;
+    const rdna = ctx.device.architecture == .amd_rdna3 or ctx.device.architecture == .amd_rdna4;
     var split_k: u32 = 1;
-    if (cores != 0 and n >= pipeline.wg_denoms[1]) {
+    if (rdna and cores != 0 and k >= 2048 and n <= 32) {
+        // Small n gives too few workgroups to hide latency, aim for 8 per CU. Small tiles are one subgroup each.
+        const tiles = ceilDiv(mm, pipeline.wg_denoms[0]) *% ceilDiv(n, pipeline.wg_denoms[1]);
+        if (tiles < 4 *% cores) {
+            split_k = @min(@as(u32, 8), ceilDiv(8 *% cores, tiles));
+        }
+    }
+
+    // On RDNA, also split when n <= 64 only partly fills one tile column.
+    if (split_k == 1 and cores != 0 and (n >= pipeline.wg_denoms[1] or (rdna and n <= 64))) {
         // If k is 'large' and the SMs will fill less than halfway, use split_k.
         const m_tiles = ceilDiv(mm, pipeline.wg_denoms[0]);
         const n_tiles = ceilDiv(n, pipeline.wg_denoms[1]);
         if (k >= 2048) {
             if (m_tiles *% n_tiles <= cores / 2) {
                 split_k = cores / (m_tiles *% n_tiles);
-            } else if (m_tiles *% n_tiles <= cores * 2 / 3) {
+            } else if (m_tiles *% n_tiles <= cores *% 2 / 3) {
                 split_k = 3;
             }
             // Cap the split at 8x. Unless k is huge this is a lot of overhead.
             split_k = @min(split_k, 8);
-
-            // ggml_vk_matmul aligns the splits to a multiple of 256; reduce the
-            // count while the rounded-up size would leave the last split empty.
-            while (split_k != 1) {
-                var k_split = ceilDiv(k, split_k);
-                k_split = @intCast(roundupPow2(k_split, 256));
-                if (k_split *% (split_k - 1) < k) break;
-                split_k -= 1;
-            }
         }
+    }
+
+    // ggml_vk_matmul aligns the splits to a multiple of 256; reduce the
+    // count while the rounded-up size would leave the last split empty.
+    while (split_k != 1) {
+        var k_split = ceilDiv(k, split_k);
+        k_split = @intCast(roundupPow2(k_split, 256));
+        if (k_split *% (split_k - 1) < k) break;
+        split_k -= 1;
     }
     return split_k;
 }

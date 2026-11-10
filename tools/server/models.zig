@@ -8,7 +8,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/server/server-models.cpp` and
-//! `llama.cpp/tools/server/server-models.h` (v0.8.0, `8642541b2`): the
+//! `llama.cpp/tools/server/server-models.h` (v0.9.0, `cd959bae9`): the
 //! monitor thread, `server_models`, `server_models_routes` with every
 //! handler, and the helpers above them; and `server_role`, the router's
 //! protocol with a child, from `llama.cpp/tools/server/server-common.cpp` and
@@ -1385,7 +1385,7 @@ pub const Models = struct {
     arena: std.heap.ArenaAllocator = .init(std.heap.c_allocator),
 
     /// Ports the constructor of `server_models` (server-models.cpp:393
-    /// @8642541b2). `self` must not move afterwards.
+    /// @cd959bae9). `self` must not move afterwards.
     pub fn init(self: *Models, params: *const Params, argv: []const [:0]const u8) !void {
         self.* = .{
             .ctx_preset = try preset_mod.Context.create(gpa, .server),

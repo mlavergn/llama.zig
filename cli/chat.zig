@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! **Not a port.** Our own code. It covers the ground `common_chat_templates`
-//! does in `llama.cpp/common/chat.cpp` (v0.8.0, `8642541b2`) -- find the
+//! does in `llama.cpp/common/chat.cpp` (v0.9.0, `cd959bae9`) -- find the
 //! model's template, bind the conversation to it, render -- but shares no code
 //! with it, and renders through `zigjinja` rather than upstream's bundled
 //! Jinja.
@@ -52,7 +52,7 @@
 //! Two bound values *are* control tokens: `bos_token` and `eos_token`, which
 //! templates emit by name. They come from the model, not the user, so
 //! upstream binds them after the input with `ctx.set_val`, unmarked
-//! (`common_chat_template_direct_apply_impl`, chat.cpp:1042 @8642541b2), and
+//! (`common_chat_template_direct_apply_impl`, chat.cpp:1042 @cd959bae9), and
 //! so does this file: they are template text for every propagation rule.
 //! Only their own bytes are trusted -- matching their spelling is not
 //! enough: a message that reads exactly `</s>` stays untrusted.

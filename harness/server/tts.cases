@@ -49,6 +49,28 @@ POST /tts {"input": "hello", "n_predict": 4, "seed": 7}
 POST /tts {"input": "stream", "n_predict": 4, "seed": 7, "stream": true}
 POST /tts {"input": "ref", "n_predict": 3, "seed": 1, "speaker_ref_b64": "$WAV"}
 GET /v1/models
+# v0.9.0: the fixture's two predefined voices, "alba" and "Bob"
+GET /props
+POST /tts {"input": "voiced", "n_predict": 3, "seed": 1, "voice": "alba"}
+POST /tts {"input": "voiced", "n_predict": 3, "seed": 1, "voice": "ALBA"}
+POST /tts {"input": "voiced", "n_predict": 3, "seed": 1, "voice": "carol"}
+POST /tts {"input": "voiced", "n_predict": 3, "seed": 1, "voice": "Bob", "speaker_ref_b64": "$WAV"}
+
+# v0.9.0: predefined voices. An LFM3-Audio generator has two, "female" and
+# "male": GET /props lists them, a request speaks with the one it names, or
+# with the first; an unknown one, or one beside a speaker reference, is
+# refused, and so is a speaker reference to a model with no voice encoder
+!server -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -c 4096 -np 1 --no-warmup --seed 42 -lv 4
+!fulllog
+GET /props
+POST /tts {"input": "hello", "n_predict": 3, "seed": 7}
+POST /tts {"input": "hello", "n_predict": 3, "seed": 7, "voice": "male"}
+POST /tts {"input": "hello", "n_predict": 3, "seed": 7, "voice": "female", "stream": true}
+POST /tts {"input": "hello", "n_predict": 3, "voice": "nobody"}
+POST /tts {"input": "hello", "n_predict": 3, "voice": "Male"}
+POST /tts {"input": "hello", "n_predict": 3, "voice": "male", "speaker_ref_b64": "$WAV"}
+POST /tts {"input": "hello", "n_predict": 3, "speaker_ref_b64": "$WAV"}
+FORM /tts {"input": "form", "n_predict": "3", "voice": "male", "speaker_ref": "@file:$DATA/tone.wav"}
 
 # two requests: the second waits for the slot, its prompt re-evaluated whole
 !server -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -c 2048 -np 2 --no-warmup --seed 42 -lv 4

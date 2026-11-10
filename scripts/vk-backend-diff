@@ -27,6 +27,13 @@
 # multi-device scenarios run with it on: `0,1` on the GB10, and `0,0`, the
 # one physical device listed twice, which is how llvmpipe alone reaches it.
 #
+# Since v0.9.0 the registry hands out an all-reduce (`ggml-vulkan-comm.cpp`)
+# and every scenario reduces a set of tensors across two backends through it
+# (`ask_allreduce`): the default spin, none (`GGML_VK_ALLREDUCE_SPIN_US=0`,
+# which puts the bridge thread to sleep on its condition variable at once),
+# a long one, `GGML_VK_DISABLE_ALLREDUCE` and the serialized and perf-logger
+# scenarios above, which refuse or always submit.
+#
 # Usage: scripts/vk-backend-diff
 # Requires:
 #   zig build reference vk-ref --release=fast -Dvulkan -Dcuda=false --prefix zig-out/vk-port
@@ -39,7 +46,7 @@ REF_LIB=${VK_REF_LIB:-zig-out/vk-port/lib/libggml-vulkan-ref.a}
 for lib in "$PORT_LIB" "$REF_LIB"; do
     [ -f "$lib" ] || { echo "missing $lib -- see the Requires lines in $0" >&2; exit 2; }
 done
-if nm -A "$PORT_LIB" 2>/dev/null | grep -qE '/ggml-vulkan(-buffers|-debug)?\.o:'; then
+if nm -A "$PORT_LIB" 2>/dev/null | grep -qE '/ggml-vulkan(-buffers|-comm|-debug)?\.o:'; then
     echo "FAIL: $PORT_LIB contains upstream's ggml-vulkan objects -- build it with -Dvulkan-port" >&2; exit 1
 fi
 n=$(nm -g --defined-only "$REF_LIB" 2>/dev/null | grep -cE ' [TDVW] ref_(ggml_backend_|vk_conv_block_sizes)')
@@ -83,6 +90,10 @@ scenarios=(
     "GGML_VK_VISIBLE_DEVICES=0,0"
     "GGML_VK_VISIBLE_DEVICES=0,0 GGML_VK_MEMORY_LOGGER=1"
     "GGML_VK_VISIBLE_DEVICES=0,1 GGML_VK_MEMORY_LOGGER=1"
+    "GGML_VK_DISABLE_ALLREDUCE=1"
+    "GGML_VK_ALLREDUCE_SPIN_US=0"
+    "GGML_VK_VISIBLE_DEVICES=0,1 GGML_VK_ALLREDUCE_SPIN_US=0"
+    "GGML_VK_VISIBLE_DEVICES=0,0 GGML_VK_ALLREDUCE_SPIN_US=1000000"
 )
 
 # A side that aborts must abort the same way on both; gdb's backtrace would

@@ -5,8 +5,8 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-debug.cpp`, and
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.8.0
-//! (`8642541b2`). Upstream split `ggml-vulkan.cpp` into those files at
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.9.0
+//! (`cd959bae9`). Upstream split `ggml-vulkan.cpp` into those files at
 //! v0.5.0. Each declaration below names the C++ it replaces and the line it
 //! began at. The instance and the device queries are in `instance.zig`.
 //!
@@ -64,7 +64,7 @@ fn init(dev_num: usize) callconv(.c) c.ggml_backend_t {
 }
 
 /// Ports `ggml_backend_is_vk` (ggml-vulkan.cpp:15380 @cd959bae9).
-fn isVk(backend: c.ggml_backend_t) callconv(.c) bool {
+pub fn isVk(backend: c.ggml_backend_t) callconv(.c) bool {
     return backend != null and c.ggml_guid_matches(impl.one(c.struct_ggml_backend, backend).guid, &guid);
 }
 
@@ -162,7 +162,7 @@ fn deviceInit(dev: c.ggml_backend_dev_t, params: [*c]const u8) callconv(.c) c.gg
     return init(deviceCtx(dev).device);
 }
 
-/// Ports `ggml_backend_vk_device_supports_op` (ggml-vulkan.cpp:15505 @8642541b2);
+/// Ports `ggml_backend_vk_device_supports_op` (ggml-vulkan.cpp:15533 @cd959bae9);
 /// the predicate itself is `supports.zig`.
 fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: [*c]const c.ggml_tensor) callconv(.c) bool {
     const t = impl.one(c.ggml_tensor, @constCast(op));
@@ -206,8 +206,8 @@ fn deviceEventSynchronize(dev: c.ggml_backend_dev_t, event: c.ggml_backend_event
     m.iface.deviceEventSynchronize(deviceCtx(dev).device, event);
 }
 
-/// Ports `ggml_backend_vk_device_buffer_from_host_ptr` (ggml-vulkan.cpp:16259 @8642541b2).
-fn deviceBufferFromHostPtr(dev: c.ggml_backend_dev_t, ptr: ?*anyopaque, size: usize, max_tensor_size: usize) callconv(.c) c.ggml_backend_buffer_t {
+/// Ports `ggml_backend_vk_device_buffer_from_host_ptr` (ggml-vulkan.cpp:16292 @cd959bae9).
+pub fn deviceBufferFromHostPtr(dev: c.ggml_backend_dev_t, ptr: ?*anyopaque, size: usize, max_tensor_size: usize) callconv(.c) c.ggml_backend_buffer_t {
     _ = max_tensor_size;
     return m.iface.deviceBufferFromHostPtr(dev, deviceCtx(dev).device, ptr, size);
 }
@@ -285,12 +285,25 @@ fn regGetDevice(r: c.ggml_backend_reg_t, device: usize) callconv(.c) c.ggml_back
     return Devices.list.items[device];
 }
 
-/// Ports `ggml_backend_vk_reg_i` (ggml-vulkan.cpp:16341 @8642541b2).
+/// Ports `ggml_backend_vk_reg_get_proc_address` (ggml-vulkan.cpp:16374 @cd959bae9):
+/// the all-reduce of `comm.zig`, everywhere but Windows.
+fn regGetProcAddress(r: c.ggml_backend_reg_t, name: [*c]const u8) callconv(.c) ?*anyopaque {
+    _ = r;
+    if (m.comm.supported) {
+        const n = std.mem.span(name);
+        if (std.mem.eql(u8, n, "ggml_backend_comm_init")) return @ptrCast(@constCast(&m.comm.commInit));
+        if (std.mem.eql(u8, n, "ggml_backend_comm_free")) return @ptrCast(@constCast(&m.comm.commFree));
+        if (std.mem.eql(u8, n, "ggml_backend_comm_allreduce_tensor")) return @ptrCast(@constCast(&m.comm.commAllreduceTensor));
+    }
+    return null;
+}
+
+/// Ports `ggml_backend_vk_reg_i` (ggml-vulkan.cpp:16392 @cd959bae9).
 const reg_iface: c.struct_ggml_backend_reg_i = .{
     .get_name = regGetName,
     .get_device_count = regGetDeviceCount,
     .get_device = regGetDevice,
-    .get_proc_address = null,
+    .get_proc_address = regGetProcAddress,
 };
 
 var the_reg: c.struct_ggml_backend_reg = .{

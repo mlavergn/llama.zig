@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/mtmd/mtmd-helper-gen.cpp` and the gen-audio types
-//! of `llama.cpp/tools/mtmd/mtmd-helper.h`, at v0.8.0 (`8642541b2`). Each
+//! of `llama.cpp/tools/mtmd/mtmd-helper.h`, at v0.9.0 (`cd959bae9`). Each
 //! declaration names what it ports and the line it began at.
 //!
 //! The C++'s abstract `mtmd_gen_audio_pipeline` and its four subclasses are a
@@ -52,7 +52,7 @@ pub const OutMode = enum(c_int) {
     _,
 };
 
-/// Ports `mtmd_helper_gen_audio_inp` (mtmd-helper.h:234 @8642541b2).
+/// Ports `mtmd_helper_gen_audio_inp` (mtmd-helper.h:234 @cd959bae9).
 pub const Inp = extern struct {
     stream: bool, // if true, output() must be called after each step_gen()
     seq_id: c.llama_seq_id,
@@ -65,9 +65,8 @@ pub const Inp = extern struct {
     n_past: i32,
     out_mode: OutMode, // n_past > 0 only (default: auto)
 
-    speaker_ref: ?*mtmd.Bitmap, // optional, can be NULL
+    speaker_ref: ?*mtmd.Bitmap, // optional, can be NULL: audio to clone, or a voice bitmap
     lang: ?[*:0]const u8, // optional, can be NULL
-    voice: ?[*:0]const u8, // optional, can be NULL, model-dependent
     top_k: i32,
     top_p: f32,
     seed: u32, // UINT32_MAX for random (default: random)
@@ -177,7 +176,7 @@ const StreamOut = struct {
     }
 };
 
-/// Ports `mtmd_gen_audio_pipeline` (mtmd-helper-gen.cpp:90 @8642541b2): what
+/// Ports `mtmd_gen_audio_pipeline` (mtmd-helper-gen.cpp:90 @cd959bae9): what
 /// every pipeline holds.
 const Base = struct {
     lctx: ?*c.struct_llama_context,
@@ -247,12 +246,11 @@ const Base = struct {
         return true;
     }
 
-    /// Ports `encode_speaker` and `encode_speaker` (mtmd-helper-gen.cpp:432,
-    /// 1000 @8642541b2), one per pipeline: the reference audio through the mmproj's audio encoder.
-    /// They differ only in their messages.
-    fn encodeSpeaker(self: *const Base, bitmap: *mtmd.Bitmap, out: *std.ArrayList(f32), comptime no_encoder: [*:0]const u8, comptime encode_failed: [*:0]const u8) bool {
-        if (!mtmd.mtmd_support_audio(self.mctx)) {
-            logErr(no_encoder, .{});
+    /// Ports `encode_speaker` (mtmd-helper-gen.cpp:128 @cd959bae9): encodes a
+    /// speaker clip or a voice, `out` receives the encoder embeddings.
+    fn encodeSpeaker(self: *const Base, bitmap: *mtmd.Bitmap, out: *std.ArrayList(f32)) bool {
+        if (!mtmd.mtmd_bitmap_is_voice(bitmap) and !mtmd.mtmd_support_audio(self.mctx)) {
+            logErr("mtmd_helper_gen_audio: mmproj has no speaker/audio encoder\n", .{});
             return false;
         }
         const marker = std.mem.span(mtmd.mtmd_get_marker(self.mctx));
@@ -267,7 +265,7 @@ const Base = struct {
                 const chunk = mtmd.mtmd_input_chunks_get(chunks, i).?;
                 if (mtmd.mtmd_input_chunk_get_type(chunk) != .audio) continue;
                 if (mtmd.mtmd_encode_chunk(self.mctx, chunk) != 0) {
-                    logErr(encode_failed, .{});
+                    logErr("mtmd_helper_gen_audio: speaker encode failed\n", .{});
                     break;
                 }
                 const embd = mtmd.mtmd_get_output_embd(self.mctx);
@@ -396,7 +394,7 @@ fn assign(comptime T: type, list: *std.ArrayList(T), p: ?[*]const T, n: usize) v
 // -----------------------------------------------------------------------------
 // Qwen3-TTS
 
-/// Ports `qwen3tts_gen_audio_pipeline` (mtmd-helper-gen.cpp:138 @8642541b2):
+/// Ports `qwen3tts_gen_audio_pipeline` (mtmd-helper-gen.cpp:171 @cd959bae9):
 /// the backbone samples codec 0, the code predictor gives the other 15
 /// codebooks, then code2wav decodes them to PCM.
 const Qwen3tts = struct {
@@ -495,7 +493,7 @@ const Qwen3tts = struct {
         var speaker_embd: std.ArrayList(f32) = .empty;
         defer speaker_embd.deinit(gpa);
         if (inp.speaker_ref) |sr| {
-            if (!self.base.encodeSpeaker(sr, &speaker_embd, "mtmd_helper_gen_audio: mmproj has no speaker/audio encoder\n", "mtmd_helper_gen_audio: speaker encode failed\n")) return 1;
+            if (!self.base.encodeSpeaker(sr, &speaker_embd)) return 1;
         }
 
         const n_e = self.base.nE();
@@ -711,7 +709,7 @@ fn freeLists(lists: *std.ArrayList(TokenList)) void {
 }
 
 /// Ports `pockettts_gen_audio_pipeline` (mtmd-helper-gen.cpp:549
-/// @8642541b2): the backbone emits no token; the flow net turns each hidden
+/// @cd959bae9): the backbone emits no token; the flow net turns each hidden
 /// state into a latent, and the end-of-speech head lives in the mmproj.
 const Pockettts = struct {
     base: Base,
@@ -788,7 +786,7 @@ const Pockettts = struct {
         var voice: std.ArrayList(f32) = .empty;
         defer voice.deinit(gpa);
         if (inp.speaker_ref) |sr| {
-            if (!self.base.encodeSpeaker(sr, &voice, "mtmd_helper_gen_audio: mmproj has no voice encoder\n", "mtmd_helper_gen_audio: voice encode failed\n")) return 1;
+            if (!self.base.encodeSpeaker(sr, &voice)) return 1;
         }
 
         self.pack = pocketttsPack(self.base.info.model_variant);
@@ -1434,7 +1432,7 @@ fn nthLargest(sorted: []f32, k: usize) f32 {
     return sorted[k];
 }
 
-/// Ports `lfm3a_gen_audio_pipeline` (mtmd-helper-gen.cpp:1273 @8642541b2): LFM3-Audio
+/// Ports `lfm3a_gen_audio_pipeline` (mtmd-helper-gen.cpp:1240 @cd959bae9): LFM3-Audio
 /// TTS, see generate() in the reference: each step samples a frame of codes by
 /// MaskGIT and feeds its embedding back, the end-of-audio code stops.
 const Lfm3a = struct {
@@ -1518,13 +1516,16 @@ const Lfm3a = struct {
         self.out_buf.clearRetainingCapacity();
     }
 
-    /// `set_input` (mtmd-helper-gen.cpp:1297 @8642541b2).
+    /// `set_input` (mtmd-helper-gen.cpp:1264 @cd959bae9).
     fn setInput(self: *Lfm3a, inp: *const Inp) i32 {
         self.reset();
         self.seq_id = inp.seq_id;
 
-        if (inp.speaker_ref != null) {
-            logWrn("mtmd_helper_gen_audio: the model has no voice conditioning, the speaker file is ignored\n", .{});
+        // a voice is named in the prompt instead
+        if (inp.speaker_ref) |sr| {
+            if (!mtmd.mtmd_bitmap_is_voice(sr)) {
+                logWrn("mtmd_helper_gen_audio: the model has no voice conditioning, the speaker file is ignored\n", .{});
+            }
         }
 
         // the prompt is rendered by the caller: the "tts" chat template of the model, or the next turn of a conversation
@@ -1865,12 +1866,378 @@ const Lfm3a = struct {
     }
 };
 
+// -----------------------------------------------------------------------------
+// Chatterbox
+
+/// Ports `chatterbox_gen_audio_pipeline` (mtmd-helper-gen.cpp:1690
+/// @cd959bae9): the backbone emits s3 speech tokens, then one flow-matching
+/// mel decode and the NSF-iSTFT vocoder make the PCM. The multilingual
+/// variant runs cfg with an uncond sequence (text rows zeroed), paired as
+/// seq_id and n_seq_max / 2 + seq_id.
+const Chatterbox = struct {
+    base: Base,
+
+    // vocab and mmproj data fixed across the whole session, read once
+    tok_embd: std.ArrayList(f32) = .empty,
+    mtl: bool = false,
+    text_pos: std.ArrayList(f32) = .empty,
+    speech_pos: std.ArrayList(f32) = .empty,
+    speech_base: Token = token_null,
+
+    // per-generation state, cleared by reset()
+    seq_id: c.llama_seq_id = 0,
+    seq_uncond: c.llama_seq_id = 0,
+    pos: c.llama_pos = 0,
+    ar_idx: c_int = 0,
+    prompt_embd_buf: std.ArrayList(f32) = .empty,
+    uncond_embd_buf: std.ArrayList(f32) = .empty,
+    n_prompt: c_int = 0,
+    prompt_pos: c_int = 0,
+    cond_logits: std.ArrayList(f32) = .empty,
+    codes_buf: std.ArrayList(i32) = .empty,
+    decoded: bool = false,
+    audio_pcm: std.ArrayList(f32) = .empty,
+    h_state_buf: std.ArrayList(f32) = .empty,
+    out_type: OutType = .wav,
+    out_buf: std.ArrayList(u8) = .empty,
+    so: StreamOut = .{},
+
+    /// `text_start` (mtmd-helper-gen.cpp:2056 @cd959bae9): start_text_token
+    /// of the reference, only the multilingual prompt uses it.
+    const text_start: Token = 255;
+    /// `text_stop` (mtmd-helper-gen.cpp:2057 @cd959bae9).
+    const text_stop: Token = 0;
+
+    fn deinit(self: *Chatterbox) void {
+        self.base.deinit();
+        self.tok_embd.deinit(gpa);
+        self.text_pos.deinit(gpa);
+        self.speech_pos.deinit(gpa);
+        self.prompt_embd_buf.deinit(gpa);
+        self.uncond_embd_buf.deinit(gpa);
+        self.cond_logits.deinit(gpa);
+        self.codes_buf.deinit(gpa);
+        self.audio_pcm.deinit(gpa);
+        self.h_state_buf.deinit(gpa);
+        self.out_buf.deinit(gpa);
+    }
+
+    /// `reset` (mtmd-helper-gen.cpp:1694 @cd959bae9).
+    fn reset(self: *Chatterbox) void {
+        self.seq_id = 0;
+        self.seq_uncond = 0;
+        self.pos = 0;
+        self.ar_idx = 0;
+        self.codes_buf.clearRetainingCapacity();
+        self.audio_pcm.clearRetainingCapacity();
+        self.h_state_buf.clearRetainingCapacity();
+        self.out_buf.clearRetainingCapacity();
+        self.prompt_embd_buf.clearRetainingCapacity();
+        self.uncond_embd_buf.clearRetainingCapacity();
+        self.cond_logits.clearRetainingCapacity();
+        self.n_prompt = 0;
+        self.prompt_pos = 0;
+        self.decoded = false;
+        self.so.reset();
+        self.base.dropGenState();
+    }
+
+    /// The `add_pos` lambda (mtmd-helper-gen.cpp:1760 @cd959bae9) of set_input.
+    fn addPos(self: *const Chatterbox, r: []f32, tab: *const std.ArrayList(f32), idx: usize) void {
+        const n_e = self.base.nE();
+        const p = tab.items[idx * n_e ..][0..n_e];
+        for (r[0..n_e], p) |*x, v| x.* += v;
+    }
+
+    /// `set_input` (mtmd-helper-gen.cpp:1715 @cd959bae9).
+    fn setInput(self: *Chatterbox, inp: *const Inp) i32 {
+        self.reset();
+        self.seq_id = inp.seq_id;
+        const lctx = self.base.lctx;
+        const vocab = self.base.vocab;
+
+        if (!self.ensureCache()) return 1;
+
+        self.out_type = inp.out_type;
+        self.so.stream = inp.stream;
+        if (!self.base.initGenState(inp.seed)) return 1;
+
+        if (self.mtl) {
+            // the uncond sequence lives half a seq space away from the cond one
+            const n_seq_max: i32 = @bitCast(lapi.context.llama_n_seq_max(lctx));
+            self.seq_uncond = @divTrunc(n_seq_max, 2) + self.seq_id;
+            if (n_seq_max < 2 or self.seq_id >= @divTrunc(n_seq_max, 2)) {
+                logErr("mtmd_helper_gen_audio: multilingual chatterbox needs a paired cfg sequence " ++
+                    "(n_seq_max = %d, seq_id = %d)\n", .{ n_seq_max, self.seq_id });
+                return 1;
+            }
+        }
+        const mem = lapi.context.llama_get_memory(lctx);
+        if (!lapi.context.llama_memory_seq_rm(mem, self.seq_id, 0, -1) or (self.mtl and !lapi.context.llama_memory_seq_rm(mem, self.seq_uncond, 0, -1))) {
+            logErr("mtmd_helper_gen_audio: cannot reset chatterbox sequences\n", .{});
+            return 1;
+        }
+
+        // the encode gives the talker conditioning rows, set_ref keeps the flow decoder reference
+        const speaker_ref = inp.speaker_ref orelse {
+            logErr("mtmd_helper_gen_audio: chatterbox requires a speaker reference or a voice\n", .{});
+            return 1;
+        };
+        if (!self.base.encodeSpeaker(speaker_ref, &self.prompt_embd_buf) or
+            mtmd.mtmd_gen_state_set_ref(self.base.mctx, self.base.gen_state) != 0)
+        {
+            logErr("mtmd_helper_gen_audio: speaker reference encoding failed\n", .{});
+            return 1;
+        }
+
+        const n_e = self.base.nE();
+
+        // prompt rows: [conditioning, text, speech bos]
+        // no text preprocessing here, the [SPACE] substitution and the case folding are baked in at conversion
+        var txt: std.ArrayList(u8) = .empty;
+        defer txt.deinit(gpa);
+        if (self.mtl and inp.lang != null and inp.lang.?[0] != 0) {
+            // the reference prefixes the language tag, e.g. "[fr]"
+            txt.append(gpa, '[') catch oom();
+            for (std.mem.span(inp.lang.?)) |ch| txt.append(gpa, std.ascii.toLower(ch)) catch oom();
+            txt.append(gpa, ']') catch oom();
+        }
+        if (inp.prompt_len != 0) txt.appendSlice(gpa, inp.prompt.?[0..inp.prompt_len]) catch oom();
+        var ids: std.ArrayList(Token) = .empty;
+        defer ids.deinit(gpa);
+        ids.resize(gpa, txt.items.len + 16) catch oom();
+        txt.append(gpa, 0) catch oom(); // c_str()
+        const n_ids = lapi.vocab.llama_tokenize(vocab, txt.items.ptr, @intCast(txt.items.len - 1), ids.items.ptr, @intCast(ids.items.len), false, true);
+        if (n_ids < 1) {
+            logErr("mtmd_helper_gen_audio: tokenization failed\n", .{});
+            return 1;
+        }
+        ids.shrinkRetainingCapacity(@intCast(n_ids));
+        if (self.mtl) {
+            // only the multilingual prompt wraps the text in start/stop tokens
+            ids.insert(gpa, 0, text_start) catch oom();
+            ids.append(gpa, text_stop) catch oom();
+            if (ids.items.len > self.text_pos.items.len / n_e) {
+                logErr("mtmd_helper_gen_audio: prompt too long (%zu tokens, max %zu)\n", .{ ids.items.len, self.text_pos.items.len / n_e });
+                return 1;
+            }
+        }
+        const text0 = self.prompt_embd_buf.items.len / n_e;
+        for (ids.items, 0..) |id, i| {
+            self.prompt_embd_buf.appendSlice(gpa, self.tok_embd.items[@as(usize, @intCast(id)) * n_e ..][0..n_e]) catch oom();
+            if (self.mtl) self.addPos(self.prompt_embd_buf.items[(text0 + i) * n_e ..], &self.text_pos, i);
+        }
+
+        // speech bos opens the AR stream
+        const bos: usize = @intCast(lapi.vocab.llama_vocab_bos(vocab));
+        self.prompt_embd_buf.appendSlice(gpa, self.tok_embd.items[bos * n_e ..][0..n_e]) catch oom();
+        if (self.mtl) self.addPos(self.prompt_embd_buf.items[self.prompt_embd_buf.items.len - n_e ..], &self.speech_pos, 0);
+        self.ar_idx = 1;
+        self.n_prompt = @intCast(self.prompt_embd_buf.items.len / n_e);
+
+        if (self.mtl) {
+            // cfg uncond prompt: text rows are zeroed but keep their learned positions, as in the reference
+            self.uncond_embd_buf.clearRetainingCapacity();
+            self.uncond_embd_buf.appendSlice(gpa, self.prompt_embd_buf.items) catch oom();
+            for (0..ids.items.len) |i| {
+                const r = self.uncond_embd_buf.items[(text0 + i) * n_e ..][0..n_e];
+                @memset(r, 0.0);
+                self.addPos(r, &self.text_pos, i);
+            }
+        }
+
+        self.prompt_pos = 0;
+        return 0;
+    }
+
+    /// `step_prompt` (mtmd-helper-gen.cpp:1823 @cd959bae9): the uncond
+    /// prompt follows the cond one on mtl.
+    fn stepPrompt(self: *Chatterbox, n_batch: i32) i32 {
+        impl.ggmlAssert(n_batch > 0, "mtmd-helper-gen.cpp", 1824, "n_batch > 0");
+        const n_total: c_int = if (self.mtl) 2 * self.n_prompt else self.n_prompt;
+        if (self.prompt_pos >= n_total) return 0;
+        const uncond = self.prompt_pos >= self.n_prompt;
+        const p0 = if (uncond) self.prompt_pos - self.n_prompt else self.prompt_pos;
+        const n_tokens_batch = @min(n_batch, self.n_prompt - p0);
+        const last = p0 + n_tokens_batch == self.n_prompt;
+
+        const buf = if (uncond) &self.uncond_embd_buf else &self.prompt_embd_buf;
+        const batch = EmbdBatch.create(buf.items.ptr, self.n_prompt, 1, self.base.n_embd);
+        defer batch.destroy();
+        batch.setPositionNormal(0, if (uncond) self.seq_uncond else self.seq_id);
+        if (last) batch.logits.items[@intCast(self.n_prompt - 1)] = 1;
+        if (lapi.context.llama_process(self.base.lctx, c.LLAMA_PROCESS_TYPE_DECODE, batch.render(self.base.lctx, p0, n_tokens_batch)) != 0) {
+            logErr("mtmd_helper_gen_audio: prompt decode failed\n", .{});
+            return -1;
+        }
+        self.prompt_pos += n_tokens_batch;
+
+        if (last and self.mtl) {
+            if (!uncond) self.cfgRead() else self.cfgApply();
+        }
+
+        if (self.prompt_pos >= n_total) {
+            self.pos = self.n_prompt;
+            self.prompt_embd_buf.clearRetainingCapacity();
+            self.uncond_embd_buf.clearRetainingCapacity();
+            return 0;
+        }
+        return n_total - self.prompt_pos;
+    }
+
+    /// `step_gen` (mtmd-helper-gen.cpp:1863 @cd959bae9).
+    fn stepGen(self: *Chatterbox, sampled: Token, h_state_out: *?[*]const f32, out_stop: *bool) i32 {
+        const vocab = self.base.vocab;
+        const n_e = self.base.nE();
+        if (sampled < 0 or sampled >= lapi.vocab.llama_vocab_n_tokens(vocab)) {
+            logErr("mtmd_helper_gen_audio: chatterbox requires a token sampled from the backbone\n", .{});
+            return 1;
+        }
+
+        // the speech stop token is the backbone eos, the multilingual speech positions end the stream too
+        if (lapi.vocab.llama_vocab_is_eog(vocab, sampled) or (self.mtl and @as(usize, @intCast(self.ar_idx)) >= self.speech_pos.items.len / n_e)) {
+            out_stop.* = true;
+            h_state_out.* = null;
+            return 0;
+        }
+
+        // keep only the 6561 s3gen codes, dropping start/stop and oov ids
+        if (sampled >= self.speech_base and sampled - self.speech_base < 6561) {
+            self.codes_buf.append(gpa, sampled - self.speech_base) catch oom();
+        }
+
+        const e = gpa.alloc(f32, n_e) catch oom();
+        defer gpa.free(e);
+        @memcpy(e, self.tok_embd.items[@as(usize, @intCast(sampled)) * n_e ..][0..n_e]);
+        if (self.mtl) {
+            // the multilingual backbone takes the token row plus the learned speech position
+            self.addPos(e, &self.speech_pos, @intCast(self.ar_idx));
+            self.ar_idx += 1;
+        }
+
+        if (!self.decodeOne(e.ptr, self.seq_id)) return 1;
+        if (self.mtl) {
+            // cfg: the sampled token feeds both branches
+            self.cfgRead();
+            if (!self.decodeOne(e.ptr, self.seq_uncond)) return 1;
+            self.cfgApply();
+        }
+        self.pos += 1;
+
+        h_state_out.* = self.base.takeHState(&self.h_state_buf);
+        return 0;
+    }
+
+    /// `get_output` (mtmd-helper-gen.cpp:1912 @cd959bae9): streaming, all
+    /// the audio arrives after flush(), the flow decode being one-shot.
+    fn getOutput(self: *Chatterbox, out_sample_rate: *i32, out_data: *?[*]const u8, out_data_len: *usize, out_n_samples: ?*i64) i32 {
+        out_sample_rate.* = self.base.info.sample_rate;
+        if (!self.so.stream and !self.flushGenWav()) return 1;
+        return self.base.getOutput(&self.audio_pcm, self.out_type, &self.out_buf, &self.so, out_data, out_data_len, out_n_samples);
+    }
+
+    /// `flush` (mtmd-helper-gen.cpp:1960 @cd959bae9).
+    fn flush(self: *Chatterbox) i32 {
+        return if (self.flushGenWav()) 0 else 1;
+    }
+
+    /// `decode_one` (mtmd-helper-gen.cpp:1965 @cd959bae9).
+    fn decodeOne(self: *Chatterbox, e: [*]const f32, seq: c.llama_seq_id) bool {
+        const batch = EmbdBatch.create(e, 1, 1, self.base.n_embd);
+        defer batch.destroy();
+        batch.setPositionNormal(self.pos, seq);
+        batch.logits.items[0] = 1;
+        if (lapi.context.llama_process(self.base.lctx, c.LLAMA_PROCESS_TYPE_DECODE, batch.render(self.base.lctx, 0, 1)) != 0) {
+            logErr("mtmd_helper_gen_audio: step decode failed\n", .{});
+            return false;
+        }
+        return true;
+    }
+
+    /// `cfg_read` (mtmd-helper-gen.cpp:1978 @cd959bae9): cfg of the
+    /// reference, logits = cond + 0.5 * (cond - uncond).
+    fn cfgRead(self: *Chatterbox) void {
+        const cl = lapi.context.llama_get_logits_ith(self.base.lctx, -1);
+        assign(f32, &self.cond_logits, cl, @intCast(lapi.vocab.llama_vocab_n_tokens(self.base.vocab)));
+    }
+
+    /// `cfg_apply` (mtmd-helper-gen.cpp:1982 @cd959bae9): the mix goes into
+    /// the last output row (the uncond one), the caller samples from it.
+    /// Contracted, as clang emits `c + 0.5f * (c - u)`.
+    fn cfgApply(self: *Chatterbox) void {
+        const u = lapi.context.llama_get_logits_ith(self.base.lctx, -1).?;
+        for (self.cond_logits.items, 0..) |cv, i| u[i] = @mulAdd(f32, 0.5, cv - u[i], cv);
+    }
+
+    /// `flush_gen_wav` (mtmd-helper-gen.cpp:1990 @cd959bae9): one GEN_WAV
+    /// call over the whole utterance, the flow decode is not streamed.
+    fn flushGenWav(self: *Chatterbox) bool {
+        if (self.decoded or self.codes_buf.items.len == 0) return true;
+        if (!self.mtl) {
+            // turbo appends a short silence tail before vocoding
+            self.codes_buf.appendNTimes(gpa, 4299, 3) catch oom();
+        }
+        var inp = mtmd.mtmd_gen_inp_default(self.base.mctx);
+        inp.type = .gen_wav;
+        inp.codes = self.codes_buf.items.ptr;
+        inp.n_codes = self.codes_buf.items.len;
+        var out = std.mem.zeroes(mtmd.GenOut);
+        if (mtmd.mtmd_gen_audio_process(self.base.mctx, self.base.gen_state, &inp, &out) != 0) {
+            logErr("mtmd_helper_gen_audio: gen_wav decode failed\n", .{});
+            return false;
+        }
+        assign(f32, &self.audio_pcm, out.audio, out.n_samples);
+        self.decoded = true;
+        return true;
+    }
+
+    /// The `read_table` lambda (mtmd-helper-gen.cpp:2031 @cd959bae9) of
+    /// ensure_cache.
+    fn readTable(self: *Chatterbox, name: [*:0]const u8, dst: *std.ArrayList(f32)) bool {
+        const n = mtmd.mtmd_gen_audio_read_tensor(self.base.mctx, name, null, 0);
+        dst.resize(gpa, n) catch oom();
+        @memset(dst.items, 0.0);
+        if (n == 0 or mtmd.mtmd_gen_audio_read_tensor(self.base.mctx, name, dst.items.ptr, n) != n) {
+            logErr("mtmd_helper_gen_audio: %s read failed\n", .{name});
+            return false;
+        }
+        return true;
+    }
+
+    /// `ensure_cache` (mtmd-helper-gen.cpp:2012 @cd959bae9).
+    fn ensureCache(self: *Chatterbox) bool {
+        if (self.tok_embd.items.len != 0) return true;
+        const vocab = self.base.vocab;
+        // fused vocab layout: [text 0..speech_base) then the speech tokens
+        self.speech_base = findSpecialToken(vocab, "<|speech_0|>");
+        if (self.speech_base == token_null) {
+            logErr("mtmd_helper_gen_audio: fused speech tokens not found in vocab\n", .{});
+            return false;
+        }
+
+        const n_tok_embd = lapi.model.llama_model_get_tok_embd(self.base.model, null);
+        if (n_tok_embd != @as(u32, @bitCast(lapi.vocab.llama_vocab_n_tokens(vocab))) *% @as(u32, @bitCast(self.base.n_embd))) {
+            logErr("mtmd_helper_gen_audio: unexpected token embedding size\n", .{});
+            return false;
+        }
+        self.tok_embd.resize(gpa, n_tok_embd) catch oom();
+        @memset(self.tok_embd.items, 0.0);
+        _ = lapi.model.llama_model_get_tok_embd(self.base.model, self.tok_embd.items.ptr);
+
+        // multilingual: the learned position tables
+        self.mtl = mtmd.mtmd_gen_audio_read_tensor(self.base.mctx, "a.gen.t3.text_pos_emb", null, 0) > 0;
+        if (self.mtl and (!self.readTable("a.gen.t3.text_pos_emb", &self.text_pos) or !self.readTable("a.gen.t3.speech_pos_emb", &self.speech_pos))) return false;
+        return true;
+    }
+};
+
 /// The C++'s `mtmd_gen_audio_pipeline` hierarchy, one arm a subclass.
 const Pipeline = union(enum) {
     qwen3tts: Qwen3tts,
     pockettts: Pockettts,
     soprano: Soprano,
     lfm3a: Lfm3a,
+    chatterbox: Chatterbox,
 
     fn deinit(self: *Pipeline) void {
         switch (self.*) {
@@ -1884,13 +2251,14 @@ pub const GenAudio = struct {
     pipeline: ?Pipeline = null,
 };
 
-/// Ports `make_pipeline` (mtmd-helper-gen.cpp:1720 @8642541b2).
+/// Ports `make_pipeline` (mtmd-helper-gen.cpp:2080 @cd959bae9).
 fn makePipeline(lctx: ?*c.struct_llama_context, mctx: *Context) ?Pipeline {
     return switch (mtmd.mtmd_gen_audio_get_info(mctx).type) {
         .qwen3tts => .{ .qwen3tts = .{ .base = Base.init(lctx, mctx) } },
         .pockettts => .{ .pockettts = .{ .base = Base.init(lctx, mctx) } },
         .soprano => .{ .soprano = .{ .base = Base.init(lctx, mctx) } },
         .lfm3a => .{ .lfm3a = .{ .base = Base.init(lctx, mctx) } },
+        .chatterbox => .{ .chatterbox = .{ .base = Base.init(lctx, mctx) } },
         else => null,
     };
 }
@@ -1953,6 +2321,7 @@ pub fn mtmd_helper_gen_audio_step_prompt(ctx: *GenAudio, n_batch: i32) callconv(
     return switch (p.*) {
         .soprano => |*q| q.stepPrompt(n_batch),
         .lfm3a => |*q| q.stepPrompt(n_batch),
+        .chatterbox => |*q| q.stepPrompt(n_batch),
         inline else => |*q| q.base.stepPrompt(&q.prompt, &q.pos, n_batch),
     };
 }
@@ -2011,6 +2380,7 @@ pub fn mtmd_helper_gen_audio_step_gen(ctx: *GenAudio, sampled: Token, h_state_in
         .pockettts => |*q| q.stepGen(h_state_in, h_state_out, &stop),
         .soprano => |*q| q.stepGen(sampled, h_state_in, h_state_out, &stop),
         .lfm3a => |*q| q.stepGen(sampled, h_state_in, h_state_out, &stop),
+        .chatterbox => |*q| q.stepGen(sampled, h_state_out, &stop),
     };
     if (out_stop) |s| s.* = stop;
     return ret;

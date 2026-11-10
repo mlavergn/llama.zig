@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.8.0, `8642541b2`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.9.0, `cd959bae9`),
 //! the tables at line 78 and the converters at line 3440. Each declaration
 //! names the C it replaces and the line it began at.
 //!
@@ -32,7 +32,7 @@ const has_f16c = builtin.cpu.arch == .x86_64 and
 // -----------------------------------------------------------------------------
 // The precomputed tables
 //
-// All three are filled by `ggml_cpu_init`. They are `export` because the
+// All of them are filled by `ggml_cpu_init`. They are `export` because the
 // still-C++ half of the backend reaches them through `simd-mappings.h`:
 // `GGML_CPU_UE4M3_TO_FP32` indexes `ggml_table_f32_ue4m3` directly on NEON.
 
@@ -44,6 +44,11 @@ pub export var ggml_table_f32_e8m0_half: [1 << 8]f32 = @splat(0);
 
 /// Ports `ggml_table_f32_ue4m3` (ggml-cpu.c:87 @cd959bae9). 1 KB.
 pub export var ggml_table_f32_ue4m3: [1 << 8]f32 = @splat(0);
+
+/// Ports `ggml_table_f32_f8_e4m3` (ggml-cpu.c:90 @cd959bae9). 1 KB. Signed
+/// FP8 has its own table: UE4M3 ignores the sign, halves values for NVFP4
+/// and maps NaN to zero.
+pub export var ggml_table_f32_f8_e4m3: [1 << 8]f32 = @splat(0);
 
 /// The GELU tables, still C++ in `ggml-cpu/vec.cpp` but filled here because
 /// `ggml_cpu_init` is what fills them (vec.h:62, vec.h:65).
@@ -160,7 +165,7 @@ pub export fn ggml_cpu_fp32_to_fp16(x: [*c]const f32, y: [*c]c.ggml_fp16_t, n: i
     while (i < nn) : (i += 1) y[i] = cpuFp32ToFp16(x[i]);
 }
 
-/// Ports `ggml_cpu_fp16_to_fp32` (ggml-cpu.c:3529 @8642541b2): with F16C,
+/// Ports `ggml_cpu_fp16_to_fp32` (ggml-cpu.c:3538 @cd959bae9): with F16C,
 /// blocks of sixteen under `__AVX512F__`, then eight and four, through
 /// `vcvtph2ps`, then the tail through `GGML_CPU_FP16_TO_FP32`.
 pub export fn ggml_cpu_fp16_to_fp32(x: [*c]const c.ggml_fp16_t, y: [*c]f32, n: i64) void {
@@ -190,7 +195,7 @@ pub export fn ggml_cpu_fp32_to_bf16(x: [*c]const f32, y: [*c]c.ggml_bf16_t, n: i
     for (0..@intCast(n)) |i| y[i] = .{ .bits = impl.fp32ToBf16(x[i]) };
 }
 
-/// Ports `ggml_cpu_bf16_to_fp32` (ggml-cpu.c:3597 @8642541b2).
+/// Ports `ggml_cpu_bf16_to_fp32` (ggml-cpu.c:3606 @cd959bae9).
 ///
 /// The `__AVX2__` arm widens eight at a time by shifting each `u16` left 16
 /// bits, and its `__AVX512F__` block sixteen, which is exactly what the
@@ -212,11 +217,11 @@ pub export fn ggml_cpu_fp32_to_i32(x: [*c]const f32, y: [*c]i32, n: i64) void {
 // -----------------------------------------------------------------------------
 // Table initialisation
 
-/// Ports the table-filling block of `ggml_cpu_init` (ggml-cpu.c:3875 @8642541b2).
+/// Ports the table-filling block of `ggml_cpu_init` (ggml-cpu.c:3884 @cd959bae9).
 ///
 /// Called once, under the critical section `ggml_cpu_init` holds. Fills the
-/// f16 fan-out table, both GELU tables, and the two 256-entry
-/// micro-exponent tables.
+/// f16 fan-out table, both GELU tables, and the three 256-entry
+/// eight-bit-float tables.
 pub fn initTables() void {
     for (0..1 << 16) |i| {
         const f = impl.fp16ToFp32(@intCast(i));
@@ -231,6 +236,7 @@ pub fn initTables() void {
 
     for (0..1 << 8) |i| {
         ggml_table_f32_ue4m3[i] = impl.ue4m3ToFp32(@intCast(i));
+        ggml_table_f32_f8_e4m3[i] = impl.f8E4m3ToFp32(@intCast(i));
     }
 }
 

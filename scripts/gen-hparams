@@ -128,7 +128,10 @@ def zig_default(ztype, init):
     as `llama_hparams hparams = {}` value-initializes."""
     if ztype.startswith("["):
         n, elem = re.fullmatch(r"\[(\d+)\](\w+)", ztype).groups()
-        if init is not None:
+        # `= {}` value-initializes, as no initializer does under
+        # `llama_hparams hparams = {}` (llama-hparams.h, since v0.9.0's
+        # `final_logit_sigmoid_capping`); any other initializer stops.
+        if init is not None and init.strip() != "{}":
             sys.exit("gen-hparams: an array with an initializer")
         zero = {"bool": "false", "f32": "0"}.get(elem, "0")
         return f"@splat({zero})"

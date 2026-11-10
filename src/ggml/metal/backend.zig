@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-metal/ggml-metal.cpp` at v0.8.0
-//! (`8642541b2`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-metal/ggml-metal.cpp` at v0.9.0
+//! (`cd959bae9`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # What it does and does not do
@@ -127,11 +127,37 @@ fn BufferIface(comptime shared: bool) type {
             mc.ggml_metal_buffer_get_tensor(ctxOf(buffer), @ptrCast(tensor), data, offset, size);
         }
 
+        /// Ports `ggml_backend_metal_buffer_shared_set_tensor_n` and
+        /// `ggml_backend_metal_buffer_private_set_tensor_n`
+        /// (ggml-metal.cpp:71, 180 @cd959bae9).
+        fn setTensorN(buffer: c.ggml_backend_buffer_t, tensors: [*c]const [*c]Tensor, data: [*c]const ?*const anyopaque, offsets: [*c]const usize, sizes: [*c]const usize, n_tensors: usize) callconv(.c) void {
+            mc.ggml_metal_buffer_set_tensor_n(ctxOf(buffer), tensors, data, offsets, sizes, n_tensors);
+        }
+
+        /// Ports `ggml_backend_metal_buffer_shared_get_tensor_n` and
+        /// `ggml_backend_metal_buffer_private_get_tensor_n`
+        /// (ggml-metal.cpp:79, 188 @cd959bae9).
+        fn getTensorN(buffer: c.ggml_backend_buffer_t, tensors: [*c]const [*c]const Tensor, data: [*c]const ?*anyopaque, offsets: [*c]const usize, sizes: [*c]const usize, n_tensors: usize) callconv(.c) void {
+            mc.ggml_metal_buffer_get_tensor_n(ctxOf(buffer), tensors, data, offsets, sizes, n_tensors);
+        }
+
         fn cpyTensor(buffer: c.ggml_backend_buffer_t, src: [*c]const Tensor, dst: [*c]Tensor) callconv(.c) bool {
             const ctx = ctxOf(buffer);
             const s = impl.one(Tensor, @constCast(src));
             if (!bufferIsMetal(s.buffer)) return false;
             return mc.ggml_metal_buffer_cpy_tensor(ctx, s, impl.one(Tensor, dst));
+        }
+
+        /// Ports `ggml_backend_metal_buffer_shared_cpy_tensor_n` and
+        /// `ggml_backend_metal_buffer_private_cpy_tensor_n`
+        /// (ggml-metal.cpp:99, 208 @cd959bae9): every source must be in a
+        /// Metal buffer, or nothing is copied.
+        fn cpyTensorN(buffer: c.ggml_backend_buffer_t, srcs: [*c]const [*c]const Tensor, dsts: [*c]const [*c]Tensor, n_tensors: usize) callconv(.c) bool {
+            const ctx = ctxOf(buffer);
+            for (0..n_tensors) |i| {
+                if (!bufferIsMetal(impl.one(Tensor, @constCast(srcs[i])).buffer)) return false;
+            }
+            return mc.ggml_metal_buffer_cpy_tensor_n(ctx, srcs, dsts, n_tensors);
         }
 
         fn clear(buffer: c.ggml_backend_buffer_t, value: u8) callconv(.c) void {
@@ -140,7 +166,11 @@ fn BufferIface(comptime shared: bool) type {
 
         /// Ports `ggml_backend_metal_buffer_shared_i` and
         /// `ggml_backend_metal_buffer_private_i`
-        /// (ggml-metal.cpp:91, 167 @8642541b2).
+        /// (ggml-metal.cpp:121, 230 @cd959bae9).
+        ///
+        /// Since v0.9.0 both implement the three batched slots; every
+        /// slot is listed, since translate-c defaults an omitted one to
+        /// null.
         pub const iface = c.ggml_backend_buffer_i{
             .free_buffer = freeBuffer,
             .get_base = getBase,
@@ -153,6 +183,9 @@ fn BufferIface(comptime shared: bool) type {
             .cpy_tensor = cpyTensor,
             .clear = clear,
             .reset = null,
+            .set_tensor_n = setTensorN,
+            .get_tensor_n = getTensorN,
+            .cpy_tensor_n = cpyTensorN,
         };
     };
 }
@@ -201,8 +234,8 @@ fn bufferTypeAllocBuffer(buft: c.ggml_backend_buffer_type_t, size: usize, shared
     return c.ggml_backend_buffer_init(buft, buf_i, res, size);
 }
 
-/// Ports `ggml_backend_metal_buffer_type_get_alloc_size` (ggml-metal.cpp:220
-/// @8642541b2): `ggml_nbytes`, plus the scratch some ops need alongside
+/// Ports `ggml_backend_metal_buffer_type_get_alloc_size` (ggml-metal.cpp:286
+/// @cd959bae9): `ggml_nbytes`, plus the scratch some ops need alongside
 /// their output.
 fn bufferTypeGetAllocSize(buft: c.ggml_backend_buffer_type_t, tensor: [*c]const Tensor) callconv(.c) usize {
     _ = buft;
@@ -221,6 +254,7 @@ fn bufferTypeGetAllocSize(buft: c.ggml_backend_buffer_type_t, tensor: [*c]const 
             res += mc.ggml_metal_op_flash_attn_ext_extra_tmp(t);
             res += mc.ggml_metal_op_flash_attn_ext_extra_kv_f16(t);
             res += mc.ggml_metal_op_flash_attn_ext_extra_idx(t);
+            res += mc.ggml_metal_op_flash_attn_ext_extra_rows(t);
         },
         c.GGML_OP_CUMSUM, c.GGML_OP_ARGSORT => {
             res *= 2;

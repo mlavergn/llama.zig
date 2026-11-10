@@ -11,8 +11,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/deepseek2.cpp` at v0.8.0
-//! (`8642541b2`): `llama_model_deepseek2`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/deepseek2.cpp` at v0.9.0
+//! (`cd959bae9`): `llama_model_deepseek2`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` and
 //! `graph_mtp`. `graph` also carries DeepSeek-OCR's attention, which
 //! `llama_model_deepseek2ocr` (`deepseek2ocr.zig`) and

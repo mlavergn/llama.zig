@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/qwen3.cpp` at v0.8.0 (`8642541b2`):
+//! Ported from `llama.cpp/src/models/qwen3.cpp` at v0.9.0 (`cd959bae9`):
 //! `llama_model_qwen3`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph` with `build_backbone`, which
 //! `vllm_decision2.zig`'s graph builds on.

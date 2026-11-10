@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/build-info.cpp.in` (v0.8.0, `8642541b2`) as
+//! Ports `llama.cpp/common/build-info.cpp.in` (v0.9.0, `cd959bae9`) as
 //! `llama.cpp.zmake` fills it in -- build number, commit and compiler from
 //! `build/tools.zig`, the same values the reference tools are built with, so
 //! `--version` reads the same from both sides of a gate.

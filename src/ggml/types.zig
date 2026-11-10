@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.8.0, `8642541b2`), roughly
+//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.9.0, `cd959bae9`), roughly
 //! lines 631-1605. Each function names the C function it replaces and the line
 //! it began at.
 //!
@@ -243,6 +243,14 @@ const type_traits = blk: {
         .is_quantized = true,
         .to_float = @ptrCast(&c.dequantize_row_nvfp4),
         .from_float_ref = @ptrCast(&c.quantize_row_nvfp4_ref),
+    };
+    t[c.GGML_TYPE_F8_E4M3] = .{
+        .type_name = "f8_e4m3",
+        .blck_size = 1,
+        .type_size = @sizeOf(c.ggml_fp8_e4m3_t),
+        .is_quantized = false,
+        .to_float = @ptrCast(&c.dequantize_row_f8_e4m3),
+        .from_float_ref = @ptrCast(&c.quantize_row_f8_e4m3_ref),
     };
     t[c.GGML_TYPE_Q2_K] = .{
         .type_name = "q2_K",
@@ -516,7 +524,7 @@ pub export fn ggml_get_glu_op(t: *const c.ggml_tensor) c.enum_ggml_glu_op {
     return @intCast(t.op_params[0]);
 }
 
-/// Ports `ggml_ftype_to_ggml_type` (ggml.c:1437 @8642541b2).
+/// Ports `ggml_ftype_to_ggml_type` (ggml.c:1444 @cd959bae9).
 ///
 /// A file type names the format most tensors in a model use; this maps it to
 /// the tensor type that implies. Aborts on an unknown or mixed file type,
@@ -535,6 +543,7 @@ export fn ggml_ftype_to_ggml_type(ftype: c.enum_ggml_ftype) c.enum_ggml_type {
         c.GGML_FTYPE_MOSTLY_Q8_0 => c.GGML_TYPE_Q8_0,
         c.GGML_FTYPE_MOSTLY_MXFP4 => c.GGML_TYPE_MXFP4,
         c.GGML_FTYPE_MOSTLY_NVFP4 => c.GGML_TYPE_NVFP4,
+        c.GGML_FTYPE_MOSTLY_F8_E4M3 => c.GGML_TYPE_F8_E4M3,
         c.GGML_FTYPE_MOSTLY_Q2_K => c.GGML_TYPE_Q2_K,
         c.GGML_FTYPE_MOSTLY_Q3_K => c.GGML_TYPE_Q3_K,
         c.GGML_FTYPE_MOSTLY_Q4_K => c.GGML_TYPE_Q4_K,
@@ -822,10 +831,10 @@ pub fn isPadded1d(tensor: *const c.ggml_tensor) bool {
 // became. That is not hypothetical -- it happened, and corrupting a block size
 // left the comparison green.
 //
-// Regenerate only from a C build: `scripts/types-golden` prints the four name
-// checksums from the stock ggml `llama.cpp.zmake` builds (v0.4.0 added
+// Regenerate only from a C build: `scripts/types-golden` prints the traits and
+// four name checksums from the stock ggml `llama.cpp.zmake` builds (v0.4.0 added
 // SWIGLU_CLAMP, which moved `golden_glu_name` alone).
-const golden_traits: u64 = 0x2e2b1f729ea5e5af;
+const golden_traits: u64 = 0xea2f8c7b0e2dba72;
 const golden_op_name: u64 = 0x7849ce3c514237af;
 const golden_op_symbol: u64 = 0xbf7bcbc1d68353c3;
 const golden_unary_name: u64 = 0x78d971e2f43bd703;

@@ -9,7 +9,7 @@
 //!   `llama_prefetch_rows` and `llama_clear_tensor_data`
 //! - `llama.cpp/ggml/include/ggml.h` — `GGML_ASSERT` and `GGML_ABORT`
 //!
-//! All at v0.8.0 (`8642541b2`). Each declaration below names the source file
+//! All at v0.9.0 (`cd959bae9`). Each declaration below names the source file
 //! and line it came from.
 //!
 //! # The C ABI import

@@ -10,7 +10,7 @@
 //!                                               non-Windows bodies are three
 //!                                               lines of `dlopen`/`dlsym`
 //!
-//! Both at v0.8.0 (`8642541b2`). Each declaration below names the C++ it
+//! Both at v0.9.0 (`cd959bae9`). Each declaration below names the C++ it
 //! replaces and the line it began at. This file exports the same C symbols
 //! with the same signatures, so the C++ that calls into it links unchanged.
 //!

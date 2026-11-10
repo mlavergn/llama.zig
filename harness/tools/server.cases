@@ -254,8 +254,11 @@
 # drops each line's log prefix: upstream's worker writes the prefix and the
 # message in separate writes, so the fprintf can land between them --
 # measured, 3 runs in 600 under load put `error: invalid argument` after a
-# `W ` prefix. The level letter is therefore not compared from here on --
-!mask s/^(T )?[WIE] //
+# `W ` prefix, and (v0.9.0 combined pass, 1 run in 4 under load) it can
+# land between the timestamp and the level letter, leaving a bare `T `
+# before upstream's `error:` line. The level letter is therefore not
+# compared from here on, nor a bare timestamp prefix --
+!mask s/^(T )?([WIE] )?//
 # ... but the verbosity threshold still is: at -lv 2 a warning shows and
 # an info line does not, at -lv 1 neither does.
 !fail ~ -lv 2 --tools all --no-jinja --chat-template bogus

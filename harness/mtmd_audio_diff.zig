@@ -28,6 +28,7 @@ extern fn ref_mel_frame_free(c: ?*anyopaque) void;
 extern fn ref_mel_frame_run(c: ?*anyopaque, samples: [*]const f32, n_fft: c_int, n_mel: c_int, out: [*]f32) void;
 extern fn ref_audio_set_log(cb: ?*const fn (c_int, [*c]const u8, ?*anyopaque) callconv(.c) void, ud: ?*anyopaque) void;
 extern fn ref_audio_proc_new(kind: c_int, hp: ?*anyopaque) ?*anyopaque;
+extern fn ref_audio_proc_new_flag(kind: c_int, hp: ?*anyopaque, flag: c_int) ?*anyopaque;
 extern fn ref_audio_proc_free(r: ?*anyopaque) void;
 extern fn ref_audio_proc_run(r: ?*anyopaque, samples: [*]const f32, n: usize, out: *?*anyopaque, out_len: *usize) c_int;
 extern fn ref_istft_new(n_fft: c_int, hop: c_int) ?*anyopaque;
@@ -72,6 +73,8 @@ const Config = struct {
     chunk_samples: usize = 0,
     /// `audio_patch_sizes` (muse-spark).
     patches: []const i32 = &.{},
+    /// chatterbox_ref's `is_mtl` (v0.9.0).
+    is_mtl: bool = false,
 };
 
 const configs = [_]Config{
@@ -91,6 +94,8 @@ const configs = [_]Config{
     .{ .name = "pockettts", .kind = .pockettts, .n_mel = 0, .n_fft = 0, .window = 0, .hop = 0, .sr = 24000, .mimi_downsample = 16, .chunk_samples = 1920 },
     .{ .name = "parakeet-80", .kind = .parakeet, .n_mel = 80, .n_fft = 512, .window = 400, .hop = 160, .sr = 16000 },
     .{ .name = "parakeet-128-win512", .kind = .parakeet, .n_mel = 128, .n_fft = 512, .window = 512, .hop = 160, .sr = 16000 },
+    .{ .name = "nemotron-transcribe", .kind = .nemotron_transcribe, .n_mel = 128, .n_fft = 512, .window = 400, .hop = 160, .sr = 16000 },
+    .{ .name = "nemotron-tr-odd", .kind = .nemotron_transcribe, .n_mel = 40, .n_fft = 400, .window = 300, .hop = 150, .sr = 12000 },
     // v0.7.0: the conformer's, cut at 30 s (the chunk) and padded to 0.5 s;
     // the odd one's hop does not divide its padded lengths
     .{ .name = "d1omni", .kind = .d1omni, .n_mel = 128, .n_fft = 512, .window = 400, .hop = 160, .sr = 16000, .chunk_samples = 480000 },
@@ -100,6 +105,10 @@ const configs = [_]Config{
     .{ .name = "lfm3a-odd", .kind = .lfm3a, .n_mel = 32, .n_fft = 512, .window = 300, .hop = 150, .sr = 12000 },
     .{ .name = "muse-spark", .kind = .muse_spark_audio, .n_mel = 1, .n_fft = 0, .window = 0, .hop = 0, .sr = 24000, .patches = &.{ 4, 5, 6 } },
     .{ .name = "muse-spark-one", .kind = .muse_spark_audio, .n_mel = 1, .n_fft = 0, .window = 0, .hop = 0, .sr = 24000, .patches = &.{7} },
+    // v0.9.0: chatterbox's five-entry reference front-end, its clip_ctx
+    // hparams (the turbo variant loudness-normalizes; the t3 cap is 15 s or 6 s)
+    .{ .name = "chatterbox-ref-turbo", .kind = .chatterbox_ref, .n_mel = 80, .n_fft = 512, .window = 400, .hop = 160, .sr = 16000, .chunk_samples = 160000 },
+    .{ .name = "chatterbox-ref-mtl", .kind = .chatterbox_ref, .n_mel = 80, .n_fft = 512, .window = 400, .hop = 160, .sr = 16000, .chunk_samples = 96000, .is_mtl = true },
 };
 
 // -----------------------------------------------------------------------------
@@ -175,7 +184,10 @@ fn runCase(cfg: *const Config, hp_port: *const Hparams, hp_ref: ?*anyopaque, len
     log_port.clearRetainingCapacity();
 
     // reference
-    const r = ref_audio_proc_new(@backingInt(cfg.kind), hp_ref);
+    const r = if (cfg.kind == .chatterbox_ref)
+        ref_audio_proc_new_flag(@backingInt(cfg.kind), hp_ref, @intFromBool(cfg.is_mtl))
+    else
+        ref_audio_proc_new(@backingInt(cfg.kind), hp_ref);
     defer ref_audio_proc_free(r);
     var blob: ?*anyopaque = null;
     var blob_len: usize = 0;
@@ -185,6 +197,7 @@ fn runCase(cfg: *const Config, hp_port: *const Hparams, hp_ref: ?*anyopaque, len
 
     // port
     var p = audio.Preprocessor.init(cfg.kind, hp_port);
+    p.is_mtl = cfg.is_mtl;
     defer p.deinit();
     try p.initialize();
     var mels: std.ArrayList(audio.Mel) = .empty;
@@ -263,7 +276,7 @@ fn runConfig(cfg: *const Config, quick: bool) !void {
         gpa.free(t[0]);
         gpa.free(t[1]);
     };
-    if (cfg.kind == .parakeet) {
+    if (cfg.kind == .parakeet or cfg.kind == .nemotron_transcribe) {
         tables = try parakeetTables(cfg.n_mel, cfg.n_fft, cfg.window);
         try hp.mel_filters.appendSlice(gpa, tables.?[0]);
         try hp.window.appendSlice(gpa, tables.?[1]);

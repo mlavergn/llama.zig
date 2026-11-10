@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` at v0.8.0
-//! (`8642541b2`), the `__AVX2__` arms. Each declaration names the C++ it
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/x86/repack.cpp` at v0.9.0
+//! (`cd959bae9`), the `__AVX2__` arms. Each declaration names the C++ it
 //! replaces and the line it began at.
 //!
 //! # The same arithmetic as the row quantizers

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/console.cpp` at v0.8.0 (`8642541b2`), its POSIX
+//! Ports `llama.cpp/common/console.cpp` at v0.9.0 (`cd959bae9`), its POSIX
 //! and `_WIN32` arms side by side, as far as `llama-mtmd-cli` reaches them: `init`,
 //! `cleanup`, `set_display`, `readline` with both its readers, and every
 //! helper `readline_advanced` calls. Each declaration names the C++ it

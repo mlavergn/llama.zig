@@ -4,9 +4,9 @@
 //! # Provenance
 //!
 //! Ports `ma_dr_mp3` and its `ma_dr_mp3dec` core from
-//! `llama.cpp/vendor/miniaudio/miniaudio.h` (miniaudio v0.11.25, dr_mp3
-//! embedded) at v0.8.0 (`8642541b2`). Each declaration names the function it
-//! ports and the line it began at.
+//! `llama.cpp/vendor/miniaudio/miniaudio.h` (miniaudio v0.11.26, dr_mp3
+//! v0.7.4 embedded) at v0.9.0 (`cd959bae9`). Each declaration names the
+//! function it ports and the line it began at.
 //!
 //! # As `mtmd-helper.cpp` compiles it
 //!
@@ -33,8 +33,9 @@ const builtin = @import("builtin");
 const Io = @import("audio_io.zig").Io;
 
 /// Set when a decode read memory whose contents the C leaves to the
-/// implementation: past the main-data buffer, past the input in the
-/// Xing/LAME tag parse, or a callback buffer's unfilled tail.
+/// implementation: past the main-data buffer. (The Xing/LAME tag parse,
+/// which could read past the input, is bounded by the frame since dr_mp3
+/// v0.7.4.)
 pub threadlocal var read_indeterminate: bool = false;
 
 /// `MA_DR_MP3_HAVE_SSE`: x86 rounds the synthesis through SSE, everything
@@ -1323,11 +1324,12 @@ fn findFrame(mp3_in: [*]const u8, mp3_bytes: c_int, free_format_bytes: *c_int, p
     return mp3_bytes;
 }
 
-/// Ports `ma_dr_mp3dec_decode_frame` (miniaudio.h:94268 @8642541b2).
+/// Ports `ma_dr_mp3dec_decode_frame` (miniaudio.h:95294 @cd959bae9).
 fn decodeFrame(dec: *Dec, mp3: [*]const u8, mp3_bytes: c_int, pcm_in: ?[*]i16, info: *FrameInfo) c_int {
     var i: c_int = 0;
     var frame_size: c_int = 0;
     var success: c_int = 1;
+    info.layer = 0;
     if (mp3_bytes > 4 and dec.header[0] == 0xff and hdrCompare(&dec.header, mp3)) {
         frame_size = hdrFrameBytes(mp3, dec.free_format_bytes) + hdrPadding(mp3);
         if (frame_size != mp3_bytes and (frame_size + hdr_size > mp3_bytes or !hdrCompare(mp3, mp3 + @as(usize, @intCast(frame_size))))) {
@@ -1398,11 +1400,13 @@ fn decodeFrame(dec: *Dec, mp3: [*]const u8, mp3_bytes: c_int, pcm_in: ?[*]i16, i
     return success * @as(c_int, @intCast(hdrFrameSamples(&dec.header)));
 }
 
-/// The bytes a decoded frame came from, for the Xing/LAME parse, which
-/// reads past the frame without a bound.
+/// The bytes a decoded frame came from, for the Xing/LAME parse.
 const FrameRef = struct {
     /// From the frame's start to the end of what the C may read defined.
     bytes: []const u8 = &.{},
+    /// `pDataBufferEnd - pFirstFrameData`: to the end of the memory
+    /// stream, or of the callbacks' buffer capacity.
+    limit: usize = 0,
 
     fn at(r: FrameRef, i: usize) u8 {
         if (i < r.bytes.len) return r.bytes[i];
@@ -1445,6 +1449,9 @@ pub const Mp3 = struct {
     data_size: usize = 0,
     data_consumed: usize = 0,
     at_end: bool = false,
+    /// `mp3FramesSkipped`: frames the last decode stepped over. Only the
+    /// seek-table seek reads it, which `ma_mp3` never binds.
+    mp3_frames_skipped: u32 = 0,
 
     /// Ports `ma_dr_mp3_init_memory_with_metadata` (miniaudio.h:96105 @cd959bae9)
     /// for a `dr_mp3` stream, and `ma_dr_mp3_init` (miniaudio.h:96048 @cd959bae9)
@@ -1470,7 +1477,7 @@ pub const Mp3 = struct {
         m.gpa.destroy(m);
     }
 
-    /// Ports `ma_dr_mp3_init_internal` (miniaudio.h:94741 @8642541b2), with
+    /// Ports `ma_dr_mp3_init_internal` (miniaudio.h:95774 @cd959bae9), with
     /// no metadata callback.
     fn initInternal(m: *Mp3) bool {
         m.dec.header[0] = 0;
@@ -1533,39 +1540,52 @@ pub const Mp3 = struct {
         bsInit(&bs, ref.bytes.ptr + hdr_size, info.frame_bytes - hdr_size);
         if (hdrIsCrc(ref.bytes.ptr)) _ = bsGetBits(&bs, 16);
         var gr_info: [4]GrInfo = undefined;
-        if (l3ReadSideInfo(&bs, &gr_info, ref.bytes.ptr) >= 0) {
+        if (l3ReadSideInfo(&bs, &gr_info, ref.bytes.ptr) >= 0) xing: {
             const beg: usize = hdr_size + @as(usize, @intCast(@divTrunc(bs.pos, 8)));
             var p = beg;
+            // every read is held to the frame (`done_xing_info`), and a
+            // tag cut short is not skipped: its frame plays as audio
+            const frame_bytes = @min(@as(usize, @intCast(info.frame_bytes)), ref.limit);
+            if (frame_bytes < p + 8) break :xing;
             const is_xing = ref.at(p) == 'X' and ref.at(p + 1) == 'i' and ref.at(p + 2) == 'n' and ref.at(p + 3) == 'g';
             const is_info = ref.at(p) == 'I' and ref.at(p + 1) == 'n' and ref.at(p + 2) == 'f' and ref.at(p + 3) == 'o';
             if (is_xing or is_info) {
                 const flags = ref.at(p + 7);
                 p += 8;
                 if (flags & 0x01 != 0) {
+                    if (frame_bytes < p + 4) break :xing;
                     detected_mp3_frame_count = @as(u32, ref.at(p)) << 24 | @as(u32, ref.at(p + 1)) << 16 | @as(u32, ref.at(p + 2)) << 8 | ref.at(p + 3);
                     p += 4;
                 }
-                if (flags & 0x02 != 0) p += 4;
-                if (flags & 0x04 != 0) p += 100;
-                if (flags & 0x08 != 0) p += 4;
+                if (flags & 0x02 != 0) {
+                    if (frame_bytes < p + 4) break :xing;
+                    p += 4;
+                }
+                if (flags & 0x04 != 0) {
+                    if (frame_bytes < p + 100) break :xing;
+                    p += 100;
+                }
+                if (flags & 0x08 != 0) {
+                    if (frame_bytes < p + 4) break :xing;
+                    p += 4;
+                }
+                if (frame_bytes < p + 1) break :xing;
                 if (ref.at(p) != 0) {
+                    if (frame_bytes < p + 36) break :xing;
                     p += 21;
-                    if (@as(c_int, @intCast(p)) + 14 < info.frame_bytes) {
-                        const delay: c_int = @intCast(((@as(u32, ref.at(p)) << 4) | (@as(u32, ref.at(p + 1)) >> 4)) + (528 + 1));
-                        var padding: c_int = @as(c_int, @intCast(((@as(u32, ref.at(p + 1)) & 0xF) << 8) | ref.at(p + 2))) - (528 + 1);
-                        if (padding < 0) padding = 0;
-                        m.delay_in_pcm_frames = @intCast(delay);
-                        m.padding_in_pcm_frames = @intCast(padding);
-                    }
+                    const delay: c_int = @intCast(((@as(u32, ref.at(p)) << 4) | (@as(u32, ref.at(p + 1)) >> 4)) + (528 + 1));
+                    var padding: c_int = @as(c_int, @intCast(((@as(u32, ref.at(p + 1)) & 0xF) << 8) | ref.at(p + 2))) - (528 + 1);
+                    if (padding < 0) padding = 0;
+                    m.delay_in_pcm_frames = @intCast(delay);
+                    m.padding_in_pcm_frames = @intCast(padding);
                 }
                 m.pcm_frames_remaining_in_mp3_frame = 0;
                 m.stream_start_offset += @as(u32, @bitCast(info.frame_bytes));
-                m.stream_cursor = m.stream_start_offset;
                 m.dec.header[0] = 0;
             }
         }
 
-        if (detected_mp3_frame_count != 0xFFFFFFFF) m.total_pcm_frame_count = detected_mp3_frame_count *% first_count;
+        if (detected_mp3_frame_count != 0xFFFFFFFF) m.total_pcm_frame_count = @as(u64, detected_mp3_frame_count) * first_count;
         m.channels = m.mp3_frame_channels;
         m.sample_rate = m.mp3_frame_sample_rate;
         return true;
@@ -1573,8 +1593,9 @@ pub const Mp3 = struct {
 
     /// Ports `ma_dr_mp3_decode_next_frame_ex` and its two arms,
     /// `ma_dr_mp3_decode_next_frame_ex__memory` and
-    /// `ma_dr_mp3_decode_next_frame_ex__callbacks` (miniaudio.h:94713, 94678, 94592 @8642541b2).
+    /// `ma_dr_mp3_decode_next_frame_ex__callbacks` (miniaudio.h:95745, 95707, 95619 @cd959bae9).
     fn decodeNextFrameEx(m: *Mp3, pcm: ?[*]i16, frame_info: ?*FrameInfo, frame_ref: ?*FrameRef) u32 {
+        m.mp3_frames_skipped = 0;
         if (m.memory_mode) return m.decodeNextFrameMemory(pcm, frame_info, frame_ref);
         return m.decodeNextFrameCallbacks(pcm, frame_info, frame_ref);
     }
@@ -1589,7 +1610,7 @@ pub const Mp3 = struct {
         return n;
     }
 
-    /// Ports `ma_dr_mp3_decode_next_frame_ex__memory` (miniaudio.h:94678 @8642541b2).
+    /// Ports `ma_dr_mp3_decode_next_frame_ex__memory` (miniaudio.h:95707 @cd959bae9).
     fn decodeNextFrameMemory(m: *Mp3, pcm: ?[*]i16, frame_info: ?*FrameInfo, frame_ref: ?*FrameRef) u32 {
         if (m.at_end) return 0;
         var info: FrameInfo = .{};
@@ -1599,9 +1620,10 @@ pub const Mp3 = struct {
             const got = decodeFrame(&m.dec, m.full.ptr + m.io.pos, @truncate(@as(isize, @bitCast(avail))), pcm, &info);
             if (got > 0) {
                 n = m.frameDecoded(info, frame_info);
-                if (frame_ref) |r| r.* = .{ .bytes = m.full[m.io.pos..] };
+                if (frame_ref) |r| r.* = .{ .bytes = m.full[m.io.pos..], .limit = m.io.data.len -% m.io.pos };
                 break;
             } else if (info.frame_bytes > 0) {
+                if (info.layer != 0) m.mp3_frames_skipped += 1;
                 m.io.pos += @intCast(info.frame_bytes);
                 m.stream_cursor += @intCast(info.frame_bytes);
             } else break;
@@ -1634,7 +1656,7 @@ pub const Mp3 = struct {
         return true;
     }
 
-    /// Ports `ma_dr_mp3_decode_next_frame_ex__callbacks` (miniaudio.h:94592 @8642541b2).
+    /// Ports `ma_dr_mp3_decode_next_frame_ex__callbacks` (miniaudio.h:95619 @cd959bae9).
     fn decodeNextFrameCallbacks(m: *Mp3, pcm: ?[*]i16, frame_info: ?*FrameInfo, frame_ref: ?*FrameRef) u32 {
         if (m.at_end) return 0;
         while (true) {
@@ -1663,7 +1685,7 @@ pub const Mp3 = struct {
                 const n = m.frameDecoded(info, frame_info);
                 if (frame_ref) |r| {
                     const start = m.data_consumed - @as(usize, @intCast(info.frame_bytes));
-                    r.* = .{ .bytes = m.data[start .. m.data_consumed + m.data_size] };
+                    r.* = .{ .bytes = m.data[start .. m.data_consumed + m.data_size], .limit = m.data.len - start };
                 }
                 return n;
             } else if (info.frame_bytes == 0) {
@@ -1678,6 +1700,8 @@ pub const Mp3 = struct {
                     return 0;
                 }
                 m.data_size += n;
+            } else if (info.layer != 0) {
+                m.mp3_frames_skipped += 1;
             }
         }
     }
@@ -1719,10 +1743,10 @@ pub const Mp3 = struct {
         return total;
     }
 
-    /// Ports `ma_dr_mp3_read_pcm_frames_f32` (miniaudio.h:95265 @8642541b2)
+    /// Ports `ma_dr_mp3_read_pcm_frames_f32` (miniaudio.h:96333 @cd959bae9)
     /// without `MA_DR_MP3_FLOAT_OUTPUT`: `int16` samples times 2^-15.
     pub fn readPcmFramesF32(m: *Mp3, frames: u64, out: []f32) u64 {
-        var temp: [8192]i16 = undefined;
+        var temp: [max_pcm_frames_per_mp3_frame * 2]i16 = undefined;
         var total: u64 = 0;
         while (total < frames) {
             const now = @min(temp.len / m.channels, frames - total);
@@ -1754,20 +1778,31 @@ pub const Mp3 = struct {
         return true;
     }
 
+    /// Ports `ma_dr_mp3_get_cursor_in_pcm_frames` (miniaudio.h:96411 @cd959bae9):
+    /// the position past the encoder delay.
+    fn cursorInPcmFrames(m: *const Mp3) u64 {
+        if (m.current_pcm_frame > m.delay_in_pcm_frames) return m.current_pcm_frame - m.delay_in_pcm_frames;
+        return 0;
+    }
+
     /// Ports `ma_dr_mp3_seek_to_pcm_frame` (miniaudio.h:96517 @cd959bae9)
-    /// with no seek table, which `ma_mp3` never binds: brute force.
+    /// with no seek table, which `ma_mp3` never binds:
+    /// `ma_dr_mp3_seek_to_pcm_frame__brute_force` and
+    /// `ma_dr_mp3_seek_forward_by_pcm_frames__brute_force` (miniaudio.h:96431, 96418 @cd959bae9).
     fn seekToPcmFrame(m: *Mp3, frame_index: u64) bool {
         if (frame_index == 0) return m.seekToStartOfStream();
-        if (frame_index == m.current_pcm_frame) return true;
-        if (frame_index < m.current_pcm_frame) {
+        var cursor = m.cursorInPcmFrames();
+        if (frame_index == cursor) return true;
+        if (frame_index < cursor) {
             if (!m.seekToStartOfStream()) return false;
+            cursor = 0;
         }
-        const offset = frame_index - m.current_pcm_frame;
+        const offset = frame_index - cursor;
         return m.readPcmFramesRaw(offset, null) == offset;
     }
 
     /// Ports `ma_dr_mp3_get_pcm_frame_count` and
-    /// `ma_dr_mp3_get_mp3_and_pcm_frame_count` (miniaudio.h:95477, 95437 @8642541b2).
+    /// `ma_dr_mp3_get_mp3_and_pcm_frame_count` (miniaudio.h:96571, 96531 @cd959bae9).
     pub fn getPcmFrameCount(m: *Mp3) u64 {
         if (m.total_pcm_frame_count != std.math.maxInt(u64)) {
             var total = m.total_pcm_frame_count;
@@ -1775,7 +1810,7 @@ pub const Mp3 = struct {
             if (total >= m.padding_in_pcm_frames) total -= m.padding_in_pcm_frames;
             return total;
         }
-        const current = m.current_pcm_frame;
+        const current = m.cursorInPcmFrames();
         if (!m.seekToStartOfStream()) return 0;
         var total: u64 = 0;
         while (true) {

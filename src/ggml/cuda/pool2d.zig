@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/pool2d.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/pool2d.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/pool2d.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels, `pool2d_nchw_kernel` and (since v0.7.0) the warp-per-output
 //! `pool2d_nchw_kernel_warp`, stay CUDA.
 

@@ -6,8 +6,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/moe-weighted-reduction.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/moe-weighted-reduction.cuh` at v0.8.0
-//! (`8642541b2`), the host half. The kernel, `moe_weighted_reduction_f32`,
+//! `llama.cpp/ggml/src/ggml-cuda/moe-weighted-reduction.cuh` at v0.9.0
+//! (`cd959bae9`), the host half. The kernel, `moe_weighted_reduction_f32`,
 //! stays CUDA.
 
 const std = @import("std");

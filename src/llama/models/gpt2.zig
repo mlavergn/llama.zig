@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gpt2.cpp` at v0.8.0 (`8642541b2`):
+//! Ported from `llama.cpp/src/models/gpt2.cpp` at v0.9.0 (`cd959bae9`):
 //! `llama_model_gpt2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -33,7 +33,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_gpt2`'s `load_arch_tensors` (models/gpt2.cpp:15 @8642541b2).
+/// Ports `llama_model_gpt2`'s `load_arch_tensors` (models/gpt2.cpp:15 @cd959bae9).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -46,6 +46,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     self.output_norm = try self.createTensor(.{ .tensor = .output_norm, .suffix = "weight" }, &.{l.n_embd}, 0, exc);
     self.output_norm_b = try self.createTensor(.{ .tensor = .output_norm, .suffix = "bias" }, &.{l.n_embd}, 0, exc);
     self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, nr, exc);
+    self.output_b = try self.createTensor(.{ .tensor = .output, .suffix = "bias" }, &.{l.n_vocab}, nr, exc);
 
     // Without an output, the input token embedding is used.
     if (self.output == null) {
@@ -77,7 +78,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_gpt2`'s `build_arch_graph` (models/gpt2.cpp:55 @cd959bae9)
-/// and the constructor of its `graph` (models/gpt2.cpp:58 @8642541b2).
+/// and the constructor of its `graph` (models/gpt2.cpp:59 @cd959bae9).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -147,6 +148,9 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
     b.res.t_embd = cur;
 
     cur = b.buildLoraMm(model.output.?, cur, model.output_s);
+    if (model.output_b) |ob| {
+        cur = c.ggml_add(ctx, cur, ob);
+    }
 
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;

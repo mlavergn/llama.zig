@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/sampling.cpp` (v0.8.0, `8642541b2`): the ring
+//! Ports `llama.cpp/common/sampling.cpp` (v0.9.0, `cd959bae9`): the ring
 //! buffer, `common_sampler` and every function the tools and the server call,
 //! with `regex_escape` from `llama.cpp/common/common.cpp`. Each declaration
 //! names the C++ it replaces and the line it began at.

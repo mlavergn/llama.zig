@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! **Not a port.** Our own code, written against libllama's C ABI. It follows
-//! the shape of `llama.cpp/tools/cli/cli-context.cpp` (v0.8.0, `8642541b2`) --
+//! the shape of `llama.cpp/tools/cli/cli-context.cpp` (v0.9.0, `cd959bae9`) --
 //! load, tokenize, build a sampler chain, decode in a loop -- but shares no
 //! code with it and is far smaller, because it does one-shot completion only.
 //!
@@ -67,7 +67,7 @@ pub const Stop = enum {
 /// What a chat turn generates with, beyond the session's own sampler: the
 /// parts of upstream's server task that `common_chat_templates_apply` fills
 /// in for a chat request (`oaicompat_chat_params_parse`,
-/// tools/server/server-common.cpp:1348 @8642541b2). Everything is borrowed
+/// tools/server/server-common.cpp:1348 @cd959bae9). Everything is borrowed
 /// for the call.
 pub const TurnOptions = struct {
     /// Tokens printed with their special spelling; every other control token
@@ -585,7 +585,7 @@ pub const Session = struct {
     /// a wrong answer.
     ///
     /// The reply goes to `sink` as upstream's server sends it
-    /// (`process_token`, tools/server/server-context.cpp:2137 @8642541b2): each
+    /// (`process_token`, tools/server/server-context.cpp:2137 @cd959bae9): each
     /// token's piece, special only for a preserved token, joins the text; while
     /// the text ends inside a UTF-8 sequence nothing is sent; a stop string
     /// ends the reply where it begins and is not sent; and text that could be
@@ -779,7 +779,7 @@ pub fn validUtf8Len(text: []const u8) usize {
 /// Ports `server_slot`'s `find_stopping_strings` (tools/server/server-context.cpp:685 @cd959bae9): where the first stop string begins in `text`. A full stop
 /// looks only at the end the last token could have completed; otherwise this
 /// finds a stop string's beginning at the very end of `text`
-/// (`string_find_partial_stop`, common/common.h:880 @8642541b2).
+/// (`string_find_partial_stop`, common/common.h:880 @cd959bae9).
 ///
 /// Return: the offset, or null.
 pub fn findStop(stops: []const []const u8, text: []const u8, last_token_size: usize, is_full_stop: bool) ?usize {
@@ -823,7 +823,7 @@ pub const Timings = struct {
     generated_per_second: f64,
 };
 
-/// Ports the warmup in `common_init_from_params` (common/common.cpp:1446 @8642541b2).
+/// Ports the warmup in `common_init_from_params` (common/common.cpp:1457 @cd959bae9).
 ///
 /// Upstream decodes through `llama_process` and gives every warmup token a
 /// zero state embedding (`common_batch_set_zero_state`, which a context

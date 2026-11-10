@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/set-rows.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/set-rows.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/set-rows.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels, `k_set_rows` and `k_set_rows_quant`, stay CUDA.
 //!
 //! The fused `ROPE -> VIEW -> SET_ROWS` path is not here: upstream writes

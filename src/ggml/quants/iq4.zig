@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.8.0, `8642541b2`), lines
-//! 4966-5145. Each function names the C function it replaces and the line it
+//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.9.0, `cd959bae9`), lines
+//! 28-34 and 4953-5160. Each function names the C function it replaces and the line it
 //! began at.
 //!
 //! # Non-linear, not a codebook of vectors
@@ -26,25 +26,19 @@ const c = impl.c;
 const fp16 = impl.fp32ToFp16;
 const QK_K = c.QK_K;
 
-/// Ports `best_index_int8` (ggml-quants.c:28 @8642541b2).
+/// Ports `best_index_iq4nl` (ggml-quants.c:30 @cd959bae9).
 ///
-/// Binary search for the nearest level, then a tie-break between the two
-/// straddling entries. The table is sorted ascending, which is what lets the
-/// search work at all -- `kvalues_mxfp4` is not, which is why `legacy.zig`
-/// searches its table linearly instead.
-pub fn bestIndexInt8(n: usize, val: [*]const i8, x: f32) usize {
-    if (x <= @as(f32, @floatFromInt(val[0]))) return 0;
-    if (x >= @as(f32, @floatFromInt(val[n - 1]))) return n - 1;
-    var ml: usize = 0;
-    var mu: usize = n - 1;
-    while (mu - ml > 1) {
-        const mav = (ml + mu) / 2;
-        if (x < @as(f32, @floatFromInt(val[mav]))) mu = mav else ml = mav;
-    }
-    return if (x - @as(f32, @floatFromInt(val[mu - 1])) < @as(f32, @floatFromInt(val[mu])) - x) mu - 1 else mu;
+/// The nearest `kvalues_iq4nl` level, counted down from 15 by every midpoint
+/// `x` lies below; `mid[k]` is `(values[k] + values[k+1]) / 2`. For this table
+/// it agrees with the binary search it replaced at v0.9.0, tie rule
+/// `x - values[k] < values[k+1] - x` included, for every float `x`.
+fn bestIndexIq4nl(mid: *const [15]f32, x: f32) usize {
+    var l: usize = 15;
+    for (0..15) |k| l -= @intFromBool(x < mid[k]);
+    return l;
 }
 
-/// Ports `quantize_row_iq4_nl_impl` (ggml-quants.c:4938 @8642541b2).
+/// Ports `quantize_row_iq4_nl_impl` (ggml-quants.c:4953 @cd959bae9).
 ///
 /// One routine for both formats: `iq4_nl` calls it with
 /// `super_block_size == block_size == 32` and no sub-block scales, `iq4_xs`
@@ -85,6 +79,11 @@ pub fn quantizeRowIq4NlImpl(
     @memset(q4[0 .. super_block_size / 2], 0);
     dh.* = fp16(0.0);
 
+    var mid: [15]f32 = undefined;
+    var fval: [16]f32 = undefined;
+    for (0..15) |k| mid[k] = 0.5 * @as(f32, @floatFromInt(@as(i32, values[k]) + values[k + 1]));
+    for (0..16) |k| fval[k] = @floatFromInt(values[k]);
+
     var max_scale: f32 = 0;
     var amax_scale: f32 = 0;
     const n_blocks = super_block_size / block_size;
@@ -114,36 +113,34 @@ pub fn quantizeRowIq4NlImpl(
         // values[0] is the most negative level, so dividing by it maps the
         // block's extreme onto the end of the table.
         var d: f32 = if (ntry > 0) -max / @as(f32, @floatFromInt(values[0])) else max / @as(f32, @floatFromInt(values[0]));
-        var id = 1 / d;
-        var sumqx: f32 = 0;
-        var sumq2: f32 = 0;
-        for (0..block_size) |j| {
-            const al = id * xb[j];
-            const l = bestIndexInt8(16, values, al);
-            lb[j] = @intCast(l);
-            const q = @as(f32, @floatFromInt(values[l]));
-            const w = weight[j];
-            sumqx += w * q * xb[j];
-            sumq2 += w * q * q;
+        // lane 0 is the initial guess, lanes 1..nt-1 are itry = -ntry..ntry; each lane sums over j in order
+        const nt: usize = if (ntry >= 0) @intCast(2 * ntry + 2) else 1;
+        var idt: [16]f32 = undefined;
+        var sqx: [16]f32 = undefined;
+        var sq2: [16]f32 = undefined;
+        idt[0] = 1 / d;
+        for (1..nt) |lane| idt[lane] = @as(f32, @floatFromInt(@as(i32, @intCast(lane)) - 1 - ntry + values[0])) / max;
+        for (0..nt) |lane| {
+            sqx[lane] = 0;
+            sq2[lane] = 0;
         }
-        d = if (sumq2 > 0) sumqx / sumq2 else 0.0;
-        var best = d * sumqx;
-        var itry: i32 = -ntry;
-        while (itry <= ntry) : (itry += 1) {
-            id = (@as(f32, @floatFromInt(itry)) + @as(f32, @floatFromInt(values[0]))) / max;
-            sumqx = 0;
-            sumq2 = 0;
-            for (0..block_size) |j| {
-                const al = id * xb[j];
-                const l = bestIndexInt8(16, values, al);
-                const q = @as(f32, @floatFromInt(values[l]));
-                const w = weight[j];
-                sumqx += w * q * xb[j];
-                sumq2 += w * q * q;
+        for (0..block_size) |j| {
+            lb[j] = @intCast(bestIndexIq4nl(&mid, idt[0] * xb[j]));
+        }
+        for (0..block_size) |j| {
+            const w = weight[j];
+            for (0..nt) |lane| {
+                const q = fval[bestIndexIq4nl(&mid, idt[lane] * xb[j])];
+                sqx[lane] += w * q * xb[j];
+                sq2[lane] += w * q * q;
             }
-            if (sumq2 > 0 and sumqx * sumqx > best * sumq2) {
-                d = sumqx / sumq2;
-                best = d * sumqx;
+        }
+        d = if (sq2[0] > 0) sqx[0] / sq2[0] else 0.0;
+        var best = d * sqx[0];
+        for (1..nt) |lane| {
+            if (sq2[lane] > 0 and sqx[lane] * sqx[lane] > best * sq2[lane]) {
+                d = sqx[lane] / sq2[lane];
+                best = d * sqx[lane];
             }
         }
         scales[ib] = d;
@@ -169,7 +166,7 @@ pub fn quantizeRowIq4NlImpl(
             // Requantize against the rounded sub-block scale, not the fitted
             // one -- the same absorb-the-rounding step the K-quants make.
             for (0..block_size) |j| {
-                lb[j] = @intCast(bestIndexInt8(16, values, idl * xb[j]));
+                lb[j] = @intCast(bestIndexIq4nl(&mid, idl * xb[j]));
             }
             l += 32;
             const l_l: u8 = @intCast(l & 0xf);
@@ -182,7 +179,7 @@ pub fn quantizeRowIq4NlImpl(
         if (ntry > 0) {
             const id: f32 = if (scales[0] != 0) 1 / scales[0] else 0;
             for (0..super_block_size) |j| {
-                l_buf[j] = @intCast(bestIndexInt8(16, values, id * x[j]));
+                l_buf[j] = @intCast(bestIndexIq4nl(&mid, id * x[j]));
             }
         }
     }
@@ -412,10 +409,10 @@ test "iq4_xs matches the C on every pattern, ref and chunk" {
     try checkIq4("IQ4_XS", blocks.IQ4_XS, quantize_row_iq4_xs_ref, quantize_iq4_xs, iq_dequant.dequantize_row_iq4_xs);
 }
 
-test "the level table is sorted, which is what the binary search needs" {
-    // bestIndexInt8 binary-searches kvalues_iq4nl. kvalues_mxfp4 is *not*
-    // sorted, which is why legacy.zig searches that one linearly -- using this
-    // routine there would silently return the wrong level.
+test "the level table is sorted, which is what the midpoint count needs" {
+    // bestIndexIq4nl counts the midpoints below x, which is a nearest-level
+    // search only over a sorted table. kvalues_mxfp4 is *not* sorted, which is
+    // why legacy.zig searches that one linearly.
     var prev: i8 = std.math.minInt(i8);
     for (c.kvalues_iq4nl) |v| {
         try std.testing.expect(v > prev);
@@ -423,19 +420,19 @@ test "the level table is sorted, which is what the binary search needs" {
     }
 }
 
-test "bestIndexInt8 picks the nearer level and breaks ties low" {
-    const vals: [*]const i8 = @ptrCast(&c.kvalues_iq4nl);
+test "bestIndexIq4nl picks the nearer level and breaks ties high" {
+    var mid: [15]f32 = undefined;
+    for (0..15) |k| mid[k] = 0.5 * @as(f32, @floatFromInt(@as(i32, c.kvalues_iq4nl[k]) + c.kvalues_iq4nl[k + 1]));
     // Below the table and above it clamp to the ends.
-    try std.testing.expectEqual(@as(usize, 0), bestIndexInt8(16, vals, -1000.0));
-    try std.testing.expectEqual(@as(usize, 15), bestIndexInt8(16, vals, 1000.0));
+    try std.testing.expectEqual(@as(usize, 0), bestIndexIq4nl(&mid, -1000.0));
+    try std.testing.expectEqual(@as(usize, 15), bestIndexIq4nl(&mid, 1000.0));
     // An exact hit returns that level.
     for (0..16) |i| {
         const x: f32 = @floatFromInt(c.kvalues_iq4nl[i]);
-        try std.testing.expectEqual(i, bestIndexInt8(16, vals, x));
+        try std.testing.expectEqual(i, bestIndexIq4nl(&mid, x));
     }
-    // Exactly halfway goes to the *higher* index. The C's comparison is
-    // `x - val[mu-1] < val[mu] - x`, which is false at a tie, so it falls
-    // through to `mu`. Guessing "ties round down" was wrong.
-    const mid = (@as(f32, @floatFromInt(c.kvalues_iq4nl[3])) + @as(f32, @floatFromInt(c.kvalues_iq4nl[4]))) / 2.0;
-    try std.testing.expectEqual(@as(usize, 4), bestIndexInt8(16, vals, mid));
+    // Exactly halfway goes to the *higher* index, as the binary search it
+    // replaced did: `x < mid[k]` is false at a tie, so that midpoint does not
+    // count it down.
+    try std.testing.expectEqual(@as(usize, 4), bestIndexIq4nl(&mid, mid[3]));
 }

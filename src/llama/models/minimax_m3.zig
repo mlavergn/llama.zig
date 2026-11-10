@@ -10,8 +10,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/minimax-m3.cpp` at v0.8.0
-//! (`8642541b2`): `llama_model_minimax_m3`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/minimax-m3.cpp` at v0.9.0
+//! (`cd959bae9`): `llama_model_minimax_m3`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, its `graph` with
 //! `build_attn_msa_fa`, and `llm_graph_input_msa`, which upstream defines
 //! in the model's own file. `msa_params` (src/models/models.h:2585
@@ -267,7 +267,7 @@ var warned_no_fa = false;
 var warned_unified = false;
 
 /// Ports the constructor of `llama_model_minimax_m3`'s `graph`
-/// (src/models/minimax-m3.cpp:210 @8642541b2). Partial rotary: the head size
+/// (src/models/minimax-m3.cpp:210 @cd959bae9). Partial rotary: the head size
 /// is not `n_rot`, so that is not asserted.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
@@ -328,7 +328,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     if (msa_enabled) {
         const mctx_msa = b.mctx.?.cast(MsaContext);
 
-        const msa_kqm = inp_attn.getKqMask().?;
+        const msa_kqm = inp_attn.base.self_attn_mask.raw.?;
         n_kv = msa_kqm.ne[0];
         n_tps = msa_kqm.ne[1]; // tokens per stream
         ns = msa_kqm.ne[3]; // streams in this ubatch
@@ -423,11 +423,11 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 c.ggml_build_forward_expand(b.gf, mctx_idx.cpyK(ctx, ik, inp_attn.getKIdxsIdx(), il));
                 const ik_kv = mctx_idx.getK(ctx, il);
 
-                if (inp_attn.base.self_k_rot) |r| {
+                if (inp_attn.base.self_k_rot[@intCast(il)]) |r| {
                     Qcur = graph.mulMatHadamard(ctx, Qcur, r);
                     Kcur = graph.mulMatHadamard(ctx, Kcur, r);
                 }
-                if (inp_attn.base.self_v_rot) |r| {
+                if (inp_attn.base.self_v_rot[@intCast(il)]) |r| {
                     Vcur = graph.mulMatHadamard(ctx, Vcur, r);
                 }
 
@@ -579,7 +579,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                         cur = c.ggml_concat(ctx, cur, outs[@intCast(st)], 1);
                     }
                 }
-                if (inp_attn.base.self_v_rot) |r| {
+                if (inp_attn.base.self_v_rot[@intCast(il)]) |r| {
                     cur = graph.mulMatHadamard(ctx, cur, r);
                 }
                 b.cb(cur, "kqv_out", il);

@@ -58,6 +58,7 @@ const RefUbatch = extern struct {
     token: [*c]c.llama_token = null,
     embd: [*c]f32 = null,
     embd_state: [*c]f32 = null,
+    embd_row: [*c]i32 = null,
     pos: [*c]c.llama_pos = null,
     n_seq_id: [*c]i32 = null,
     seq_id: [*c][*c]c.llama_seq_id = null,
@@ -75,6 +76,7 @@ const RefExtToken = extern struct {
     embd_off: u64,
     has_state: i32,
     state_off: u64,
+    embd_row: i32,
     output: i32,
     decision_order: i32,
     pos: [4]c.llama_pos,
@@ -94,6 +96,7 @@ extern fn ref_ext_new(n_tokens_max: usize, n_embd_inp: usize, n_embd_inp_enc: us
 extern fn ref_ext_free(b: *RefExt) void;
 extern fn ref_compat_init(b: *RefExt, batch: *const c.llama_batch, n_embd_row: usize) void;
 extern fn ref_ext_set_decision_order(b: *RefExt, idx: i32, order: i32) c_int;
+extern fn ref_ext_add_embd_row(b: *RefExt, seq_id: c.llama_seq_id, row: i32) i32;
 extern fn ref_ext_n_tokens(b: *const RefExt) usize;
 extern fn ref_ext_n_embd(b: *const RefExt) usize;
 extern fn ref_ext_set_n_embd_state(b: *RefExt, n: usize) void;
@@ -356,15 +359,23 @@ const Gen = struct {
             }
         }
 
-        // 0 tokens, 1 embeddings, 2 mixed, 3 both on every entry
-        const kind = self.below(4);
+        // 0 tokens, 1 embeddings, 2 mixed, 3 both on every entry, 4 rows of
+        // ctx_other's layer input device buffer (v0.9.0), sometimes mixed
+        // with an entry of another kind, which init refuses
+        const kind = self.below(5);
         const n = 1 + self.below(if (self.chance(10)) 40 else 12);
         for (0..n) |_| {
             var seq: i32 = @intCast(self.below(@intCast(n_seq_max)));
             if (self.chance(4)) seq = self.pick(i32, &.{ -1, n_seq_max, n_seq_max + 7 });
             const as_embd = kind == 1 or (kind == 2 and self.chance(50));
             var idx: i32 = undefined;
-            if (kind == 3) {
+            if (kind == 4 and !self.chance(6)) {
+                var row: i32 = @intCast(self.below(64));
+                if (self.chance(5)) row = self.pick(i32, &.{ -1, -7, std.math.minInt(i32) });
+                idx = addEmbdRow(e, seq, row, ref_log, port_log);
+                // a token id or an embedding on a row entry, which is refused
+                if (idx >= 0 and self.chance(5)) _ = both(e, "llama_batch_ext_set_embd_token", .{ idx, self.embdArg(n_embd_inp, n_embd_inp_enc) }, ref_log, port_log);
+            } else if (kind == 3) {
                 idx = both(e, "llama_batch_ext_add_token", .{ seq, @as(c.llama_token, @intCast(self.below(self.n_vocab))) }, ref_log, port_log);
                 if (idx >= 0) _ = both(e, "llama_batch_ext_set_embd_token", .{ idx, self.embdArg(n_embd_inp, n_embd_inp_enc) }, ref_log, port_log);
             } else if (as_embd) {
@@ -724,6 +735,19 @@ fn both(e: Exts, comptime name: []const u8, args: anytype, ref_log: *std.ArrayLi
     return ri;
 }
 
+/// `llama_batch_ext_add_embd_row` on both sides: `llama-ext.h` declares it
+/// with C++ linkage, so the reference goes through `batch_ref.cpp`.
+fn addEmbdRow(e: Exts, seq: i32, row: i32, ref_log: *std.ArrayList(u8), port_log: *std.ArrayList(u8)) i32 {
+    log_target = ref_log;
+    const r = ref_ext_add_embd_row(e.ref, seq, row);
+    log_target = port_log;
+    const p = PA.llama_batch_ext_add_embd_row(portExt(e), seq, row);
+    log_target = null;
+    _ = expectInt("llama_batch_ext_add_embd_row", r, p);
+    tally.ext_calls += 1;
+    return r;
+}
+
 fn setDecisionOrder(e: Exts, idx: i32, order: i32) void {
     const r = ref_ext_set_decision_order(e.ref, idx, order);
     const p = PA.llama_batch_ext_set_decision_order(portExt(e), idx, @fromBackingInt(@intCast(@as(c_uint, @bitCast(order)))));
@@ -775,6 +799,7 @@ fn compareUbatch(what: []const u8, r: *const RefUbatch, p: *const B.Ubatch, n_em
     if (sameNull("token", r.token, p.token)) sameArray(c.llama_token, "token", r.token, p.token, n);
     if (sameNull("embd", r.embd, p.embd)) sameArray(f32, "embd", r.embd, p.embd, @as(usize, n) * n_embd);
     if (sameNull("embd_state", r.embd_state, p.embd_state)) sameArray(f32, "embd_state", r.embd_state, p.embd_state, @as(usize, n) * n_embd_state);
+    if (sameNull("embd_row", r.embd_row, p.embd_row)) sameArray(i32, "embd_row", r.embd_row, p.embd_row, n);
     if (sameNull("pos", r.pos, p.pos)) sameArray(c.llama_pos, "pos", r.pos, p.pos, @as(usize, n) * r.n_pos);
     const have_nsid = sameNull("n_seq_id", r.n_seq_id, p.n_seq_id);
     if (have_nsid) sameArray(i32, "n_seq_id", r.n_seq_id, p.n_seq_id, n);
@@ -875,6 +900,7 @@ fn compareExt(what: []const u8, e: Exts) void {
         if (!expectInt("ext embd_off", rt.embd_off, pt.embd_off)) break;
         if (!expectInt("ext has_state", rt.has_state, @intFromBool(pt.has_state))) break;
         if (!expectInt("ext state_off", rt.state_off, pt.state_off)) break;
+        if (!expectInt("ext embd_row", rt.embd_row, pt.embd_row)) break;
         if (!expectInt("ext output", rt.output, @intFromBool(pt.output))) break;
         if (!expectInt("ext decision_order", rt.decision_order, pt.decision_order)) break;
         sameArray(c.llama_pos, "ext pos", &rt.pos, &pt.pos, 4);

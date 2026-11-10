@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v0.8.0
-//! (`8642541b2`). Each declaration names the C++ it replaces and the line
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v0.9.0
+//! (`cd959bae9`). Each declaration names the C++ it replaces and the line
 //! it began at.
 //!
 //! # This layer is invisible to the symbol count

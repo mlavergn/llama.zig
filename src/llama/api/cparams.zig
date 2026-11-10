@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-cparams.cpp` (v0.8.0, `8642541b2`):
+//! Ported from `llama.cpp/src/llama-cparams.cpp` (v0.9.0, `cd959bae9`):
 //! `llama_max_parallel_sequences`, its one unmangled export.
 //!
 //! The function has the C signature and is `pub`, not `export`: the

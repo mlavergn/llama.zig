@@ -8,7 +8,7 @@
 //! `llama.cpp/vendor/sheredom/subprocess.h` it calls --
 //! `subprocess_create_ex` over `posix_spawn`, `subprocess_join`,
 //! `subprocess_destroy`, `subprocess_terminate`, `subprocess_alive` and the
-//! pipe helpers -- at llama.cpp v0.8.0 (`8642541b2`). Each declaration names
+//! pipe helpers -- at llama.cpp v0.9.0 (`cd959bae9`). Each declaration names
 //! what it ports and the line it began at.
 //!
 //! # Which arm

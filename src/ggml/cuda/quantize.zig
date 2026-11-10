@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/quantize.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/quantize.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/quantize.cuh` at v0.9.0 (`cd959bae9`). The
 //! `quantize_*` kernels stay CUDA.
 
 const std = @import("std");

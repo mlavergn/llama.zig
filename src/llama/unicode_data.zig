@@ -4,7 +4,7 @@
 //!
 //! **Generated** by `scripts/gen-unicode-data` from
 //! `llama.cpp/src/unicode-data.cpp` and `llama.cpp/src/unicode-data.h`
-//! (`8642541b2`), which upstream itself generates. Do not edit; rerun the
+//! (`cd959bae9`), which upstream itself generates. Do not edit; rerun the
 //! script. `scripts/unicode-diff` checks every code point against the C++.
 
 /// Ports `unicode_ranges_flags` (unicode-data.cpp:10 @cd959bae9): each

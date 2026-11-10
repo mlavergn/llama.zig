@@ -7,7 +7,7 @@
 //! `common_speculative_impl_draft_eagle3`,
 //! `common_speculative_impl_draft_dflash` and
 //! `common_speculative_impl_draft_mtp` from
-//! `llama.cpp/common/speculative.cpp` (v0.8.0, `8642541b2`), with
+//! `llama.cpp/common/speculative.cpp` (v0.9.0, `cd959bae9`), with
 //! `spec_retune`. Each declaration names what it ports and the line it
 //! began at; the rest of the file is `speculative.zig`.
 //!
@@ -934,7 +934,7 @@ fn randomDevice() u32 {
 }
 
 /// Ports `common_speculative_impl_draft_dflash` (speculative.cpp:984
-/// @8642541b2): block-diffusion drafting with the target's features
+/// @cd959bae9): block-diffusion drafting with the target's features
 /// injected into the draft's KV cache. DSpark is the same driver with a
 /// Markov head, an anchor-first block and an optional confidence head;
 /// LiliCorr (`lilicorr.candidate_topk` in the draft's metadata) walks a
@@ -986,8 +986,11 @@ pub const DFlash = struct {
     target_layer_ids: [*c]const i32 = null, // model_dft's extract layer indices
     target_layer_ids_n: u32 = 0,
 
-    /// Ports `common_speculative_impl_draft_dflash` (speculative.cpp:1030
-    /// @8642541b2), the constructor.
+    // inject target features from the target's device buffer instead of host copies (env LLAMA_DFLASH_DEV=0 disables)
+    use_dev_features: bool = false,
+
+    /// Ports `common_speculative_impl_draft_dflash` (speculative.cpp:1033
+    /// @cd959bae9), the constructor.
     pub fn init(base: *Base, params: *const params_mod.Speculative, kind: params_mod.SpeculativeType) S.InitError!DFlash {
         const func = "common_speculative_impl_draft_dflash";
         var p = params.draft;
@@ -1089,6 +1092,25 @@ pub const DFlash = struct {
         // turn on extraction of the target layers' input embeddings
         for (0..target_layer_ids_n) |k| ext.setEmbeddingsLayerInp(ctx_tgt, @intCast(target_layer_ids[k]), true);
 
+        // the device buffer keeps layers in ascending id order, the fc input expects target_layer_ids order
+        var use_dev_features = false;
+        {
+            const env = c.getenv("LLAMA_DFLASH_DEV");
+            const ascending = for (1..target_layer_ids_n) |k| {
+                if (target_layer_ids[k - 1] >= target_layer_ids[k]) break false;
+            } else true;
+
+            use_dev_features = !is_lilicorr and ascending and (env == null or c.atoi(env) != 0);
+            if (use_dev_features) {
+                ext.setEmbeddingsLayerInpDev(ctx_tgt, true);
+                use_dev_features = ext.supportsEmbdRow(ctx_dft);
+                if (!use_dev_features) {
+                    ext.setEmbeddingsLayerInpDev(ctx_tgt, false);
+                }
+            }
+            log.inf("%s: DFlash target features via %s\n", .{ @as([*:0]const u8, func), @as([*:0]const u8, if (use_dev_features) "device buffer" else "host copies") });
+        }
+
         // DFlash2 reads its selector lattice from h_nextn and never consumes raw logits.
         ext.setEmbeddingsNextn(ctx_dft, true, !is_dflash2 and !is_lilicorr);
         c.llama_set_causal_attn(ctx_dft, causal_attn); // DFlash needs non-causal attention unless the model says otherwise
@@ -1119,6 +1141,7 @@ pub const DFlash = struct {
             .causal_attn = causal_attn,
             .target_layer_ids = target_layer_ids,
             .target_layer_ids_n = target_layer_ids_n,
+            .use_dev_features = use_dev_features,
         };
     }
 
@@ -1152,7 +1175,7 @@ pub const DFlash = struct {
         }
     }
 
-    /// Ports `process` (speculative.cpp:1184 @8642541b2): each sequence's
+    /// Ports `process` (speculative.cpp:1204 @cd959bae9): each sequence's
     /// target features, chunked by the draft's micro-batch, injected into
     /// the draft's KV cache at the target positions; LiliCorr also keeps the
     /// draft's projected embeddings of the last `block_size + 1` positions.
@@ -1209,6 +1232,24 @@ pub const DFlash = struct {
                 const n_chunk: i32 = @min(n_ubatch, n_rows - offset);
                 const nc: usize = @intCast(n_chunk);
                 const uo: usize = @intCast(offset);
+
+                if (self.use_dev_features) {
+                    // the features are the target batch rows in the target's device buffer
+                    self.batch_inject.clear();
+                    for (0..nc) |i| {
+                        const row: i32 = @intCast(ub + uo + i);
+                        const p = tok[ub + uo + i].pos[0];
+                        const pos_arr = [4]c.llama_pos{ p, p, p, 0 };
+                        _ = self.batch_inject.addEmbdRow(row, &pos_arr, seq_id, false);
+                    }
+
+                    const rc = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch_inject.get());
+                    if (rc != 0) {
+                        log.err("%s: llama_process(ctx_dft) failed rc=%d (n_tokens=%d, offset=%d)\n", .{ @as([*:0]const u8, "process"), rc, n_chunk, offset });
+                        return false;
+                    }
+                    continue;
+                }
 
                 // gather target features per extract layer; the fused decode encodes and
                 // injects them into the K/V cache at the target positions
@@ -1470,8 +1511,8 @@ pub const DFlash = struct {
 // -----------------------------------------------------------------------------
 // draft-mtp
 
-/// Ports `common_speculative_impl_draft_mtp` (speculative.cpp:1489
-/// @8642541b2): multi-token prediction heads, in one of three modes -- a
+/// Ports `common_speculative_impl_draft_mtp` (speculative.cpp:1528
+/// @cd959bae9): multi-token prediction heads, in one of three modes -- a
 /// shared KV cache with every head in one graph (Gemma 4), chained heads
 /// one per draft step (Step 3.5), or a single head (Qwen 3.5).
 pub const Mtp = struct {
@@ -1506,8 +1547,8 @@ pub const Mtp = struct {
     i_last: []c_int,
     chain_h: []std.ArrayList(f32),
 
-    /// Ports `common_speculative_impl_draft_mtp` (speculative.cpp:1527
-    /// @8642541b2), the constructor.
+    /// Ports `common_speculative_impl_draft_mtp` (speculative.cpp:1566
+    /// @cd959bae9), the constructor.
     pub fn init(base: *Base, params: *const params_mod.Speculative) S.InitError!Mtp {
         const func = "common_speculative_impl_draft_mtp";
         var p = params.draft;
@@ -1517,7 +1558,7 @@ pub const Mtp = struct {
         assertC(ctx_tgt != null and ctx_dft != null, 1572, "ctx_tgt && ctx_dft && \"MTP requires ctx_tgt and ctx_dft to be set\"");
 
         const n_embd = c.llama_model_n_embd_out(c.llama_get_model(ctx_dft));
-        assertC(n_embd == c.llama_model_n_embd_out(c.llama_get_model(ctx_tgt)), 1536, "n_embd == llama_model_n_embd_out(llama_get_model(ctx_tgt)) && \"MTP input row width must match the target h_nextn width\"");
+        assertC(n_embd == c.llama_model_n_embd_out(c.llama_get_model(ctx_tgt)), 1575, "n_embd == llama_model_n_embd_out(llama_get_model(ctx_tgt)) && \"MTP input row width must match the target h_nextn width\"");
         const n_mtp_layers: i32 = @max(1, c.llama_model_n_layer_nextn(c.llama_get_model(ctx_dft)));
 
         spcTrc(func, "%s", .{@as([*:0]const u8, "adding speculative implementation 'draft-mtp'\n")});
@@ -1541,11 +1582,11 @@ pub const Mtp = struct {
         // offload draft sampling to the backend
         const chains = backendChains(ctx_dft, n_seq, p.backend_sampling);
 
-        ext.setEmbeddingsNextn(ctx_tgt, true, false);
-        ext.setEmbeddingsNextn(ctx_dft, true, true);
-
         const is_mem_shared = ext.getCtxOther(ctx_dft) == ctx_tgt;
         const chain_heads = n_mtp_layers > 1 and !is_mem_shared;
+
+        ext.setEmbeddingsNextn(ctx_tgt, true, is_mem_shared);
+        ext.setEmbeddingsNextn(ctx_dft, true, true);
 
         const chain_h = gpa.alloc(std.ArrayList(f32), if (chain_heads) n_seq else 0) catch oom();
         if (chain_heads) {
@@ -1632,7 +1673,7 @@ pub const Mtp = struct {
         }
     }
 
-    /// Ports `process` (speculative.cpp:1638 @8642541b2): the catch-up
+    /// Ports `process` (speculative.cpp:1677 @cd959bae9): the catch-up
     /// decode of the target's batch under every head, the hidden states
     /// shifted one position right as each entry's state input, and the rows
     /// the next `accept` chooses from. Vision tokens, which carry an
@@ -1724,15 +1765,26 @@ pub const Mtp = struct {
             if (self.i_batch_end[s] < 0) continue;
 
             const n_rows: usize = @intCast(self.i_batch_end[s] - self.i_batch_beg[s] + 1);
-            self.verify_h_rows[s] = @intCast(n_rows);
-            self.verify_h[s].resize(gpa, n_rows * n_embd) catch oom();
+            if (self.is_mem_shared and !tok[@intCast(self.i_batch_end[s])].output) {
+                self.verify_h_rows[s] = 0;
+                continue;
+            }
 
-            for (0..n_rows) |i| {
-                const h = ext.getEmbeddingsNextnIth(ctx_tgt, self.i_batch_beg[s] + @as(i32, @intCast(i)));
+            const all_rows_output = for (tok[@intCast(self.i_batch_beg[s])..@intCast(self.i_batch_end[s] + 1)]) |t| {
+                if (!t.output) break false;
+            } else true;
+            const h_rows: usize = if (self.is_mem_shared and !all_rows_output) 1 else n_rows;
+            const h_offset: i32 = if (self.is_mem_shared and !all_rows_output) self.i_batch_end[s] else self.i_batch_beg[s];
+
+            self.verify_h_rows[s] = @intCast(h_rows);
+            self.verify_h[s].resize(gpa, h_rows * n_embd) catch oom();
+
+            for (0..h_rows) |i| {
+                const h = ext.getEmbeddingsNextnIth(ctx_tgt, h_offset + @as(i32, @intCast(i)));
                 rowCopy(self.verify_h[s].items.ptr + i * n_embd, h.?, n_embd);
             }
 
-            rowCopy(self.pending_h[s].ptr, self.verify_h[s].items.ptr + (n_rows - 1) * n_embd, n_embd);
+            rowCopy(self.pending_h[s].ptr, self.verify_h[s].items.ptr + (h_rows - 1) * n_embd, n_embd);
         }
 
         return true;
@@ -1889,7 +1941,7 @@ pub const Mtp = struct {
         }
     }
 
-    /// Ports `accept` (speculative.cpp:1917 @8642541b2): the hidden row of
+    /// Ports `accept` (speculative.cpp:1968 @cd959bae9): the hidden row of
     /// the first position the target did not accept becomes pending.
     pub fn accept(self: *Mtp, base: *Base, seq_id: c.llama_seq_id, n_accepted: u16, _: bool) void {
         if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(base.n_seq))) return;
@@ -1901,6 +1953,26 @@ pub const Mtp = struct {
         const i_h: i32 = @min(@as(i32, n_accepted), n_rows - 1);
         const n_embd: usize = @intCast(self.n_embd);
         rowCopy(self.pending_h[s].ptr, self.verify_h[s].items.ptr + @as(usize, @intCast(i_h)) * n_embd, n_embd);
+    }
+
+    /// Ports `get_state` (speculative.cpp:1983 @cd959bae9): the pending
+    /// hidden row, as bytes.
+    pub fn getState(self: *const Mtp, base: *const Base, seq_id: c.llama_seq_id, data: *std.ArrayList(u8)) bool {
+        if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(base.n_seq))) return false;
+
+        const row_bytes: usize = @as(usize, @intCast(self.n_embd)) * @sizeOf(f32);
+        data.resize(gpa, row_bytes) catch oom();
+        @memcpy(data.items, std.mem.sliceAsBytes(self.pending_h[@intCast(seq_id)])[0..row_bytes]);
+        return true;
+    }
+
+    /// Ports `set_state` (speculative.cpp:1994 @cd959bae9).
+    pub fn setState(self: *Mtp, base: *const Base, seq_id: c.llama_seq_id, data: []const u8) void {
+        if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(base.n_seq))) return;
+
+        const row_bytes: usize = @as(usize, @intCast(self.n_embd)) * @sizeOf(f32);
+        if (data.len != row_bytes) return;
+        @memcpy(std.mem.sliceAsBytes(self.pending_h[@intCast(seq_id)])[0..row_bytes], data);
     }
 };
 

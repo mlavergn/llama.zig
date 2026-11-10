@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports two switches of `llama.cpp/tools/mtmd/clip.cpp` at v0.8.0
-//! (`8642541b2`): the one that sets each projector's graph inputs in
+//! Ports two switches of `llama.cpp/tools/mtmd/clip.cpp` at v0.9.0
+//! (`cd959bae9`): the one that sets each projector's graph inputs in
 //! `clip_encode`, and `clip_n_output_tokens`'s token counts. Each
 //! declaration names what it ports and the line it began at.
 //!
@@ -61,13 +61,13 @@ fn uniformRealF32(g: *libcxx.Mt19937, a: f32, b: f32) f32 {
 
 /// libc++'s `normal_distribution<float>` (`<__random/normal_distribution.h>`):
 /// Marsaglia's polar method, keeping the second value for the next draw.
-const NormalF32 = struct {
+pub const NormalF32 = struct {
     mean: f32,
     stddev: f32,
     v: f32 = 0,
     v_hot: bool = false,
 
-    fn next(self: *NormalF32, g: *libcxx.Mt19937) f32 {
+    pub fn next(self: *NormalF32, g: *libcxx.Mt19937) f32 {
         var up: f32 = undefined;
         if (self.v_hot) {
             self.v_hot = false;
@@ -114,8 +114,8 @@ fn usz(x: anytype) usize {
 
 const lowest = -std.math.floatMax(f32);
 
-/// Ports the per-projector input switch of `clip_encode` (mtmd/clip.cpp:5218
-/// @8642541b2), entered at mtmd/clip.cpp:5421.
+/// Ports the per-projector input switch of `clip_encode` (mtmd/clip.cpp:5753
+/// @cd959bae9), entered at mtmd/clip.cpp:5962.
 ///
 /// Return: false where the C++ `return false`s out of `clip_encode` (a
 /// qwen3tts code out of range), having logged why.
@@ -377,20 +377,22 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
         },
         .qwen2vl, .qwen3vl, .ling3vl, .glm4v, .glm5v => {
             const merge_ratio = hparams.n_merge;
-            const pw = @divTrunc(image_size_width, patch_size);
-            const ph = @divTrunc(image_size_height, patch_size);
+            const pw = @divTrunc(@divTrunc(image_size_width, patch_size), merge_ratio);
+            const ph = @divTrunc(@divTrunc(image_size_height, patch_size), merge_ratio);
             const positions = try allocI32(usz(n_pos * 4), 0);
             defer gpa.free(positions);
             const np = usz(num_patches);
             var ptr: usize = 0;
-            var y: c_int = 0;
-            while (y < ph) : (y += merge_ratio) {
-                var x: c_int = 0;
-                while (x < pw) : (x += merge_ratio) {
-                    for (0..2) |dy| {
-                        for (0..2) |dx| {
-                            const yy = y + @as(c_int, @intCast(dy));
-                            const xx = x + @as(c_int, @intCast(dx));
+            var ty: c_int = 0;
+            while (ty < ph) : (ty += 1) {
+                var tx: c_int = 0;
+                while (tx < pw) : (tx += 1) {
+                    var dy: c_int = 0;
+                    while (dy < merge_ratio) : (dy += 1) {
+                        var dx: c_int = 0;
+                        while (dx < merge_ratio) : (dx += 1) {
+                            const yy = ty * merge_ratio + dy;
+                            const xx = tx * merge_ratio + dx;
                             positions[ptr] = yy;
                             positions[np + ptr] = xx;
                             positions[2 * np + ptr] = yy;
@@ -412,21 +414,23 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
         },
         .paddleocr => {
             const merge_ratio = hparams.n_merge;
-            const pw = @divTrunc(image_size_width, patch_size);
-            const ph = @divTrunc(image_size_height, patch_size);
+            const pw = @divTrunc(@divTrunc(image_size_width, patch_size), merge_ratio);
+            const ph = @divTrunc(@divTrunc(image_size_height, patch_size), merge_ratio);
             const positions = try allocI32(usz(n_pos * 4), 0);
             defer gpa.free(positions);
             const np = usz(num_patches);
             var ptr: usize = 0;
             // NOTE: same as Qwen-VL, but x and y are swapped
-            var y: c_int = 0;
-            while (y < ph) : (y += merge_ratio) {
-                for (0..2) |dy| {
-                    var x: c_int = 0;
-                    while (x < pw) : (x += merge_ratio) {
-                        for (0..2) |dx| {
-                            const yy = y + @as(c_int, @intCast(dy));
-                            const xx = x + @as(c_int, @intCast(dx));
+            var ty: c_int = 0;
+            while (ty < ph) : (ty += 1) {
+                var dy: c_int = 0;
+                while (dy < merge_ratio) : (dy += 1) {
+                    var tx: c_int = 0;
+                    while (tx < pw) : (tx += 1) {
+                        var dx: c_int = 0;
+                        while (dx < merge_ratio) : (dx += 1) {
+                            const yy = ty * merge_ratio + dy;
+                            const xx = tx * merge_ratio + dx;
                             positions[ptr] = yy;
                             positions[np + ptr] = xx;
                             positions[2 * np + ptr] = yy;
@@ -559,16 +563,18 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
             const np = usz(num_patches);
 
             var ptr: usize = 0;
-            var y: c_int = 0;
-            while (y < iph) : (y += merge_ratio) {
-                var x: c_int = 0;
-                while (x < ipw) : (x += merge_ratio) {
-                    for (0..2) |dy| {
-                        for (0..2) |dx| {
+            var ty: c_int = 0;
+            while (ty < ph) : (ty += 1) {
+                var tx: c_int = 0;
+                while (tx < pw) : (tx += 1) {
+                    var dy: c_int = 0;
+                    while (dy < merge_ratio) : (dy += 1) {
+                        var dx: c_int = 0;
+                        while (dx < merge_ratio) : (dx += 1) {
                             var remap: usize = usz(idx[ptr / mpow]);
                             remap = (remap * mpow) + (ptr % mpow);
-                            const yy = y + @as(c_int, @intCast(dy));
-                            const xx = x + @as(c_int, @intCast(dx));
+                            const yy = ty * merge_ratio + dy;
+                            const xx = tx * merge_ratio + dx;
                             positions[remap] = yy;
                             positions[np + remap] = xx;
                             positions[2 * np + remap] = yy;
@@ -800,6 +806,19 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
         .pockettts_spkenc => {
             try st.setPocketttsTfmInputs();
         },
+        // `PROJECTOR_TYPE_CHATTERBOX_SPKENC` (mtmd/clip.cpp:6846 @cd959bae9)
+        .chatterbox_spkenc => {
+            // the ceil-mode seg pooling divides by the full segment length, rescale the last partial segment
+            const T1 = @divTrunc(imgs.entries.items[0].nx() - 1, 2) + 1;
+            const S = @divTrunc(T1 + 99, 100);
+            const segfix = try allocF32(usz(S), 1.0);
+            defer gpa.free(segfix);
+            const last = T1 - (S - 1) * 100;
+            segfix[usz(S) - 1] = 100.0 / @as(f32, @floatFromInt(last));
+            st.setInputF32("inp_segfix", segfix);
+        },
+        // `PROJECTOR_TYPE_CHATTERBOX` (mtmd/clip.cpp:6742 @cd959bae9)
+        .chatterbox => if (!try models.chatterbox_gen.setInputs(st)) return false,
         .pockettts_gen => {
             if (params.gen_process == .gen_wav) {
                 impl.ggmlAssert(params.feats != null, "clip.cpp", 6652, "params->feats != nullptr");
@@ -1239,6 +1258,19 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
 
             try st.setLfm3aWindowInputs(base, n_pos_a, hparams.attn_window_size);
         },
+        // PROJECTOR_TYPE_NEMOTRON_TRANSCRIBE
+        .nemotron_transcribe => {
+            impl.ggmlAssert(imgs.entries.items.len == 1, "clip.cpp", 7198, "imgs.entries.size() == 1");
+            const positions = try allocI32(usz(c.ggml_nelements(st.getInpTensor("positions"))), 0);
+            defer gpa.free(positions);
+            for (positions, 0..) |*p, i| p.* = @intCast(i);
+            st.setInputI32("positions", positions);
+            impl.ggmlAssert(params.enc_state != null, "clip.cpp", 7204, "params->enc_state != nullptr");
+            st.setInputF32("inp_norm", params.enc_state.?.mel_norm.items);
+            if (c.ggml_graph_get_tensor(gf, "spk_prev") != null) {
+                st.setInputF32("spk_prev", params.enc_state.?.spk_prev.items);
+            }
+        },
         .parakeet => {
             impl.ggmlAssert(imgs.entries.items.len == 1, "clip.cpp", 7212, "imgs.entries.size() == 1");
             const attn_mask = c.ggml_graph_get_tensor(gf, "attn_mask");
@@ -1514,7 +1546,7 @@ fn upload(gf: ?*c.ggml_cgraph, name: [*:0]const u8, idx: []const i32) void {
     c.ggml_backend_tensor_set(t, buf.ptr, 0, c.ggml_nbytes(t));
 }
 
-/// Ports `clip_n_output_tokens` (mtmd/clip.cpp:4726 @8642541b2): the number of
+/// Ports `clip_n_output_tokens` (mtmd/clip.cpp:5222 @cd959bae9): the number of
 /// embeddings the projector produces for `img`.
 pub fn nOutputTokens(ctx: *const clip.Ctx, img: *const impl.ImageF32) c_int {
     const params = &ctx.model.hparams;
@@ -1692,7 +1724,7 @@ pub fn nOutputTokens(ctx: *const clip.Ctx, img: *const impl.ImageF32) c_int {
             for (0..2) |_| n = @divTrunc(n - 1, 2) + 1;
             n_patches = n;
         },
-        .parakeet => {
+        .nemotron_transcribe, .parakeet => {
             n_patches = @divTrunc(img.nx() + (params.subsampling_factor - 1), params.subsampling_factor);
         },
         .gemma4ua => {
@@ -1713,6 +1745,10 @@ pub fn nOutputTokens(ctx: *const clip.Ctx, img: *const impl.ImageF32) c_int {
         },
         .qwen3tts_spkenc => {
             // pooling gives one speaker embedding, whatever the clip length is
+            n_patches = 1;
+        },
+        .chatterbox_spkenc => {
+            // statistics pooling gives one speaker embedding, whatever the clip length is
             n_patches = 1;
         },
         .qwen3tts_gen, .lfm3a_gen => {

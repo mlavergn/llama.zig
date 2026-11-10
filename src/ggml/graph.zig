@@ -11,7 +11,7 @@
 //!                                      which no caller can link against and
 //!                                      which every reader of a graph needs
 //!
-//! both at v0.8.0 (`8642541b2`). Each declaration names the C function it
+//! both at v0.9.0 (`cd959bae9`). Each declaration names the C function it
 //! replaces and the line it began at.
 //!
 //! # A graph is one allocation

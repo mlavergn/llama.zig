@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/vec.h` at v0.8.0 (`8642541b2`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/vec.h` at v0.9.0 (`cd959bae9`).
 //!
 //! **These are `inline static` in the C, so they have no symbols** and
 //! `cpu/vec.zig` — which ports `vec.cpp`'s *exported* contract — does not
@@ -208,7 +208,7 @@ pub inline fn mul_f32(n: i64, z: [*]f32, x: [*]const f32, y: [*]const f32) void 
 // computes in `f32` and narrows on store, which is what the tail does, so
 // there the whole range is one loop again.
 
-/// Ports `ggml_vec_mad_f32` (vec.h:318 @8642541b2), the `GGML_SIMD` NEON arm:
+/// Ports `ggml_vec_mad_f32` (vec.h:318 @cd959bae9), the `GGML_SIMD` NEON arm:
 /// `y += x * v`, fused per element. See the section comment for why body and
 /// tail are one loop here.
 pub inline fn mad_f32(n: i64, y: [*]f32, x: [*]const f32, v: f32) void {
@@ -216,7 +216,7 @@ pub inline fn mad_f32(n: i64, y: [*]f32, x: [*]const f32, v: f32) void {
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = @mulAdd(f32, x[i], v, y[i]);
 }
 
-/// Ports `ggml_vec_mad_f16` (vec.h:438 @8642541b2), the `GGML_SIMD` NEON arm
+/// Ports `ggml_vec_mad_f16` (vec.h:438 @cd959bae9), the `GGML_SIMD` NEON arm
 /// with `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC`, and on x86 the AVX one
 /// (`madF16Avx`).
 ///
@@ -268,7 +268,7 @@ fn madF16Avx(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t, v: f32) voi
 /// `GGML_VEC_MAD_UNROLL` (vec.h:50 @cd959bae9).
 pub const mad_unroll: usize = 32;
 
-/// Ports `ggml_vec_mad_f32_unroll` (vec.h:584 @8642541b2), the `GGML_SIMD`
+/// Ports `ggml_vec_mad_f32_unroll` (vec.h:584 @cd959bae9), the `GGML_SIMD`
 /// NEON arm.
 ///
 /// The body loads `y` once and folds all 32 `x[k] * v[k]` into it with
@@ -298,7 +298,7 @@ pub inline fn mad_f32_unroll(n: i64, xs: i64, vs: i64, y: [*]f32, xv: [*]const f
 extern fn vDSP_vsmsa(a: [*]const f32, ia: Stride, b: *const f32, cc: *const f32, d: [*]f32, id: Stride, n: Length) void;
 extern fn vDSP_vsmul(a: [*]const f32, ia: Stride, b: *const f32, cc: [*]f32, ic: Stride, n: Length) void;
 
-/// Ports `ggml_vec_mad1_f32` (vec.h:654 @8642541b2): `y = x * s + b`, through
+/// Ports `ggml_vec_mad1_f32` (vec.h:654 @cd959bae9): `y = x * s + b`, through
 /// `vDSP_vsmsa` under `GGML_USE_ACCELERATE`. Otherwise the NEON `GGML_SIMD`
 /// arm, whose body is `GGML_F32_VEC_FMA(vb, ay, vs)` -- `vfmaq_f32`, fused --
 /// and whose leftovers `x[i]*s + b` clang contracts to the same `fmadd`, so
@@ -309,7 +309,7 @@ pub inline fn mad1_f32(n: i64, y: [*]f32, x: [*]const f32, s: f32, b: f32) void 
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = @mulAdd(f32, x[i], s, b);
 }
 
-/// Ports `ggml_vec_scale_f32` (vec.h:702 @8642541b2): `y *= v`, through
+/// Ports `ggml_vec_scale_f32` (vec.h:702 @cd959bae9): `y *= v`, through
 /// `vDSP_vsmul` under `GGML_USE_ACCELERATE`. Otherwise the NEON `GGML_SIMD`
 /// arm, a vector multiply with a scalar tail -- elementwise and unfused, so a
 /// plain loop gives the same bits.
@@ -319,7 +319,7 @@ pub inline fn scale_f32(n: i64, y: [*]f32, v: f32) void {
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] *= v;
 }
 
-/// Ports `ggml_vec_scale_f16` (vec.h:768 @8642541b2), the `GGML_SIMD` NEON arm
+/// Ports `ggml_vec_scale_f16` (vec.h:768 @cd959bae9), the `GGML_SIMD` NEON arm
 /// with `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC`: the body multiplies **in
 /// half precision** by `v` rounded to `f16`, the tail in `f32`. On x86 the
 /// AVX arm, `scaleF16Avx`.

@@ -6,7 +6,7 @@
 //! `common_batch`, the typed decision models and the rest of what the tools
 //! reach from `llama.cpp/common/common.cpp` and `llama.cpp/common/common.h`,
 //! and `common_log_get_verbosity` and `common_log_default_callback` from
-//! `common/log.cpp` (v0.8.0, `8642541b2`). Each declaration names what it
+//! `common/log.cpp` (v0.9.0, `cd959bae9`). Each declaration names what it
 //! ports and the line it began at.
 
 const std = @import("std");
@@ -185,11 +185,11 @@ pub fn contextParamsToLlama(p: *const Params) c.llama_context_params {
     return cparams;
 }
 
-/// Ports `common_batch` (common/common.h:1092 @8642541b2): a wrapper around
+/// Ports `common_batch` (common/common.h:1089 @cd959bae9): a wrapper around
 /// `llama_batch_ext` holding its entries, which may exceed `n_batch`; render
 /// them with `get` or `getSubBatch`, and decode them in chunks.
 pub const Batch = struct {
-    /// Ports `token` (common/common.h:1093 @8642541b2), a member of
+    /// Ports `token` (common/common.h:1090 @cd959bae9), a member of
     /// `common_batch`.
     pub const Token = struct {
         id: c.llama_token,
@@ -200,6 +200,7 @@ pub const Batch = struct {
         state: c.llama_embd = .{ .data = null, .n_rows = 0, .n_embd = 0 }, // non-owning view of the data passed to setEmbdState(), data == null if none
         seq_ids_extra: std.ArrayList(c.llama_seq_id) = .empty, // see addSeq()
         decision_order: i32 = 0, // see llama_batch_ext_set_decision_order()
+        embd_row: i32 = -1, // see addEmbdRow(), -1 if none
     };
 
     a: std.mem.Allocator,
@@ -312,7 +313,18 @@ pub const Batch = struct {
         return self.size() - 1;
     }
 
-    /// Ports `get_sub_batch` (common/common.cpp:2263 @8642541b2): entries
+    /// Ports `add_embd_row` (common/common.cpp:2278 @cd959bae9): an entry
+    /// whose embedding is row `row` of the layer input device buffer of the
+    /// context's `ctx_other`; `pos` points to `n_pos` positions.
+    pub fn addEmbdRow(self: *Batch, row: i32, pos: [*]const c.llama_pos, seq_id: c.llama_seq_id, output: bool) i32 {
+        var t: Token = .{ .id = c.LLAMA_TOKEN_NULL, .pos = .{ 0, 0, 0, 0 }, .seq_id = seq_id, .output = output, .embd = .{ .data = null, .n_rows = 0, .n_embd = 0 }, .state = .{ .data = null, .n_rows = 0, .n_embd = 0 } };
+        t.embd_row = row;
+        for (0..@intCast(self.n_pos)) |j| t.pos[j] = pos[j];
+        self.tokens.append(self.a, t) catch oom();
+        return self.size() - 1;
+    }
+
+    /// Ports `get_sub_batch` (common/common.cpp:2288 @cd959bae9): entries
     /// `[off, off + n)` rendered into the `llama_batch_ext`, which the next
     /// call overwrites.
     pub fn getSubBatch(self: *Batch, off: i32, n: i32) ?*c.llama_batch_ext {
@@ -339,6 +351,12 @@ pub const Batch = struct {
                 if (t.embd.data != null and !c.llama_batch_ext_set_embd_token(res, idx, t.embd)) {
                     _ = c.ggml_abort("common.cpp", 2306, "%s: failed to set the embedding of token %d at index %d\n", func, t.id, i);
                 }
+            } else if (t.embd_row >= 0) {
+                idx = llama.api.batch.llama_batch_ext_add_embd_row(@ptrCast(res), t.seq_id, t.embd_row); // llama-ext.h: C++ linkage, reached through the port's api
+                if (idx < 0) {
+                    _ = c.ggml_abort("common.cpp", 2311, "%s: failed to add embd row %d at index %d (error %d, n = %d)\n", func, t.embd_row, i, idx, n);
+                }
+                _ = c.llama_batch_ext_set_pos(res, idx, &t.pos);
             } else {
                 idx = c.llama_batch_ext_add_embd(res, t.seq_id, t.embd);
                 if (idx < 0) {

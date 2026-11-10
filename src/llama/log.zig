@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-impl.cpp` at v0.8.0 (`8642541b2`):
+//! Ported from `llama.cpp/src/llama-impl.cpp` at v0.9.0 (`cd959bae9`):
 //! `llama_logger_state`, `g_logger_state`, `llama_log_internal_v`,
 //! `llama_log_internal` and `llama_log_callback_default`. The rest of that
 //! file is ported elsewhere: `time_meas` in `impl.zig`, `replace_all` in

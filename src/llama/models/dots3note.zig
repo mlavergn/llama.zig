@@ -11,8 +11,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/dots3note.cpp` at v0.8.0
-//! (`8642541b2`): `llama_model_dots3note`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/dots3note.cpp` at v0.9.0
+//! (`cd959bae9`): `llama_model_dots3note`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`. The C++
 //! notes it was adapted from `deepseek32.cpp` (the DSA indexer and absorbed
 //! MLA) and `step35.cpp` (the head-wise output gate).
@@ -194,7 +194,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports the constructor of `llama_model_dots3note`'s `graph`
-/// (src/models/dots3note.cpp:152 @8642541b2).
+/// (src/models/dots3note.cpp:152 @cd959bae9).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

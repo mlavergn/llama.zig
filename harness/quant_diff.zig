@@ -206,6 +206,12 @@ fn buildList(v: Variant, n_layer: u32, n_expert: u32) TensorList {
                         "attn_qkv_gate", "attn_gate",      "ffn_latent_down", "ffn_latent_up",
                         "engram_gate",   "conv2d_spatial", "conv_dw",
                     }) |nm| l.addf("blk.{d}." ++ nm ++ ".weight", .{i}, .{ 512, 512, 1, 1 }, h16);
+                    // v0.9.0: what Limite and Metis16 keep unquantized
+                    inline for (.{
+                        "attn_ve_gate",      "mudd_down",    "mudd_up",     "attn_pass_lora_down",
+                        "attn_pass_lora_up", "ffn_exp_embd", "hc_attn_mix", "depth_mem_x",
+                        "cont_x",
+                    }) |nm| l.addf("blk.{d}." ++ nm ++ ".weight", .{i}, .{ 512, 512, 1, 1 }, h16);
                 }
                 l.addf("blk.{d}.attn_output.weight", .{i}, .{ if (i % 3 == 1) 40 else n_embd, n_embd, 1, 1 }, h16);
                 l.addf("blk.{d}.ffn_gate.weight", .{i}, .{ n_embd, 13824, 1, 1 }, h16);
@@ -238,6 +244,11 @@ fn buildList(v: Variant, n_layer: u32, n_expert: u32) TensorList {
             l.add("a.gen.wav.0.weight", .{ 512, 512, 1, 1 }, h16);
             l.add("xa.conv1d.0.weight", .{ 512, 512, 1, 1 }, h16);
             l.add("xa.gen.wav.0.weight", .{ 512, 512, 1, 1 }, h16);
+            // v0.9.0 keeps only the codec FSQ unquantized
+            l.add("a.gen.wav.quant.0.weight", .{ 512, 512, 1, 1 }, h16);
+            // Metis16's prefixes, at the start of a name and inside one
+            inline for (.{ "depth_mem_query", "cont_hidden", "stream_embd", "xdepth_mem_query", "xcont_output" }) |nm|
+                l.add(nm ++ ".weight", .{ 512, 512, 1, 1 }, h16);
         },
         else => {},
     }
@@ -464,7 +475,7 @@ fn typeRules(quick: bool) void {
 
     // The architectures the rules name, under every descriptor, parameter
     // set and list.
-    const archs = [_][:0]const u8{ "llama", "falcon", "bailingmoe3", "qwen35", "qwen2", "deepseek2", "glm5-next", "muse-spark" };
+    const archs = [_][:0]const u8{ "llama", "falcon", "bailingmoe3", "qwen35", "qwen2", "deepseek2", "glm5-next", "muse-spark", "limite", "metis16" };
     const layer_counts = [_]u32{ 1, 8, 32, 80 };
     const heads = [_][2]u32{ .{ 32, 32 }, .{ 32, 8 }, .{ 32, 4 }, .{ 32, 0 } };
     const experts = [_]u32{ 0, 4, 8, 16 };
@@ -930,6 +941,8 @@ fn fileRuns(dir: []const u8, quick: bool) void {
         .{ .name = "bf16-gqa4-untied", .wtype = c.GGML_TYPE_BF16, .tied = false },
         .{ .name = "mixed-gqa1", .wtype = c.GGML_TYPE_F32, .mixed = true, .n_head_kv = 4, .tied = false },
         .{ .name = "f32-four-d", .wtype = c.GGML_TYPE_F32, .four_d = true },
+        // v0.9.0: an F8_E4M3 source dequantizes like a quantized one
+        .{ .name = "f8-gqa4-untied", .wtype = c.GGML_TYPE_F8_E4M3, .tied = false },
     };
     var paths: [specs.len][:0]const u8 = undefined;
     for (specs, 0..) |s, i| paths[i] = writeSpec(dir, s, 1);

@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/server/server-queue.cpp` and
-//! `llama.cpp/tools/server/server-queue.h` (llama.cpp v0.8.0, `8642541b2`):
+//! `llama.cpp/tools/server/server-queue.h` (llama.cpp v0.9.0, `cd959bae9`):
 //! `server_queue`, `server_response` and `server_response_reader`. Each
 //! declaration names what it ports and the line it began at.
 //!

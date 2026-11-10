@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/phimoe.cpp` at v0.8.0 (`8642541b2`):
+//! Ported from `llama.cpp/src/models/phimoe.cpp` at v0.9.0 (`cd959bae9`):
 //! `llama_model_phimoe`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`. Its graph is `llama_model_phi3`'s, in `phi3.zig`.
 

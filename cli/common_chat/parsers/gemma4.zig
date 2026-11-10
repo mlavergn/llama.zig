@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/gemma4.cpp` (llama.cpp v0.8.0,
-//! `8642541b2`): `workaround::gemma4_model_turn_builder`,
+//! Ports `llama.cpp/common/parsers/gemma4.cpp` (llama.cpp v0.9.0,
+//! `cd959bae9`): `workaround::gemma4_model_turn_builder`,
 //! `workaround::convert_tool_responses_gemma4` and
 //! `common_chat_params_init_gemma4`. The parser is built in the order clang
 //! evaluates the C++ expressions, left to right, since a parser's id is its

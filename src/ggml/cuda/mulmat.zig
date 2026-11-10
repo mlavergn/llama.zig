@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.8.0
-//! (`8642541b2`): `batched_mul_mat_traits`, `ggml_cuda_mul_mat_cublas_impl`,
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.9.0
+//! (`cd959bae9`): `batched_mul_mat_traits`, `ggml_cuda_mul_mat_cublas_impl`,
 //! `ggml_cuda_mul_mat_cublas`, `ggml_cuda_should_fuse_mul_mat`,
 //! `ggml_cuda_should_fuse_mul_mat_vec_{f,q}`,
 //! `ggml_cuda_mul_mat_q_fusion_matches`, `ggml_cuda_should_fuse_mul_mat_q`,
@@ -62,7 +62,7 @@ fn traitsOf(comptime t: c.enum_ggml_type) Traits {
     };
 }
 
-/// Ports `ggml_cuda_mul_mat_cublas_impl` (ggml-cuda.cu:1463 @8642541b2).
+/// Ports `ggml_cuda_mul_mat_cublas_impl` (ggml-cuda.cu:1657 @cd959bae9).
 /// Since v0.7.0 `dst`'s leading dimension is `nb1 / sizeof(float)`, not
 /// `ne0`: an F32 chunk from `mulMatCublas` keeps the full destination's row
 /// stride.
@@ -184,6 +184,7 @@ fn mulMatCublasImpl(comptime compute_type: c.enum_ggml_type, ctx: *common.Contex
         // `cc == VOLTA || RDNA4 || CDNA`; the AMD tests are false here.
         prefer_f32_output = x == common.cc.volta;
     } else if (compute_type == c.GGML_TYPE_BF16) {
+        // `!RDNA3 && !RDNA4_M && !CDNA`; the AMD tests are false here.
         prefer_f32_output = true;
     }
 
@@ -453,13 +454,14 @@ pub fn shouldFuseMulMatVecQ(tensor: *const Tensor) bool {
     return use_mul_mat_vec_q;
 }
 
-/// Ports `ggml_cuda_mul_mat_q_fusion_matches` (ggml-cuda.cu:1961 @8642541b2),
+/// Ports `ggml_cuda_mul_mat_q_fusion_matches` (ggml-cuda.cu:2155 @cd959bae9),
 /// new at v0.8.0: whether gate/up/GLU has a fused MMQ kernel at all. Buffer-
 /// and batch-size independent, so `graph_optimize` produces the same graph
 /// topology for every ubatch size. `up` may be any node here, so its sources
-/// are not read until its op says they exist.
+/// are not read until its op says they exist. Since v0.9.0 `up` may be a
+/// `MUL_MAT_ID` too (the MoE gate/up/GLU).
 pub fn mulMatQFusionMatches(up: *const Tensor, gate: *const Tensor, glu: *const Tensor, device: c_int) bool {
-    if (up.op != c.GGML_OP_MUL_MAT) return false;
+    if (up.op != c.GGML_OP_MUL_MAT and up.op != c.GGML_OP_MUL_MAT_ID) return false;
 
     const x_up = impl.one(Tensor, up.src[0]);
     const y = impl.one(Tensor, up.src[1]);
@@ -486,9 +488,10 @@ fn badPaddingClear(x: *const Tensor) bool {
         c.ggml_nbytes(x) != c.ggml_backend_buffer_get_alloc_size(x.buffer, x) and x.view_src != null;
 }
 
-/// Ports `ggml_cuda_should_fuse_mul_mat_q` (ggml-cuda.cu:1987 @8642541b2),
+/// Ports `ggml_cuda_should_fuse_mul_mat_q` (ggml-cuda.cu:2181 @cd959bae9),
 /// new at v0.8.0: `mulMatQFusionMatches` and the checks that depend on the
-/// buffers and the batch.
+/// buffers and the batch. For `MUL_MAT_ID` (v0.9.0) the kernel choice is
+/// `ggml_cuda_mul_mat_id`'s, with the nominal tiles of all experts.
 pub fn shouldFuseMulMatQ(up: *const Tensor, gate: *const Tensor, glu: *const Tensor) bool {
     // A hinted matmul can be fused, but its unfused path may be faster (e.g. FWHT for GGML_HINT_SRC0_IS_HADAMARD).
     if (impl.getOpParamsI32(up, 1) != c.GGML_HINT_NONE or impl.getOpParamsI32(gate, 1) != c.GGML_HINT_NONE) return false;
@@ -500,10 +503,16 @@ pub fn shouldFuseMulMatQ(up: *const Tensor, gate: *const Tensor, glu: *const Ten
     const x_up = impl.one(Tensor, up.src[0]);
     const y = impl.one(Tensor, up.src[1]);
     const x = common.info().devices[@intCast(device)].cc;
-    if (mmvq.shouldUseMmvq(x_up.type, x, y.ne[1]) or !mmq.shouldUseMmq(x_up.type, x, y.ne[1], 0)) return false;
+
+    // For MUL_MAT_ID: same kernel choice as ggml_cuda_mul_mat_id, with the nominal tiles of all experts (the per-expert token counts are only known on the GPU).
+    const is_id = up.op == c.GGML_OP_MUL_MAT_ID;
+    const ncols: i64 = if (is_id) y.ne[2] else y.ne[1];
+    const nchannels: i64 = if (is_id) x_up.ne[2] else y.ne[2] * y.ne[3];
+    const use_mmvq = if (is_id) ncols <= mmvq.getMmidMaxBatch(x_up.type, x) else mmvq.shouldUseMmvq(x_up.type, x, ncols);
+    if (use_mmvq or !mmq.shouldUseMmq(x_up.type, x, ncols, if (is_id) x_up.ne[2] else 0)) return false;
 
     // The fused kernel needs one block per tile (no stream-k split), so only fuse if the tiling is efficient.
-    return mmq.fusionIsEfficient(x_up.type, x_up.ne[1], y.ne[1], y.ne[2] * y.ne[3], device);
+    return mmq.fusionIsEfficient(x_up.type, x_up.ne[1], ncols, nchannels, device);
 }
 
 /// Ports `ggml_cuda_mul_mat` (ggml-cuda.cu:2215 @cd959bae9).

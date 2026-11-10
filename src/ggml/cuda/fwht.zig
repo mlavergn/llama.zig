@@ -6,7 +6,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/fwht.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/fwht.cuh` at v0.8.0 (`8642541b2`). The
+//! `llama.cpp/ggml/src/ggml-cuda/fwht.cuh` at v0.9.0 (`cd959bae9`). The
 //! kernels, `fwht_cuda` and (since v0.7.0) `fwht_cuda_block`, stay CUDA.
 
 const std = @import("std");

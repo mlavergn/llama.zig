@@ -10,7 +10,7 @@
 //! `server_chat_convert_anthropic_to_oai`,
 //! `convert_transcriptions_to_chatcmpl` and `server_chat_get_asr_prompt` from
 //! `llama.cpp/tools/server/server-chat.cpp` and
-//! `llama.cpp/tools/server/server-chat.h` (llama.cpp v0.8.0, `8642541b2`);
+//! `llama.cpp/tools/server/server-chat.h` (llama.cpp v0.9.0, `cd959bae9`);
 //! the file's fourth function, `server_chat_msg_diff_to_json_oaicompat`, is
 //! `result.zig`'s. Each declaration names what it ports and the line it
 //! began at.
@@ -107,11 +107,12 @@ pub fn responsesTools(a: Allocator, tools_in: *const Value) Error!Value {
 }
 
 /// Ports `server_chat_convert_responses_to_chatcmpl` (server-chat.cpp:32
-/// @8642541b2): an OpenAI Responses request as a `/chat/completions` one --
+/// @cd959bae9): an OpenAI Responses request as a `/chat/completions` one --
 /// `instructions` a system message, each input item a message (an output
 /// item, a function call or a reasoning item following an assistant
 /// message merged into it), function tools unwrapped, `max_output_tokens`
-/// and `reasoning.effort` renamed.
+/// and `reasoning.effort` renamed, and the members of an `extra_params`
+/// object (llama.cpp's own parameters) merged in.
 ///
 /// Parameters:
 /// - `a`: an arena; the result is its.
@@ -391,6 +392,18 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
             try chatcmpl_body.set(a, "reasoning_effort", try (try reasoning.at("effort")).clone(a));
         }
         try chatcmpl_body.erase(a, "reasoning");
+    }
+
+    // llama.cpp params (e.g. seed, min_p) go under extra_params and are merged into the converted body
+    if (response_body.contains("extra_params")) {
+        try chatcmpl_body.erase(a, "extra_params");
+        const extra_params = try response_body.at("extra_params");
+        if (extra_params.isObject()) {
+            var it = @constCast(extra_params).items();
+            while (it.next()) |item| {
+                try chatcmpl_body.set(a, item.key, try item.value.clone(a));
+            }
+        }
     }
 
     return chatcmpl_body;

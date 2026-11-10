@@ -738,6 +738,23 @@ static void graph_props(graph_t * g, weights_t * w) {
      * ggml_backend_meta_buffer_n_bufs. So this reaches the new arm, and no
      * case can tell it from the old one. */
     P("view_tensor_mir", ggml_scale(c, ggml_view_tensor(c, a), 2.0f));
+    /* v0.9.0: ARANGE has no sources and is MIRRORED outright. */
+    P("arange", ggml_scale(c, ggml_arange(c, 0.0f, 8.0f, 1.0f), 2.0f));
+    /* v0.9.0, handle_view: a permuted view of an unpermuted split tensor
+     * splits the view dim that spans the source's split axis (ax2_t is
+     * [8, 4, 6] split on axis 2; the view puts that axis at dim 1)... */
+    {
+        struct ggml_tensor * t3 = W(w, "ax2_t");
+        P("view_permuted_ax2", ggml_cont(c, ggml_view_3d(c, t3, 8, 6, 4, t3->nb[2], t3->nb[1], 0)));
+    }
+    /* ...and a view that only regroups dims inside one slab of the split
+     * axis of a *permuted* source keeps the source's split state, the axis
+     * moved to the view's dim (dim 0 of the permuted [8, 6, 4] split into
+     * [4, 2], the split axis 6 at dim 2). */
+    {
+        struct ggml_tensor * pp = ggml_permute(c, W(w, "ax2_t"), 0, 2, 1, 3);
+        P("view_slab_ax2", ggml_cont(c, ggml_view_4d(c, pp, 4, 2, 6, 4, 4 * sizeof(float), pp->nb[1], pp->nb[2], 0)));
+    }
 #undef P
 }
 
