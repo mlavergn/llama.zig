@@ -390,14 +390,29 @@ pub inline fn addvq_f32(v: f32x4) f32 {
     return (v[0] + v[1]) + (v[2] + v[3]);
 }
 
-/// Ports `vmaxvq_f32`: the largest lane.
+extern fn @"llvm.aarch64.neon.fmaxv.f32.v4f32"(f32x4) f32;
+extern fn @"llvm.aarch64.neon.fmax.v4f32"(f32x4, f32x4) f32x4;
+
+/// The NaN `fmax` returns: the first NaN operand, quieted, payload kept.
+inline fn fmaxScalar(a: f32, b: f32) f32 {
+    if (std.math.isNan(a)) return @bitCast(@as(u32, @bitCast(a)) | 0x00400000);
+    if (std.math.isNan(b)) return @bitCast(@as(u32, @bitCast(b)) | 0x00400000);
+    return if (a > b) a else b;
+}
+
+/// Ports `vmaxvq_f32`: the largest lane, as `fmaxv` computes it.
 ///
-/// `@reduce(.Max, ...)` matches for every input this file sees, which is always
-/// the output of `vabsq_f32` over model weights. The two can differ on NaN,
-/// where ARM's `fmaxv` and LLVM's reduction disagree about propagation; a NaN
-/// weight is outside what either the C or this port defines.
+/// `fmaxv` propagates a NaN lane, payload and all; LLVM's `@reduce(.Max)` is
+/// `maxnum` -- `fmaxnmv` -- which prefers a number to a NaN, and makes a
+/// default NaN when it returns one. Not only weights reach this:
+/// `quantize_row_q8_0` quantizes every q8_0 `MUL_MAT`'s activations, and on
+/// the GB10 a T5 fixture's `Q` carried NaNs, so `amax` and with it every
+/// block scale came out `0x7fc00000` where the C kept the payload. On
+/// aarch64 this is the instruction; elsewhere (unit tests on x86) the same
+/// semantics in scalar code, pairwise as `fmaxv` reduces.
 pub inline fn maxvq_f32(v: f32x4) f32 {
-    return @reduce(.Max, v);
+    if (comptime builtin.cpu.arch == .aarch64) return @"llvm.aarch64.neon.fmaxv.f32.v4f32"(v);
+    return fmaxScalar(fmaxScalar(v[0], v[1]), fmaxScalar(v[2], v[3]));
 }
 
 // -----------------------------------------------------------------------------
@@ -408,9 +423,14 @@ pub inline fn abs_f32(v: f32x4) f32x4 {
     return @abs(v);
 }
 
-/// Ports `vmaxq_f32`: elementwise maximum.
+/// Ports `vmaxq_f32`: elementwise maximum, as `fmax` computes it -- a NaN
+/// in either lane propagates, where `@max` (`maxnum`, `fmaxnm`) would take
+/// the number. See `maxvq_f32`.
 pub inline fn max_f32(a: f32x4, b: f32x4) f32x4 {
-    return @max(a, b);
+    if (comptime builtin.cpu.arch == .aarch64) return @"llvm.aarch64.neon.fmax.v4f32"(a, b);
+    var r: f32x4 = undefined;
+    inline for (0..4) |l| r[l] = fmaxScalar(a[l], b[l]);
+    return r;
 }
 
 /// Ports `vmulq_f32`.
@@ -1077,4 +1097,16 @@ test "vextq_f32 and vzip1q_f32 reorder ABCD to ACBD" {
     try std.testing.expectEqual(f32x4{ 0, 2, 1, 3 }, zip1q_f32(v, extq_f32(v, v, 2)));
     const w: f32x4 = .{ 4, 5, 6, 7 };
     try std.testing.expectEqual(f32x4{ 1, 2, 3, 4 }, extq_f32(v, w, 1));
+}
+
+test "max_f32 and maxvq_f32 propagate a NaN with its payload, as fmax and fmaxv do" {
+    const nan_payload: f32 = @bitCast(@as(u32, 0x7fd12345));
+    const v: f32x4 = .{ 1.0, nan_payload, 3.0, -2.0 };
+    try std.testing.expectEqual(@as(u32, 0x7fd12345), @as(u32, @bitCast(maxvq_f32(v))));
+    const m = max_f32(v, @as(f32x4, @splat(2.0)));
+    try std.testing.expectEqual(@as(u32, 0x7fd12345), @as(u32, @bitCast(m[1])));
+    try std.testing.expectEqual(@as(f32, 2.0), m[0]);
+    try std.testing.expectEqual(@as(f32, 3.0), m[2]);
+    // Without a NaN, the plain maximum.
+    try std.testing.expectEqual(@as(f32, 4.5), maxvq_f32(.{ 1.0, 4.5, -7.0, 0.0 }));
 }

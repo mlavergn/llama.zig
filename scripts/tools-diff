@@ -124,7 +124,10 @@ masks=(
     's/, [0-9]+ MiB free\)/, N MiB free)/g'
     's/ - [0-9]+ MiB free$/ - N MiB free/'
     's/available_memory_kb: [0-9]+/available_memory_kb: N/'
-    's/(common_memory_breakdown_print: .*\| +[0-9]+ = )[0-9]+( \+ \(.*\) \+ +)[0-9]+ \|/\1N\2N |/'
+    # The two figures are right-aligned, so their padding moves with their
+    # digit count: the mask takes it too (`+        N |` against `+       N |`
+    # failed six llama-mtmd-cli cases at the v0.9.0 GB10 pickup).
+    's/(common_memory_breakdown_print: .*\| +[0-9]+ = +)-?[0-9]+( \+ \(.*\) \+) +-?[0-9]+ \|/\1N\2 N |/'
     's/vs\. [0-9]+ MiB of free device memory/vs. N MiB of free device memory/'
     's/will leave [0-9]+ >= /will leave N >= /'
 )

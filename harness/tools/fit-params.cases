@@ -25,7 +25,9 @@
 !fail -m $FIX/qwen3-dense.gguf -fitp maybe
 !fail -m /nonexistent/model.gguf
 # Upstream throws through main here, and std::terminate races common_log's
-# worker: on the GB10 its three load errors were lost in 8 runs of 20. The
-# abort itself is still compared.
-!mask /(failed to open GGUF file|error loading model|failed to load model)/d
+# worker: on the GB10 its three load errors were lost in 8 runs of 20, and
+# at v0.9.0's pickup the "printing estimated memory" line before them was
+# lost too (2, 3 or 5 lines of 5 in 20 runs). Every queued line is masked;
+# the abort itself is still compared.
+!mask /(failed to open GGUF file|error loading model|failed to load model|printing estimated memory)/d
 !fail -m /nonexistent/model.gguf -fitp on

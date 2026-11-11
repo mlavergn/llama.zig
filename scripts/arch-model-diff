@@ -99,10 +99,25 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/context_diff" -Ofast -lc \
 #   deterministic upstream abort -- `supports_op` claims every CONT and
 #   `ggml_cuda_cpy` has no non-contiguous q8_0-to-q8_0 path -- which the
 #   crash split counts as `+1abort`.
+# - T5's "q8_0 cache, attn rot off" on the CPU, where a CUDA backend is
+#   registered (the GB10, v0.9.0 pickup): with op offload, the 314-token
+#   decode's layer-1 cross-attention reads the scheduler's copy of
+#   `cross_embd`, and that copy holds uninitialized memory -- different in
+#   every process, in pure upstream too (llama.cpp.zmake built `-Dcuda`,
+#   driven by a C program: layer 0's copy is the encoder output, layer 1's
+#   changes run to run). Upstream's logits stay put only because its garbage
+#   happened to be finite against this fixture's zero cross-attention
+#   weights; with NaN garbage they do not. With offload off the case is
+#   deterministic and the port matches upstream. The same case also exposed
+#   a real port bug -- `vmaxq_f32`/`vmaxvq_f32` ported as `@max`/`@reduce`,
+#   which drop a NaN where `fmax` keeps it -- fixed in `neon.zig`.
 KNOWN_NONDET=()
 if [ "$(uname -s)" = Darwin ]; then
     KNOWN_NONDET+=("t5-dense gpu q8_0 cache")
     KNOWN_NONDET+=("t5-dense gpu q8_0 cache, attn rot off")
+fi
+if [ "$(uname -s)" = Linux ] && command -v nvidia-smi > /dev/null 2>&1; then
+    KNOWN_NONDET+=("t5-dense cpu q8_0 cache, attn rot off")
 fi
 
 # The skipped cases of a fixture and model configuration, one per line.

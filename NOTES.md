@@ -13567,3 +13567,159 @@ cuda-crt 13.0.88, cuda-cccl 13.0.85 -- with `nvcc`, `cuobjdump` and
 `cu++filt` stand-ins answering from the port's own 7,307 harvested kernel
 keys) lived in the session's scratch directory; the next blind CUDA sync
 rebuilds it from that description.
+
+### The GB10 pickup
+
+Run on 2026-11-10 and 11 on the GB10 itself (checkout
+`~/src/mlavergn/llama.zig` at `ff4ce0c`), with `llama.cpp/` and the zmake
+checkout moved to `cd959bae9`, zmake at `5306453` and then `6a03eb9`
+(`-Dcuda`), zigjinja at `5b2472e` (on its remote by then; no bundle). The
+Vulkan toolchain pin did not move, so `vk-toolchain` was not rerun.
+
+**Everything passes**, after four port fixes and five gate fixes. The
+CUDA and Vulkan host layers, ported blind on the Mac, held: every gate
+below ran on them for the first time.
+
+- **CUDA.** `gen-fattn-config` and `gen-mmq-config` regenerate without a
+  diff, and the fatbins and kernel table rebuild (6m21s), the new
+  `batch-get` key among them. `cuda-ops-diff`: 19,306 / 19,306 on bits, 14
+  cases where the reference differs from itself, 0 claimed beyond it; all
+  60 `kv_rows` FLASH_ATTN_EXT cases, both MoE `MUL_MAT_VEC_FUSION` cases
+  (q4_K m=17 n=5120, q8_0 m=2048 n_mats=40) and every F8_E4M3 case found,
+  the last unsupported on both sides. `cuda-backend-diff` in all four
+  settings (6,147 / 18,411 / 6,147 / 6,147 answers), `cuda-node-diff` 2,862
+  nodes and 33 fused decodes at 1 and 4 threads, `cuda-parity-cli` 6/6.
+  Injections 3/3: `.get_tensor_n` dropped (the slot), the descriptor's
+  `.dst + 1` (the round trips), `bufferCpyTensorN` without its
+  `bufferIsCuda` loop (the port aborts where the reference declines).
+- **Vulkan, all four arms.** `vk-builds` (no `ggml-vulkan-comm.o` in the
+  port's `libggml`), `vk-push-layout`, `vk-backend-diff` all 32 scenarios,
+  `vk-node-diff` 2,862 nodes and 33 fused decodes per arm, `vk-repro` and
+  `vk-parity-cli` 6/6 per arm, `vk-ops-diff` per arm (21,659 cases on
+  coopmat2, 96 / 96 runs of the extra cases); the `supports_extra` lines
+  agree, and the two `supports_op` injections fail on them (`non_compute`:
+  "the port refuses NONE/RESHAPE/VIEW/PERMUTE/TRANSPOSE"; `src[5]`: "the
+  port claims FLASH_ATTN_EXT"). The seven `ask_allreduce` injections: 5
+  caught, 2 inert -- `submit`'s ready-wait (only `sync_fd` sets `ready`;
+  NVIDIA takes the host bridge) and `binary_semaphore_idx`'s cleanup reset
+  (without it `context.zig:206` makes fresh semaphores: a leak, no answer
+  changes). Three of the five escaped the first run; see below.
+- **Linux arm64 CPU** (`GATE_CPU` baseline, which on Linux is `generic`):
+  `ops-diff` 1,676, `repack-diff` 141, `node-diff`, `parity-port-cpu` 6/6,
+  `host-arms-diff` 18, `libcxx-diff`, `regex-diff`, `unicode-diff`,
+  `vocab-diff`, `loader-diff`, `quant-diff` 260,688,306 checks,
+  `gemma4-assistant-diff`; all rerun after the `neon.zig` fix below.
+- **Models.** `arch-model-diff` over all 210 fixtures (44 first-run
+  failures, every one a gate fault below; all pass rerun), `mtp-diff` 36
+  pass and 2 aborting alike, `moe-slru-diff`, `context-diff`.
+- **libmtmd.** `mtmd-exports` 112 / 112, `mtmd-image-diff`,
+  `mtmd-audio-diff`/`mtmd-decode-diff`, `mtmd-diff` 420 identical and 4
+  different -- `qwen3tts`, `qwen3tts_shared`, and v0.9.0's `chatterbox`
+  and `chatterbox-mtl`, all CPU node passes, and all four differ upstream
+  against upstream too (the reference on both sides): chatterbox from its
+  decoder's first nodes, its noise inputs.
+- **Chat, tools and server.** `json-diff`, `schema-diff`, `peg-diff`,
+  `jinja-diff`, `chat-parse-diff` 62,764 records, `chat-msg-diff`,
+  `cnv-diff`, `spec-diff` 64 cases, `http-diff` 463, `server-task-diff`
+  7,449 records, every tool's `tools-diff` (13 tools), every `server-diff`
+  file but `parallel`, whose one differing check (`id_slot` under concurrent
+  requests) differs upstream against upstream too, once in two `--self`
+  runs, as at v0.8.0.
+
+**Port bugs found**:
+
+- **`batch_get.zig`'s `n_batch` and `bytes` were `u18`.** `@min` against a
+  comptime-known `usize` narrows its result to the smallest type that
+  holds the constant (128 Ki here). `n_batch` went to
+  `ggml_cuda_batch_get_kernel`'s `size_t count` as four bytes, and the
+  first-launch size check aborted every pinned `get_tensor_n` -- three of
+  `cuda-backend-diff`'s four settings, all but `GGML_CUDA_NO_PINNED=1`,
+  which never gathers. `bytes` multiplied in `u18` too and would have
+  wrapped at 10,923 reads, under-allocating the descriptor buffer. Both
+  are `usize` now, as upstream's `size_t`. Worth grepping for in the next
+  blind port: `const x = @min(runtime, comptime_const)`.
+- **`vulkan/buffer.zig`'s `formatSize` rounded ties away.** Upstream's
+  `std::fixed << std::setprecision(2)` is `%.2f`, which rounds an exact
+  binary tie to even: 16,000 bytes is `15.62 KiB` there and was `15.63`
+  here. It formats through `snprintf` now. The memory-logger scenarios of
+  `vk-backend-diff` saw it only once the back-to-back case below allocated
+  exactly 16,000 bytes.
+- **`neon.zig` ported `vmaxq_f32` and `vmaxvq_f32` as `@max` and
+  `@reduce(.Max)`.** Those are LLVM's `maxnum`, ARM's `FMAXNM`, which
+  prefers a number to a NaN; the C's are `FMAX` and `FMAXV`, which
+  propagate the NaN with its payload. `quantize_row_q8_0` (and `q8_1` and
+  the repack quantizers, 23 sites) reduces a block's absolute maximum with
+  them -- over activations, not only weights, as the old comment claimed --
+  so a block holding a NaN got a finite or default-NaN scale where the C's
+  is that NaN. Found through T5 below; fixed with the two instructions by
+  name, and a test that the old reduction fails (it returns 3.0 for a
+  lane holding `0x7fd12345`).
+
+**Gates that were wrong**:
+
+- **`vk-backend-diff`'s all-reduce section** asserted on both sides under
+  `GGML_VK_FORCE_MAX_BUFFER_SIZE=40000`, where its 1.2 MB tensors cannot be
+  allocated; it reports `unallocated` now and goes on. Its inputs were
+  multiples of 1/8 in a small range, exact in f16, so an f16 and an f32 wire
+  gave the same bits and the f16-threshold and `needsF32` injections
+  escaped; a low term below f16's precision closed both. And every case
+  synchronized after its round, which serializes them, so slot parity
+  fixed at 0 escaped; a back-to-back case, four rounds with no
+  synchronize between, closed it. 3/3 caught after.
+- **`context_diff.zig` hashed bytes no op wrote.** v0.9.0's layer-input
+  device buffer is allocated without a clear (`layer_inp_dev_alloc`) and
+  read through a VIEW, then written by a `SET_ROWS` that covers only the
+  rows its indices name, so the reference differed from itself run to run
+  on 43 fixtures' "layer inputs, device" case, CPU. Ops that compute
+  nothing (`ggml_op_is_empty`) are marked `h view` now, and `SET_ROWS`
+  hashes each written row with its index folded in. Negative-tested in a
+  private copy of `src/llama`: a permuted batch index fails at exactly that
+  `SET_ROWS`.
+- **`tools-diff`'s breakdown mask kept the column padding.** The free and
+  unaccounted figures are right-aligned, and when the live figure gained a
+  digit between the two sides' runs, six `llama-mtmd-cli` cases differed in
+  spaces. The mask takes the padding and a sign now.
+- **`fit-params.cases` #19** masked the three load errors upstream's queued
+  logger loses when `std::terminate` wins, but not the line before them,
+  which it loses too (upstream printed 2, 3 or 5 of 5 lines in 20 runs).
+- **The web UI needs Node 20** since v0.9.0's `tools/ui`, and the GB10's is
+  18: `server-diff`'s `make ui` failed before any case ran. It was built
+  with the Node 24 VS Code's server ships, running the system's npm; the
+  bundle is b12110.
+
+**T5, settled.** `t5-dense`'s CPU configuration, `q8_0 cache, attn rot
+off` -- open since the v0.8.0 pickup, where it was unproven whose CUDA host
+layer left the bytes -- now has a pure upstream to stand against:
+zmake's `6a03eb9` builds `-Dcuda`, and a C driver
+(encode, decode, three steps, a five-output batch, then a 314-token decode)
+links either libllama over either ggml with libstdc++, no harness
+exception in the way. What it showed:
+
+1. Only op offload makes it vary: `GGML_OP_OFFLOAD_MIN_BATCH` out of reach,
+   it is deterministic and equal to upstream's. Not a timing race --
+   `CUDA_LAUNCH_BLOCKING=1` varies too -- and not the new pinned gather
+   (`GGML_CUDA_NO_PINNED=1` too).
+2. Upstream's libllama over the port's ggml gave a different `kq-0` from
+   pure upstream, deterministically, with both operands byte-identical
+   (dumped and compared): every differing element was NaN on both sides,
+   upstream's carrying f16-shaped payloads, ours `0x7fc00000`. That is the
+   `neon.zig` bug above. After it, payloads still differ where several NaNs
+   meet in one operation; LLVM leaves NaN propagation unspecified, so
+   upstream's own bits there are clang's choice of operand order.
+3. The run-to-run variation is **upstream's**: in the offloaded decode, the
+   layer-1 cross-attention reads the scheduler's copy of `cross_embd`, and
+   pure upstream's copy holds different garbage in every process too (layer
+   0's is the encoder output). Upstream's logits stay put only because its
+   garbage happened to be finite against zero cross-attention weights.
+   It is the Metal note's mechanism on CUDA. The case is a documented
+   `KNOWN_NONDET` on Linux with an NVIDIA GPU now, `+1nondet`; worth
+   reporting upstream.
+
+**Not reproduced**: one `vk-backend-diff` run differed on the port's side,
+`GGML_VK_SERIALIZE_SUBMISSIONS=1`'s `pinned async get_2d`, under load from
+a concurrent `arch-model-diff`; 84 reruns, 60 of them under parallel load,
+agreed. Recorded, not closed.
+
+**Windows (DESKTOP-BR7J5S9) is not reachable from the GB10**: its agent is
+paired with the Mac's updater Host, and a push from here waits on it
+forever. The x86 pickup runs from the Mac, as Step 9 says.

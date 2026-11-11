@@ -2618,7 +2618,16 @@ not on its remote yet -- carry it in a bundle), before anything else. Both
 GPU host layers were ported blind, so every CUDA and Vulkan gate below runs
 here for the first time.
 
-**GB10 (`spark-dbff`, `~/src/mlavergn/llama.zig`)**
+**GB10 (`spark-dbff`, `~/src/mlavergn/llama.zig`)** -- **done**
+(`NOTES.md`, "The GB10 pickup", under the v0.9.0 sync): every item below
+passes, after port fixes to `cuda/batch_get.zig` (`u18` launch argument),
+`vulkan/buffer.zig` (tie rounding) and `cpu/quants/arm/neon.zig` (`vmaxq_f32`
+and `vmaxvq_f32` dropped NaNs), and gate fixes to `vk_backend_diff.c`,
+`context_diff.zig`, `tools-diff` and `fit-params.cases`. Five of the seven
+`ask_allreduce` injections caught, two inert with reasons; both
+`supports_extra` injections caught. The `t5-dense` CPU case open since
+v0.8.0 is settled against zmake `-Dcuda`: upstream's own uninitialized
+cross-attention copy, a documented `KNOWN_NONDET`.
 
 1. **CUDA** (`NOTES.md`, "Upstream sync v0.8.0 → v0.9.0"):
    - `zig build reference cuda-ref --release=fast --prefix zig-out/cuda-port`

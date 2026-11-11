@@ -175,7 +175,49 @@ fn writtenBytes(t: *const c.ggml_tensor) usize {
     return @intCast(elems * @sizeOf(f32));
 }
 
+/// SET_ROWS writes only the rows `src[1]` names, into a destination that is
+/// usually a whole buffer: a KV cache, which is cleared when it is made, or
+/// since v0.9.0 the layer-input device buffer, which is not (see `nodeCb`).
+/// So hash each written row, in the order upstream's loop writes them, with
+/// its index value folded in -- a row written to the wrong place still
+/// differs. The indexing is upstream's
+/// `ggml_compute_forward_set_rows_impl` (ops.cpp:5430 @cd959bae9).
+fn setRowsHash(t: *const c.ggml_tensor) u64 {
+    const src0: *const c.ggml_tensor = t.src[0];
+    const src1: *const c.ggml_tensor = t.src[1];
+    const rs = c.ggml_row_size(t.type, t.ne[0]);
+    scratch.resize(gpa, rs) catch unreachable;
+    var h = std.hash.Wyhash.init(0);
+    var j03: i64 = 0;
+    while (j03 < src0.ne[3]) : (j03 += 1) {
+        var j02: i64 = 0;
+        while (j02 < src0.ne[2]) : (j02 += 1) {
+            var i: i64 = 0;
+            while (i < src0.ne[1]) : (i += 1) {
+                const off1 = @as(usize, @intCast(i)) * src1.nb[0] +
+                    @as(usize, @intCast(@mod(j02, src1.ne[1]))) * src1.nb[1] +
+                    @as(usize, @intCast(@mod(j03, src1.ne[2]))) * src1.nb[2];
+                var j1: i64 = 0;
+                if (src1.type == c.GGML_TYPE_I64) {
+                    c.ggml_backend_tensor_get(src1, &j1, off1, 8);
+                } else {
+                    var v: i32 = 0;
+                    c.ggml_backend_tensor_get(src1, &v, off1, 4);
+                    j1 = v;
+                }
+                h.update(std.mem.asBytes(&j1));
+                if (j1 < 0 or j1 >= t.ne[1]) continue;
+                const off = @as(usize, @intCast(j1)) * t.nb[1] + @as(usize, @intCast(j02)) * t.nb[2] + @as(usize, @intCast(j03)) * t.nb[3];
+                c.ggml_backend_tensor_get(t, scratch.items.ptr, off, rs);
+                h.update(scratch.items[0..rs]);
+            }
+        }
+    }
+    return h.final();
+}
+
 fn tensorHash(t: *const c.ggml_tensor) u64 {
+    if (t.op == c.GGML_OP_SET_ROWS) return setRowsHash(t);
     const n = writtenBytes(t);
     scratch.resize(gpa, n) catch unreachable;
     c.ggml_backend_tensor_get(t, scratch.items.ptr, 0, n);
@@ -227,6 +269,20 @@ fn nodeCb(t: [*c]c.ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
     if ((node.flags & c.GGML_TENSOR_FLAG_COMPUTE) == 0) {
         r.print(gpa, " flags {x} h -\n", .{node.flags}) catch unreachable;
         return true;
+    }
+    // An op that computes nothing (`ggml_op_is_empty`, ggml-impl.h) writes
+    // no bytes: its data is whatever its source holds, which the node that
+    // wrote it already hashed -- or, before anything has, the allocator's
+    // leftovers. v0.9.0's layer-input device buffer is allocated without a
+    // clear, by `layer_inp_dev_alloc` (llama-context.cpp:1481 @cd959bae9),
+    // and read through a VIEW before its SET_ROWS, so on the GB10's CPU the reference differed from
+    // itself run to run on `bailingmoe3-moe`'s "layer inputs, device".
+    switch (node.op) {
+        c.GGML_OP_NONE, c.GGML_OP_RESHAPE, c.GGML_OP_VIEW, c.GGML_OP_PERMUTE, c.GGML_OP_TRANSPOSE => {
+            r.print(gpa, " flags {x} h view\n", .{node.flags}) catch unreachable;
+            return true;
+        },
+        else => {},
     }
     r.print(gpa, " flags {x} h {x}\n", .{ node.flags, tensorHash(node) }) catch unreachable;
     return true;

@@ -78,20 +78,28 @@ pub const Subbuffer = struct {
 // The memory logger
 
 /// Ports `format_size` (ggml-vulkan-types.h:1150 @cd959bae9).
+///
+/// `std::fixed << std::setprecision(2)` formats as `%.2f` does, through the
+/// C library, which rounds an exact binary tie to even: 16000 bytes is
+/// 15.625 KiB and prints `15.62`. Zig's `{d:.2}` rounds it away, `15.63`,
+/// which `vk-backend-diff`'s memory-logger scenarios caught on the GB10.
 fn formatSize(size: usize, buf: []u8) [:0]const u8 {
     const kib: usize = 1024;
     const mib = kib * 1024;
     const gib = mib * 1024;
     const f: f64 = @floatFromInt(size);
-    return (if (size >= gib)
-        std.fmt.bufPrintSentinel(buf, "{d:.2} GiB", .{f / @as(f64, @floatFromInt(gib))}, 0)
+    const n = if (size >= gib)
+        snprintf(buf.ptr, buf.len, "%.2f GiB", f / @as(f64, @floatFromInt(gib)))
     else if (size >= mib)
-        std.fmt.bufPrintSentinel(buf, "{d:.2} MiB", .{f / @as(f64, @floatFromInt(mib))}, 0)
+        snprintf(buf.ptr, buf.len, "%.2f MiB", f / @as(f64, @floatFromInt(mib)))
     else if (size >= kib)
-        std.fmt.bufPrintSentinel(buf, "{d:.2} KiB", .{f / @as(f64, @floatFromInt(kib))}, 0)
+        snprintf(buf.ptr, buf.len, "%.2f KiB", f / @as(f64, @floatFromInt(kib)))
     else
-        std.fmt.bufPrintSentinel(buf, "{d} B", .{size}, 0)) catch unreachable;
+        snprintf(buf.ptr, buf.len, "%zu B", size);
+    return buf[0..@min(@as(usize, @intCast(n)), buf.len - 1) :0];
 }
+
+extern fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
 
 /// Ports `vk_memory_logger` (ggml-vulkan-types.h:1171 @cd959bae9), one per
 /// process here where the C++ keeps one per device; its totals are per
@@ -825,4 +833,7 @@ test "formatSize matches format_size's units and precision" {
     try std.testing.expectEqualStrings("1.00 KiB", formatSize(1024, &buf));
     try std.testing.expectEqualStrings("1.50 MiB", formatSize(3 * 512 * 1024, &buf));
     try std.testing.expectEqualStrings("2.00 GiB", formatSize(2 << 30, &buf));
+    // An exact binary tie rounds to even, as the C library's %.2f does.
+    try std.testing.expectEqualStrings("15.62 KiB", formatSize(16000, &buf));
+    try std.testing.expectEqualStrings("15.38 KiB", formatSize(15744, &buf));
 }

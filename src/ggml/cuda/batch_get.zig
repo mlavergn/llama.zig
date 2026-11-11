@@ -152,7 +152,7 @@ pub fn getTensorN(device: c_int, tensors: [*c]const [*c]const Tensor, data: [*c]
     var n_reads_gather: usize = if (mapping.device != null and n_reads_small >= min_batch_reads) n_reads_small else 0;
     // Keep descriptor storage alive until the final stream synchronization.
     const max_batch_descriptors: usize = 128 * 1024;
-    const bytes = @min(n_reads_gather, max_batch_descriptors) * @sizeOf(Descriptor);
+    const bytes: usize = @as(usize, @min(n_reads_gather, max_batch_descriptors)) * @sizeOf(Descriptor);
     const descriptors: c.ggml_backend_buffer_t = if (n_reads_gather != 0) c.ggml_backend_buft_alloc_buffer(backend.bufferType(device), bytes) else null;
     defer freeBuffer(descriptors);
     if (descriptors == null) {
@@ -172,7 +172,7 @@ pub fn getTensorN(device: c_int, tensors: [*c]const [*c]const Tensor, data: [*c]
         var i: usize = 0;
         var first: usize = 0;
         while (first < n_reads_gather) : (first += max_batch_descriptors) {
-            const n_batch = @min(n_reads_gather - first, max_batch_descriptors);
+            const n_batch: usize = @min(n_reads_gather - first, max_batch_descriptors);
             var count: usize = 0;
             while (i < n_tensors and count < n_batch) : (i += 1) {
                 if (sizes[i] == 0 or sizes[i] > max_gather_read_bytes) {

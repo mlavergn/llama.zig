@@ -638,6 +638,18 @@ static void ask_allreduce(ggml_backend_reg_t reg, size_t n_dev) {
                     t[b]->op_params[0] = GGML_PREC_F32;
                 }
                 buf[b] = ggml_backend_alloc_ctx_tensors(tctx[b], be[b]);
+            }
+            /* Under GGML_VK_FORCE_MAX_BUFFER_SIZE the larger cases cannot be
+             * allocated at all; say so, as both sides must, and go on. */
+            if (buf[0] == NULL || buf[1] == NULL) {
+                printf("allreduce %s = unallocated %d %d\n", cases[k].label, buf[0] != NULL, buf[1] != NULL);
+                for (int b = 0; b < 2; b++) {
+                    if (buf[b] != NULL) ggml_backend_buffer_free(buf[b]);
+                    ggml_free(tctx[b]);
+                }
+                continue;
+            }
+            for (int b = 0; b < 2; b++) {
                 if (cases[k].compute) {
                     t[b]->flags |= GGML_TENSOR_FLAG_COMPUTE;
                 }
@@ -650,7 +662,12 @@ static void ask_allreduce(ggml_backend_reg_t reg, size_t n_dev) {
                     if (cases[k].type == GGML_TYPE_F32) {
                         float * f = (float *) host;
                         for (int64_t i = 0; i < ggml_nelements(t[b]); i++) {
-                            f[i] = (float) ((i * 7 + b * 13 + (int64_t) k * 5) % 101) / 8.0f - 3.0f;
+                            /* The low term puts bits below f16's precision in every
+                             * value, so an f16 wire and an f32 wire give different
+                             * sums: with multiples of 1/8 alone both were exact, and
+                             * the f16 threshold and needsF32 injections escaped. */
+                            f[i] = (float) ((i * 7 + b * 13 + (int64_t) k * 5) % 101) / 8.0f - 3.0f
+                                 + (float) ((i * 2654435761u + (uint32_t) b * 40503u) % 8191u) * 1.0e-6f;
                         }
                     } else {
                         for (size_t i = 0; i < nb; i++) host[i] = (uint8_t) (i * 31 + b);
@@ -675,6 +692,63 @@ static void ask_allreduce(ggml_backend_reg_t reg, size_t n_dev) {
             for (int b = 0; b < 2; b++) {
                 ggml_backend_buffer_free(buf[b]);
                 ggml_free(tctx[b]);
+            }
+        }
+        /* Back to back: two rounds with no synchronize between them, so the
+         * second round's partials go out while the first round's adds may
+         * still read the other slot. Every case above synchronizes after its
+         * round, which serializes them, and a slot parity fixed at 0 escaped. */
+        {
+            struct ggml_context * bctx[2];
+            struct ggml_tensor * bt[2][4];
+            ggml_backend_buffer_t bbuf[2];
+            const int64_t bne = 1000;
+            int ok_alloc = 1;
+            for (int b = 0; b < 2; b++) {
+                struct ggml_init_params ip = { ggml_tensor_overhead() * 4, NULL, true };
+                bctx[b] = ggml_init(ip);
+                for (int r = 0; r < 4; r++) {
+                    bt[b][r] = ggml_new_tensor_1d(bctx[b], GGML_TYPE_F32, bne);
+                }
+                bbuf[b] = ggml_backend_alloc_ctx_tensors(bctx[b], be[b]);
+                ok_alloc &= bbuf[b] != NULL;
+            }
+            if (!ok_alloc) {
+                printf("allreduce back to back = unallocated\n");
+            } else {
+                float * host = (float *) malloc(bne * sizeof(float));
+                for (int b = 0; b < 2; b++) {
+                    for (int r = 0; r < 4; r++) {
+                        bt[b][r]->flags |= GGML_TENSOR_FLAG_COMPUTE;
+                        for (int64_t i = 0; i < bne; i++) {
+                            host[i] = (float) ((i * 11 + b * 17 + r * 23) % 97) / 8.0f - 5.0f
+                                    + (float) ((i * 2654435761u + (uint32_t) (b * 4 + r) * 40503u) % 8191u) * 1.0e-6f;
+                        }
+                        ggml_backend_tensor_set(bt[b][r], host, 0, bne * sizeof(float));
+                    }
+                }
+                free(host);
+                int oks = 0;
+                for (int r = 0; r < 4; r++) {
+                    struct ggml_tensor * pair[2] = { bt[0][r], bt[1][r] };
+                    oks = oks * 2 + allreduce(comm, pair);
+                }
+                ggml_backend_synchronize(be[0]);
+                ggml_backend_synchronize(be[1]);
+                printf("allreduce back to back = %d", oks);
+                uint8_t * out = (uint8_t *) malloc(bne * sizeof(float));
+                for (int r = 0; r < 4; r++) {
+                    for (int b = 0; b < 2; b++) {
+                        ggml_backend_tensor_get(bt[b][r], out, 0, bne * sizeof(float));
+                        printf(" %016llx", (unsigned long long) fnv(out, bne * sizeof(float)));
+                    }
+                }
+                free(out);
+                printf("\n");
+            }
+            for (int b = 0; b < 2; b++) {
+                if (bbuf[b] != NULL) ggml_backend_buffer_free(bbuf[b]);
+                ggml_free(bctx[b]);
             }
         }
         comm_free(comm);
