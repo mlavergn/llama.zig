@@ -1,0 +1,26 @@
+debug(zigupdater_main): main.zig:38 :: main
+debug(zigupdater_options): options.zig:59 :: init
+debug(zigupdater_cli_command): command.zig:79 :: parse
+debug(zigupdater_config): config.zig:97 :: init
+debug(ziglink_self_binary): self_binary.zig:164 :: cleanup
+debug(zigupdater_preferences): preferences.zig:95 :: init
+debug(zigupdater_updater_service): updater_service.zig:75 :: init
+debug(zigupdater_self_build): self_build.zig:113 :: chooseDir
+debug(zigupdater_preferences): preferences.zig:120 :: load
+debug(zigupdater_self_build): self_build.zig:87 :: init /home/mlavergn/src/mlavergn/llama.zig/zig-out
+debug(ziglink_link_client): link_client.zig:96 :: init
+debug(zigupdater_launcher): launcher.zig:117 :: init
+debug(zigupdater_preferences): preferences.zig:95 :: init
+debug(ziglink_bin_directory): bin_directory.zig:93 :: init
+debug(ziglink_link_client): link_client.zig:267 :: push cmd
+debug(ziglink_peers): peers.zig:97 :: init
+debug(ziglink_peers): peers.zig:127 :: load
+debug(ziglink_host): host.zig:469 :: init
+debug(ziglink_machine): machine.zig:51 :: name
+debug(ziglink_machine): machine.zig:80 :: system
+debug(ziglink_host): host.zig:514 :: start
+debug(ziglink_directory): directory.zig:19 :: ensure /home/mlavergn/.example/updater
+debug(ziglink_discovery): mdns/discovery.zig:105 :: init
+debug(ziglink_multicast_socket): mdns/multicast_socket.zig:86 :: init
+debug(ziglink_discovery): mdns/discovery.zig:142 :: advertise
+Listening on 192.168.1.222:47247 as spark-dbff; waiting for DESKTOP-BR7J5S9 (Ctrl-C to give up)…

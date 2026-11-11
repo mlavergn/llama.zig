@@ -389,7 +389,7 @@ blas-node-diff: blas-builds
 	./scripts/blas-node-diff
 
 # The x86 gates, run on the Windows laptop (Decision 57) through
-# zigupdater's link: each cross-builds both sides for
+# ziglink: each cross-builds both sides for
 # x86_64-windows-gnu at X86_CPU (x86_64_v3), pushes the programs and reads
 # back the verdict. The agent's window must be open there. AVX-512 --
 # X86_CPU=x86_64_v4 or tigerlake -- runs on X86_AGENT=JWHLPTOP, a Tiger Lake. x86-quants-diff

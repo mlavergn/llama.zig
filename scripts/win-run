@@ -2,7 +2,7 @@
 # Run a cross-built program on the Windows laptop and print what it printed
 # (PLAN.md, Decision 57).
 #
-# Pushes the .exe through `zigupdater push --run`, which starts it with
+# Pushes the .exe through `ziglink push --run`, which starts it with
 # the given arguments and streams its console back through ConPTY. ConPTY
 # re-renders the screen rather than passing bytes through: it draws a blank
 # line as a cursor move and wraps at the console's width. So the stream is
@@ -12,28 +12,31 @@
 #
 # Usage: scripts/win-run <program.exe> <package name> [args...]
 #   X86_AGENT=<name>         the agent to run on (DESKTOP-BR7J5S9)
-#   ZUPDATER=<path>          the updater binary
-#                            (../zigupdater/zig-out/bin/zigupdater)
+#   ZIGLINK=<path>           the link binary
+#                            (../ziglink/zig-out/bin/ziglink); zigupdater's
+#                            link is retired
 #   WIN_RUN_TRIES=<n>        attempts while the link is busy (60, 10 s apart)
 # The agent's window must be open on the laptop. The raw stream is kept
 # beside the program as <program>.log.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 X86_AGENT="${X86_AGENT:-DESKTOP-BR7J5S9}"
-ZUPDATER="${ZUPDATER:-$ROOT/../zigupdater/zig-out/bin/zigupdater}"
+ZIGLINK="${ZIGLINK:-$ROOT/../ziglink/zig-out/bin/ziglink}"
 TRIES="${WIN_RUN_TRIES:-60}"
 
 exe="${1:?usage: scripts/win-run <program.exe> <package name> [args...]}"
 name="${2:?usage: scripts/win-run <program.exe> <package name> [args...]}"
 shift 2
 
-[ -x "$ZUPDATER" ] || { echo "missing $ZUPDATER -- set ZUPDATER" >&2; exit 2; }
-# The Mac has one updater Host: while another push holds it (a GB10 pickup
+[ -x "$ZIGLINK" ] || { echo "missing $ZIGLINK -- set ZIGLINK" >&2; exit 2; }
+# A machine has one link Host: while another push holds it (a GB10 pickup
 # running beside this one), a push refuses with "another Host is already
 # running", and a busy laptop agent can answer "could not open a terminal".
 # Both are transient, so retry them; neither means the window is closed.
+# An .exe the laptop's Application Control policy blocks gives the second
+# message too, every time: run it from `ziglink tty` to see the real reason.
 for try in $(seq 1 "$TRIES"); do
-    "$ZUPDATER" push "$X86_AGENT" "$exe" --name "$name" --run -- "$@" > "$exe.log" 2>&1
+    "$ZIGLINK" push "$X86_AGENT" "$exe" --name "$name" --run -- "$@" > "$exe.log" 2>&1
     grep -aq 'another Host is already running\|could not open a terminal' "$exe.log" || break
     [ "$try" = "$TRIES" ] && { echo "win-run: the link stayed busy for $TRIES attempts -- another Host held it, or $X86_AGENT could not open a terminal. See $exe.log" >&2; exit 2; }
     sleep 10

@@ -2682,7 +2682,10 @@ cross-attention copy, a documented `KNOWN_NONDET`.
    every `server-diff` file (`spec`'s new MTP block among them; run
    `--self` before reading a failure in `parallel`, `sleep` or `decision`).
 
-**DESKTOP-BR7J5S9 (Windows x86_64)**: `make x86-gates` at `x86_64_v3`, plus
+**DESKTOP-BR7J5S9 (Windows x86_64)** -- **done**, from the GB10 over
+`ziglink` (`NOTES.md`, "The DESKTOP-BR7J5S9 pickup"): every item below
+passes; the laptop now needs each pushed `.exe` allowed by its Application
+Control policy. `make x86-gates` at `x86_64_v3`, plus
 `win-host-diffs`. New: the AVX2 arm of `ggml_vec_dot_f8_e4m3_f32` and its
 all-fused tail (both measured from the reference's disassembly, not run),
 `ops-diff`'s F8 and FA-rows cases on Intel. Check that `llama-cli.exe` and

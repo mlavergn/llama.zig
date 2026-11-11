@@ -13720,6 +13720,36 @@ exception in the way. What it showed:
 a concurrent `arch-model-diff`; 84 reruns, 60 of them under parallel load,
 agreed. Recorded, not closed.
 
-**Windows (DESKTOP-BR7J5S9) is not reachable from the GB10**: its agent is
-paired with the Mac's updater Host, and a push from here waits on it
-forever. The x86 pickup runs from the Mac, as Step 9 says.
+**Windows looked unreachable from the GB10, and was not.** A push waited
+on DESKTOP-BR7J5S9 forever because `scripts/win-run` still defaulted to
+`../zigupdater`'s binary: the laptop's agent has been `ziglink`'s since
+2026-11-08, and `zigupdater peers` here last saw it on 2026-10-30.
+`ziglink peers` saw it the same morning. `win-run` now takes `ZIGLINK`
+(default `../ziglink/zig-out/bin/ziglink`) and `ZUPDATER` is gone.
+
+### The DESKTOP-BR7J5S9 pickup
+
+Run from the GB10 over `ziglink`, 2026-11-11, at `x86_64_v3`. **Clear.**
+
+- `make x86-gates`: `x86-quants-diff` 28 kernels, `x86-repack-diff` 129
+  checks, `x86-ops-diff` 884 lines at 1 and 3 threads (the `f8_e4m3`
+  `mul_mat` and `cpy` cases among them, so the AVX2 f8 dot product and its
+  all-fused tail ran on Intel silicon for the first time), `x86-node-diff`
+  5,729 lines (1 and 4 threads, fused) -- all identical.
+- `win-host-diffs`: `host-arms-diff` 168 lines, `libcxx-diff` 453,010,
+  `regex-diff` 43,537,552, `unicode-diff` 9,554,020 -- all identical.
+- `WIN_X86=1 scripts/json-diff`: 9,548,891 checks identical, the
+  1M-deep document on the 1 MB main stack among them.
+- `llama-cli.exe` and the twelve tools cross-build for
+  `x86_64-windows-gnu`, and each of the 13 embeds `win-app.manifest`
+  (`activeCodePage` UTF-8, counted in the binary); `llama-cli.exe
+  --version` runs on the laptop.
+
+**The laptop now enforces an Application Control policy** (Smart App
+Control or WDAC): every freshly pushed `.exe` failed to start --
+"An Application Control policy has blocked this file", read by running
+it from `ziglink tty`, since `push --run` reports only "the Agent could
+not open a terminal" -- until Marc allowed it. `win-run` treats that
+message as a busy link and retries it, so a blocked binary costs
+`WIN_RUN_TRIES` × 10 s before it fails; when a Windows gate stalls there,
+run the program from `ziglink tty` to see the real reason.
