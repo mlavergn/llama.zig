@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/mistral-large4.cpp` at v0.9.0
-//! (`cd959bae9`): `llama_model_mistral_large4`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/mistral-large4.cpp` at v1.0.0
+//! (`b1b770d90`): `llama_model_mistral_large4`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
@@ -19,9 +19,11 @@ const c = impl.c;
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
+const RopeParams = model_mod.RopeParams;
+const Cparams = @import("../cparams.zig").Cparams;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_mistral_large4`'s `load_arch_hparams` (models/mistral-large4.cpp:6 @cd959bae9).
+/// Ports `llama_model_mistral_large4`'s `load_arch_hparams` (models/mistral-large4.cpp:6 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -77,7 +79,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     self.type = .unknown;
 }
 
-/// Ports `llama_model_mistral_large4`'s `load_arch_tensors` (models/mistral-large4.cpp:58 @cd959bae9).
+/// Ports `llama_model_mistral_large4`'s `load_arch_tensors` (models/mistral-large4.cpp:58 @b1b770d90).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     _ = ml;
     const l = self.loadLocals();
@@ -178,14 +180,32 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 // -----------------------------------------------------------------------------
 // The graph
 
-/// Ports `llama_model_mistral_large4`'s `build_arch_graph` (models/mistral-large4.cpp:151 @cd959bae9).
+/// Ports `llama_model_mistral_large4`'s `get_rope_params_indexer` (models/mistral-large4.cpp:151
+/// @b1b770d90): the indexer keys rotate with the model's RoPE type and frequency factors.
+///
+/// Parameters:
+/// - `model`: the model.
+/// - `cparams`: the context's parameters.
+/// - `il`: the layer.
+///
+/// Return: the layer's RoPE.
+pub fn getRopeParamsIndexer(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+    var res = model.getRopeParamsIndexerBase(cparams, il);
+
+    res.type = model.hparams.rope_type;
+    res.factors = model.getRopeFactors(cparams, il);
+
+    return res;
+}
+
+/// Ports `llama_model_mistral_large4`'s `build_arch_graph` (models/mistral-large4.cpp:160 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     _ = params;
     buildGraph(model, b);
 }
 
 /// `build_ssmax`, a lambda of the `graph` constructor
-/// (models/mistral-large4.cpp:155 @cd959bae9): the per-head SSMax scale
+/// (models/mistral-large4.cpp:164 @b1b770d90): the per-head SSMax scale
 /// `s * log(pos + 1) + b`, `{1, n_head, n_tokens}`.
 fn buildSsmax(b: *const graph.Builder, ssmax_pos: *Tensor, s: ?*Tensor, bias: ?*Tensor, n_head_l: i64) *Tensor {
     const ctx = b.ctx0;
@@ -195,7 +215,7 @@ fn buildSsmax(b: *const graph.Builder, ssmax_pos: *Tensor, s: ?*Tensor, bias: ?*
 }
 
 /// `pad_rope`, a lambda of the `graph` constructor
-/// (models/mistral-large4.cpp:155 @cd959bae9): NoPE layers keep the cache
+/// (models/mistral-large4.cpp:164 @b1b770d90): NoPE layers keep the cache
 /// layout of the RoPE layers by zero-filling the RoPE part.
 fn padRope(b: *const graph.Builder, x: *Tensor) *Tensor {
     const ctx = b.ctx0;
@@ -204,12 +224,12 @@ fn padRope(b: *const graph.Builder, x: *Tensor) *Tensor {
     return c.ggml_concat(ctx, x, zeros, 0);
 }
 
-/// Ports the constructor of `llama_model_mistral_large4`'s `graph` (models/mistral-large4.cpp:155 @cd959bae9).
+/// Ports the constructor of `llama_model_mistral_large4`'s `graph` (models/mistral-large4.cpp:164 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const cp = b.cparams;
-    impl.assert(hp.isMla(), "models/mistral-large4.cpp", 157, "hparams.is_mla()");
+    impl.assert(hp.isMla(), "models/mistral-large4.cpp", 166, "hparams.is_mla()");
 
     const n_embd_head_k: i64 = hp.nEmbdHeadKMla();
 
@@ -218,7 +238,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const n_indexer_top_k: u32 = hp.indexer_top_k;
 
     // The indexer head layout is [rope | nope].
-    impl.assert(b.n_rot <= n_embd_indexer_head, "models/mistral-large4.cpp", 166, "n_rot <= n_embd_indexer_head");
+    impl.assert(b.n_rot <= n_embd_indexer_head, "models/mistral-large4.cpp", 175, "n_rot <= n_embd_indexer_head");
 
     const kv_lora_rank: i64 = hp.n_lora_kv;
     const n_head = b.n_head;
@@ -263,8 +283,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         const n_rot_l: i64 = if (use_rope) n_rot else 0;
         const n_embd_head_qk_nope = n_embd_head_k - n_rot_l;
 
-        const rope_factors = model.getRopeFactors(cp, ilu);
-
         var inpSA = inpL;
 
         cur = b.buildNorm(inpL, layer.attn_norm, null, .rms, il);
@@ -297,10 +315,10 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 indexer_k = c.ggml_reshape_3d(ctx, indexer_k, n_embd_indexer_head, 1, n_tokens);
 
                 if (use_rope) {
-                    indexer_q = c.ggml_rope_ext(ctx, indexer_q, inp_pos, rope_factors, @intCast(n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+                    indexer_q = b.buildRopeIndexer(indexer_q, inp_pos, il);
                     b.cb(indexer_q, "indexer_q", il);
 
-                    indexer_k = c.ggml_rope_ext(ctx, indexer_k, inp_pos, rope_factors, @intCast(n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+                    indexer_k = b.buildRopeIndexer(indexer_k, inp_pos, il);
                     b.cb(indexer_k, "indexer_k", il);
                 }
 
@@ -377,7 +395,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 prev_top_k = top_k;
                 b.cb(top_k, "top_k", il);
             } else {
-                impl.assert(prev_top_k != null, "models/mistral-large4.cpp", 337, "prev_top_k != nullptr && \"shared indexer layer must follow a previous full indexer layer\"");
+                impl.assert(prev_top_k != null, "models/mistral-large4.cpp", 340, "prev_top_k != nullptr && \"shared indexer layer must follow a previous full indexer layer\"");
                 top_k = prev_top_k.?;
                 b.cb(top_k, "top_k", il);
             }
@@ -406,7 +424,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             var Qcur: *Tensor = undefined;
             if (use_rope) {
                 var q_pe: *Tensor = c.ggml_view_3d(ctx, q, n_rot, n_head, n_tokens, c.ggml_row_size(q.type, n_embd_head_k), c.ggml_row_size(q.type, n_embd_head_k) * @as(usize, @intCast(n_head)), c.ggml_row_size(q.type, n_embd_head_qk_nope));
-                q_pe = c.ggml_rope_ext(ctx, q_pe, inp_pos, rope_factors, @intCast(n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+                q_pe = b.buildRope(q_pe, inp_pos, il);
                 b.cb(q_pe, "q_pe", il);
 
                 Qcur = c.ggml_concat(ctx, q_nope_absorbed, q_pe, 0);
@@ -439,7 +457,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 if (use_rope) {
                     // {n_rot, 1, n_tokens}
                     var k_pe: *Tensor = c.ggml_view_3d(ctx, kv_cmpr_pe, n_rot, 1, n_tokens, c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank + n_rot), c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank + n_rot), c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank));
-                    k_pe = c.ggml_rope_ext(ctx, k_pe, inp_pos, rope_factors, @intCast(n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+                    k_pe = b.buildRope(k_pe, inp_pos, il);
                     b.cb(k_pe, "k_pe", il);
 
                     Kcur = c.ggml_concat(ctx, kv_cmpr, k_pe, 0);

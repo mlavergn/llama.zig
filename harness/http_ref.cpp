@@ -161,6 +161,21 @@ static void configure(const std::string & name, common_params & params, bool & r
     } else if (name == "multiport0") {
         // port 0 with two TCP addresses is refused
         params.hostnames = {"127.0.0.1", "::1"};
+    } else if (name == "corslocal" || name == "child") {
+        // v1.0.0: same-origin only, and the DNS rebinding guard on Host;
+        // "child" also has LLAMA_SERVER_ROUTER_PORT set by the driver
+        params.cors_origins     = "localhost";
+        params.cors_credentials = false;
+    } else if (name == "corslist") {
+        params.cors_origins     = "http://good.example:8080, HTTPS://Other.Example ,bad";
+        params.cors_credentials = false;
+    } else if (name == "lan") {
+        // every address, so a request can reach a non-loopback one
+        const char * port = std::getenv("HTTP_DIFF_PORT");
+        params.hostnames        = {"0.0.0.0"};
+        params.port             = port ? std::atoi(port) : 0;
+        params.cors_origins     = "localhost";
+        params.cors_credentials = false;
     } else if (name == "multibad") {
         // the second address cannot be bound: the first is stopped again
         params.hostnames = {"127.0.0.1", "256.1.1.1"};

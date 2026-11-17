@@ -228,6 +228,13 @@ CASES = [
                                  "--spec-draft-p-min", "0.265"] + FIXV),
     case("lilicorr-wide-2seq", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-lilicorr-wide.gguf", "--spec-type",
                                 "draft-dflash", "-np", "2", "-p", IDS2, "-n", "16", "--temp", "0"] + FIXV),
+    # v1.0.0 (a8fad21e9): an in-model MTP head (Qwen3.5) reads the target's hidden states from the
+    # device buffer (llama_set_embeddings_nextn_dev, common_batch::set_embd_state_row); every other
+    # MTP case is Gemma 4, whose shared memory never takes that path
+    case("mtp-qwen35-devrows", ["-m", f"{F}/mtp/qwen35-mtp-dense.gguf", "--spec-type", "draft-mtp",
+                                "-p", IDS, "-n", "16", "--temp", "0"] + FIX),
+    case("mtp-qwen35-devrows-2seq", ["-m", f"{F}/mtp/qwen35-mtp-dense.gguf", "--spec-type", "draft-mtp",
+                                     "-np", "2", "-p", IDS2, "-n", "16", "--temp", "0"] + FIX),
     # v0.7.0: the server's common_context_can_seq_rm probe on each context; a draft context with a
     # state input (MTP, LiliCorr) decodes the probe with zero state rows
     case("seq-rm-mtp", ["-m", f"{FX}/gemma4-moe.gguf", "-md", f"{FX}/gemma4-assistant.gguf", "--spec-type", "draft-mtp",

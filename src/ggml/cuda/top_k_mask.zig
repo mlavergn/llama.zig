@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/top-k-mask.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/top-k-mask.cuh` at v0.9.0 (`cd959bae9`).
+//! `llama.cpp/ggml/src/ggml-cuda/top-k-mask.cuh` at v1.0.0 (`b1b770d90`).
 //! The kernel, `top_k_mask_kernel`, stays CUDA.
 
 const impl = @import("../impl.zig");
@@ -15,7 +15,7 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_TOP_K_MASK_BLOCK_SIZE` (top-k-mask.cu:4 @cd959bae9).
+/// Ports `CUDA_TOP_K_MASK_BLOCK_SIZE` (top-k-mask.cu:4 @b1b770d90).
 const block_size = 512;
 
 /// `sizeof(int4)`: the kernel's vectorized store.
@@ -32,7 +32,7 @@ fn data(t: ?*const Tensor) ?*const anyopaque {
     return if (t) |x| x.data else null;
 }
 
-/// Ports `top_k_mask_cuda` (top-k-mask.cu:86 @cd959bae9), its element type
+/// Ports `top_k_mask_cuda` (top-k-mask.cu:86 @b1b770d90), its element type
 /// `T` comptime: `f32` or `kernels.half`.
 fn topKMaskCuda(comptime T: type, ctx: *common.Context, dst: *Tensor) void {
     const mask = impl.one(Tensor, dst.src[0]);
@@ -103,7 +103,7 @@ fn topKMaskCuda(comptime T: type, ctx: *common.Context, dst: *Tensor) void {
     });
 }
 
-/// Ports `ggml_cuda_op_top_k_mask` (top-k-mask.cu:130 @cd959bae9).
+/// Ports `ggml_cuda_op_top_k_mask` (top-k-mask.cu:130 @b1b770d90).
 pub fn opTopKMask(ctx: *common.Context, dst: *Tensor) void {
     switch (dst.type) {
         c.GGML_TYPE_F16 => topKMaskCuda(kernels.half, ctx, dst),

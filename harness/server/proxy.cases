@@ -11,6 +11,10 @@
 GET /cors-proxy?url=http://127.0.0.1:$TPORT/echo
 POST /cors-proxy?url=http://127.0.0.1:$TPORT/echo {}
 
+# v1.0.0 (8954f1948): the target must resolve to public addresses and is
+# pinned, and a redirect comes back rewritten through the proxy; the target
+# here is local, so the test-only escape hatch lets it through
+!env LLAMA_SERVER_DEBUG_PROXY_ALLOW_PRIVATE=1
 !server -m $QWEN3 -c 512 -np 1 --no-jinja --ui-mcp-proxy
 !fulllog
 GET /cors-proxy?url=http://127.0.0.1:$TPORT/echo
@@ -81,3 +85,23 @@ GET /cors-proxy?url=https://127.0.0.1:$TPORT/echo
 GET /cors-proxy?url=http://[::1/x
 GET /cors-proxy?url=http://[::1]:1/x
 GET /cors-proxy?url=http://127.0.0.1:$TPORT/echo/%E2%9C%93
+!noenv
+
+# v1.0.0 (8954f1948): without the escape hatch, a local, private or
+# unresolvable target is refused before anything is sent
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --ui-mcp-proxy
+!fulllog
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/echo
+POST /cors-proxy?url=http://127.0.0.1:$TPORT/echo {"a": 1}
+GET /cors-proxy?url=http://localhost:$TPORT/echo
+GET /cors-proxy?url=http://[::1]:$TPORT/echo
+GET /cors-proxy?url=http://10.0.0.1:1/
+GET /cors-proxy?url=http://169.254.169.254/latest/meta-data/
+GET /cors-proxy?url=http://0.0.0.0:$TPORT/echo
+GET /cors-proxy?url=http://[::ffff:127.0.0.1]:$TPORT/echo
+GET /cors-proxy?url=http://no-such-host.invalid/
+GET /cors-proxy?url=http://u:p@127.0.0.1:$TPORT/echo
+!env LLAMA_SERVER_DEBUG_PROXY_ALLOW_PRIVATE=
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --ui-mcp-proxy
+GET /cors-proxy?url=http://127.0.0.1:$TPORT/echo
+!noenv

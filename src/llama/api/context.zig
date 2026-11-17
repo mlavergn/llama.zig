@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-context.cpp` (v0.9.0, `cd959bae9`):
-//! the C API at the end of the file, from `llama_new_context_with_model`
+//! Ported from `llama.cpp/src/llama-context.cpp` (v1.0.0, `b1b770d90`):
+//! the C API at the end of the file, from `llama_context_default_params`
 //! through `llama_get_ctx_other`, except the state API
 //! (`api/state.zig`), the adapters (`api/adapter.zig`) and training
 //! (`api/opt.zig`).
@@ -38,130 +38,120 @@ fn memOf(mem: c.llama_memory_t) ?*memory.Memory {
     return @ptrCast(@alignCast(mem));
 }
 
-/// Ports `llama_context_default_params` (llama-context.cpp:4244 @cd959bae9).
+/// Ports `llama_context_default_params` (llama-context.cpp:4415 @b1b770d90).
 pub fn llama_context_default_params() callconv(.c) c.llama_context_params {
     return context.defaultParams();
 }
 
-/// Ports `llama_init_from_model` (llama-context.cpp:4289 @cd959bae9).
+/// Ports `llama_init_from_model` (llama-context.cpp:4460 @b1b770d90).
 pub fn llama_init_from_model(model: ?*c.struct_llama_model, params: c.llama_context_params) callconv(.c) ?*c.struct_llama_context {
     const m: ?*model_mod.Model = if (model) |p| modelOf(p) else null;
     return @ptrCast(context.initFromModel(m, params));
 }
 
-/// Ports `llama_new_context_with_model` (llama-context.cpp:4397 @cd959bae9).
-pub fn llama_new_context_with_model(model: ?*c.struct_llama_model, params: c.llama_context_params) callconv(.c) ?*c.struct_llama_context {
-    return llama_init_from_model(model, params);
-}
-
-/// Ports `llama_free` (llama-context.cpp:4403 @cd959bae9).
+/// Ports `llama_free` (llama-context.cpp:4606 @b1b770d90).
 pub fn llama_free(ctx: ?*c.struct_llama_context) callconv(.c) void {
     if (ctx != null) ctxOf(ctx).destroy();
 }
 
-/// Ports `llama_n_ctx` (llama-context.cpp:4407 @cd959bae9).
+/// Ports `llama_n_ctx` (llama-context.cpp:4610 @b1b770d90).
 pub fn llama_n_ctx(ctx: ?*const c.struct_llama_context) callconv(.c) u32 {
     return ctxOf(ctx).nCtx();
 }
 
-/// Ports `llama_n_ctx_seq` (llama-context.cpp:4411 @cd959bae9).
+/// Ports `llama_n_ctx_seq` (llama-context.cpp:4614 @b1b770d90).
 pub fn llama_n_ctx_seq(ctx: ?*const c.struct_llama_context) callconv(.c) u32 {
     return ctxOf(ctx).nCtxSeq();
 }
 
-/// Ports `llama_n_batch` (llama-context.cpp:4415 @cd959bae9).
+/// Ports `llama_n_batch` (llama-context.cpp:4618 @b1b770d90).
 pub fn llama_n_batch(ctx: ?*const c.struct_llama_context) callconv(.c) u32 {
     return ctxOf(ctx).nBatch();
 }
 
-/// Ports `llama_n_ubatch` (llama-context.cpp:4419 @cd959bae9).
+/// Ports `llama_n_ubatch` (llama-context.cpp:4622 @b1b770d90).
 pub fn llama_n_ubatch(ctx: ?*const c.struct_llama_context) callconv(.c) u32 {
     return ctxOf(ctx).nUbatch();
 }
 
-/// Ports `llama_n_seq_max` (llama-context.cpp:4423 @cd959bae9).
+/// Ports `llama_n_seq_max` (llama-context.cpp:4626 @b1b770d90).
 pub fn llama_n_seq_max(ctx: ?*const c.struct_llama_context) callconv(.c) u32 {
     return ctxOf(ctx).nSeqMax();
 }
 
-/// Ports `llama_n_rs_seq` (llama-context.cpp:4427 @cd959bae9).
+/// Ports `llama_n_rs_seq` (llama-context.cpp:4630 @b1b770d90).
 pub fn llama_n_rs_seq(ctx: ?*const c.struct_llama_context) callconv(.c) u32 {
     return ctxOf(ctx).cparams.n_rs_seq;
 }
 
-/// Ports `llama_get_model` (llama-context.cpp:4431 @cd959bae9).
+/// Ports `llama_get_model` (llama-context.cpp:4634 @b1b770d90).
 pub fn llama_get_model(ctx: ?*const c.struct_llama_context) callconv(.c) ?*const c.struct_llama_model {
     return @ptrCast(ctxOf(ctx).getModel());
 }
 
-/// Ports `llama_pooling_type` (llama-context.cpp:4435 @cd959bae9).
+/// Ports `llama_pooling_type` (llama-context.cpp:4638 @b1b770d90).
 pub fn llama_pooling_type(ctx: ?*const c.struct_llama_context) callconv(.c) c.enum_llama_pooling_type {
     return ctxOf(ctx).poolingType();
 }
 
-/// Ports `llama_attach_threadpool` (llama-context.cpp:4439 @cd959bae9).
+/// Ports `llama_attach_threadpool` (llama-context.cpp:4642 @b1b770d90).
 pub fn llama_attach_threadpool(ctx: ?*c.struct_llama_context, threadpool: c.ggml_threadpool_t, threadpool_batch: c.ggml_threadpool_t) callconv(.c) void {
     ctxOf(ctx).attachThreadpool(threadpool, threadpool_batch);
 }
 
-/// Ports `llama_detach_threadpool` (llama-context.cpp:4446 @cd959bae9).
+/// Ports `llama_detach_threadpool` (llama-context.cpp:4649 @b1b770d90).
 pub fn llama_detach_threadpool(ctx: ?*c.struct_llama_context) callconv(.c) void {
     ctxOf(ctx).detachThreadpool();
 }
 
-/// Ports `llama_set_n_threads` (llama-context.cpp:4450 @cd959bae9).
+/// Ports `llama_set_n_threads` (llama-context.cpp:4653 @b1b770d90).
 pub fn llama_set_n_threads(ctx: ?*c.struct_llama_context, n_threads: i32, n_threads_batch: i32) callconv(.c) void {
     ctxOf(ctx).setNThreads(n_threads, n_threads_batch);
 }
 
-/// Ports `llama_n_threads` (llama-context.cpp:4454 @cd959bae9).
+/// Ports `llama_n_threads` (llama-context.cpp:4657 @b1b770d90).
 pub fn llama_n_threads(ctx: ?*c.struct_llama_context) callconv(.c) i32 {
     return @bitCast(ctxOf(ctx).nThreads());
 }
 
-/// Ports `llama_n_threads_batch` (llama-context.cpp:4458 @cd959bae9).
+/// Ports `llama_n_threads_batch` (llama-context.cpp:4661 @b1b770d90).
 pub fn llama_n_threads_batch(ctx: ?*c.struct_llama_context) callconv(.c) i32 {
     return @bitCast(ctxOf(ctx).nThreadsBatch());
 }
 
-/// Ports `llama_set_abort_callback` (llama-context.cpp:4462 @cd959bae9).
+/// Ports `llama_set_abort_callback` (llama-context.cpp:4665 @b1b770d90).
 pub fn llama_set_abort_callback(ctx: ?*c.struct_llama_context, abort_callback: c.ggml_abort_callback, abort_callback_data: ?*anyopaque) callconv(.c) void {
     ctxOf(ctx).setAbortCallback(abort_callback, abort_callback_data);
 }
 
-/// Ports `llama_set_embeddings` (llama-context.cpp:4466 @cd959bae9).
+/// Ports `llama_set_embeddings` (llama-context.cpp:4669 @b1b770d90).
 pub fn llama_set_embeddings(ctx: ?*c.struct_llama_context, embeddings: bool) callconv(.c) void {
     ctxOf(ctx).setEmbeddings(embeddings);
 }
 
-/// Ports `llama_set_causal_attn` (llama-context.cpp:4470 @cd959bae9).
+/// Ports `llama_set_causal_attn` (llama-context.cpp:4673 @b1b770d90).
 pub fn llama_set_causal_attn(ctx: ?*c.struct_llama_context, causal_attn: bool) callconv(.c) void {
     ctxOf(ctx).setCausalAttn(causal_attn);
 }
 
-/// Ports `llama_get_causal_attn` (llama-context.cpp:4474 @cd959bae9).
+/// Ports `llama_get_causal_attn` (llama-context.cpp:4677 @b1b770d90).
 pub fn llama_get_causal_attn(ctx: ?*const c.struct_llama_context) callconv(.c) bool {
     return ctxOf(ctx).getCausalAttn();
 }
 
-/// Ports `llama_set_warmup` (llama-context.cpp:4478 @cd959bae9).
-pub fn llama_set_warmup(ctx: ?*c.struct_llama_context, warmup: bool) callconv(.c) void {
-    ctxOf(ctx).setWarmup(warmup);
-}
-
-/// Ports `llama_synchronize` (llama-context.cpp:4482 @cd959bae9).
+/// Ports `llama_synchronize` (llama-context.cpp:4681 @b1b770d90).
 pub fn llama_synchronize(ctx: ?*c.struct_llama_context) callconv(.c) void {
     ctxOf(ctx).synchronize();
 }
 
-/// Ports `llama_get_logits` (llama-context.cpp:4486 @cd959bae9).
+/// Ports `llama_get_logits` (llama-context.cpp:4685 @b1b770d90).
 pub fn llama_get_logits(ctx: ?*c.struct_llama_context) callconv(.c) ?[*]f32 {
     const self = ctxOf(ctx);
     self.synchronize();
     return self.getLogits();
 }
 
-/// Ports `llama_get_logits_ith` (llama-context.cpp:4492 @cd959bae9): the
+/// Ports `llama_get_logits_ith` (llama-context.cpp:4691 @b1b770d90): the
 /// backend-sampled logits where there are some.
 pub fn llama_get_logits_ith(ctx: ?*c.struct_llama_context, i: i32) callconv(.c) ?[*]f32 {
     const self = ctxOf(ctx);
@@ -169,55 +159,74 @@ pub fn llama_get_logits_ith(ctx: ?*c.struct_llama_context, i: i32) callconv(.c) 
     return self.getSampledLogitsIth(i) orelse self.getLogitsIth(i);
 }
 
-/// Ports `llama_get_embeddings` (llama-context.cpp:4506 @cd959bae9).
+/// Ports `llama_get_embeddings` (llama-context.cpp:4705 @b1b770d90).
 pub fn llama_get_embeddings(ctx: ?*c.struct_llama_context) callconv(.c) ?[*]f32 {
     const self = ctxOf(ctx);
     self.synchronize();
     return self.getEmbeddings();
 }
 
-/// Ports `llama_get_embeddings_ith` (llama-context.cpp:4512 @cd959bae9).
+/// Ports `llama_get_embeddings_ith` (llama-context.cpp:4711 @b1b770d90).
 pub fn llama_get_embeddings_ith(ctx: ?*c.struct_llama_context, i: i32) callconv(.c) ?[*]f32 {
     const self = ctxOf(ctx);
     self.synchronize();
     return self.getEmbeddingsIth(i);
 }
 
-/// Ports `llama_get_embeddings_seq` (llama-context.cpp:4518 @cd959bae9).
+/// Ports `llama_get_embeddings_seq` (llama-context.cpp:4717 @b1b770d90).
 pub fn llama_get_embeddings_seq(ctx: ?*c.struct_llama_context, seq_id: c.llama_seq_id) callconv(.c) ?[*]f32 {
     const self = ctxOf(ctx);
     self.synchronize();
     return self.getEmbeddingsSeq(seq_id);
 }
 
-/// Ports `llama_set_embeddings_nextn` (llama-context.cpp:4524 @cd959bae9).
+/// Ports `llama_set_embeddings_nextn` (llama-context.cpp:4723 @b1b770d90).
 pub fn llama_set_embeddings_nextn(ctx: ?*c.struct_llama_context, value: bool, masked: bool) callconv(.c) void {
     ctxOf(ctx).setEmbeddingsNextn(value, masked);
 }
 
-/// Ports `llama_set_embeddings_layer_inp_dev` (llama-context.cpp:4528
-/// @cd959bae9), which `llama-ext.h` declares with C++ linkage.
+/// Ports `llama_set_embeddings_nextn_dev` (llama-context.cpp:4727 @b1b770d90).
+pub fn llama_set_embeddings_nextn_dev(ctx: ?*c.struct_llama_context, value: bool) callconv(.c) bool {
+    return ctxOf(ctx).setEmbeddingsNextnDev(value);
+}
+
+/// Ports `llama_get_embeddings_nextn_rows` (llama-context.cpp:4731 @b1b770d90).
+pub fn llama_get_embeddings_nextn_rows(ctx: ?*c.struct_llama_context, row0: i64, n_rows: i64, out: [*c]f32) callconv(.c) bool {
+    return ctxOf(ctx).getHNextnRows(row0, n_rows, out);
+}
+
+/// Ports `llama_set_embeddings_nextn_rows` (llama-context.cpp:4735 @b1b770d90).
+pub fn llama_set_embeddings_nextn_rows(ctx: ?*c.struct_llama_context, row0: i64, n_rows: i64, data: [*c]const f32) callconv(.c) bool {
+    return ctxOf(ctx).setHNextnRows(row0, n_rows, data);
+}
+
+/// Ports `llama_set_ctx_state_src` (llama-context.cpp:4739 @b1b770d90).
+pub fn llama_set_ctx_state_src(ctx: ?*c.struct_llama_context, ctx_src: ?*c.struct_llama_context) callconv(.c) bool {
+    return ctxOf(ctx).setCtxStateSrc(if (ctx_src) |p| ctxOf(p) else null);
+}
+
+/// Ports `llama_set_embeddings_layer_inp_dev` (llama-context.cpp:4743
+/// @b1b770d90).
 pub fn llama_set_embeddings_layer_inp_dev(ctx: ?*c.struct_llama_context, value: bool) callconv(.c) void {
     ctxOf(ctx).setEmbeddingsLayerInpDev(value);
 }
 
-/// Ports `llama_supports_embd_row` (llama-context.cpp:4532 @cd959bae9),
-/// which `llama-ext.h` declares with C++ linkage.
+/// Ports `llama_supports_embd_row` (llama-context.cpp:4747 @b1b770d90).
 pub fn llama_supports_embd_row(ctx: ?*const c.struct_llama_context) callconv(.c) bool {
     return ctxOf(ctx).supportsEmbdRow();
 }
 
-/// Ports `llama_set_embeddings_layer_inp` (llama-context.cpp:4536 @cd959bae9).
+/// Ports `llama_set_embeddings_layer_inp` (llama-context.cpp:4751 @b1b770d90).
 pub fn llama_set_embeddings_layer_inp(ctx: ?*c.struct_llama_context, lid: u32, value: bool) callconv(.c) void {
     ctxOf(ctx).setEmbeddingsLayerInp(lid, value);
 }
 
-/// Ports `llama_set_nextn_layer_offset` (llama-context.cpp:4540 @cd959bae9).
+/// Ports `llama_set_nextn_layer_offset` (llama-context.cpp:4755 @b1b770d90).
 pub fn llama_set_nextn_layer_offset(ctx: ?*c.struct_llama_context, offset: i32) callconv(.c) void {
     ctxOf(ctx).setNextnLayerOffset(offset);
 }
 
-/// Ports `llama_get_memory` (llama-context.cpp:4544 @cd959bae9).
+/// Ports `llama_get_memory` (llama-context.cpp:4759 @b1b770d90).
 pub fn llama_get_memory(ctx: ?*const c.struct_llama_context) callconv(.c) c.llama_memory_t {
     if (ctx == null) return null;
     const self = ctxOf(ctx);
@@ -225,150 +234,150 @@ pub fn llama_get_memory(ctx: ?*const c.struct_llama_context) callconv(.c) c.llam
     return null;
 }
 
-/// Ports `llama_get_embeddings_nextn` (llama-context.cpp:4552 @cd959bae9).
+/// Ports `llama_get_embeddings_nextn` (llama-context.cpp:4767 @b1b770d90).
 pub fn llama_get_embeddings_nextn(ctx: ?*c.struct_llama_context) callconv(.c) ?[*]f32 {
     const self = ctxOf(ctx);
     self.synchronize();
     return self.getEmbeddingsNextn();
 }
 
-/// Ports `llama_get_embeddings_nextn_ith` (llama-context.cpp:4558 @cd959bae9).
+/// Ports `llama_get_embeddings_nextn_ith` (llama-context.cpp:4773 @b1b770d90).
 pub fn llama_get_embeddings_nextn_ith(ctx: ?*c.struct_llama_context, i: i32) callconv(.c) ?[*]f32 {
     const self = ctxOf(ctx);
     self.synchronize();
     return self.getEmbeddingsNextnIth(i);
 }
 
-/// Ports `llama_get_embeddings_layer_inp` (llama-context.cpp:4564 @cd959bae9).
+/// Ports `llama_get_embeddings_layer_inp` (llama-context.cpp:4779 @b1b770d90).
 pub fn llama_get_embeddings_layer_inp(ctx: ?*c.struct_llama_context, lid: u32) callconv(.c) ?[*]f32 {
     const self = ctxOf(ctx);
     self.synchronize();
     return self.getEmbeddingsLayerInp(lid);
 }
 
-/// Ports `llama_set_sampler` (llama-context.cpp:4570 @cd959bae9).
+/// Ports `llama_set_sampler` (llama-context.cpp:4785 @b1b770d90).
 pub fn llama_set_sampler(ctx: ?*c.struct_llama_context, seq_id: c.llama_seq_id, smpl: ?*c.struct_llama_sampler) callconv(.c) bool {
     return ctxOf(ctx).setSampler(seq_id, smpl);
 }
 
-/// Ports `llama_get_sampled_token_ith` (llama-context.cpp:4574 @cd959bae9).
+/// Ports `llama_get_sampled_token_ith` (llama-context.cpp:4789 @b1b770d90).
 pub fn llama_get_sampled_token_ith(ctx: ?*c.struct_llama_context, i: i32) callconv(.c) c.llama_token {
     const self = ctxOf(ctx);
     self.synchronize();
     return self.getSampledTokenIth(i);
 }
 
-/// Ports `llama_get_sampled_probs_ith` (llama-context.cpp:4580 @cd959bae9).
+/// Ports `llama_get_sampled_probs_ith` (llama-context.cpp:4795 @b1b770d90).
 pub fn llama_get_sampled_probs_ith(ctx: ?*c.struct_llama_context, i: i32) callconv(.c) ?[*]f32 {
     const self = ctxOf(ctx);
     self.synchronize();
     return self.getSampledProbsIth(i);
 }
 
-/// Ports `llama_get_sampled_logits_ith` (llama-context.cpp:4586 @cd959bae9).
+/// Ports `llama_get_sampled_logits_ith` (llama-context.cpp:4801 @b1b770d90).
 pub fn llama_get_sampled_logits_ith(ctx: ?*c.struct_llama_context, i: i32) callconv(.c) ?[*]f32 {
     const self = ctxOf(ctx);
     self.synchronize();
     return self.getSampledLogitsIth(i);
 }
 
-/// Ports `llama_get_sampled_candidates_ith` (llama-context.cpp:4592 @cd959bae9).
+/// Ports `llama_get_sampled_candidates_ith` (llama-context.cpp:4807 @b1b770d90).
 pub fn llama_get_sampled_candidates_ith(ctx: ?*c.struct_llama_context, i: i32) callconv(.c) [*]c.llama_token {
     const self = ctxOf(ctx);
     self.synchronize();
     return @constCast(self.getSampledCandidatesIth(i));
 }
 
-/// Ports `llama_get_sampled_candidates_count_ith` (llama-context.cpp:4598 @cd959bae9).
+/// Ports `llama_get_sampled_candidates_count_ith` (llama-context.cpp:4813 @b1b770d90).
 pub fn llama_get_sampled_candidates_count_ith(ctx: ?*c.struct_llama_context, i: i32) callconv(.c) u32 {
     const self = ctxOf(ctx);
     self.synchronize();
     return @truncate(self.getSampledCandidatesCount(i));
 }
 
-/// Ports `llama_get_sampled_logits_count_ith` (llama-context.cpp:4604 @cd959bae9).
+/// Ports `llama_get_sampled_logits_count_ith` (llama-context.cpp:4819 @b1b770d90).
 pub fn llama_get_sampled_logits_count_ith(ctx: ?*c.struct_llama_context, i: i32) callconv(.c) u32 {
     const self = ctxOf(ctx);
     self.synchronize();
     return @truncate(self.getSampledLogitsCount(i));
 }
 
-/// Ports `llama_get_sampled_probs_count_ith` (llama-context.cpp:4610 @cd959bae9).
+/// Ports `llama_get_sampled_probs_count_ith` (llama-context.cpp:4825 @b1b770d90).
 pub fn llama_get_sampled_probs_count_ith(ctx: ?*c.struct_llama_context, i: i32) callconv(.c) u32 {
     const self = ctxOf(ctx);
     self.synchronize();
     return @truncate(self.getSampledProbsCount(i));
 }
 
-/// Ports `llama_memory_clear` (llama-context.cpp:4661 @cd959bae9).
+/// Ports `llama_memory_clear` (llama-context.cpp:4876 @b1b770d90).
 pub fn llama_memory_clear(mem: c.llama_memory_t, data: bool) callconv(.c) void {
     const m = memOf(mem) orelse return;
     m.clear(data);
 }
 
-/// Ports `llama_memory_seq_rm` (llama-context.cpp:4669 @cd959bae9).
+/// Ports `llama_memory_seq_rm` (llama-context.cpp:4884 @b1b770d90).
 pub fn llama_memory_seq_rm(mem: c.llama_memory_t, seq_id: c.llama_seq_id, p0: c.llama_pos, p1: c.llama_pos) callconv(.c) bool {
     const m = memOf(mem) orelse return true;
     return m.seqRm(seq_id, p0, p1);
 }
 
-/// Ports `llama_memory_seq_cp` (llama-context.cpp:4681 @cd959bae9).
+/// Ports `llama_memory_seq_cp` (llama-context.cpp:4896 @b1b770d90).
 pub fn llama_memory_seq_cp(mem: c.llama_memory_t, seq_id_src: c.llama_seq_id, seq_id_dst: c.llama_seq_id, p0: c.llama_pos, p1: c.llama_pos) callconv(.c) void {
     const m = memOf(mem) orelse return;
     m.seqCp(seq_id_src, seq_id_dst, p0, p1);
 }
 
-/// Ports `llama_memory_seq_keep` (llama-context.cpp:4694 @cd959bae9).
+/// Ports `llama_memory_seq_keep` (llama-context.cpp:4909 @b1b770d90).
 pub fn llama_memory_seq_keep(mem: c.llama_memory_t, seq_id: c.llama_seq_id) callconv(.c) void {
     const m = memOf(mem) orelse return;
     m.seqKeep(seq_id);
 }
 
-/// Ports `llama_memory_seq_add` (llama-context.cpp:4704 @cd959bae9).
+/// Ports `llama_memory_seq_add` (llama-context.cpp:4919 @b1b770d90).
 pub fn llama_memory_seq_add(mem: c.llama_memory_t, seq_id: c.llama_seq_id, p0: c.llama_pos, p1: c.llama_pos, delta: c.llama_pos) callconv(.c) void {
     const m = memOf(mem) orelse return;
     m.seqAdd(seq_id, p0, p1, delta);
 }
 
-/// Ports `llama_memory_seq_div` (llama-context.cpp:4717 @cd959bae9).
+/// Ports `llama_memory_seq_div` (llama-context.cpp:4932 @b1b770d90).
 pub fn llama_memory_seq_div(mem: c.llama_memory_t, seq_id: c.llama_seq_id, p0: c.llama_pos, p1: c.llama_pos, d: c_int) callconv(.c) void {
     const m = memOf(mem) orelse return;
     m.seqDiv(seq_id, p0, p1, d);
 }
 
-/// Ports `llama_memory_seq_pos_min` (llama-context.cpp:4730 @cd959bae9).
+/// Ports `llama_memory_seq_pos_min` (llama-context.cpp:4945 @b1b770d90).
 pub fn llama_memory_seq_pos_min(mem: c.llama_memory_t, seq_id: c.llama_seq_id) callconv(.c) c.llama_pos {
     const m = memOf(mem) orelse return -1;
     return m.seqPosMin(seq_id);
 }
 
-/// Ports `llama_memory_seq_pos_max` (llama-context.cpp:4740 @cd959bae9).
+/// Ports `llama_memory_seq_pos_max` (llama-context.cpp:4955 @b1b770d90).
 pub fn llama_memory_seq_pos_max(mem: c.llama_memory_t, seq_id: c.llama_seq_id) callconv(.c) c.llama_pos {
     const m = memOf(mem) orelse return -1;
     return m.seqPosMax(seq_id);
 }
 
-/// Ports `llama_memory_can_shift` (llama-context.cpp:4750 @cd959bae9).
+/// Ports `llama_memory_can_shift` (llama-context.cpp:4965 @b1b770d90).
 pub fn llama_memory_can_shift(mem: c.llama_memory_t) callconv(.c) bool {
     const m = memOf(mem) orelse return false;
     return m.getCanShift();
 }
 
-/// Ports `llama_encode` (llama-context.cpp:4889 @cd959bae9).
+/// Ports `llama_encode` (llama-context.cpp:5079 @b1b770d90).
 pub fn llama_encode(ctx: ?*c.struct_llama_context, batch: c.llama_batch) callconv(.c) i32 {
     const ret = ctxOf(ctx).encode(batch);
     if (ret != 0) impl.logError("%s: failed to encode, ret = %d\n", .{ "llama_encode", ret });
     return ret;
 }
 
-/// Ports `llama_decode` (llama-context.cpp:4900 @cd959bae9).
+/// Ports `llama_decode` (llama-context.cpp:5090 @b1b770d90).
 pub fn llama_decode(ctx: ?*c.struct_llama_context, batch: c.llama_batch) callconv(.c) i32 {
     const ret = ctxOf(ctx).decode(batch);
     if (ret != 0 and ret != 1) impl.logError("%s: failed to decode, ret = %d\n", .{ "llama_decode", ret });
     return ret;
 }
 
-/// Ports `llama_process` (llama-context.cpp:4977 @cd959bae9): an extended
+/// Ports `llama_process` (llama-context.cpp:5167 @b1b770d90): an extended
 /// batch through the context's encoder or decoder. Unlike `llama_encode`
 /// and `llama_decode` it logs nothing of its own on failure.
 ///
@@ -383,13 +392,13 @@ pub fn llama_process(ctx: ?*c.struct_llama_context, @"type": c.enum_llama_proces
     };
 }
 
-/// Ports `llama_perf_context` (llama-context.cpp:4915 @cd959bae9).
+/// Ports `llama_perf_context` (llama-context.cpp:5105 @b1b770d90).
 pub fn llama_perf_context(ctx: ?*const c.struct_llama_context) callconv(.c) c.llama_perf_context_data {
     if (ctx == null) return std.mem.zeroes(c.llama_perf_context_data);
     return ctxOf(ctx).perfGetData();
 }
 
-/// Ports `llama_perf_context_print` (llama-context.cpp:4927 @cd959bae9).
+/// Ports `llama_perf_context_print` (llama-context.cpp:5117 @b1b770d90).
 pub fn llama_perf_context_print(ctx: ?*const c.struct_llama_context) callconv(.c) void {
     const func = "llama_perf_context_print";
     const data = llama_perf_context(ctx);
@@ -404,12 +413,12 @@ pub fn llama_perf_context_print(ctx: ?*const c.struct_llama_context) callconv(.c
     impl.logInfo("%s:   graph reallocs = %10d    / %5d        (same size) / (changed size)\n", .{ func, data.n_reallocs_same, data.n_reallocs_diff });
 }
 
-/// Ports `llama_perf_context_reset` (llama-context.cpp:4942 @cd959bae9).
+/// Ports `llama_perf_context_reset` (llama-context.cpp:5132 @b1b770d90).
 pub fn llama_perf_context_reset(ctx: ?*c.struct_llama_context) callconv(.c) void {
     ctxOf(ctx).perfReset();
 }
 
-/// Ports `llama_get_memory_breakdown` (llama-context.cpp:4989 @cd959bae9),
+/// Ports `llama_get_memory_breakdown` (llama-context.cpp:5179 @b1b770d90),
 /// from `llama-ext.h`. The C++ returns a `std::map` keyed by buffer type,
 /// so this has no C signature and is never exported; `cli/fit.zig`, the
 /// port of its one caller, calls it as Zig.
@@ -426,7 +435,7 @@ pub fn llama_get_memory_breakdown(ctx: ?*const c.struct_llama_context, gpa: std.
     return gpa.dupe(context.MemoryBreakdownEntry, mb);
 }
 
-/// Ports `llama_memory_get_buffers` (llama-memory.cpp:134 @cd959bae9), from
+/// Ports `llama_memory_get_buffers` (llama-memory.cpp:134 @b1b770d90), from
 /// `llama-ext.h`. The C++ returns a `std::vector`, so this has no C
 /// signature and is never exported; it is called as Zig.
 ///
@@ -445,8 +454,7 @@ pub fn llama_memory_get_buffers(mem: c.llama_memory_t, gpa: std.mem.Allocator) !
     return gpa.dupe(c.ggml_backend_buffer_t, bufs);
 }
 
-/// Ports `llama_get_ctx_other` (llama-context.cpp:4993 @cd959bae9), from
-/// `llama-ext.h`: the context whose memory this one shares, if any.
+/// Ports `llama_get_ctx_other` (llama-context.cpp:5183 @b1b770d90): the context whose memory this one shares, if any.
 /// `common/speculative.cpp`'s MTP draft compares it with the target.
 pub fn llama_get_ctx_other(ctx: ?*c.struct_llama_context) callconv(.c) ?*c.struct_llama_context {
     return @ptrCast(ctxOf(ctx).getCparams().ctx_other);

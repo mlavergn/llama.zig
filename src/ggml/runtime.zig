@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.9.0, `cd959bae9`), which is
+//! Ported from `llama.cpp/ggml/src/ggml.c` (v1.0.0, `b1b770d90`), which is
 //! 8,067 lines and split across several files here. This one covers the
 //! preamble, roughly lines 36-630 and 8036-8067: the pieces that talk to the
 //! operating system rather than to tensors. Each function names the C function
@@ -86,7 +86,7 @@ const efault: c_int = 14;
 /// Counter behind `ggml_graph_next_uid`.
 var graph_uid = std.atomic.Value(u64).init(0);
 
-/// Ports `ggml_graph_next_uid` (ggml.c:57 @cd959bae9).
+/// Ports `ggml_graph_next_uid` (ggml.c:57 @b1b770d90).
 ///
 /// Return: a value unique across the process. Graphs use it to recognise that
 /// two of them are the same, so a repeat must never occur.
@@ -97,11 +97,11 @@ export fn ggml_graph_next_uid() u64 {
 // -----------------------------------------------------------------------------
 // Aborting
 
-/// Ports `g_abort_callback` (ggml.c:244 @cd959bae9), the storage behind
+/// Ports `g_abort_callback` (ggml.c:244 @b1b770d90), the storage behind
 /// `ggml_set_abort_callback`.
 var abort_callback: c.ggml_abort_callback_t = null;
 
-/// Ports `ggml_print_backtrace_symbols` (ggml.c:147 @cd959bae9) -- the `__APPLE__`
+/// Ports `ggml_print_backtrace_symbols` (ggml.c:147 @b1b770d90) -- the `__APPLE__`
 /// variant, and the `__linux__ && __GLIBC__` one at ggml.c:139, which is the
 /// same body.
 ///
@@ -115,7 +115,7 @@ fn printBacktraceSymbols() void {
 }
 
 /// Ports `ggml_print_backtrace`, `ggml_print_backtrace` (ggml.c:158, 239
-/// @cd959bae9): the Unix arm and the `#else` that prints nothing.
+/// @b1b770d90): the Unix arm and the `#else` that prints nothing.
 ///
 /// Honours `GGML_NO_BACKTRACE`. The C also honours `GGML_BACKTRACE_LLDB` on
 /// macOS, forking to attach a debugger; that path is not ported, because it is
@@ -137,7 +137,7 @@ extern fn _Exit(status: c_int) noreturn;
 /// `PR_SET_PTRACER` from `<linux/prctl.h>`.
 const pr_set_ptracer: c_int = 0x59616d61;
 
-/// The `__linux__` arm of `ggml_print_backtrace` (ggml.c:158 @cd959bae9):
+/// The `__linux__` arm of `ggml_print_backtrace` (ggml.c:158 @b1b770d90):
 /// unless a debugger is already attached, fork and have the child attach
 /// `gdb`, then `lldb`, to the parent, falling back to `backtrace` if neither
 /// runs. The pipe holds the child back until the parent has allowed it to
@@ -193,7 +193,7 @@ fn printBacktraceLinux() void {
     }
 }
 
-/// Ports `ggml_set_abort_callback` (ggml.c:247 @cd959bae9).
+/// Ports `ggml_set_abort_callback` (ggml.c:247 @b1b770d90).
 ///
 /// Return: the previous callback, so a caller can chain or restore it. Passing
 /// null restores the default of printing a message and a backtrace.
@@ -203,7 +203,7 @@ export fn ggml_set_abort_callback(callback: c.ggml_abort_callback_t) c.ggml_abor
     return previous;
 }
 
-/// Ports `ggml_abort` (ggml.c:253 @cd959bae9).
+/// Ports `ggml_abort` (ggml.c:253 @b1b770d90).
 ///
 /// Formats `file:line: ` followed by the message, hands it to the callback if
 /// one is set, and otherwise prints it with a backtrace. Never returns.
@@ -224,7 +224,7 @@ fn ggmlAbort(file: [*:0]const u8, line: c_int, fmt: [*:0]const u8, ...) callconv
     abortWith(@ptrCast(&message));
 }
 
-/// The second half of `ggml_abort` (ggml.c:253 @cd959bae9), once the message
+/// The second half of `ggml_abort` (ggml.c:253 @b1b770d90), once the message
 /// is formatted: exported as `ggml_zig_abort_message` for `varargs.c` where
 /// that file defines `ggml_abort`.
 fn abortWith(message: [*:0]const u8) callconv(.c) noreturn {
@@ -241,7 +241,7 @@ fn abortWith(message: [*:0]const u8) callconv(.c) noreturn {
 // -----------------------------------------------------------------------------
 // Logging
 
-/// Ports `struct ggml_logger_state` (ggml.c:281 @cd959bae9).
+/// Ports `struct ggml_logger_state` (ggml.c:281 @b1b770d90).
 const LoggerState = struct {
     log_callback: c.ggml_log_callback,
     log_callback_user_data: ?*anyopaque,
@@ -252,7 +252,7 @@ var logger_state: LoggerState = .{
     .log_callback_user_data = null,
 };
 
-/// Ports `ggml_log_internal_v` (ggml.c:287 @cd959bae9).
+/// Ports `ggml_log_internal_v` (ggml.c:287 @b1b770d90).
 ///
 /// Formats into a small stack buffer first and only allocates when the message
 /// does not fit, which is why the argument list has to be copied before the
@@ -279,7 +279,7 @@ fn logInternalV(level: c.enum_ggml_log_level, format: ?[*:0]const u8, ap: std.la
     logger_state.log_callback.?(level, @ptrCast(buffer2), logger_state.log_callback_user_data);
 }
 
-/// Ports `ggml_log_internal` (ggml.c:307 @cd959bae9).
+/// Ports `ggml_log_internal` (ggml.c:307 @b1b770d90).
 fn ggmlLogInternal(level: c.enum_ggml_log_level, format: ?[*:0]const u8, ...) callconv(.c) void {
     var ap = @cVaStart();
     defer @cVaEnd(&ap);
@@ -287,7 +287,7 @@ fn ggmlLogInternal(level: c.enum_ggml_log_level, format: ?[*:0]const u8, ...) ca
 }
 
 /// Hands a message `varargs.c` has formatted to the current callback: the last
-/// line of `ggml_log_internal_v` (ggml.c:287 @cd959bae9). Exported as
+/// line of `ggml_log_internal_v` (ggml.c:287 @b1b770d90). Exported as
 /// `ggml_zig_log_emit` where that file defines `ggml_log_internal`.
 fn logEmit(level: c.enum_ggml_log_level, text: [*:0]const u8) callconv(.c) void {
     logger_state.log_callback.?(level, text, logger_state.log_callback_user_data);
@@ -303,7 +303,7 @@ comptime {
     }
 }
 
-/// Ports `ggml_log_callback_default` (ggml.c:314 @cd959bae9).
+/// Ports `ggml_log_callback_default` (ggml.c:314 @b1b770d90).
 export fn ggml_log_callback_default(
     level: c.enum_ggml_log_level,
     text: [*c]const u8,
@@ -315,13 +315,13 @@ export fn ggml_log_callback_default(
     _ = fflush(cStderr());
 }
 
-/// Ports `ggml_log_get` (ggml.c:8278 @cd959bae9).
+/// Ports `ggml_log_get` (ggml.c:8084 @b1b770d90).
 export fn ggml_log_get(log_callback: *c.ggml_log_callback, user_data: *?*anyopaque) void {
     log_callback.* = logger_state.log_callback;
     user_data.* = logger_state.log_callback_user_data;
 }
 
-/// Ports `ggml_log_set` (ggml.c:8283 @cd959bae9).
+/// Ports `ggml_log_set` (ggml.c:8089 @b1b770d90).
 ///
 /// A null callback restores the default rather than disabling logging, so
 /// there is always something to call.
@@ -333,7 +333,7 @@ export fn ggml_log_set(log_callback: c.ggml_log_callback, user_data: ?*anyopaque
 // -----------------------------------------------------------------------------
 // Aligned allocation
 
-/// Ports `GGML_TSAN_ENABLED` (ggml.c:335 @cd959bae9): the thread sanitizer
+/// Ports `GGML_TSAN_ENABLED` (ggml.c:335 @b1b770d90): the thread sanitizer
 /// does not intercept `vm_allocate` and `vm_deallocate`, so under it macOS
 /// takes the `posix_memalign` arm. The C asks the compiler's
 /// `__has_feature(thread_sanitizer)`; this module's own sanitizer setting is
@@ -346,7 +346,7 @@ const tsan_enabled = builtin.sanitize_thread;
 /// alone, and iOS took `posix_memalign`.
 const use_vm_allocate = builtin.os.tag.isDarwin() and !tsan_enabled;
 
-/// Ports `ggml_aligned_malloc` (ggml.c:343 @cd959bae9).
+/// Ports `ggml_aligned_malloc` (ggml.c:343 @b1b770d90).
 ///
 /// On every Apple OS this goes to the Mach VM rather than `posix_memalign`,
 /// which is what the C does under `__APPLE__` without the thread sanitizer:
@@ -393,7 +393,7 @@ export fn ggml_aligned_malloc(size: usize) ?*anyopaque {
     return @ptrFromInt(address);
 }
 
-/// The failure branch of `ggml_aligned_malloc` (ggml.c:343 @cd959bae9), shared
+/// The failure branch of `ggml_aligned_malloc` (ggml.c:343 @b1b770d90), shared
 /// by both allocation arms. `EINVAL` and `ENOMEM` are 22 and 12 on Darwin and
 /// Linux alike.
 fn logAllocFailure(result: c_int, size: usize) void {
@@ -409,7 +409,7 @@ fn logAllocFailure(result: c_int, size: usize) void {
     });
 }
 
-/// Ports `ggml_aligned_free` (ggml.c:400 @cd959bae9).
+/// Ports `ggml_aligned_free` (ggml.c:400 @b1b770d90).
 ///
 /// On an Apple OS `size` is required, not decorative: `vm_deallocate` needs the
 /// length that was allocated, so this cannot be a plain `free`. Elsewhere it
@@ -424,7 +424,7 @@ export fn ggml_aligned_free(ptr: ?*anyopaque, size: usize) void {
 // -----------------------------------------------------------------------------
 // Status and version
 
-/// Ports `ggml_status_to_string` (ggml.c:450 @cd959bae9).
+/// Ports `ggml_status_to_string` (ggml.c:450 @b1b770d90).
 export fn ggml_status_to_string(status: c.enum_ggml_status) [*:0]const u8 {
     return switch (status) {
         c.GGML_STATUS_ALLOC_FAILED => "GGML status: error (failed to allocate memory)",
@@ -435,12 +435,12 @@ export fn ggml_status_to_string(status: c.enum_ggml_status) [*:0]const u8 {
     };
 }
 
-/// Ports `ggml_version` (ggml.c:525 @cd959bae9).
+/// Ports `ggml_version` (ggml.c:525 @b1b770d90).
 export fn ggml_version() [*:0]const u8 {
     return build_version;
 }
 
-/// Ports `ggml_commit` (ggml.c:529 @cd959bae9).
+/// Ports `ggml_commit` (ggml.c:529 @b1b770d90).
 export fn ggml_commit() [*:0]const u8 {
     return build_commit;
 }
@@ -450,10 +450,10 @@ export fn ggml_commit() [*:0]const u8 {
 /// version, not llama.cpp's, and the pin's short commit. They must equal
 /// `build/upstream.zig`'s `ggml_version` and `commit`, which
 /// `scripts/check-reference-pin` asserts.
-const build_version: [*:0]const u8 = "0.29.0";
-const build_commit: [*:0]const u8 = "cd959bae9";
+const build_version: [*:0]const u8 = "1.0.0";
+const build_commit: [*:0]const u8 = "b1b770d90";
 
-/// Ports `ggml_guid_matches` (ggml.c:521 @cd959bae9).
+/// Ports `ggml_guid_matches` (ggml.c:521 @b1b770d90).
 export fn ggml_guid_matches(guid_a: c.ggml_guid_t, guid_b: c.ggml_guid_t) bool {
     const a: [*]const u8 = @ptrCast(guid_a);
     const b: [*]const u8 = @ptrCast(guid_b);
@@ -467,17 +467,17 @@ export fn ggml_guid_matches(guid_a: c.ggml_guid_t, guid_b: c.ggml_guid_t) bool {
 // without the header's macros. The row variants are what the type traits table
 // points at, so they are on the hot path for every dequantized tensor.
 
-/// Ports `ggml_fp16_to_fp32` (ggml.c:462 @cd959bae9).
+/// Ports `ggml_fp16_to_fp32` (ggml.c:462 @b1b770d90).
 export fn ggml_fp16_to_fp32(x: c.ggml_fp16_t) f32 {
     return impl.fp16ToFp32(x);
 }
 
-/// Ports `ggml_fp32_to_fp16` (ggml.c:467 @cd959bae9).
+/// Ports `ggml_fp32_to_fp16` (ggml.c:467 @b1b770d90).
 export fn ggml_fp32_to_fp16(x: f32) c.ggml_fp16_t {
     return impl.fp32ToFp16(x);
 }
 
-/// Ports `ggml_bf16_to_fp32` (ggml.c:472 @cd959bae9).
+/// Ports `ggml_bf16_to_fp32` (ggml.c:472 @b1b770d90).
 ///
 /// **The parameter is spelled `u16`, not `c.ggml_bf16_t`, because Zig
 /// 0.16 miscompiles the struct.** `ggml_bf16_t` is `struct { uint16_t
@@ -492,32 +492,32 @@ export fn ggml_bf16_to_fp32(x: u16) f32 {
     return impl.bf16ToFp32(x);
 }
 
-/// Ports `ggml_fp32_to_bf16` (ggml.c:477 @cd959bae9).
+/// Ports `ggml_fp32_to_bf16` (ggml.c:477 @b1b770d90).
 export fn ggml_fp32_to_bf16(x: f32) c.ggml_bf16_t {
     return .{ .bits = impl.fp32ToBf16(x) };
 }
 
-/// Ports `ggml_fp16_to_fp32_row` (ggml.c:481 @cd959bae9).
+/// Ports `ggml_fp16_to_fp32_row` (ggml.c:481 @b1b770d90).
 export fn ggml_fp16_to_fp32_row(x: [*]const c.ggml_fp16_t, y: [*]f32, n: i64) void {
     for (0..@intCast(n)) |i| y[i] = impl.fp16ToFp32(x[i]);
 }
 
-/// Ports `ggml_fp32_to_fp16_row` (ggml.c:487 @cd959bae9).
+/// Ports `ggml_fp32_to_fp16_row` (ggml.c:487 @b1b770d90).
 export fn ggml_fp32_to_fp16_row(x: [*]const f32, y: [*]c.ggml_fp16_t, n: i64) void {
     for (0..@intCast(n)) |i| y[i] = impl.fp32ToFp16(x[i]);
 }
 
-/// Ports `ggml_bf16_to_fp32_row` (ggml.c:493 @cd959bae9).
+/// Ports `ggml_bf16_to_fp32_row` (ggml.c:493 @b1b770d90).
 export fn ggml_bf16_to_fp32_row(x: [*]const c.ggml_bf16_t, y: [*]f32, n: i64) void {
     for (0..@intCast(n)) |i| y[i] = impl.bf16ToFp32(x[i].bits);
 }
 
-/// Ports `ggml_fp32_to_bf16_row_ref` (ggml.c:499 @cd959bae9).
+/// Ports `ggml_fp32_to_bf16_row_ref` (ggml.c:499 @b1b770d90).
 export fn ggml_fp32_to_bf16_row_ref(x: [*]const f32, y: [*]c.ggml_bf16_t, n: i64) void {
     for (0..@intCast(n)) |i| y[i] = .{ .bits = impl.fp32ToBf16(x[i]) };
 }
 
-/// Ports `ggml_fp32_to_bf16_row` (ggml.c:505 @cd959bae9).
+/// Ports `ggml_fp32_to_bf16_row` (ggml.c:505 @b1b770d90).
 ///
 /// The C has an AVX512-BF16 fast path here; on ARM it falls through to the
 /// same scalar loop as the reference version.
@@ -528,13 +528,13 @@ export fn ggml_fp32_to_bf16_row(x: [*]const f32, y: [*]c.ggml_bf16_t, n: i64) vo
 // -----------------------------------------------------------------------------
 // Timing
 
-/// Ports `timer_freq`, `timer_start` (ggml.c:538, 538 @cd959bae9): the
+/// Ports `timer_freq`, `timer_start` (ggml.c:538, 538 @b1b770d90): the
 /// performance counter's frequency and its reading at `ggml_time_init`.
 /// Windows only.
 var timer_freq: i64 = 0;
 var timer_start: i64 = 0;
 
-/// Ports `ggml_time_init_once` (ggml.c:539 @cd959bae9).
+/// Ports `ggml_time_init_once` (ggml.c:539 @b1b770d90).
 fn timeInitOnce(once: *win32.INIT_ONCE, param: ?*anyopaque, ctx: ?*?*anyopaque) callconv(.winapi) win32.BOOL {
     _ = once;
     _ = param;
@@ -547,7 +547,7 @@ fn timeInitOnce(once: *win32.INIT_ONCE, param: ?*anyopaque, ctx: ?*?*anyopaque) 
     return 1;
 }
 
-/// Ports `ggml_time_init`, `ggml_time_init` (ggml.c:553, 568 @cd959bae9).
+/// Ports `ggml_time_init`, `ggml_time_init` (ggml.c:553, 568 @b1b770d90).
 ///
 /// A no-op outside Windows, where the C initialises a performance counter
 /// once per process.
@@ -559,7 +559,7 @@ export fn ggml_time_init() void {
     _ = win32.InitOnceExecuteOnce(&S.once, timeInitOnce, null, null);
 }
 
-/// Ports `ggml_time_ms`, `ggml_time_ms` (ggml.c:557, 569 @cd959bae9).
+/// Ports `ggml_time_ms`, `ggml_time_ms` (ggml.c:557, 569 @b1b770d90).
 export fn ggml_time_ms() i64 {
     if (comptime is_windows) {
         var t: i64 = undefined;
@@ -571,7 +571,7 @@ export fn ggml_time_ms() i64 {
     return @as(i64, ts.sec) * 1000 + @divTrunc(@as(i64, ts.nsec), 1_000_000);
 }
 
-/// Ports `ggml_time_us`, `ggml_time_us` (ggml.c:562, 575 @cd959bae9).
+/// Ports `ggml_time_us`, `ggml_time_us` (ggml.c:562, 575 @b1b770d90).
 export fn ggml_time_us() i64 {
     if (comptime is_windows) {
         var t: i64 = undefined;
@@ -583,12 +583,12 @@ export fn ggml_time_us() i64 {
     return @as(i64, ts.sec) * 1_000_000 + @divTrunc(@as(i64, ts.nsec), 1_000);
 }
 
-/// Ports `ggml_cycles` (ggml.c:582 @cd959bae9).
+/// Ports `ggml_cycles` (ggml.c:582 @b1b770d90).
 export fn ggml_cycles() i64 {
     return @intCast(clock());
 }
 
-/// Ports `ggml_cycles_per_ms` (ggml.c:586 @cd959bae9).
+/// Ports `ggml_cycles_per_ms` (ggml.c:586 @b1b770d90).
 export fn ggml_cycles_per_ms() i64 {
     return @divTrunc(clocks_per_sec, 1000);
 }
@@ -596,7 +596,7 @@ export fn ggml_cycles_per_ms() i64 {
 // -----------------------------------------------------------------------------
 // Threadpool parameters
 
-/// Ports `ggml_threadpool_params_init` (ggml.c:8288 @cd959bae9).
+/// Ports `ggml_threadpool_params_init` (ggml.c:8094 @b1b770d90).
 export fn ggml_threadpool_params_init(p: *c.struct_ggml_threadpool_params, n_threads: c_int) void {
     p.n_threads = n_threads;
     p.prio = 0; // normal, or inherited
@@ -607,14 +607,14 @@ export fn ggml_threadpool_params_init(p: *c.struct_ggml_threadpool_params, n_thr
     @memset(&p.cpumask, false);
 }
 
-/// Ports `ggml_threadpool_params_default` (ggml.c:8297 @cd959bae9).
+/// Ports `ggml_threadpool_params_default` (ggml.c:8103 @b1b770d90).
 export fn ggml_threadpool_params_default(n_threads: c_int) c.struct_ggml_threadpool_params {
     var p: c.struct_ggml_threadpool_params = undefined;
     ggml_threadpool_params_init(&p, n_threads);
     return p;
 }
 
-/// Ports `ggml_threadpool_params_match` (ggml.c:8303 @cd959bae9).
+/// Ports `ggml_threadpool_params_match` (ggml.c:8109 @b1b770d90).
 export fn ggml_threadpool_params_match(
     p0: *const c.struct_ggml_threadpool_params,
     p1: *const c.struct_ggml_threadpool_params,
@@ -664,7 +664,7 @@ test "aligned malloc returns aligned memory and frees it" {
 // -----------------------------------------------------------------------------
 // File access
 
-/// Ports `ggml_fopen` (ggml.c:614 @cd959bae9), both arms.
+/// Ports `ggml_fopen` (ggml.c:614 @b1b770d90), both arms.
 ///
 /// A plain `fopen`, except on Windows, where both arguments are converted from
 /// UTF-8 to wide characters and the file is opened with `_wfopen`, so a path
@@ -683,7 +683,7 @@ pub export fn ggml_fopen(fname: [*:0]const u8, mode: [*:0]const u8) ?*std.c.FILE
     return file;
 }
 
-/// Ports `ggml_mbstowcs` (ggml.c:595 @cd959bae9): UTF-8 to a `malloc`ed,
+/// Ports `ggml_mbstowcs` (ggml.c:595 @b1b770d90): UTF-8 to a `malloc`ed,
 /// NUL-terminated wide string, or null with `errno` set to `EINVAL`.
 fn mbstowcs(mbs: [*:0]const u8) ?[*:0]u16 {
     var wlen = win32.MultiByteToWideChar(win32.CP_UTF8, 0, mbs, -1, null, 0);

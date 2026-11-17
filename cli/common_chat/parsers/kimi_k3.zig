@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/kimi-k3.cpp` (llama.cpp v0.9.0,
-//! `cd959bae9`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/kimi-k3.cpp` (llama.cpp v1.0.0,
+//! `b1b770d90`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -166,7 +166,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_kimi_k3` (parsers/kimi-k3.cpp:8 @cd959bae9).
+/// Ports `common_chat_params_init_kimi_k3` (parsers/kimi-k3.cpp:8 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {

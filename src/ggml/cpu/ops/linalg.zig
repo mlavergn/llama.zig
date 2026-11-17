@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.9.0 (`cd959bae9`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v1.0.0 (`b1b770d90`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # `out_prod` accumulates through `ggml_vec_mad_f32`
@@ -48,7 +48,7 @@ fn zeroDstAndSync(params: *const ComputeParams, dst: *Tensor, l: common.BinaryLo
     threading.ggml_barrier(@ptrCast(@alignCast(params.threadpool.?)));
 }
 
-/// Ports `ggml_compute_forward_out_prod_f32` (ops.cpp:4529 @cd959bae9), the
+/// Ports `ggml_compute_forward_out_prod_f32` (ops.cpp:4529 @b1b770d90), the
 /// `GGML_VEC_MAD_UNROLL > 2` arm.
 fn outProdF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
@@ -154,8 +154,8 @@ fn outProdF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_out_prod_q_f32` (ops.cpp:4650 @cd959bae9) and
-/// `ggml_compute_forward_out_prod_f16_f32` (ops.cpp:4739 @cd959bae9).
+/// Ports `ggml_compute_forward_out_prod_q_f32` (ops.cpp:4650 @b1b770d90) and
+/// `ggml_compute_forward_out_prod_f16_f32` (ops.cpp:4739 @b1b770d90).
 ///
 /// The two differ in how a `src0` row is widened into the per-thread scratch
 /// row — the type's `to_float`, or `ggml_fp16_to_fp32_row` — and in their
@@ -251,7 +251,7 @@ fn outProdWiden(comptime is_f16: bool, params: *const ComputeParams, dst: *Tenso
     }
 }
 
-/// Ports `ggml_compute_forward_out_prod` (ops.cpp:4803 @cd959bae9).
+/// Ports `ggml_compute_forward_out_prod` (ops.cpp:4803 @b1b770d90).
 pub export fn ggml_compute_forward_out_prod(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -289,7 +289,7 @@ pub export fn ggml_compute_forward_out_prod(params: *const ComputeParams, dst: *
     }
 }
 
-/// Ports `ggml_compute_forward_scale_f32` (ops.cpp:4856 @cd959bae9).
+/// Ports `ggml_compute_forward_scale_f32` (ops.cpp:4856 @b1b770d90).
 ///
 /// Since v0.8.0 rows need only be contiguous within themselves, so each flat
 /// row index is split into `i1`, `i2`, `i3` and every row addressed through
@@ -345,7 +345,7 @@ fn scaleF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_scale_bf16` (ops.cpp:4908 @cd959bae9), new
+/// Ports `ggml_compute_forward_scale_bf16` (ops.cpp:4908 @b1b770d90), new
 /// at v0.6.0.
 ///
 /// Unlike `scaleF32` there is no `b == 0` split: every element is
@@ -397,7 +397,7 @@ fn scaleBf16(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_scale` (ops.cpp:4952 @cd959bae9).
+/// Ports `ggml_compute_forward_scale` (ops.cpp:4952 @b1b770d90).
 pub export fn ggml_compute_forward_scale(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -408,8 +408,8 @@ pub export fn ggml_compute_forward_scale(params: *const ComputeParams, dst: *Ten
     }
 }
 
-/// Ports `ggml_compute_forward_set_f32` (ops.cpp:4976 @cd959bae9) and
-/// `ggml_compute_forward_set_i32` (ops.cpp:5047 @cd959bae9).
+/// Ports `ggml_compute_forward_set_f32` (ops.cpp:4976 @b1b770d90) and
+/// `ggml_compute_forward_set_i32` (ops.cpp:5047 @b1b770d90).
 ///
 /// Identical but for the element type and the `ggml_vec_cpy_*` they call.
 fn setT(comptime T: type, params: *const ComputeParams, dst: *Tensor) void {
@@ -491,7 +491,7 @@ fn setT(comptime T: type, params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_set` (ops.cpp:5118 @cd959bae9).
+/// Ports `ggml_compute_forward_set` (ops.cpp:5118 @b1b770d90).
 pub export fn ggml_compute_forward_set(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 

@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v0.9.0
-//! (`cd959bae9`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v1.0.0
+//! (`b1b770d90`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # Two halves per step, not two nibbles
@@ -57,7 +57,7 @@ inline fn sixBit(
 }
 
 /// Ports `ggml_gemv_q6_K_NxM_q8_K_generic_impl`
-/// (ggml-cpu/repack.cpp:357 @cd959bae9).
+/// (ggml-cpu/repack.cpp:357 @b1b770d90).
 fn gemv(
     comptime blocklen: i32,
     comptime ncols_interleaved: i32,
@@ -137,7 +137,7 @@ fn gemv(
 }
 
 /// Ports `ggml_gemm_q6_K_NxM_q8_K_generic_impl`
-/// (ggml-cpu/repack.cpp:447 @cd959bae9).
+/// (ggml-cpu/repack.cpp:447 @b1b770d90).
 fn gemm(
     comptime blocklen: i32,
     comptime ncols_interleaved: i32,

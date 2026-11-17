@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/snake.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/snake.cuh` at v0.9.0 (`cd959bae9`). The
+//! `llama.cpp/ggml/src/ggml-cuda/snake.cuh` at v1.0.0 (`b1b770d90`). The
 //! kernel, `snake_kernel`, stays CUDA.
 
 const std = @import("std");
@@ -16,7 +16,7 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `launch_snake` (snake.cu:28 @cd959bae9). `x` is `[T, C]` with `T`
+/// Ports `launch_snake` (snake.cu:28 @b1b770d90). `x` is `[T, C]` with `T`
 /// contiguous, `a` and `inv_b` are `[1, C]`.
 fn launchSnake(ctx: *common.Context, x: *const Tensor, a: *const Tensor, inv_b: *const Tensor, dst: *Tensor) void {
     const a_d: ?*const anyopaque = a.data;
@@ -42,7 +42,7 @@ fn launchSnake(ctx: *common.Context, x: *const Tensor, a: *const Tensor, inv_b: 
     }
 }
 
-/// Ports `ggml_cuda_op_snake_fused` (snake.cu:66 @cd959bae9): the fusion
+/// Ports `ggml_cuda_op_snake_fused` (snake.cu:66 @b1b770d90): the fusion
 /// entry point. The caller supplies `x`, `a` and `inv_b` explicitly.
 pub fn opSnakeFused(ctx: *common.Context, x: *const Tensor, a: *const Tensor, inv_b: *const Tensor, dst: *Tensor) void {
     launchSnake(ctx, x, a, inv_b, dst);

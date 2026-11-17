@@ -5,9 +5,9 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/voxtral-rt.cpp` at v0.9.0
-//! (`cd959bae9`), and the `PROJECTOR_TYPE_VOXTRAL_RT` arm of
-//! `clip_get_graph_builder` (`llama.cpp/tools/mtmd/clip.cpp`). Each
+//! Ports `llama.cpp/tools/mtmd/models/voxtral-rt.cpp` at v1.0.0
+//! (`b1b770d90`), and the `PROJECTOR_TYPE_VOXTRAL_RT` arm of
+//! `mtmd_get_graph_builder` (`llama.cpp/tools/mtmd/mtmd-graph.cpp`). Each
 //! declaration names what it ports and the line it began at.
 
 const std = @import("std");
@@ -18,9 +18,9 @@ const c = impl.c;
 const ne = graph.ne;
 const nb = graph.nb;
 
-/// Ports `build` (voxtral-rt.cpp:5 @cd959bae9), a member of
-/// `clip_graph_voxtral_rt`, with the state `clip_get_graph_builder`
-/// (mtmd/clip.cpp:980 @cd959bae9) passes it: null during warmup, the cache is
+/// Ports `build` (voxtral-rt.cpp:5 @b1b770d90), a member of
+/// `mtmd_graph_voxtral_rt`, with the state `mtmd_get_graph_builder`
+/// (mtmd-graph.cpp:749 @b1b770d90) passes it: null during warmup, the cache is
 /// then a graph input.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     const state: ?*clip.EncState = if (params) |p| p.enc_state else null;

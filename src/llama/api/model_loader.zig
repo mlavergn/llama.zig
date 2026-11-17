@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-model-loader.cpp` (v0.9.0,
-//! `cd959bae9`): `llama_ftype_name`, its one unmangled export. The name
+//! Ported from `llama.cpp/src/llama-model-loader.cpp` (v1.0.0,
+//! `b1b770d90`): `llama_ftype_name`, its one unmangled export. The name
 //! table is `loader.zig`'s.
 //!
 //! The function has the C signature and is `pub`, not `export`: the
@@ -16,7 +16,7 @@ const loader = @import("../loader.zig");
 
 const c = impl.c;
 
-/// Ports `llama_ftype_name` (llama-model-loader.cpp:34 @cd959bae9).
+/// Ports `llama_ftype_name` (llama-model-loader.cpp:34 @b1b770d90).
 pub fn llama_ftype_name(ftype: c.enum_llama_ftype) callconv(.c) [*c]const u8 {
     return loader.ftypeName(ftype).ptr;
 }

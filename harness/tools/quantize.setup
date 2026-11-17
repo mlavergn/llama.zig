@@ -1,0 +1,19 @@
+#!/bin/bash
+# Writes quantize's inputs into $DATA: llama-dense given a tokenizer by
+# harness/tools/add_vocab.c, and an imatrix collected over it by upstream's
+# llama-imatrix, the file and its dataset under subdirectories, so the names
+# llama-quantize records in the output's metadata (since v1.0.0 the file
+# names alone, 71a6a114b) are seen apart from their paths. Run by
+# scripts/tools-diff.
+set -eu
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$ROOT/scripts/platform-libs"
+platform_libs cc "$ROOT/zig-out/lib/libggml.a"
+zig cc -O2 -w -I "$ROOT/llama.cpp/ggml/include" "$ROOT/harness/tools/add_vocab.c" \
+    "$ROOT/zig-out/lib/libggml.a" -lc++ "${PLATFORM_LIBS[@]}" -o "$DATA/add_vocab"
+"$DATA/add_vocab" "$ROOT/zig-out/arch-fixtures/llama-dense.gguf" "$DATA/dense.gguf"
+mkdir -p "$DATA/sub/dir" "$DATA/sub/data"
+# the fixtures' vocabulary has a byte token for the newline only
+LC_ALL=C tr -cd '\12\40-\176' < "$ROOT/llama.cpp/README.md" > "$DATA/sub/data/text.txt"
+"$ROOT/zig-out/tools-ref/bin/llama-imatrix" -m "$DATA/dense.gguf" -f "$DATA/sub/data/text.txt" \
+    -c 64 --chunks 2 -o "$DATA/sub/dir/dense-imatrix.gguf" >/dev/null 2>&1

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.9.0 (`cd959bae9`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v1.0.0 (`b1b770d90`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # Two different state updates, on purpose
@@ -46,7 +46,7 @@ extern fn logf(x: f32) f32;
 /// Byte offset `i*nb`; see `common.byteOff`.
 const off = common.byteOff;
 
-/// Ports `ggml_compute_softplus_f32` (ggml-impl.h:107 @cd959bae9) through
+/// Ports `ggml_compute_softplus_f32` (ggml-impl.h:107 @b1b770d90) through
 /// libm.
 ///
 /// `impl.softplus` is the same expression on Zig's `@log` and `@exp`, which
@@ -59,7 +59,7 @@ inline fn softplus(input: f32) f32 {
 // -----------------------------------------------------------------------------
 // ssm_conv
 
-/// Ports `ggml_compute_forward_ssm_conv_f32` (ops.cpp:9943 @cd959bae9).
+/// Ports `ggml_compute_forward_ssm_conv_f32` (ops.cpp:9811 @b1b770d90).
 ///
 /// `sumf += s[...] * c[...]` is one expression, but the loop is a
 /// contiguous reduction and the reference compiler vectorizes it: products in
@@ -120,7 +120,7 @@ fn ssmConvF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_ssm_conv` (ops.cpp:9996 @cd959bae9).
+/// Ports `ggml_compute_forward_ssm_conv` (ops.cpp:9864 @b1b770d90).
 pub export fn ggml_compute_forward_ssm_conv(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     switch (impl.one(Tensor, dst.src[0]).type) {
         c.GGML_TYPE_F32 => ssmConvF32(params, dst),
@@ -131,7 +131,7 @@ pub export fn ggml_compute_forward_ssm_conv(params: *const ComputeParams, dst: *
 // -----------------------------------------------------------------------------
 // ssm_scan
 
-/// Ports `ggml_compute_forward_ssm_scan_f32` (ops.cpp:10013 @cd959bae9). The
+/// Ports `ggml_compute_forward_ssm_scan_f32` (ops.cpp:9881 @b1b770d90). The
 /// Mamba-2 arm is the `GGML_SIMD` NEON one; the Mamba-1 arm is the
 /// non-SVE scalar loop.
 fn ssmScanF32(params: *const ComputeParams, dst: *Tensor) void {
@@ -347,7 +347,7 @@ fn ssmScanF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_ssm_scan` (ops.cpp:10236 @cd959bae9).
+/// Ports `ggml_compute_forward_ssm_scan` (ops.cpp:10104 @b1b770d90).
 pub export fn ggml_compute_forward_ssm_scan(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     switch (impl.one(Tensor, dst.src[0]).type) {
         c.GGML_TYPE_F32 => ssmScanF32(params, dst),

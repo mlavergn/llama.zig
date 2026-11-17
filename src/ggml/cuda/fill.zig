@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/fill.cu` at v0.9.0
-//! (`cd959bae9`). The kernel, `fill_kernel`, stays CUDA.
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/fill.cu` at v1.0.0
+//! (`b1b770d90`). The kernel, `fill_kernel`, stays CUDA.
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -14,7 +14,7 @@ const c = impl.c;
 const Tensor = c.ggml_tensor;
 const half = kernels.half;
 
-/// Ports `CUDA_FILL_BLOCK_SIZE` (fill.cu:4 @cd959bae9).
+/// Ports `CUDA_FILL_BLOCK_SIZE` (fill.cu:4 @b1b770d90).
 const block_size = 256;
 
 /// `ggml_cuda_cast<half>(x)`: `__float2half`, round to nearest even.
@@ -22,7 +22,7 @@ fn toHalf(x: f32) half {
     return @fromBackingInt(@intCast(@as(u16, @bitCast(@as(f16, @floatCast(x))))));
 }
 
-/// Ports `ggml_cuda_op_fill` (fill.cu:15 @cd959bae9), which launches with
+/// Ports `ggml_cuda_op_fill` (fill.cu:15 @b1b770d90), which launches with
 /// `<<<>>>`.
 pub fn opFill(ctx: *common.Context, dst: *Tensor) void {
     const dst_d: ?*anyopaque = dst.data;

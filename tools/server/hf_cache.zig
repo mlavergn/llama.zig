@@ -6,7 +6,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/hf-cache.cpp` and `llama.cpp/common/hf-cache.h`
-//! (v0.9.0, `cd959bae9`) whole, their POSIX arms. Each declaration names
+//! (v1.0.0, `b1b770d90`) whole, their POSIX arms. Each declaration names
 //! the C++ it replaces and the line it began at.
 //!
 //! # `std::filesystem`
@@ -326,7 +326,7 @@ fn absolute(a: Allocator, p: []const u8) Allocator.Error![]u8 {
 var cache_dir_value: ?[]const u8 = null;
 var cache_dir_mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER;
 
-/// Ports `get_cache_directory` (hf-cache.cpp:34 @cd959bae9): the first of
+/// Ports `get_cache_directory` (hf-cache.cpp:34 @b1b770d90): the first of
 /// `LLAMA_CACHE`, `HF_HUB_CACHE`, `HUGGINGFACE_HUB_CACHE`, `$HF_HOME/hub`,
 /// `$XDG_CACHE_HOME/huggingface/hub`, `$HOME/.cache/huggingface/hub` and
 /// the password database's home, decided on the first call.
@@ -376,7 +376,7 @@ fn passwdDir(pw: *anyopaque) ?[]const u8 {
     return std.mem.span(d);
 }
 
-/// Ports `folder_name_to_repo` (hf-cache.cpp:69 @cd959bae9): `models--a--b`
+/// Ports `folder_name_to_repo` (hf-cache.cpp:69 @b1b770d90): `models--a--b`
 /// as `a/b`, anything else as nothing.
 fn folderNameToRepo(a: Allocator, folder: []const u8) Allocator.Error![]u8 {
     const prefix = "models--";
@@ -386,25 +386,25 @@ fn folderNameToRepo(a: Allocator, folder: []const u8) Allocator.Error![]u8 {
     return std.mem.replaceOwned(u8, a, folder[prefix.len..], "--", "/");
 }
 
-/// Ports `repo_to_folder_name` (hf-cache.cpp:79 @cd959bae9).
+/// Ports `repo_to_folder_name` (hf-cache.cpp:79 @b1b770d90).
 fn repoToFolderName(a: Allocator, repo_id: []const u8) Allocator.Error![]u8 {
     const result = try std.mem.concat(a, u8, &.{ "models--", repo_id });
     return std.mem.replaceOwned(u8, a, result, "/", "--");
 }
 
-/// Ports `get_repo_path` (hf-cache.cpp:86 @cd959bae9).
+/// Ports `get_repo_path` (hf-cache.cpp:86 @b1b770d90).
 fn getRepoPath(a: Allocator, repo_id: []const u8) Error![]u8 {
     return pathJoin(a, try getCacheDirectory(), try repoToFolderName(a, repo_id));
 }
 
-/// Ports `is_hex_char` (hf-cache.cpp:90 @cd959bae9).
+/// Ports `is_hex_char` (hf-cache.cpp:90 @b1b770d90).
 fn isHexChar(ch: u8) bool {
     return (ch >= 'A' and ch <= 'F') or
         (ch >= 'a' and ch <= 'f') or
         (ch >= '0' and ch <= '9');
 }
 
-/// Ports `is_hex_string` (hf-cache.cpp:96 @cd959bae9).
+/// Ports `is_hex_string` (hf-cache.cpp:96 @b1b770d90).
 fn isHexString(s: []const u8, expected_len: usize) bool {
     if (s.len != expected_len) {
         return false;
@@ -417,19 +417,19 @@ fn isHexString(s: []const u8, expected_len: usize) bool {
     return true;
 }
 
-/// Ports `is_alphanum` (hf-cache.cpp:108 @cd959bae9).
+/// Ports `is_alphanum` (hf-cache.cpp:108 @b1b770d90).
 fn isAlphanum(ch: u8) bool {
     return (ch >= 'A' and ch <= 'Z') or
         (ch >= 'a' and ch <= 'z') or
         (ch >= '0' and ch <= '9');
 }
 
-/// Ports `is_special_char` (hf-cache.cpp:114 @cd959bae9).
+/// Ports `is_special_char` (hf-cache.cpp:114 @b1b770d90).
 fn isSpecialChar(ch: u8) bool {
     return ch == '/' or ch == '.' or ch == '-';
 }
 
-/// Ports `is_valid_repo_id` (hf-cache.cpp:121 @cd959bae9): base chars
+/// Ports `is_valid_repo_id` (hf-cache.cpp:121 @b1b770d90): base chars
 /// `[A-Za-z0-9_]` are always valid, special chars `[/.-]` must be
 /// surrounded by base chars, exactly one `/` required.
 pub fn isValidRepoId(repo_id: []const u8) bool {
@@ -455,7 +455,7 @@ pub fn isValidRepoId(repo_id: []const u8) bool {
     return !special and slash == 1;
 }
 
-/// Ports `is_valid_hf_token` (hf-cache.cpp:144 @cd959bae9).
+/// Ports `is_valid_hf_token` (hf-cache.cpp:144 @b1b770d90).
 fn isValidHfToken(token: []const u8) bool {
     if (token.len < 37 or token.len > 256 or
         !std.mem.startsWith(u8, token, "hf_"))
@@ -470,17 +470,17 @@ fn isValidHfToken(token: []const u8) bool {
     return true;
 }
 
-/// Ports `is_valid_commit` (hf-cache.cpp:157 @cd959bae9).
+/// Ports `is_valid_commit` (hf-cache.cpp:157 @b1b770d90).
 fn isValidCommit(hash: []const u8) bool {
     return isHexString(hash, 40);
 }
 
-/// Ports `is_valid_oid` (hf-cache.cpp:161 @cd959bae9).
+/// Ports `is_valid_oid` (hf-cache.cpp:161 @b1b770d90).
 fn isValidOid(oid: []const u8) bool {
     return isHexString(oid, 40) or isHexString(oid, 64);
 }
 
-/// Ports `get_lock_path` (hf-cache.cpp:165 @cd959bae9): the lock file of a
+/// Ports `get_lock_path` (hf-cache.cpp:165 @b1b770d90): the lock file of a
 /// blob, shared with the hf CLI: `<cache>/.locks/<repo folder>/<oid>.lock`. A
 /// pure path computation: creates nothing.
 ///
@@ -491,7 +491,7 @@ pub fn getLockPath(a: Allocator, repo_id: []const u8, oid: []const u8) Error![]c
     return pathJoin(a, dir, try std.mem.concat(a, u8, &.{ oid, ".lock" }));
 }
 
-/// Ports `is_valid_subpath` (hf-cache.cpp:173 @cd959bae9): `subpath`, a
+/// Ports `is_valid_subpath` (hf-cache.cpp:173 @b1b770d90): `subpath`, a
 /// relative path, stays under `path` once normalized.
 fn isValidSubpath(a: Allocator, path: []const u8, subpath: []const u8) Allocator.Error!bool {
     if (subpath.len != 0 and subpath[0] == '/') {
@@ -547,7 +547,7 @@ pub fn readFirstLine(a: Allocator, path: []const u8) Allocator.Error!?[]u8 {
     return out.items;
 }
 
-/// Ports `api_get` (hf-cache.cpp:184 @cd959bae9): a hub API GET, its body
+/// Ports `api_get` (hf-cache.cpp:184 @b1b770d90): a hub API GET, its body
 /// parsed as JSON; any other status throws with the body's `error`, or the
 /// body itself.
 fn apiGet(a: Allocator, url: []const u8, token: []const u8) Error!Value {
@@ -606,7 +606,7 @@ fn logCaught(comptime func: [*:0]const u8, e: anyerror) void {
     }
 }
 
-/// Ports `get_repo_commit` (hf-cache.cpp:215 @cd959bae9): the commit of the
+/// Ports `get_repo_commit` (hf-cache.cpp:215 @b1b770d90): the commit of the
 /// `main` branch, or of the first valid one, recorded under `refs/`; empty
 /// on any failure, which is logged.
 fn getRepoCommit(a: Allocator, repo_id: []const u8, token: []const u8) Allocator.Error![]const u8 {
@@ -676,7 +676,7 @@ fn getRepoCommitImpl(a: Allocator, repo_id: []const u8, token: []const u8) Error
     return try a.dupe(u8, commit);
 }
 
-/// Ports `hf_file` (hf-cache.h:11 @cd959bae9).
+/// Ports `hf_file` (hf-cache.h:11 @b1b770d90).
 pub const HfFile = struct {
     path: []const u8 = "",
     url: []const u8 = "",
@@ -686,10 +686,10 @@ pub const HfFile = struct {
     repo_id: []const u8 = "",
 };
 
-/// Ports `hf_files` (hf-cache.h:20 @cd959bae9).
+/// Ports `hf_files` (hf-cache.h:20 @b1b770d90).
 pub const HfFiles = []HfFile;
 
-/// Ports `get_repo_files` (hf-cache.cpp:282 @cd959bae9): every file of the
+/// Ports `get_repo_files` (hf-cache.cpp:282 @b1b770d90): every file of the
 /// repository at its current commit, from the hub's tree API; a blob not
 /// yet in a snapshot downloads to `blobs/<oid>`. Empty on any failure,
 /// which is logged.
@@ -775,7 +775,7 @@ fn getRepoFilesImpl(a: Allocator, repo_id: []const u8, token: []const u8, commit
     }
 }
 
-/// Ports `get_cached_ref` (hf-cache.cpp:362 @cd959bae9): the commit `refs/main`
+/// Ports `get_cached_ref` (hf-cache.cpp:362 @b1b770d90): the commit `refs/main`
 /// names, or the first valid one under `refs/`.
 fn getCachedRef(a: Allocator, repo_path: []const u8) Allocator.Error![]const u8 {
     const refs_path = try pathJoin(a, repo_path, "refs");
@@ -817,7 +817,7 @@ fn walk(a: Allocator, root: []const u8, out: *std.ArrayList([]const u8)) Allocat
     }
 }
 
-/// Ports `get_cache_path` (hf-cache.cpp:65 @cd959bae9): the HuggingFace hub
+/// Ports `get_cache_path` (hf-cache.cpp:65 @b1b770d90): the HuggingFace hub
 /// cache path, as UTF-8.
 ///
 /// Return: process-lifetime; the error `get_cache_directory` throws when no
@@ -826,7 +826,7 @@ pub fn getCachePath() Error![]const u8 {
     return getCacheDirectory();
 }
 
-/// Ports `get_cached_files` (hf-cache.cpp:392 @cd959bae9): every file in
+/// Ports `get_cached_files` (hf-cache.cpp:392 @b1b770d90): every file in
 /// the snapshot of each cached repository's current commit, or of `repo_id`'s
 /// alone.
 pub fn getCachedFiles(a: Allocator, repo_id: []const u8) Error!HfFiles {
@@ -890,7 +890,7 @@ pub fn getCachedFiles(a: Allocator, repo_id: []const u8) Error!HfFiles {
 
 var symlinks_disabled: std.atomic.Value(bool) = .init(false);
 
-/// Ports `finalize_file` (hf-cache.cpp:449 @cd959bae9): a downloaded blob
+/// Ports `finalize_file` (hf-cache.cpp:448 @b1b770d90): a downloaded blob
 /// linked into its snapshot (relative symbolic link), or moved, or copied
 /// once links have failed. A completed snapshot is returned without the
 /// lock, so a read-only cache works; otherwise the blob's lock, shared with
@@ -987,7 +987,7 @@ fn copyFile(a: Allocator, from: []const u8, to: []const u8) bool {
     return writeFile(a, to, data.items);
 }
 
-/// Ports `remove_cached_repo` (hf-cache.cpp:510 @cd959bae9): the whole
+/// Ports `remove_cached_repo` (hf-cache.cpp:509 @b1b770d90): the whole
 /// cached directory of a repository.
 ///
 /// Return: whether anything was removed.

@@ -3,9 +3,9 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/soprano.cpp` at v0.9.0 (`cd959bae9`),
-//! and the `PROJECTOR_TYPE_SOPRANO` arm of `clip_get_graph_builder`
-//! (`llama.cpp/tools/mtmd/clip.cpp`). Each declaration names what it ports
+//! Ports `llama.cpp/tools/mtmd/models/soprano.cpp` at v1.0.0 (`b1b770d90`),
+//! and the `PROJECTOR_TYPE_SOPRANO` arm of `mtmd_get_graph_builder`
+//! (`llama.cpp/tools/mtmd/mtmd-graph.cpp`). Each declaration names what it ports
 //! and the line it began at.
 
 const std = @import("std");
@@ -19,13 +19,13 @@ const gpa = impl.gpa;
 const ne = graph.ne;
 const nb = graph.nb;
 
-/// `upscale` (mtmd/models/models.h:501 @cd959bae9), a member of `clip_graph_soprano`:
+/// `upscale` (mtmd/models/models.h:544 @b1b770d90), a member of `mtmd_graph_soprano`:
 /// the SopranoDecoder default.
 const upscale: c_int = 4;
 
-/// Ports `build` (soprano.cpp:5 @cd959bae9), a member of `clip_graph_soprano`,
-/// with `n_frames` derived as clip_get_graph_builder's `PROJECTOR_TYPE_SOPRANO`
-/// arm does (mtmd/clip.cpp:1247 @cd959bae9).
+/// Ports `build` (soprano.cpp:5 @b1b770d90), a member of `mtmd_graph_soprano`,
+/// with `n_frames` derived as mtmd_get_graph_builder's `PROJECTOR_TYPE_SOPRANO`
+/// arm does (mtmd-graph.cpp:1030 @b1b770d90).
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     const ctx0 = g.ctx0;
     const hparams = g.hparams;
@@ -90,8 +90,8 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     return g.gf;
 }
 
-/// Ports `decode_spectrum` (soprano.cpp:62 @cd959bae9), a member of
-/// `clip_graph_soprano`: the graph's STFT frames to PCM, on the host.
+/// Ports `decode_spectrum` (soprano.cpp:62 @b1b770d90), a member of
+/// `mtmd_graph_soprano`: the graph's STFT frames to PCM, on the host.
 pub fn decodeSpectrum(model: *const model_mod.Model, spectrum: []const f32, pcm: *std.ArrayList(f32)) clip.Error!void {
     const n_frame_vals: usize = @intCast(ne(model.vocos.output_w, 1));
     const n_fft: c_int = @intCast(n_frame_vals - 2);

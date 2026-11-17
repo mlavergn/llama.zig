@@ -5,7 +5,7 @@
 //!
 //! Ports `common_json::dump_safe` from `llama.cpp/common/json.cpp` and the
 //! string escaping of `nlohmann::detail::serializer::dump_escaped` from
-//! `llama.cpp/vendor/nlohmann/json.hpp` (v0.9.0, `cd959bae9`), as
+//! `llama.cpp/vendor/nlohmann/json.hpp` (v1.0.0, `b1b770d90`), as
 //! `common/log.cpp` uses them. Each declaration names what it ports and the
 //! line it began at.
 //!
@@ -18,8 +18,8 @@
 const std = @import("std");
 const serializer = @import("serializer.zig");
 
-/// Ports `dump_escaped` (json.hpp:19363 @cd959bae9), a member of
-/// `serializer`, as `dump_safe` (json.cpp:343 @cd959bae9) calls it:
+/// Ports `dump_escaped` (json.hpp:19363 @b1b770d90), a member of
+/// `serializer`, as `dump_safe` (json.cpp:343 @b1b770d90) calls it:
 /// `ensure_ascii` false and `error_handler_t::replace`. Writes `s` without
 /// its quotes.
 ///

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/sum.cu` at v0.9.0 (`cd959bae9`),
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/sum.cu` at v1.0.0 (`b1b770d90`),
 //! the `GGML_CUDA_USE_CUB` arm. `cub::DeviceReduce::Sum` is reached through
 //! `cub_shim.cu` (PLAN.md, Decision 47).
 
@@ -18,7 +18,7 @@ const Tensor = c.ggml_tensor;
 /// `cub_shim.cu`.
 pub extern fn ggml_cuda_cub_reduce_sum_f32(d_temp_storage: ?*anyopaque, tmp_size: *usize, x: ?*const f32, dst: ?*f32, ne: i64, stream: cu.cudaStream_t) cu.cudaError_t;
 
-/// Ports `sum_f32_cuda` (sum.cu:11 @cd959bae9). Upstream ignores both of
+/// Ports `sum_f32_cuda` (sum.cu:11 @b1b770d90). Upstream ignores both of
 /// CUB's return values, and so does this.
 ///
 /// Parameters:
@@ -33,7 +33,7 @@ pub fn sumF32Cuda(pool: *common.Pool, x: ?*const f32, dst: ?*f32, ne: i64, strea
     _ = ggml_cuda_cub_reduce_sum_f32(tmp_alloc.get(), &tmp_size, x, dst, ne, stream);
 }
 
-/// Ports `ggml_cuda_op_sum` (sum.cu:25 @cd959bae9).
+/// Ports `ggml_cuda_op_sum` (sum.cu:25 @b1b770d90).
 pub fn opSum(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 

@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/deepseek.cpp` (llama.cpp v0.9.0,
-//! `cd959bae9`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/deepseek.cpp` (llama.cpp v1.0.0,
+//! `b1b770d90`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -43,7 +43,7 @@ fn role(m: *const Value) Error![]const u8 {
     return m.value("role", []const u8, "") catch |e| util.fromJson(e);
 }
 
-/// Ports `deepseek_v4_sort_tool_results` (parsers/deepseek.cpp:7 @cd959bae9): each
+/// Ports `deepseek_v4_sort_tool_results` (parsers/deepseek.cpp:7 @b1b770d90): each
 /// run of user and tool messages with its tool results put in the order of
 /// the preceding assistant message's tool calls, matched by id.
 ///
@@ -295,7 +295,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_deepseek_v3_2` (parsers/deepseek.cpp:70 @cd959bae9).
+/// Ports `common_chat_params_init_deepseek_v3_2` (parsers/deepseek.cpp:70 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
@@ -425,7 +425,7 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     const arena = &data.parser.?;
 
     if (include_grammar) {
-        data.grammar_lazy = has_tools and !require_tools;
+        data.grammar_lazy = !has_response_format and has_tools and !require_tools;
         data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
         try data.addWordTrigger(a, fc_start);
     }

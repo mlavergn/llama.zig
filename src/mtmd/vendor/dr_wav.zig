@@ -5,7 +5,7 @@
 //!
 //! Ports the reading half of `ma_dr_wav` in
 //! `llama.cpp/vendor/miniaudio/miniaudio.h` (miniaudio v0.11.26, dr_wav
-//! v0.14.6 embedded) at v0.9.0 (`cd959bae9`). Each declaration names the
+//! v0.14.6 embedded) at v1.0.0 (`b1b770d90`). Each declaration names the
 //! function it ports and the line it began at.
 //!
 //! # What is reachable
@@ -29,7 +29,7 @@ const format_mulaw = 0x7;
 const format_dvi_adpcm = 0x11;
 const format_extensible = 0xFFFE;
 
-/// `MA_DR_WAV_MAX_SAMPLE_RATE`, `MA_DR_WAV_MAX_CHANNELS` and `MA_DR_WAV_MAX_BITS_PER_SAMPLE` (miniaudio.h:80272, 80275, 80278 @cd959bae9).
+/// `MA_DR_WAV_MAX_SAMPLE_RATE`, `MA_DR_WAV_MAX_CHANNELS` and `MA_DR_WAV_MAX_BITS_PER_SAMPLE` (miniaudio.h:80272, 80275, 80278 @b1b770d90).
 const max_sample_rate = 384000;
 const max_channels = 256;
 const max_bits_per_sample = 64;
@@ -60,7 +60,7 @@ fn u32le(b: []const u8) u32 {
     return std.mem.readInt(u32, b[0..4], .little);
 }
 
-/// Ports `ma_dr_wav`'s reading state (miniaudio.h:62462 @cd959bae9).
+/// Ports `ma_dr_wav`'s reading state (miniaudio.h:62462 @b1b770d90).
 pub const Wav = struct {
     io: Io,
     fmt: Fmt = .{},
@@ -89,7 +89,7 @@ pub const Wav = struct {
         cached_frame_count: u32 = 0,
     } = .{},
 
-    /// Ports `ma_dr_wav_init__internal` (miniaudio.h:81550 @cd959bae9), the
+    /// Ports `ma_dr_wav_init__internal` (miniaudio.h:81550 @b1b770d90), the
     /// RIFF container with no metadata and no chunk callback.
     ///
     /// Parameters:
@@ -122,7 +122,7 @@ pub const Wav = struct {
         if (!std.mem.eql(u8, &wave, "WAVE")) return false;
 
         while (true) {
-            // `ma_dr_wav__read_chunk_header` (miniaudio.h:80634 @cd959bae9)
+            // `ma_dr_wav__read_chunk_header` (miniaudio.h:80634 @b1b770d90)
             var id: [4]u8 = undefined;
             if (w.io.read(&id) != 4) break;
             var size_bytes: [4]u8 = undefined;
@@ -281,14 +281,14 @@ pub const Wav = struct {
         return true;
     }
 
-    /// Ports `ma_dr_wav__on_read` (miniaudio.h:80705 @cd959bae9).
+    /// Ports `ma_dr_wav__on_read` (miniaudio.h:80705 @b1b770d90).
     fn readCounted(w: *Wav, buf: []u8, cursor: *u64) usize {
         const n = w.io.read(buf);
         cursor.* +%= n;
         return n;
     }
 
-    /// Ports `ma_dr_wav_get_bytes_per_pcm_frame` (miniaudio.h:81508 @cd959bae9).
+    /// Ports `ma_dr_wav_get_bytes_per_pcm_frame` (miniaudio.h:81508 @b1b770d90).
     fn bytesPerPcmFrame(w: *const Wav) u32 {
         var bpf: u32 = undefined;
         if (w.bits_per_sample & 0x7 == 0) {
@@ -302,7 +302,7 @@ pub const Wav = struct {
         return bpf;
     }
 
-    /// Ports `ma_dr_wav_read_raw` (miniaudio.h:83141 @cd959bae9), into a
+    /// Ports `ma_dr_wav_read_raw` (miniaudio.h:83141 @b1b770d90), into a
     /// buffer.
     fn readRaw(w: *Wav, buf: []u8) usize {
         var bytes_to_read = buf.len;
@@ -317,7 +317,7 @@ pub const Wav = struct {
         return n;
     }
 
-    /// Ports `ma_dr_wav_read_pcm_frames_le` (miniaudio.h:83190 @cd959bae9),
+    /// Ports `ma_dr_wav_read_pcm_frames_le` (miniaudio.h:83190 @b1b770d90),
     /// the only arm `ma_dr_wav_read_pcm_frames` takes for RIFF.
     fn readPcmFramesLe(w: *Wav, frames_in: u64, buf: []u8) u64 {
         var frames = frames_in;
@@ -332,7 +332,7 @@ pub const Wav = struct {
         return w.readRaw(buf[0..@intCast(bytes)]) / bpf;
     }
 
-    /// Ports `ma_dr_wav_read_pcm_frames_f32` (miniaudio.h:84338 @cd959bae9).
+    /// Ports `ma_dr_wav_read_pcm_frames_f32` (miniaudio.h:84338 @b1b770d90).
     /// The decoder always reads into a buffer, so the null-buffer arm
     /// (`ma_dr_wav_seek_forward`) is not here.
     ///
@@ -357,7 +357,7 @@ pub const Wav = struct {
 
     /// Ports `ma_dr_wav_read_pcm_frames_f32__pcm`, `ma_dr_wav_read_pcm_frames_f32__ieee`,
     /// `ma_dr_wav_read_pcm_frames_f32__alaw` and `ma_dr_wav_read_pcm_frames_f32__mulaw`
-    /// (miniaudio.h:84176, 84230, 84268, 84303 @cd959bae9), which
+    /// (miniaudio.h:84176, 84230, 84268, 84303 @b1b770d90), which
     /// share a body.
     fn readF32Chunked(w: *Wav, frames_in: u64, out: []f32, comptime conv: Conv) u64 {
         if (conv == .ieee and w.translated_format_tag == format_ieee_float and w.bits_per_sample == 32) {
@@ -398,7 +398,7 @@ pub const Wav = struct {
         return total;
     }
 
-    /// Ports `ma_dr_wav_read_pcm_frames_f32__msadpcm_ima` (miniaudio.h:84211 @cd959bae9).
+    /// Ports `ma_dr_wav_read_pcm_frames_f32__msadpcm_ima` (miniaudio.h:84211 @b1b770d90).
     fn readF32Adpcm(w: *Wav, frames_in: u64, out: []f32) u64 {
         var samples16: [2048]i16 = undefined;
         var frames = frames_in;
@@ -417,7 +417,7 @@ pub const Wav = struct {
         return total;
     }
 
-    /// Ports `ma_dr_wav_read_pcm_frames_s16` (miniaudio.h:83997 @cd959bae9),
+    /// Ports `ma_dr_wav_read_pcm_frames_s16` (miniaudio.h:83997 @b1b770d90),
     /// the ADPCM arms `__msadpcm_ima` reaches.
     fn readPcmFramesS16(w: *Wav, frames: u64, out: []i16) u64 {
         if (frames == 0) return 0;
@@ -428,7 +428,7 @@ pub const Wav = struct {
         };
     }
 
-    /// Ports `ma_dr_wav_read_pcm_frames_s16__msadpcm` (miniaudio.h:83487 @cd959bae9).
+    /// Ports `ma_dr_wav_read_pcm_frames_s16__msadpcm` (miniaudio.h:83487 @b1b770d90).
     fn readS16MsAdpcm(w: *Wav, frames_in: u64, out: []i16) u64 {
         const adaptation_table = [16]i32{ 230, 230, 230, 230, 307, 409, 512, 614, 768, 614, 512, 409, 307, 230, 230, 230 };
         const coeff1_table = [7]i32{ 256, 512, 0, 192, 240, 460, 392 };
@@ -523,7 +523,7 @@ pub const Wav = struct {
         return total;
     }
 
-    /// Ports `ma_dr_wav_read_pcm_frames_s16__ima` (miniaudio.h:83614 @cd959bae9).
+    /// Ports `ma_dr_wav_read_pcm_frames_s16__ima` (miniaudio.h:83614 @b1b770d90).
     fn readS16Ima(w: *Wav, frames_in: u64, out: []i16) u64 {
         const index_table = [16]i32{ -1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8 };
         const im = &w.ima;
@@ -607,7 +607,7 @@ pub const Wav = struct {
     }
 };
 
-/// Ports `ma_dr_wav__msadpcm_calc_sample` (miniaudio.h:83477 @cd959bae9):
+/// Ports `ma_dr_wav__msadpcm_calc_sample` (miniaudio.h:83477 @b1b770d90):
 /// a delta large enough to overflow `int` adds in 64 bits; below that
 /// bound the `int` sum cannot overflow, the previous samples being 16-bit.
 fn msadpcmCalcSample(prev0: i32, prev1: i32, coeff1: i32, coeff2: i32, nibble: i32, delta: i32) i32 {
@@ -622,14 +622,14 @@ fn adaptDelta(adaptation: i32, delta: i32) i32 {
     return @intCast(std.math.clamp((@as(i64, adaptation) * delta) >> 8, 16, 0x7FFFFFFF));
 }
 
-/// Ports `ma_dr_wav__is_compressed_format_tag` (miniaudio.h:80609 @cd959bae9).
+/// Ports `ma_dr_wav__is_compressed_format_tag` (miniaudio.h:80609 @b1b770d90).
 fn isCompressedFormatTag(tag: u16) bool {
     return tag == format_adpcm or tag == format_dvi_adpcm;
 }
 
-/// Ports `ma_dr_wav__pcm_to_f32` (miniaudio.h:84121 @cd959bae9) and the
+/// Ports `ma_dr_wav__pcm_to_f32` (miniaudio.h:84121 @b1b770d90) and the
 /// converters it calls, `ma_dr_wav_u8_to_f32`, `ma_dr_wav_s16_to_f32`,
-/// `ma_dr_wav_s24_to_f32` and `ma_dr_wav_s32_to_f32` (miniaudio.h:84382, 84392, 84402, 84417 @cd959bae9).
+/// `ma_dr_wav_s24_to_f32` and `ma_dr_wav_s32_to_f32` (miniaudio.h:84382, 84392, 84402, 84417 @b1b770d90).
 fn pcmToF32(out: []f32, in: []const u8, bps: u32) void {
     switch (bps) {
         1 => for (out, 0..) |*d, i| {
@@ -670,7 +670,7 @@ fn pcmToF32(out: []f32, in: []const u8, bps: u32) void {
     }
 }
 
-/// Ports `ma_dr_wav__ieee_to_f32` (miniaudio.h:84160 @cd959bae9).
+/// Ports `ma_dr_wav__ieee_to_f32` (miniaudio.h:84160 @b1b770d90).
 fn ieeeToF32(out: []f32, in: []const u8, bps: u32) void {
     switch (bps) {
         4 => for (out, 0..) |*d, i| {
@@ -683,7 +683,7 @@ fn ieeeToF32(out: []f32, in: []const u8, bps: u32) void {
     }
 }
 
-/// The IMA `stepTable` (miniaudio.h:83622 @cd959bae9).
+/// The IMA `stepTable` (miniaudio.h:83622 @b1b770d90).
 const ima_step_table = [89]i32{
     7,     8,     9,     10,    11,    12,    13,    14,    16,    17,
     19,    21,    23,    25,    28,    31,    34,    37,    41,    45,
@@ -696,7 +696,7 @@ const ima_step_table = [89]i32{
     15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767,
 };
 
-/// `ma_dr_wav_gAlawTable` (miniaudio.h:83735 @cd959bae9).
+/// `ma_dr_wav_gAlawTable` (miniaudio.h:83735 @b1b770d90).
 const alaw_table = [256]u16{
     0xEA80, 0xEB80, 0xE880, 0xE980, 0xEE80, 0xEF80, 0xEC80, 0xED80, 0xE280, 0xE380, 0xE080, 0xE180, 0xE680, 0xE780, 0xE480, 0xE580,
     0xF540, 0xF5C0, 0xF440, 0xF4C0, 0xF740, 0xF7C0, 0xF640, 0xF6C0, 0xF140, 0xF1C0, 0xF040, 0xF0C0, 0xF340, 0xF3C0, 0xF240, 0xF2C0,
@@ -716,7 +716,7 @@ const alaw_table = [256]u16{
     0x02B0, 0x0290, 0x02F0, 0x02D0, 0x0230, 0x0210, 0x0270, 0x0250, 0x03B0, 0x0390, 0x03F0, 0x03D0, 0x0330, 0x0310, 0x0370, 0x0350,
 };
 
-/// `ma_dr_wav_gMulawTable` (miniaudio.h:83753 @cd959bae9).
+/// `ma_dr_wav_gMulawTable` (miniaudio.h:83753 @b1b770d90).
 const mulaw_table = [256]u16{
     0x8284, 0x8684, 0x8A84, 0x8E84, 0x9284, 0x9684, 0x9A84, 0x9E84, 0xA284, 0xA684, 0xAA84, 0xAE84, 0xB284, 0xB684, 0xBA84, 0xBE84,
     0xC184, 0xC384, 0xC584, 0xC784, 0xC984, 0xCB84, 0xCD84, 0xCF84, 0xD184, 0xD384, 0xD584, 0xD784, 0xD984, 0xDB84, 0xDD84, 0xDF84,

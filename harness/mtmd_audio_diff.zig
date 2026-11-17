@@ -3,9 +3,14 @@
 //! (`harness/mtmd_audio_ref.cpp`), in one process.
 //!
 //! Every preprocessor runs on both sides over the same PCM and hparams, and
-//! everything it returns must agree **on bits**: the ok flag, the number of
-//! mels, each mel's `n_len`, `n_len_org`, `n_mel` and every float -- and
-//! every log line either side wrote. The streaming inverse STFT runs a
+//! everything it returns must agree **on bits** -- since v1.0.0 through its
+//! two public stages: what `preprocess` returns (each entry's shape, whether
+//! it is a placeholder, its floats if not, the samples kept for the log-mel
+//! graph and `needs_compute`), then the same after `compute`, which runs the
+//! graph (`mtmd_audio_log_mel`) on a CPU scheduler, and its ok flag -- and
+//! every log line either side wrote. A mel's `n_len_org` no longer leaves a
+//! preprocessor, so it is not compared. Cases alternate between one thread
+//! and four. The streaming inverse STFT runs a
 //! sequence of frames, a flush, a reset and more frames. Signals: silence,
 //! sine sweeps, white noise, impulses, a hard-clipped square, large
 //! amplitudes; lengths from a handful of samples to past 60 s, at every
@@ -17,6 +22,7 @@ const std = @import("std");
 const audio = @import("mtmd_audio");
 const mtmd = audio.deps;
 const Hparams = mtmd.model.Hparams;
+const c = mtmd.impl.c;
 
 extern fn ref_audio_hparams_new() ?*anyopaque;
 extern fn ref_audio_hparams_free(hp: ?*anyopaque) void;
@@ -24,11 +30,11 @@ extern fn ref_audio_hparams_set(hp: ?*anyopaque, n_mel_bins: c_int, n_fft: c_int
 extern fn ref_audio_hparams_set_parakeet(hp: ?*anyopaque, mel_filters: [*]const f32, n_filters: usize, window: [*]const f32, n_window: usize) void;
 extern fn ref_audio_hparams_set_patches(hp: ?*anyopaque, sizes: [*]const i32, n: usize) void;
 extern fn ref_mel_frame_new(n_fft: c_int, window: c_int, n_mel: c_int, sample_rate: c_int) ?*anyopaque;
-extern fn ref_mel_frame_free(c: ?*anyopaque) void;
-extern fn ref_mel_frame_run(c: ?*anyopaque, samples: [*]const f32, n_fft: c_int, n_mel: c_int, out: [*]f32) void;
+extern fn ref_mel_frame_free(cache: ?*anyopaque) void;
+extern fn ref_mel_frame_run(cache: ?*anyopaque, samples: [*]const f32, n_fft: c_int, n_mel: c_int, out: [*]f32) void;
 extern fn ref_audio_set_log(cb: ?*const fn (c_int, [*c]const u8, ?*anyopaque) callconv(.c) void, ud: ?*anyopaque) void;
-extern fn ref_audio_proc_new(kind: c_int, hp: ?*anyopaque) ?*anyopaque;
-extern fn ref_audio_proc_new_flag(kind: c_int, hp: ?*anyopaque, flag: c_int) ?*anyopaque;
+extern fn ref_audio_proc_new(kind: c_int, hp: ?*anyopaque, n_threads: c_int) ?*anyopaque;
+extern fn ref_audio_proc_new_flag(kind: c_int, hp: ?*anyopaque, flag: c_int, n_threads: c_int) ?*anyopaque;
 extern fn ref_audio_proc_free(r: ?*anyopaque) void;
 extern fn ref_audio_proc_run(r: ?*anyopaque, samples: [*]const f32, n: usize, out: *?*anyopaque, out_len: *usize) c_int;
 extern fn ref_istft_new(n_fft: c_int, hop: c_int) ?*anyopaque;
@@ -138,17 +144,35 @@ fn makeSignal(sig: Signal, n: usize, sr: c_int, seed: u64) ![]f32 {
 // -----------------------------------------------------------------------------
 // the port's result, in the shim's blob format
 
-fn portBlob(mels: []const audio.Mel) ![]u8 {
-    var blob: std.ArrayList(u8) = .empty;
-    try blob.appendSlice(gpa, std.mem.asBytes(&@as(i64, @intCast(mels.len))));
-    for (mels) |m| {
-        try blob.appendSlice(gpa, std.mem.asBytes(&m.n_len));
-        try blob.appendSlice(gpa, std.mem.asBytes(&m.n_len_org));
-        try blob.appendSlice(gpa, std.mem.asBytes(&m.n_mel));
-        try blob.appendSlice(gpa, std.mem.asBytes(&@as(i64, @intCast(m.data.items.len))));
-        try blob.appendSlice(gpa, std.mem.sliceAsBytes(m.data.items));
+fn put64(blob: *std.ArrayList(u8), v: i64) !void {
+    try blob.appendSlice(gpa, std.mem.asBytes(&v));
+}
+
+/// `put_out` of `harness/mtmd_audio_ref.cpp`.
+fn putOut(blob: *std.ArrayList(u8), o: *const audio.PreprocOut) !void {
+    try put64(blob, @intCast(o.entries.items.len));
+    for (o.entries.items) |*e| {
+        try put64(blob, e.nx());
+        try put64(blob, e.ny());
+        try put64(blob, @intFromBool(e.isPlaceholder()));
+        try put64(blob, @intCast(e.roBuf().len));
+        try blob.appendSlice(gpa, std.mem.sliceAsBytes(e.roBuf()));
     }
-    return blob.toOwnedSlice(gpa);
+    try put64(blob, @intCast(o.samples.items.len));
+    try blob.appendSlice(gpa, std.mem.sliceAsBytes(o.samples.items));
+    try put64(blob, @intFromBool(o.needsCompute()));
+}
+
+// The port's CPU scheduler, built as the shim builds its own.
+var port_sched: c.ggml_backend_sched_t = null;
+
+fn portSched() c.ggml_backend_sched_t {
+    if (port_sched == null) {
+        var cpu = c.ggml_backend_init_by_type(c.GGML_BACKEND_DEVICE_TYPE_CPU, null);
+        var buft = c.ggml_backend_get_default_buffer_type(cpu);
+        port_sched = c.ggml_backend_sched_new(&cpu, &buft, 1, 8192, false, true);
+    }
+    return port_sched;
 }
 
 var n_cases: usize = 0;
@@ -183,11 +207,13 @@ fn runCase(cfg: *const Config, hp_port: *const Hparams, hp_ref: ?*anyopaque, len
     log_ref.clearRetainingCapacity();
     log_port.clearRetainingCapacity();
 
+    const n_threads: c_int = if (n_cases % 2 == 0) 4 else 1;
+
     // reference
     const r = if (cfg.kind == .chatterbox_ref)
-        ref_audio_proc_new_flag(@backingInt(cfg.kind), hp_ref, @intFromBool(cfg.is_mtl))
+        ref_audio_proc_new_flag(@backingInt(cfg.kind), hp_ref, @intFromBool(cfg.is_mtl), n_threads)
     else
-        ref_audio_proc_new(@backingInt(cfg.kind), hp_ref);
+        ref_audio_proc_new(@backingInt(cfg.kind), hp_ref, n_threads);
     defer ref_audio_proc_free(r);
     var blob: ?*anyopaque = null;
     var blob_len: usize = 0;
@@ -198,16 +224,18 @@ fn runCase(cfg: *const Config, hp_port: *const Hparams, hp_ref: ?*anyopaque, len
     // port
     var p = audio.Preprocessor.init(cfg.kind, hp_port);
     p.is_mtl = cfg.is_mtl;
+    p.mel_config.n_threads = n_threads;
+    p.mel_config.sched = portSched();
     defer p.deinit();
     try p.initialize();
-    var mels: std.ArrayList(audio.Mel) = .empty;
-    defer {
-        for (mels.items) |*m| m.deinit();
-        mels.deinit(gpa);
-    }
-    const ok_port = try p.preprocess(samples, &mels);
-    const port_bytes = try portBlob(mels.items);
-    defer gpa.free(port_bytes);
+    var o = try p.preprocess(samples);
+    defer o.deinit();
+    var port_blob: std.ArrayList(u8) = .empty;
+    defer port_blob.deinit(gpa);
+    try putOut(&port_blob, &o);
+    const ok_port = try p.compute(&o);
+    try putOut(&port_blob, &o);
+    const port_bytes = port_blob.items;
 
     n_checks += 1;
     if (ok_ref != ok_port) fail("{s} n={d} {s}: ok ref={} port={}", .{ cfg.name, len, @tagName(sig), ok_ref, ok_port });
@@ -397,7 +425,7 @@ pub fn main(init: std.process.Init) !u8 {
         for ([_][3]c_int{ .{ 400, 128, 16000 }, .{ 400, 32, 16000 }, .{ 512, 80, 24000 } }) |m| try runMelFrame(m[0], m[1], m[2]);
     }
     if (filter == null or std.mem.indexOf(u8, "istft", filter.?) != null) {
-        for ([_][2]c_int{ .{ 16, 4 }, .{ 20, 5 }, .{ 100, 25 }, .{ 1024, 256 }, .{ 1920, 480 }, .{ 30, 30 }, .{ 25, 7 } }) |c| try runIstft(c[0], c[1], 40);
+        for ([_][2]c_int{ .{ 16, 4 }, .{ 20, 5 }, .{ 100, 25 }, .{ 1024, 256 }, .{ 1920, 480 }, .{ 30, 30 }, .{ 25, 7 } }) |cf| try runIstft(cf[0], cf[1], 40);
     }
 
     if (n_fail != 0) {

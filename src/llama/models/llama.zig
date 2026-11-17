@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/llama.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/llama.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_llama`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph<embed>`; and from
 //! `llama.cpp/src/models/llama-embed.cpp`, `llama_model_llama_embed`'s
@@ -21,7 +21,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_llama`'s `load_arch_hparams` (models/llama.cpp:3 @cd959bae9).
+/// Ports `llama_model_llama`'s `load_arch_hparams` (models/llama.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -60,7 +60,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     }
 }
 
-/// Ports `llama_model_llama`'s `load_arch_tensors` (models/llama.cpp:34 @cd959bae9).
+/// Ports `llama_model_llama`'s `load_arch_tensors` (models/llama.cpp:34 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -125,20 +125,20 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_llama`'s `build_arch_graph` (models/llama.cpp:94 @cd959bae9).
+/// Ports `llama_model_llama`'s `build_arch_graph` (models/llama.cpp:94 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(false, model, b);
 }
 
 /// Ports `llama_model_llama_embed`'s `build_arch_graph` (llama-embed.cpp:3
-/// @cd959bae9): Llama's graph without a KV cache or an output projection.
+/// @b1b770d90): Llama's graph without a KV cache or an output projection.
 /// `llama_model_llama_embed` reuses Llama's loading unchanged.
 pub fn buildArchGraphEmbed(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(true, model, b);
 }
 
 /// Ports the constructor of `llama_model_llama`'s `graph<embed>`
-/// (models/llama.cpp:99 @cd959bae9).
+/// (models/llama.cpp:99 @b1b770d90).
 fn buildGraph(comptime embed: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -171,17 +171,14 @@ fn buildGraph(comptime embed: bool, model: *const Model, b: *const graph.Builder
 
         // Self-attention.
         {
-            // Llama 3's RoPE frequency factors; null for Llama 2 and others.
-            const rope_factors = model.getRopeFactors(b.cparams, @intCast(il));
-
             // Q, K and V, and RoPE on Q and K.
             const qkv = b.buildQkv(layer, cur, n_embd_head, b.n_head, b.n_head_kv, il);
             var Qcur = qkv.q;
             var Kcur = qkv.k;
             const Vcur = qkv.v;
 
-            Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
 
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);

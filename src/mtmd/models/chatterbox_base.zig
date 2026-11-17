@@ -3,13 +3,13 @@
 //!
 //! # Provenance
 //!
-//! Ports `clip_graph_chatterbox_base`, declared in
+//! Ports `mtmd_graph_chatterbox_base`, declared in
 //! `llama.cpp/tools/mtmd/models/models.h` and defined in
-//! `llama.cpp/tools/mtmd/models/chatterbox-gen.cpp`, at v0.9.0
-//! (`cd959bae9`). Each declaration names what it ports and the line it
+//! `llama.cpp/tools/mtmd/models/chatterbox-gen.cpp`, at v1.0.0
+//! (`b1b770d90`). Each declaration names what it ports and the line it
 //! began at.
 //!
-//! Upstream's class is a `clip_graph` subclass with three `const` members;
+//! Upstream's class is a `mtmd_graph` subclass with three `const` members;
 //! here they are free functions over a `graph.Graph`.
 
 const std = @import("std");
@@ -19,8 +19,8 @@ const c = impl.c;
 const T = graph.T;
 const ne = graph.ne;
 
-/// Ports `cbx_linear` (chatterbox-gen.cpp:7 @cd959bae9), a member of
-/// `clip_graph_chatterbox_base`: x `[C, T]`, y = W x + b with torch Linear
+/// Ports `cbx_linear` (chatterbox-gen.cpp:6 @b1b770d90), a member of
+/// `mtmd_graph_chatterbox_base`: x `[C, T]`, y = W x + b with torch Linear
 /// weights stored as `[in, out]`.
 pub fn cbxLinear(g: *const graph.Graph, w: T, b: T, x: T) T {
     const ctx0 = g.ctx0;
@@ -31,8 +31,8 @@ pub fn cbxLinear(g: *const graph.Graph, w: T, b: T, x: T) T {
     return y;
 }
 
-/// Ports `cbx_conv1d` (chatterbox-gen.cpp:16 @cd959bae9), a member of
-/// `clip_graph_chatterbox_base`: conv1d over time with asymmetric zero
+/// Ports `cbx_conv1d` (chatterbox-gen.cpp:15 @b1b770d90), a member of
+/// `mtmd_graph_chatterbox_base`: conv1d over time with asymmetric zero
 /// padding, x `[C, T]` to `[OC, T_out]`, kernel `[K, IC, OC]`.
 pub fn cbxConv1d(g: *const graph.Graph, k: T, b: T, x: T, stride: c_int, pad_l: c_int, pad_r: c_int) T {
     const ctx0 = g.ctx0;
@@ -55,8 +55,8 @@ pub fn cbxConv1d(g: *const graph.Graph, k: T, b: T, x: T, stride: c_int, pad_l: 
     return y;
 }
 
-/// Ports `cbx_conv1d_dil` (chatterbox-gen.cpp:38 @cd959bae9), a member of
-/// `clip_graph_chatterbox_base`: x `[C, T]` through a symmetric-padded
+/// Ports `cbx_conv1d_dil` (chatterbox-gen.cpp:37 @b1b770d90), a member of
+/// `mtmd_graph_chatterbox_base`: x `[C, T]` through a symmetric-padded
 /// dilated conv to `[OC, T]`.
 pub fn cbxConv1dDil(g: *const graph.Graph, k: T, b: T, x: T, pad: c_int, dil: c_int) T {
     const ctx0 = g.ctx0;

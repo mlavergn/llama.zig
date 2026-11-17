@@ -6,7 +6,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/metis16.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/metis16.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_metis16`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph` with the helpers it declares.
 
@@ -25,7 +25,7 @@ const Tensor = c.ggml_tensor;
 
 /// Mirrors `llama_model_metis16`'s members, with their defaults: `n_pass`,
 /// `n_stream`, `n_mem`, `n_route`, `n_layer_phys` and `cont_limit`
-/// (src/models/models.h:1807, 1808, 1809, 1810, 1811, 1812 @cd959bae9).
+/// (src/models/models.h:1715, 1716, 1717, 1718, 1719, 1720 @b1b770d90).
 pub const State = struct {
     n_pass: u32 = 1,
     n_stream: u32 = 1,
@@ -35,7 +35,7 @@ pub const State = struct {
     cont_limit: f32 = 0.0,
 };
 
-/// Ports `llama_model_metis16`'s `load_arch_hparams` (models/metis16.cpp:5 @cd959bae9).
+/// Ports `llama_model_metis16`'s `load_arch_hparams` (models/metis16.cpp:5 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -91,7 +91,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_metis16`'s `load_arch_tensors` (models/metis16.cpp:56 @cd959bae9).
+/// Ports `llama_model_metis16`'s `load_arch_tensors` (models/metis16.cpp:56 @b1b770d90).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     _ = ml;
     const hp = &self.hparams;
@@ -219,7 +219,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 // -----------------------------------------------------------------------------
 // The graph
 
-/// Ports `llama_model_metis16`'s `build_arch_graph` (models/metis16.cpp:168 @cd959bae9).
+/// Ports `llama_model_metis16`'s `build_arch_graph` (models/metis16.cpp:168 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     _ = params;
     var g: Graph = .{ .b = b, .model = model };
@@ -237,7 +237,7 @@ const Graph = struct {
     bank_vt: ?*Tensor = null,
 
     /// Ports `llama_model_metis16::graph`'s `stream_mean` (models/metis16.cpp:173
-    /// @cd959bae9). Streams are kept stream-innermost: `[n_stream, n_embd, n_tokens]`.
+    /// @b1b770d90). Streams are kept stream-innermost: `[n_stream, n_embd, n_tokens]`.
     fn streamMean(self: *const Graph, x: *Tensor) *Tensor {
         const ctx = self.b.ctx0;
         const mean = c.ggml_mean(ctx, c.ggml_reshape_2d(ctx, x, x.ne[0], x.ne[1] * x.ne[2]));
@@ -245,7 +245,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_metis16::graph`'s `hc_read` (models/metis16.cpp:179
-    /// @cd959bae9): the normalized sublayer input.
+    /// @b1b770d90): the normalized sublayer input.
     fn hcRead(self: *const Graph, x: *Tensor, mix: *Tensor, read: *Tensor, norm: ?*Tensor, p: c_int, mixed: **Tensor, il: c_int) *Tensor {
         const ctx = self.b.ctx0;
         const pu: usize = @intCast(p);
@@ -260,7 +260,7 @@ const Graph = struct {
         return self.b.buildNorm(src, norm, null, .rms, il);
     }
 
-    /// Ports `llama_model_metis16::graph`'s `hc_write` (models/metis16.cpp:192 @cd959bae9).
+    /// Ports `llama_model_metis16::graph`'s `hc_write` (models/metis16.cpp:192 @b1b770d90).
     fn hcWrite(self: *const Graph, mixed: *Tensor, write: *Tensor, update: *Tensor, p: c_int) *Tensor {
         const ctx = self.b.ctx0;
         const pu: usize = @intCast(p);
@@ -272,7 +272,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_metis16::graph`'s `mem_read` (models/metis16.cpp:201
-    /// @cd959bae9): blends the retrieved entries into the streams and returns
+    /// @b1b770d90): blends the retrieved entries into the streams and returns
     /// their summary.
     fn memRead(self: *const Graph, x: **Tensor) *Tensor {
         const b = self.b;
@@ -304,7 +304,7 @@ const Graph = struct {
         return self.streamMean(proj_s);
     }
 
-    /// Ports `llama_model_metis16::graph`'s `mem_write` (models/metis16.cpp:226 @cd959bae9).
+    /// Ports `llama_model_metis16::graph`'s `mem_write` (models/metis16.cpp:226 @b1b770d90).
     fn memWrite(self: *Graph, x: *Tensor, summary: ?*Tensor, entropy: ?*Tensor, confidence: ?*Tensor, cont_: ?*Tensor, entry: c_int) void {
         const b = self.b;
         const ctx = b.ctx0;
@@ -328,7 +328,7 @@ const Graph = struct {
         self.bank_vt = if (self.bank_vt) |bv| c.ggml_concat(ctx, bv, v, 0) else v;
     }
 
-    /// Ports `llama_model_metis16::graph`'s `route_features` (models/metis16.cpp:246 @cd959bae9).
+    /// Ports `llama_model_metis16::graph`'s `route_features` (models/metis16.cpp:246 @b1b770d90).
     fn routeFeatures(self: *const Graph, state: *Tensor, summary: ?*Tensor, diff: ?*Tensor, history: ?*Tensor) *Tensor {
         const ctx = self.b.ctx0;
         const model = self.model;
@@ -345,7 +345,7 @@ const Graph = struct {
         return c.ggml_tanh(ctx, c.ggml_add(ctx, f, model.depth_mem_route_b));
     }
 
-    /// Ports the constructor of `llama_model_metis16`'s `graph` (models/metis16.cpp:261 @cd959bae9).
+    /// Ports the constructor of `llama_model_metis16`'s `graph` (models/metis16.cpp:261 @b1b770d90).
     fn build(self: *Graph) void {
         const b = self.b;
         const ctx = b.ctx0;

@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v0.9.0
-//! (`cd959bae9`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v1.0.0
+//! (`b1b770d90`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # `q4_K` plus a fifth bit
@@ -63,7 +63,7 @@ inline fn fiveBit(bl: *const blocks.block_q5_Kx8, b_qs_offset: i32, b_qh_offset:
 }
 
 /// Ports `ggml_gemv_q5_K_NxM_q8_K_generic_impl`
-/// (ggml-cpu/repack.cpp:551 @cd959bae9).
+/// (ggml-cpu/repack.cpp:551 @b1b770d90).
 fn gemv(
     comptime blocklen: i32,
     comptime ncols_interleaved: i32,
@@ -153,7 +153,7 @@ fn gemv(
 }
 
 /// Ports `ggml_gemm_q5_K_NxM_q8_K_generic_impl`
-/// (ggml-cpu/repack.cpp:647 @cd959bae9).
+/// (ggml-cpu/repack.cpp:647 @b1b770d90).
 fn gemm(
     comptime blocklen: i32,
     comptime ncols_interleaved: i32,

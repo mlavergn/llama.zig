@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports that stretch of `common_params_parser_init` (arg.cpp:1344 @cd959bae9)
-//! from `llama.cpp/common/arg.cpp` (v0.9.0, `cd959bae9`), as
+//! Ports that stretch of `common_params_parser_init` (arg.cpp:1365 @b1b770d90)
+//! from `llama.cpp/common/arg.cpp` (v1.0.0, `b1b770d90`), as
 //! `arg_options.zig` describes, with the helpers its handlers call:
 //! `common_reasoning_format_from_name` from `llama.cpp/common/chat.cpp`,
 //! `fs_is_directory` from `llama.cpp/common/common.cpp`, and libc++'s
@@ -52,7 +52,7 @@ fn jsonThrow(e: json.Error) anyerror {
     };
 }
 
-/// Ports `common_reasoning_format_from_name` (chat.cpp:1026 @cd959bae9).
+/// Ports `common_reasoning_format_from_name` (chat.cpp:1058 @b1b770d90).
 fn reasoningFormatFromName(format: []const u8) !params_mod.ReasoningFormat {
     if (std.mem.eql(u8, format, "none")) return .none;
     if (std.mem.eql(u8, format, "auto")) return .auto;
@@ -74,7 +74,7 @@ fn statOf(path: [:0]const u8, err: *c_int) Status {
     return .unknown;
 }
 
-/// Ports `fs_is_directory` (common/common.cpp:964 @cd959bae9).
+/// Ports `fs_is_directory` (common/common.cpp:944 @b1b770d90).
 fn fsIsDirectory(p: *Params, path: []const u8) !bool {
     var e: c_int = 0;
     return statOf(try p.arena.dupeSentinel(u8, path, 0), &e) == .directory;
@@ -184,7 +184,7 @@ pub fn add(ctx: *Context) !void {
         }
     }.f } }).setExamples(&.{.server}).setEnv("LLAMA_ARG_STATIC_PATH"));
     // arg.cpp:3379
-    try ctx.add((Arg{ .args = &.{"--cors-origins"}, .value_hint = "ORIGINS", .help = try ctx.fmt("comma-separated list of allowed origins for CORS (default: %s)\nif set to special value 'localhost', reflect the Origin header only if it is localhost", .{try z(p, p.cors_origins)}), .handler = .{ .string = struct {
+    try ctx.add((Arg{ .args = &.{"--cors-origins"}, .value_hint = "ORIGINS", .help = try ctx.fmt("comma-separated list of allowed origins for CORS (default: %s)\nif set to special value 'localhost', only allow same-origin requests (e.g. the built-in UI)", .{try z(p, p.cors_origins)}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.cors_origins = try arg.dupe(q, value);
             q.cors_origins_explicit = true;
@@ -227,7 +227,7 @@ pub fn add(ctx: *Context) !void {
         }
     }.f } }).setExamples(&.{.server}).setEnv("LLAMA_ARG_UI_CONFIG_FILE"));
     // arg.cpp:3436
-    try ctx.add((Arg{ .args = &.{ "--ui-mcp-proxy", "--webui-mcp-proxy" }, .args_neg = &.{ "--no-ui-mcp-proxy", "--no-webui-mcp-proxy" }, .help = "experimental: whether to enable MCP CORS proxy - do not enable in untrusted environments (default: disabled)", .handler = .{ .bool_ = struct {
+    try ctx.add((Arg{ .args = &.{ "--ui-mcp-proxy", "--webui-mcp-proxy" }, .args_neg = &.{ "--no-ui-mcp-proxy", "--no-webui-mcp-proxy" }, .help = "experimental: whether to enable MCP CORS proxy, for the Web UI to reach public MCP servers without CORS headers; local and private addresses are refused - do not enable in untrusted environments (default: disabled)\nnote: for security reasons, this will limit --cors-origins to localhost by default", .handler = .{ .bool_ = struct {
         fn f(q: *Params, value: bool) !void {
             q.ui_mcp_proxy = value;
         }
@@ -246,6 +246,12 @@ pub fn add(ctx: *Context) !void {
             q.server_tools_runtime = try arg.dupe(q, value);
         }
     }.f } }).setExamples(&.{.server}).setEnv("LLAMA_ARG_TOOLS_RUNTIME"));
+    // arg.cpp:3439 @b1b770d90
+    try ctx.add((Arg{ .args = &.{"--allow-unauthenticated-tools"}, .help = "allow server tools, MCP servers or MCP proxy on a non-loopback address without an API key - only for trusted networks (default: disabled)", .handler = .{ .void_ = struct {
+        fn f(q: *Params) !void {
+            q.server_tools_allow_unauth = true;
+        }
+    }.f } }).setExamples(&.{.server}).setEnv("LLAMA_ARG_ALLOW_UNAUTHENTICATED_TOOLS"));
     // arg.cpp:3465
     try ctx.add((Arg{ .args = &.{"--mcp-servers-config"}, .value_hint = "PATH", .help = "experimental: path to JSON file with MCP server definitions (Cursor-compatible format) - do not enable in untrusted environments (default: none)\nnote: for security reasons, this will limit --cors-origins to localhost by default", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
@@ -435,6 +441,12 @@ pub fn add(ctx: *Context) !void {
             q.media_path = try directoryWithSeparator(q, value);
         }
     }.f } }).setExamples(&.{.server}));
+    // arg.cpp:3671 @b1b770d90
+    try ctx.add((Arg{ .args = &.{"--media-allow-private-urls"}, .help = "allow http(s) media URLs (e.g. image_url) that point to local or private addresses (default: disabled, only public addresses)", .handler = .{ .void_ = struct {
+        fn f(q: *Params) !void {
+            q.media_allow_private_urls = true;
+        }
+    }.f } }).setExamples(&.{.server}).setEnv("LLAMA_ARG_MEDIA_ALLOW_PRIVATE_URLS"));
     // arg.cpp:3690
     try ctx.add((Arg{ .args = &.{"--models-dir"}, .value_hint = "PATH", .help = "directory containing models for the router server (default: disabled)", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {

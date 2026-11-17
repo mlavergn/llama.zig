@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-sampler.cpp` (v0.9.0, `cd959bae9`).
+//! Ported from `llama.cpp/src/llama-sampler.cpp` (v1.0.0, `b1b770d90`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # The vocabulary, through its C API
@@ -31,7 +31,7 @@ const SamplerI = core.SamplerI;
 const TokenDataArray = core.TokenDataArray;
 const src = core.src;
 
-/// Ports `llama_sampler_infill` (llama-sampler.cpp:4100 @cd959bae9).
+/// Ports `llama_sampler_infill` (llama-sampler.cpp:4066 @b1b770d90).
 const Infill = struct {
     vocab: ?*const c.struct_llama_vocab,
 
@@ -39,7 +39,7 @@ const Infill = struct {
     buf1: [512]u8,
 };
 
-/// Ports `llama_sampler_infill_name` (llama-sampler.cpp:4107 @cd959bae9).
+/// Ports `llama_sampler_infill_name` (llama-sampler.cpp:4073 @b1b770d90).
 fn infillName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
     _ = smpl;
     return "infill";
@@ -55,7 +55,7 @@ fn pieceInto(vocab: ?*const c.struct_llama_vocab, id: c.llama_token, buf: []u8) 
     return @intCast(len);
 }
 
-/// Ports `llama_sampler_infill_apply` (llama-sampler.cpp:4111 @cd959bae9).
+/// Ports `llama_sampler_infill_apply` (llama-sampler.cpp:4077 @b1b770d90).
 ///
 /// Picks end-of-generation when its mass is high enough; otherwise merges
 /// each candidate into any it is a text prefix of, then drops the weak ones
@@ -182,17 +182,17 @@ fn infillApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
     for (core.items(cur_p)) |*d| d.p /= p_sum;
 }
 
-/// Ports `llama_sampler_infill_clone` (llama-sampler.cpp:4294 @cd959bae9).
+/// Ports `llama_sampler_infill_clone` (llama-sampler.cpp:4260 @b1b770d90).
 fn infillClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
     return llama_sampler_init_infill(core.ctxOf(Infill, smpl).vocab);
 }
 
-/// Ports `llama_sampler_infill_free` (llama-sampler.cpp:4299 @cd959bae9).
+/// Ports `llama_sampler_infill_free` (llama-sampler.cpp:4265 @b1b770d90).
 fn infillFree(smpl: [*c]Sampler) callconv(.c) void {
     core.destroy(Infill, core.ctxOf(Infill, smpl));
 }
 
-/// Ports `llama_sampler_infill_i` (llama-sampler.cpp:4303 @cd959bae9).
+/// Ports `llama_sampler_infill_i` (llama-sampler.cpp:4269 @b1b770d90).
 var infill_iface: SamplerI = .{
     .name = infillName,
     .accept = null,
@@ -202,7 +202,7 @@ var infill_iface: SamplerI = .{
     .free = infillFree,
 };
 
-/// Ports `llama_sampler_init_infill` (llama-sampler.cpp:4318 @cd959bae9).
+/// Ports `llama_sampler_init_infill` (llama-sampler.cpp:4284 @b1b770d90).
 ///
 /// Parameters:
 /// - `vocab`: the vocabulary; borrowed for the sampler's lifetime.

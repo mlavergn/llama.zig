@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/gla.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/gla.cuh` at v0.9.0 (`cd959bae9`). The
+//! `llama.cpp/ggml/src/ggml-cuda/gla.cuh` at v1.0.0 (`b1b770d90`). The
 //! kernel, `gated_linear_attn_f32`, stays CUDA.
 
 const std = @import("std");
@@ -24,7 +24,7 @@ fn int(x: i64) c_int {
     return @truncate(x);
 }
 
-/// Ports `ggml_cuda_op_gated_linear_attn` (gla.cu:64 @cd959bae9).
+/// Ports `ggml_cuda_op_gated_linear_attn` (gla.cu:64 @b1b770d90).
 pub fn opGatedLinearAttn(ctx: *common.Context, dst: *Tensor) void {
     const k_d: ?*const anyopaque = dst.src[0].*.data;
     const v_d: ?*const anyopaque = dst.src[1].*.data;

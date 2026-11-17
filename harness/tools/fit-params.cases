@@ -24,6 +24,12 @@
 -m $ROOT/Qwen3-0.6B-Q8_0.gguf -fitp on -np 4
 !fail -m $FIX/qwen3-dense.gguf -fitp maybe
 !fail -m /nonexistent/model.gguf
+# v1.0.0 (5f490d7bf): extra shards, loaded with the model through
+# llama_model_load_from_splits; a shard named twice, or the model itself, is
+# loaded once
+-m $DATA/main.gguf --ple $DATA/shard.gguf -c 512 -fitp on
+-m $DATA/main.gguf --shard $DATA/shard.gguf,$DATA/shard.gguf,$DATA/main.gguf -c 512
+!fail -m $DATA/main.gguf -c 512 -fitp on
 # Upstream throws through main here, and std::terminate races common_log's
 # worker: on the GB10 its three load errors were lost in 8 runs of 20, and
 # at v0.9.0's pickup the "printing estimated memory" line before them was

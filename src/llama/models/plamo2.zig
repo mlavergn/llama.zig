@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/plamo2.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/plamo2.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_plamo2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph` with `build_plamo2_attn_layer` and
 //! `build_plamo2_mamba_layer`.
@@ -27,7 +27,7 @@ fn dtDim(n_embd: u32) i64 {
     return @max(64, @as(c_int, @bitCast(n_embd / 16)));
 }
 
-/// Ports `llama_model_plamo2`'s `load_arch_hparams` (models/plamo2.cpp:4 @cd959bae9).
+/// Ports `llama_model_plamo2`'s `load_arch_hparams` (models/plamo2.cpp:4 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -62,7 +62,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     }
 }
 
-/// Ports `llama_model_plamo2`'s `load_arch_tensors` (models/plamo2.cpp:35 @cd959bae9).
+/// Ports `llama_model_plamo2`'s `load_arch_tensors` (models/plamo2.cpp:35 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -136,12 +136,12 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_plamo2`'s `build_arch_graph` (models/plamo2.cpp:106 @cd959bae9).
+/// Ports `llama_model_plamo2`'s `build_arch_graph` (models/plamo2.cpp:106 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
-/// Ports the constructor of `llama_model_plamo2`'s `graph` (models/plamo2.cpp:110 @cd959bae9).
+/// Ports the constructor of `llama_model_plamo2`'s `graph` (models/plamo2.cpp:110 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -227,7 +227,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_plamo2::graph`'s `build_plamo2_attn_layer`
-/// (models/plamo2.cpp:201 @cd959bae9).
+/// (models/plamo2.cpp:201 @b1b770d90).
 fn buildPlamo2AttnLayer(b: *const graph.Builder, inp: *graph.InpAttnKv, inp_pos: *Tensor, cur_: *Tensor, model: *const Model, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -263,12 +263,12 @@ fn buildPlamo2AttnLayer(b: *const graph.Builder, inp: *graph.InpAttnKv, inp_pos:
         Qcur = b.buildNorm(Qcur, layer.attn_q_norm, null, .rms, il);
         b.cb(Qcur, "Qcur_normed", il);
 
-        Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+        Qcur = b.buildRope(Qcur, inp_pos, il);
 
         Kcur = b.buildNorm(Kcur, layer.attn_k_norm, null, .rms, il);
         b.cb(Kcur, "Kcur_normed", il);
 
-        Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+        Kcur = b.buildRope(Kcur, inp_pos, il);
 
         cur = b.buildAttn(inp, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / impl.sqrtf(@floatFromInt(n_embd_head_v)), il);
     }
@@ -279,7 +279,7 @@ fn buildPlamo2AttnLayer(b: *const graph.Builder, inp: *graph.InpAttnKv, inp_pos:
 }
 
 /// Ports `llama_model_plamo2::graph`'s `build_plamo2_mamba_layer`
-/// (models/plamo2.cpp:256 @cd959bae9).
+/// (models/plamo2.cpp:253 @b1b770d90).
 fn buildPlamo2MambaLayer(b: *const graph.Builder, inp: *const graph.InpRs, cur_: *Tensor, model: *const Model, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -299,11 +299,11 @@ fn buildPlamo2MambaLayer(b: *const graph.Builder, inp: *const graph.InpRs, cur_:
 
     const n_seq_tokens: i64 = ubatch.n_seq_tokens;
 
-    impl.assert(n_seqs != 0, "models/plamo2.cpp", 275, "n_seqs != 0");
-    impl.assert(ubatch.equalSeqs(), "models/plamo2.cpp", 276, "ubatch.equal_seqs()");
-    impl.assert(ubatch.n_tokens == n_seq_tokens * n_seqs, "models/plamo2.cpp", 277, "ubatch.n_tokens == n_seq_tokens * n_seqs");
-    impl.assert(@rem(d_inner, n_heads) == 0, "models/plamo2.cpp", 278, "d_inner % n_heads == 0");
-    impl.assert(n_group == 0, "models/plamo2.cpp", 279, "n_group == 0");
+    impl.assert(n_seqs != 0, "models/plamo2.cpp", 271, "n_seqs != 0");
+    impl.assert(ubatch.equalSeqs(), "models/plamo2.cpp", 272, "ubatch.equal_seqs()");
+    impl.assert(ubatch.n_tokens == n_seq_tokens * n_seqs, "models/plamo2.cpp", 273, "ubatch.n_tokens == n_seq_tokens * n_seqs");
+    impl.assert(@rem(d_inner, n_heads) == 0, "models/plamo2.cpp", 274, "d_inner % n_heads == 0");
+    impl.assert(n_group == 0, "models/plamo2.cpp", 275, "n_group == 0");
 
     const conv_states_all = mctx_cur.getRL(il);
     const ssm_states_all = mctx_cur.getSL(il);
@@ -341,7 +341,6 @@ fn buildPlamo2MambaLayer(b: *const graph.Builder, inp: *const graph.InpRs, cur_:
         const last_conv = c.ggml_view_3d(ctx, conv_x, d_conv - 1, d_inner, n_seqs, conv_x.nb[1], conv_x.nb[2], @as(usize, @intCast(n_seq_tokens)) * conv_x.nb[0]);
 
         c.ggml_build_forward_expand(b.gf, c.ggml_cpy(ctx, last_conv, c.ggml_view_1d(ctx, conv_states_all, (d_conv - 1) * (d_inner + 2 * n_group * d_state) * n_seqs, kv_head * @as(usize, @intCast((d_conv - 1) * (d_inner + 2 * n_group * d_state))) * c.ggml_element_size(conv_states_all))));
-        b.cb(conv_states_all, "mamba_conv1d_state", il);
 
         // The 1D convolution.
         x = c.ggml_ssm_conv(ctx, conv_x, layer.ssm_conv1d);
@@ -402,7 +401,6 @@ fn buildPlamo2MambaLayer(b: *const graph.Builder, inp: *const graph.InpRs, cur_:
             c.ggml_view_1d(ctx, y_ssm, n_heads * head_dim * d_state * n_seqs, nh * hd * nst * ns * c.ggml_element_size(y_ssm)),
             c.ggml_view_1d(ctx, ssm_states_all, n_heads * head_dim * d_state * n_seqs, kv_head * ns * nh * hd * ds * c.ggml_element_size(ssm_states_all)),
         ));
-        b.cb(ssm_states_all, "mamba_ssm_states", il);
 
         var y: *Tensor = c.ggml_view_4d(ctx, y_ssm, head_dim, n_heads, n_seq_tokens, n_seqs, hd * c.ggml_element_size(x), hd * nh * c.ggml_element_size(x), hd * nh * nst * c.ggml_element_size(x), 0);
         b.cb(y, "mamba_y_view", il);

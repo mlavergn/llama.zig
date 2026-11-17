@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/mamba-base.cpp` at v0.9.0
-//! (`cd959bae9`): every member of `llm_build_mamba_base`.
+//! Ported from `llama.cpp/src/models/mamba-base.cpp` at v1.0.0
+//! (`b1b770d90`): every member of `llm_build_mamba_base`.
 //!
 //! The C++ makes these members of a subclass of `llm_graph_context`; here
 //! they are functions over the builder.
@@ -56,7 +56,7 @@ pub const SsmRows = struct {
 };
 
 /// Ports `llm_build_mamba_base`'s `build_mamba_layer` (models/mamba-base.cpp:9
-/// @cd959bae9): a Mamba-1 block over the recurrent states.
+/// @b1b770d90): a Mamba-1 block over the recurrent states.
 ///
 /// Return: `{n_embd, n_tokens}`.
 pub fn buildMambaLayer(b: *const Builder, inp: *const graph.InpRs, cur_: *Tensor, model: *const Model, il: c_int) *Tensor {
@@ -82,10 +82,10 @@ pub fn buildMambaLayer(b: *const Builder, inp: *const graph.InpRs, cur_: *Tensor
 
     const n_seq_tokens: i64 = ubatch.n_seq_tokens;
 
-    impl.assert(n_seqs != 0, "models/mamba-base.cpp", 32, "n_seqs != 0");
-    impl.assert(ubatch.equalSeqs(), "models/mamba-base.cpp", 33, "ubatch.equal_seqs()");
-    impl.assert(ubatch.n_tokens == n_seq_tokens * n_seqs, "models/mamba-base.cpp", 34, "ubatch.n_tokens == n_seq_tokens * n_seqs");
-    impl.assert(@rem(d_inner, n_head) == 0, "models/mamba-base.cpp", 35, "d_inner % n_head == 0");
+    impl.assert(n_seqs != 0, "models/mamba-base.cpp", 31, "n_seqs != 0");
+    impl.assert(ubatch.equalSeqs(), "models/mamba-base.cpp", 32, "ubatch.equal_seqs()");
+    impl.assert(ubatch.n_tokens == n_seq_tokens * n_seqs, "models/mamba-base.cpp", 33, "ubatch.n_tokens == n_seq_tokens * n_seqs");
+    impl.assert(@rem(d_inner, n_head) == 0, "models/mamba-base.cpp", 34, "d_inner % n_head == 0");
 
     const conv_states_all = mctx_cur.getRL(il);
     const ssm_states_all = mctx_cur.getSL(il);
@@ -174,8 +174,8 @@ pub fn buildMambaLayer(b: *const Builder, inp: *const graph.InpRs, cur_: *Tensor
     return cur;
 }
 
-/// Ports `llm_build_mamba_base`'s `build_mamba2_layer` (models/mamba-base.cpp:153
-/// @cd959bae9): a Mamba-2 block over the recurrent states, with rollback
+/// Ports `llm_build_mamba_base`'s `build_mamba2_layer` (models/mamba-base.cpp:152
+/// @b1b770d90): a Mamba-2 block over the recurrent states, with rollback
 /// snapshots when the context keeps them.
 ///
 /// Return: `{n_embd, n_tokens}`.
@@ -200,11 +200,11 @@ pub fn buildMamba2Layer(b: *const Builder, inp: *const graph.InpRs, cur_: *Tenso
     const n_seq_tokens: i64 = ubatch.n_seq_tokens;
     const K: i64 = if (b.cparams.n_rs_seq > 0) @as(i64, b.cparams.n_rs_seq) + 1 else 1;
 
-    impl.assert(n_seqs != 0, "models/mamba-base.cpp", 174, "n_seqs != 0");
-    impl.assert(ubatch.equalSeqs(), "models/mamba-base.cpp", 175, "ubatch.equal_seqs()");
-    impl.assert(ubatch.n_tokens == n_seq_tokens * n_seqs, "models/mamba-base.cpp", 176, "ubatch.n_tokens == n_seq_tokens * n_seqs");
-    impl.assert(@rem(d_inner, n_head) == 0, "models/mamba-base.cpp", 177, "d_inner % n_head  == 0");
-    impl.assert(@rem(d_inner, n_group) == 0, "models/mamba-base.cpp", 178, "d_inner % n_group == 0");
+    impl.assert(n_seqs != 0, "models/mamba-base.cpp", 172, "n_seqs != 0");
+    impl.assert(ubatch.equalSeqs(), "models/mamba-base.cpp", 173, "ubatch.equal_seqs()");
+    impl.assert(ubatch.n_tokens == n_seq_tokens * n_seqs, "models/mamba-base.cpp", 174, "ubatch.n_tokens == n_seq_tokens * n_seqs");
+    impl.assert(@rem(d_inner, n_head) == 0, "models/mamba-base.cpp", 175, "d_inner % n_head  == 0");
+    impl.assert(@rem(d_inner, n_group) == 0, "models/mamba-base.cpp", 176, "d_inner % n_group == 0");
 
     const conv_states_all = mctx_cur.getRL(il);
     const ssm_states_all = mctx_cur.getSL(il);
@@ -232,16 +232,7 @@ pub fn buildMamba2Layer(b: *const Builder, inp: *const graph.InpRs, cur_: *Tenso
         // => {d_conv - 1 + n_seq_tokens, d_inner + 2*n_group*d_state, n_seqs}
         const conv_x: *Tensor = c.ggml_concat(ctx, conv, c.ggml_transpose(ctx, xBC), 0);
 
-        const row_count: i64 = (d_conv - 1) * (d_inner + 2 * n_group * d_state);
-        const row_size: usize = c.ggml_row_size(conv_states_all.type, row_count);
-        const n_written: i64 = @min(n_seq_tokens, K);
-
-        var slot: i64 = 0;
-        while (slot < n_written) : (slot += 1) {
-            const last_conv = c.ggml_view_3d(ctx, conv_x, d_conv - 1, d_inner + 2 * n_group * d_state, n_seqs, conv_x.nb[1], conv_x.nb[2], @as(usize, @intCast(n_seq_tokens - slot)) * conv_x.nb[0]);
-
-            c.ggml_build_forward_expand(b.gf, c.ggml_cpy(ctx, last_conv, c.ggml_view_2d(ctx, conv_states_all, row_count, n_seqs, conv_states_all.nb[1], (@as(usize, @intCast(slot)) * mem_size + kv_head) * row_size)));
-        }
+        b.buildConvStateStore(inp, conv_states_all, conv_x, d_conv - 1, 0);
 
         // The 1D convolution: a self-overlapping view of conv_x over d_conv
         // columns at each stride of the third dimension, multiplied

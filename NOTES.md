@@ -13753,3 +13753,213 @@ not open a terminal" -- until Marc allowed it. `win-run` treats that
 message as a busy link and retries it, so a blocked binary costs
 `WIN_RUN_TRIES` × 10 s before it fails; when a Windows gate stalls there,
 run the program from `ziglink tty` to see the real reason.
+
+## Upstream sync v0.9.0 → v1.0.0
+
+The eighth sync, and the first driven from the GB10 rather than the Mac
+(Marc, 2026-11-15: "work it on the GB10"). The pin moved from `v0.9.0`
+(`cd959bae9`, `b12110`) to `v1.0.0` (`b1b770d90`, `b12359`), ggml from
+0.29.0 to 1.0.0, and the port's version with it: `1.0.0`. v1.0.0 is
+upstream's latest release, so this sync makes the port current.
+`llama.cpp.zmake` had moved first (`8608025`, Marc's): it now builds
+upstream from the release tarball its `build.zig.zon` names, unpacked into
+`zig-pkg/`, not from its nested checkout.
+
+**Driving it from the GB10 inverts the pickups.** Everything that runs on
+Linux arm64 -- the CPU set at `generic`, CUDA, Vulkan, every libllama,
+libmtmd, chat, tools and server gate -- ran here before the commit; Metal,
+the Apple CPU targets, the goldens and every macOS-only gate are this
+sync's **Mac pickup** (`PLAN.md`, "Pickup for the v1.0.0 sync"). The Metal
+port was written blind and type-checked for `aarch64-macos` with
+`use_metal`, never linked or run.
+
+### What moved
+
+249 commits; 1,092 files, +55,900 / −31,853 overall, 488 files and
++27,703 / −18,075 in the ported paths -- about three and a half times
+v0.9.0's work list. `scripts/upstream-map` gave **2,016 touched
+citations**, **966 unmapped hunks** and **72 uncited files** (584 / 278 /
+43 at v0.9.0). Two upstream changes made it large:
+
+- **The prune** (`29dbbad2b` ggml, `8ca5a8008` llama). ggml lost
+  `GGML_OP_ADD1`, `GGML_OP_DIAG_MASK_INF` and `_ZERO` -- 102 ops to 99,
+  every op table and enum ordinal after them shifted -- `GGML_PREC_DEFAULT`
+  and the deprecated constructors (`ggml_add1*`, `ggml_diag_mask_*`,
+  `ggml_rope_custom*`, `ggml_upscale_ext`, `ggml_type_sizef`, the two
+  `*_set_prec`); `ggml_rope_yarn_corr_dims` moved to `ggml-impl.h` with a
+  `truncate` argument. `llama.h` lost every deprecated function -- 255
+  exports to **237** -- while 13 `llama-ext.h` functions (the NextN and
+  layer-input API) moved into it and five new ones arrived;
+  `llama_context_params` lost `defrag_thold` and gained
+  `moe_cache_cpu_share`.
+- **The mtmd refactor** (`7d7f02875`): `clip.cpp` and `clip.h` deleted,
+  `clip-impl.h`, `clip-model.h`, `clip-graph.h` renamed `mtmd-*`, the code
+  moved into `mtmd-model.cpp`, `mtmd-subcontext.cpp` and `mtmd-graph.cpp`;
+  612 citations pointed into files that no longer exist at B.
+
+### The lead's mechanical pass
+
+- **`harness/upstream_moved.zig`, new.** `upstream-map` diffs with
+  `--no-renames` and repins only within a file, so a citation into a
+  deleted or renamed file is "touched" however unchanged its definition,
+  and fails `port-links` outright. The new tool takes each such
+  citation's extent at A, looks for the same lines (trailing white space
+  ignored) in the destination files at B, and rewrites file, line and
+  commit where exactly one match exists. **445 of 609 moved verbatim**;
+  the 164 that changed on the way, or matched twice, went to the work
+  lists with their candidate locations. A changed definition cannot match,
+  which is its negative test: every one of them stayed on the hand list.
+- `upstream-map --repin` moved **9,902** untouched citation sites;
+  `upstream-relines --write` moved **707** line literals and left 138 to
+  read by hand.
+- Generators: every Step 5 script. `gen-mtmd-names` followed the header
+  rename and upstream's `clip_projector_type_from_string` →
+  `projector_type_from_string`, and now emits 0.17's `@fromBackingInt` /
+  `@backingInt` (its output had stopped being `zig fmt`-clean).
+- **`check-reference-pin` also checks zmake's tarball now.** zmake's
+  `build.zig.zon` URL names the tag the bit-exact gates actually compile;
+  the nested checkout survives only for `types-golden`. Negative-tested: a
+  `v0.9.0` URL fails it.
+- **CUDA's FlashAttention type list gained `f8_e4m3`** in
+  `build/llamacpp.zig` and zmake's `build.zig` (and zmake's default
+  `GGML_CUDA_FA_QUANTS`): without it `fattn.cu` did not compile.
+- `build/tools.zig`: the mtmd and `common` source lists follow upstream
+  (`mtmd-model.cpp`, `mtmd-subcontext.cpp`, `mtmd-graph.cpp`,
+  `chat-tts-norm.cpp`).
+
+The port itself went to **ten agents** with disjoint files -- ggml with the
+CPU and Metal, CUDA, Vulkan, libllama's core, libllama's model and
+vocabulary, the architectures, libmtmd's core, libmtmd's models, `common/`
+with the CLI and tools, and the server -- coordinating through one
+append-only log and a `flock` lock around anything that rebuilt
+`zig-out/`. Three of them forked again (server/http, mtmd image, audio and
+helpers).
+
+### What was ported, by area
+
+- **ggml and the CPU.** The prune (op tables verified against `ggml.c`
+  entry by entry; SUM and MEAN gradients through `addOrSet(repeat(...))`;
+  Q4_2/Q4_3 named `"REMOVED"`; `ggml_compute_forward_add1` stays exported,
+  as `ops.cpp` still defines it). YaRN `truncate` (`op_params[3]` is
+  `no_trunc`; `ggml_rope_set_truncate` / `_get_truncate`; ROPE_BACK
+  carries it). TRI's backward pass. **F32 `src1` on the CPU** (`12ab59798`):
+  F16 weights now dot against F32 activations through a new
+  `ggml_vec_dot_f16_f32` -- NEON chunk arm, AVX/F16C and AVX-512 arms --
+  with conv_transpose and conv_2d/3d keeping their patches in F32 and the
+  x86 tinyBLAS taking F32 B. Flash attention accumulates V in F32
+  (`mad_f16_f32`). The scheduler's `hv_tensor_requires_copy` and input
+  prefetch. Exports equal zmake's `libggml.a` by `nm` (1,066).
+- **Metal**, blind: the 12 new TOPK_MOE fusion rows and `checkTopkMoe`'s
+  rewrite (softplus/sigmoid gating, scale and bias norms), GROUP_NORM's
+  flat and strided pipelines (`FC_GROUP_NORM`), `mul_mm` from K ≥ 32, the
+  radix top-k without `smem_out`.
+- **CUDA.** OCP FP8 (`fp8.zig`: the cuBLASLt FP8 GEMM, and F8_E4M3 arms
+  through MMVF, convert, cpy, get/set_rows, the vector FA kernels and
+  `mul_mat_id`); few-row MMQ (`mmq_few.zig`, live on the GB10); graph state
+  moved to `graph.cuh` with re-instantiation on a cluster-dim change; the
+  debug pool; the halved VMM reservation; the linearized MoE layout; the
+  NVFP4 fusions and their scales; FA head sizes 40 and 72; SSM_SCAN at
+  `d_state` 64. `gen-fattn-config` regenerated; 24 f8 vector FA instances.
+- **Vulkan.** The prune, YaRN truncate, Intel's FA prefill and two-phase
+  decode, the tiled-transpose concat, the batched tensor copy API, the
+  coopmat2 dequantized-KV path, ReBAR detection, the test-fusion interface,
+  RDNA split-k, FWHT to 8192, GROUP_NORM's 2D dispatch. The toolchain
+  stays at SDK 1.4.363 (upstream CI is on 1.4.357).
+- **libllama's core.** The `llama.h` surface above (`ext_only` is 19
+  functions now, not 31). MTP hidden states from a device buffer
+  (`a8fad21e9`: the `h_nextn` buffer, state rows in `llama_batch_ext`).
+  Scheduler reuse, graph result instances made once, `graphMaxNodes` no
+  longer per ubatch, the non-fused GDN paths and their probes removed.
+  Per-model RoPE (`buildRope` / `buildRopeIndexer`, the KV shift through
+  `getRopeParams`). The FP8 KV cache's scales. **The MoE cache's policy is
+  upstream's ClassLRU** now, with CPU-computed misses (`moe_cache_cpu_share`)
+  and zero slots.
+- **libllama's model and vocabulary.** External PLE files and split
+  merging (`5f490d7bf`); the Windows unbuffered `llama_file` arm
+  (`9d340ec34`, `NTDDI_WIN8` measured, cross-compile-checked only); the
+  POSIX arm's new fallbacks; the model side of per-model RoPE and the FP8
+  scales; the classifier-free-guidance key.
+- **Architectures**: three new -- `kimi-k31`, `ricursive`, `xing4-0` --
+  **171** `llama_model_mapping` entries, **175** files. About 130 models
+  moved to `b.buildRope`, with 24 `getRopeParams` overrides as upstream
+  has them; Qwen3.5's merged tensors; NVFP4 scales in granite and qwen2.
+- **libmtmd.** The refactor: our file names stay (`clip.zig` is now
+  `mtmd-model.cpp` plus `mtmd-subcontext.cpp`), with a shared scheduler and
+  compute buffer, a context that owns models and backends, and the compute
+  mutex. Log-mel computed in a graph; Gemma 4's audio stream; the
+  resampler (`mtmd_*` 112 → **115**); Kimi K3.1's vision; two new projector
+  types -- `magevl` and `drama3-gen` (with the Fish DAC codec); the new
+  loader requirements.
+- **`common/`, the CLI, the tools.** `chat-tts-norm.cpp` → `tts_norm.zig`
+  with its Jinja builtins; the gemma4 parser rewrite; the allOf leaf merge;
+  `common_model_load` and shards; fit's skipped NextN layers; the CLI's
+  `dump_safe`; zigjinja **`5fdd755` (v3.1.10)**: chained comparisons and
+  `*`/`**` unpacking, then **`6efb5e4` (v3.1.11)**: callable variables,
+  tuple `set` targets, `append` returning its list.
+- **The server.** `/v1/audio/speech`; the SSRF fixes (resolved and pinned
+  addresses, manual redirects); tools refused on non-loopback addresses;
+  refcounted checkpoints; parent slots before child slots; MCP
+  cancellation; the realtime changes; cpp-httplib 0.64 → **0.66** with the
+  new CORS, DNS-rebinding and router-child rules in `http.zig`.
+
+### What the gates caught
+
+- **A zero-length Zig slice is not C's null.** `graphGetClusters` passed a
+  zero-length slice's pointer to `cudaGraphGetNodes` where the C++ passes
+  an empty vector's `data()`, which is null; on a captured graph with no
+  kernel nodes the driver answered `cudaErrorInvalidValue`. It aborted
+  every GPU decode -- on the *reference* side of the libllama gates too,
+  since both libllamas link the port's `libggml` -- and `cuda-ops-diff`
+  could not see it: `test-backend-ops` captures no CUDA graphs. The abort
+  read `ggml-alloc.zig:0`; it reads `ggml-cuda.cu:113: CUDA error` now, as
+  upstream's does.
+- **`context-diff`'s K-shift section had silently stopped running** on
+  every model: the sequence restore before it left at most four
+  positions. It decodes six tokens first now.
+- The pockettts truncation warning's `__func__` is `process` at B; only
+  inputs over 30 s reach it, which `--quick` never runs.
+- `mtmd_diff.zig` printed `ggml_backend_dev_name(NULL)` for the weights'
+  device -- which upstream's CPU buffer type reports as NULL -- and 186 of
+  218 runs "aborted alike" until it printed `(null)`.
+- Two harness hashes covered bytes the op never writes: `nextn rows` on a
+  graph with no `h_nextn` tensor (rows preset now), and SSM_SCAN's
+  snapshot slots past `min(n_seq_tokens, K)` (`writtenBytes` gained an
+  arm, mirroring GATED_DELTA_NET's).
+- The mmproj fixtures on disk predated `cfg=true`: upstream itself refused
+  `chatterbox-mtl` until they were regenerated.
+
+### What the tooling got wrong
+
+- **A citation into a deleted file was invisible to the repin**, and every
+  moved definition read "touched" -- hence `upstream_moved.zig`.
+- **The work lists' TOUCHED ranges are A's lines.** Several agents retagged
+  from them and put A lines on `@b1b770d90` citations, then remapped with
+  difflib and a definition check. `port-links` cannot catch this while a
+  citation still names A, since it reads each at its own commit.
+- `scripts/upstream-literals` crashed on a file deleted in the working
+  tree but still in the index (`cuda/diagmask.zig`); it skips those now.
+  It still cannot see literals behind wrappers (`ggmlAssert`,
+  `Variant.line_*`, `src` constants); the server remapped 72 by hand.
+- `gen-mtmd-names`, `gen-upstream-flags` and `gen-layer`'s
+  `model_saver.zig` block were not `zig fmt`-clean; the first is fixed.
+- `graph-diff`, `sched-diff`, `opt-diff`, `abi-check`, `types-golden`,
+  `adapter-diff`, `opt-llama-diff`, `sampler-diff` and `meta-diff` are
+  Mac-only as written (`cmake-build/apple`, `xcrun`, BSD `nm`,
+  `__stderrp`); the agents ran Linux copies against zmake's library.
+  Making them platform-neutral is a separate change.
+- **Ten agents on one GPU interfere.** `server-diff` startups failed on
+  CUDA out of memory, alternating between reference and port, and were
+  rerun alone; injections left in the shared tree for minutes (one
+  removed `ggml_set_output` from `graph.zig` for about fifteen) could
+  reach anyone who built then, so every gate was rerun on a clean tree
+  before the commit.
+
+### Upstream behaviour kept
+
+- Under `GGML_CUDA_POOL_DEBUG=1` upstream's own CUDA backend gives wrong,
+  nondeterministic F8_E4M3 `MUL_MAT_ID` results for n > 8 (21 failures
+  against the CPU, upstream against itself).
+- 14 `cuda-ops-diff` cases differ upstream against upstream (CUMSUM ×2,
+  NVFP4 `MUL_MAT_FUSION` with bias ×12).
+- `GGML_ASSERT(device)` on the CPU buffer type's NULL device is
+  upstream's.

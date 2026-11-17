@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/cohere2.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/cohere2.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_cohere2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -20,15 +20,18 @@ const c = impl.c;
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
+const Cparams = @import("../cparams.zig").Cparams;
+const RopeParams = model_mod.RopeParams;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_cohere2`'s `load_arch_hparams` (models/cohere2.cpp:3 @cd959bae9).
+/// Ports `llama_model_cohere2`'s `load_arch_hparams` (models/cohere2.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
     try self.loadSwaPattern(ml, 4, false, exc);
+    hp.rope_pattern = hp.is_swa_impl;
 
     hp.rope_freq_base_train_swa = hp.rope_freq_base_train;
     hp.rope_freq_scale_train_swa = hp.rope_freq_scale_train;
@@ -44,7 +47,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_cohere2`'s `load_arch_tensors` (models/cohere2.cpp:21 @cd959bae9).
+/// Ports `llama_model_cohere2`'s `load_arch_tensors` (models/cohere2.cpp:22 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
 
@@ -70,19 +73,37 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_cohere2`'s `build_arch_graph` (models/cohere2.cpp:46 @cd959bae9).
+/// Ports `llama_model_cohere2`'s `get_rope_params` (models/cohere2.cpp:47 @b1b770d90).
+///
+/// Parameters:
+/// - `model`: the model.
+/// - `cparams`: the context's parameters.
+/// - `il`: the layer.
+///
+/// Return: the RoPE of layer `il`, for the graph and the K-shift alike.
+pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+    var res = model.getRopeParamsBase(cparams, il);
+
+    // The SWA layers use the global base and scale.
+    res.freq_base = cparams.rope_freq_base;
+    res.freq_scale = cparams.rope_freq_scale;
+
+    return res;
+}
+
+/// Ports `llama_model_cohere2`'s `build_arch_graph` (models/cohere2.cpp:57 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_cohere2`'s `graph`
-/// (models/cohere2.cpp:50 @cd959bae9).
+/// (models/cohere2.cpp:61 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/cohere2.cpp", 53, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/cohere2.cpp", 64, "n_embd_head == hparams.n_embd_head_k()");
 
     const f_logit_scale = hp.f_logit_scale;
 
@@ -98,9 +119,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
-        const is_swa = hp.isSwa(@intCast(il));
-        // The C++ computes the layer's own RoPE frequencies and leaves them
-        // unused.
 
         // Norm.
         var cur = b.buildNorm(inpL, layer.attn_norm, null, .norm, il);
@@ -109,19 +127,14 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
         // Self-attention.
         {
-            // RoPE frequency factors for 128k context.
-            const rope_factors = model.getRopeFactors(b.cparams, @intCast(il));
-
             // Q, K and V, and RoPE on Q and K.
             const qkv = b.buildQkv(layer, cur, n_embd_head, b.n_head, b.n_head_kv, il);
             var Qcur = qkv.q;
             var Kcur = qkv.k;
             const Vcur = qkv.v;
 
-            if (is_swa) {
-                Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-                Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            }
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
 
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);

@@ -1,0 +1,1 @@
+{% set l = [1] %}{{ l.append(2) | length }}|{{ (l.append(3) or 0) | length }}|{{ 0 < (l.append(4) | length) < 9 }}|{{ l | length }}|{{ l }}

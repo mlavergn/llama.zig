@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.9.0 (`cd959bae9`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v1.0.0 (`b1b770d90`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # `MIN` and `MAX` are ternaries, not `@min` and `@max`
@@ -44,12 +44,12 @@ const at = common.ptr;
 /// Stride as `i64`; see `common.sz`.
 const s = common.sz;
 
-/// The C's `MIN` macro (ggml-impl.h:36 @cd959bae9), over `f32`.
+/// The C's `MIN` macro (ggml-impl.h:36 @b1b770d90), over `f32`.
 inline fn minF(a: f32, b: f32) f32 {
     return if (a < b) a else b;
 }
 
-/// The C's `MAX` macro (ggml-impl.h:40 @cd959bae9), over `f32`.
+/// The C's `MAX` macro (ggml-impl.h:40 @b1b770d90), over `f32`.
 inline fn maxF(a: f32, b: f32) f32 {
     return if (a > b) a else b;
 }
@@ -57,7 +57,7 @@ inline fn maxF(a: f32, b: f32) f32 {
 // -----------------------------------------------------------------------------
 // soft_max
 
-/// Ports `ggml_compute_forward_soft_max_f32` (ops.cpp:5797 @cd959bae9).
+/// Ports `ggml_compute_forward_soft_max_f32` (ops.cpp:5709 @b1b770d90).
 fn softMaxF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1: ?*Tensor = dst.src[1];
@@ -164,7 +164,7 @@ fn softMaxF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_soft_max` (ops.cpp:5909 @cd959bae9).
+/// Ports `ggml_compute_forward_soft_max` (ops.cpp:5821 @b1b770d90).
 pub export fn ggml_compute_forward_soft_max(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -177,7 +177,7 @@ pub export fn ggml_compute_forward_soft_max(params: *const ComputeParams, dst: *
 // -----------------------------------------------------------------------------
 // soft_max_ext_back
 
-/// Ports `ggml_compute_forward_soft_max_ext_back_f32` (ops.cpp:5930 @cd959bae9).
+/// Ports `ggml_compute_forward_soft_max_ext_back_f32` (ops.cpp:5842 @b1b770d90).
 ///
 /// `dx = scale * (dy - dot(y, dy)) * y`, one element at a time, in the C's
 /// order: since v0.6.0 one loop, where v0.5.0 copied, subtracted, multiplied
@@ -228,7 +228,7 @@ fn softMaxExtBackF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_soft_max_ext_back` (ops.cpp:6013 @cd959bae9).
+/// Ports `ggml_compute_forward_soft_max_ext_back` (ops.cpp:5925 @b1b770d90).
 pub export fn ggml_compute_forward_soft_max_ext_back(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -242,7 +242,7 @@ pub export fn ggml_compute_forward_soft_max_ext_back(params: *const ComputeParam
 // clamp
 
 /// Ports `ggml_compute_forward_clamp_f32` and `ggml_compute_forward_clamp_f16`
-/// (ops.cpp:6033, 6069 @cd959bae9).
+/// (ops.cpp:5945, 5981 @b1b770d90).
 ///
 /// The two differ only in the element type, so they are one function over a
 /// comptime type. `MAX(MIN(v, max), min)` is the C's macro pair, NaN
@@ -292,7 +292,7 @@ fn clamp(comptime T: type, params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_clamp` (ops.cpp:6106 @cd959bae9).
+/// Ports `ggml_compute_forward_clamp` (ops.cpp:6018 @b1b770d90).
 pub export fn ggml_compute_forward_clamp(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 

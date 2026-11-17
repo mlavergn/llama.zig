@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/nanbeige.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/nanbeige.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_nanbeige`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`. The class's own members are
 //! `Model.nanbeige`.
@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_nanbeige`'s `load_arch_hparams` (models/nanbeige.cpp:3 @cd959bae9).
+/// Ports `llama_model_nanbeige`'s `load_arch_hparams` (models/nanbeige.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -66,7 +66,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     self.type = .unknown;
 }
 
-/// Ports `llama_model_nanbeige`'s `load_arch_tensors` (models/nanbeige.cpp:37 @cd959bae9).
+/// Ports `llama_model_nanbeige`'s `load_arch_tensors` (models/nanbeige.cpp:37 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nb = &self.nanbeige;
@@ -114,8 +114,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_nanbeige`'s `build_arch_graph` (models/nanbeige.cpp:76
-/// @cd959bae9) and the constructor of its `graph` (models/nanbeige.cpp:80
-/// @cd959bae9).
+/// @b1b770d90) and the constructor of its `graph` (models/nanbeige.cpp:80
+/// @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -147,15 +147,13 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
         b.cb(cur, "attn_norm", il);
 
         {
-            const rope_factors = model.getRopeFactors(b.cparams, @intCast(il));
-
             const qkv = b.buildQkv(layer, cur, n_embd_head, b.n_head, b.n_head_kv, il);
             var Qcur = qkv.q;
             var Kcur = qkv.k;
             const Vcur = qkv.v;
 
-            Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
 
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);

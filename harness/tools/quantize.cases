@@ -55,3 +55,7 @@ $FIX/llama-dense.gguf copy.gguf COPY
 !fail q4k.gguf req2.gguf Q4_0
 !fail $FIX/qwen3-dense.gguf IQ2_XXS
 !fail q8.gguf q8.gguf Q4_0
+# v1.0.0 (71a6a114b): the imatrix file's name, not its path, goes into the
+# output's metadata, as does the dataset's
+--imatrix $DATA/sub/dir/dense-imatrix.gguf $DATA/dense.gguf im.gguf Q4_K_M
+--imatrix $DATA/sub/dir/dense-imatrix.gguf $DATA/dense.gguf im-iq.gguf IQ3_XXS

@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/limite.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/limite.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_limite`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -20,9 +20,11 @@ const c = impl.c;
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
+const RopeParams = model_mod.RopeParams;
+const Cparams = @import("../cparams.zig").Cparams;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_limite`'s `load_arch_hparams` (models/limite.cpp:7 @cd959bae9).
+/// Ports `llama_model_limite`'s `load_arch_hparams` (models/limite.cpp:7 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -34,6 +36,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
     hp.n_swa = (try meta.getKey(u32, .attention_sliding_window, true, exc)).?;
     try self.loadSwaPattern(ml, 4, false, exc);
+    hp.rope_pattern = hp.is_swa_impl;
 
     @memset(&hp.mudd_tap_idx, -1);
     if (try meta.getKey(u32, .mudd_tap_count, false, exc)) |v| hp.n_mudd_taps = v;
@@ -48,7 +51,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_limite`'s `load_arch_tensors` (models/limite.cpp:30 @cd959bae9).
+/// Ports `llama_model_limite`'s `load_arch_tensors` (models/limite.cpp:31 @b1b770d90).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     _ = ml;
     const hp = &self.hparams;
@@ -105,14 +108,32 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 // -----------------------------------------------------------------------------
 // The graph
 
-/// Ports `llama_model_limite`'s `build_arch_graph` (models/limite.cpp:71 @cd959bae9).
+/// Ports `llama_model_limite`'s `get_rope_params` (models/limite.cpp:72
+/// @b1b770d90): the SWA layers use the global base and scale.
+///
+/// Parameters:
+/// - `model`: the model.
+/// - `cparams`: the context's parameters.
+/// - `il`: the layer.
+///
+/// Return: the layer's RoPE.
+pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+    var res = model.getRopeParamsBase(cparams, il);
+
+    res.freq_base = cparams.rope_freq_base;
+    res.freq_scale = cparams.rope_freq_scale;
+
+    return res;
+}
+
+/// Ports `llama_model_limite`'s `build_arch_graph` (models/limite.cpp:82 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     _ = params;
     buildGraph(model, b);
 }
 
-/// `mix`, a lambda of the `graph` constructor (models/limite.cpp:75
-/// @cd959bae9): the taps weighted by one half of the MUDD weights, the
+/// `mix`, a lambda of the `graph` constructor (models/limite.cpp:86
+/// @b1b770d90): the taps weighted by one half of the MUDD weights, the
 /// fused hyper-connection kernel when there are exactly four.
 fn mix(b: *const graph.Builder, stack: *Tensor, w: *Tensor, n_taps: i64, offset: usize) *Tensor {
     const ctx = b.ctx0;
@@ -124,7 +145,7 @@ fn mix(b: *const graph.Builder, stack: *Tensor, w: *Tensor, n_taps: i64, offset:
     return c.ggml_reshape_2d(ctx, c.ggml_sum_rows(ctx, m), b.n_embd, b.n_tokens);
 }
 
-/// Ports the constructor of `llama_model_limite`'s `graph` (models/limite.cpp:75 @cd959bae9).
+/// Ports the constructor of `llama_model_limite`'s `graph` (models/limite.cpp:86 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -135,7 +156,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const n_tokens = b.n_tokens;
     const n_embd = b.n_embd;
 
-    impl.assert(n_embd_head == hp.nEmbdHeadV(0), "models/limite.cpp", 79, "n_embd_head == hparams.n_embd_head_v()");
+    impl.assert(n_embd_head == hp.nEmbdHeadV(0), "models/limite.cpp", 90, "n_embd_head == hparams.n_embd_head_v()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -176,7 +197,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             var stack: ?*Tensor = null;
             var j: usize = 0;
             while (j < n_taps) : (j += 1) {
-                impl.assert(taps[j] >= 0 and taps[j] <= il, "models/limite.cpp", 120, "taps[j] >= 0 && taps[j] <= il");
+                impl.assert(taps[j] >= 0 and taps[j] <= il, "models/limite.cpp", 131, "taps[j] >= 0 && taps[j] <= il");
                 const h = c.ggml_reshape_3d(ctx, hist[@intCast(taps[j])], n_embd, 1, n_tokens);
                 stack = if (stack) |s| c.ggml_concat(ctx, s, h, 1) else h;
             }
@@ -213,12 +234,10 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(Kcur, "Kcur_normed", il);
 
             // The full attention layers use no positional encoding.
-            if (hp.isSwa(@intCast(il))) {
-                Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-                Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-                b.cb(Qcur, "Qcur", il);
-                b.cb(Kcur, "Kcur", il);
-            }
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
+            b.cb(Qcur, "Qcur", il);
+            b.cb(Kcur, "Kcur", il);
 
             cur = b.buildAttn(inp_attn, null, null, null, Qcur, Kcur, Vcur, null, null, null, hp.f_attention_scale, il);
             b.cb(cur, "attn_raw", il);

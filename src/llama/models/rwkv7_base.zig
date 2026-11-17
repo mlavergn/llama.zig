@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/rwkv7-base.cpp` at v0.9.0
-//! (`cd959bae9`): `llm_build_rwkv7_base`'s `build_rwkv7_channel_mix` and
+//! Ported from `llama.cpp/src/models/rwkv7-base.cpp` at v1.0.0
+//! (`b1b770d90`): `llm_build_rwkv7_base`'s `build_rwkv7_channel_mix` and
 //! `build_rwkv7_time_mix`. Its constructor only stores the model, which the
 //! port passes to each function instead.
 
@@ -29,7 +29,7 @@ fn doubleToFloat(comptime x: f64) f32 {
 }
 
 /// Ports `llm_build_rwkv7_base`'s `build_rwkv7_channel_mix`
-/// (models/rwkv7-base.cpp:9 @cd959bae9): the squared-ReLU feed-forward.
+/// (models/rwkv7-base.cpp:8 @b1b770d90): the squared-ReLU feed-forward.
 pub fn buildRwkv7ChannelMix(b: *const graph.Builder, layer: *const Layer, cur_: *Tensor, x_prev: *Tensor, arch: arch_mod.Arch) *Tensor {
     const ctx = b.ctx0;
     var cur = cur_;
@@ -42,13 +42,13 @@ pub fn buildRwkv7ChannelMix(b: *const graph.Builder, layer: *const Layer, cur_: 
 
             cur = b.buildLoraMm(layer.channel_mix_value.?, k, null);
         },
-        else => impl.abort("models/rwkv7-base.cpp", 25, "fatal error"),
+        else => impl.abort("models/rwkv7-base.cpp", 24, "fatal error"),
     }
     return cur;
 }
 
 /// Ports `llm_build_rwkv7_base`'s `build_rwkv7_time_mix`
-/// (models/rwkv7-base.cpp:30 @cd959bae9): the WKV-7 recurrence.
+/// (models/rwkv7-base.cpp:29 @b1b770d90): the WKV-7 recurrence.
 /// `first_layer_value` is the first layer's value, set by the first call
 /// and mixed back into every later layer's.
 pub fn buildRwkv7TimeMix(model: *const Model, b: *const graph.Builder, inp: *const graph.InpRs, cur_: *Tensor, x_prev: *Tensor, first_layer_value: *?*Tensor, ubatch: *const batch.Ubatch, il: c_int) *Tensor {

@@ -67,7 +67,7 @@ extern fn fit_ref_device_memory(
     cap: c_int,
     devs: [*]c.ggml_backend_dev_t,
     n_devs: *c_int,
-    hp: *[3]u32,
+    hp: *[4]u32,
     log_level: c_int,
 ) c_int;
 extern fn fit_ref_measure(path_model: [*:0]const u8, mparams: *const c.llama_model_params, cparams: *const c.llama_context_params, out: [*]u8, cap: usize, log_level: c_int) c_int;
@@ -437,8 +437,8 @@ fn runPort(cs: Case, in: *Inputs, log: fit.Log) !c_int {
     // The patterns the overrides point at are compared before this frees them.
     defer patterns.deinit();
     var extra: fit.ExtraModel = undefined;
-    if (cs.extra) |e| extra = .{ .path_model = pathOf(e.model).ptr, .mparams = &in.emp, .cparams = &in.ecp, .shares_model = e.shares_model };
-    const status = try fit.fitParams(gpa, &patterns, log, pathOf(cs.model).ptr, &in.mp, &in.cp, if (cs.null_split_buf) null else &in.split_buf, if (cs.null_tbo_buf) null else in.tbo_buf.ptr, &in.margins, cs.n_ctx_min, if (cs.extra != null) &extra else null, @intCast(cs.log_level));
+    if (cs.extra) |e| extra = .{ .paths_model = &.{pathOf(e.model).ptr}, .mparams = &in.emp, .cparams = &in.ecp, .shares_model = e.shares_model };
+    const status = try fit.fitParams(gpa, &patterns, log, &.{pathOf(cs.model).ptr}, &in.mp, &in.cp, if (cs.null_split_buf) null else &in.split_buf, if (cs.null_tbo_buf) null else in.tbo_buf.ptr, &in.margins, cs.n_ctx_min, if (cs.extra != null) &extra else null, @intCast(cs.log_level));
     var w: std.Io.Writer.Allocating = .init(gpa);
     defer w.deinit();
     try record(&w.writer, in, @backingInt(status));
@@ -544,9 +544,9 @@ fn memoryData(w: *std.Io.Writer, cs: Case, in: *Inputs, ref: bool, fit_log: *std
         var out: [5 * 16]i64 = undefined;
         var devs: [16]c.ggml_backend_dev_t = undefined;
         var n_devs: c_int = 0;
-        var hp: [3]u32 = .{ 0, 0, 0 };
+        var hp: [4]u32 = .{ 0, 0, 0, 0 };
         const n = fit_ref_device_memory(pathOf(cs.model).ptr, &in.mp, &in.cp, &out, 16, &devs, &n_devs, &hp, cs.log_level);
-        try w.print("memory_data {d} devs {d} hp {d} {d} {d}\n", .{ n, if (n < 0) 0 else n_devs, hp[0], hp[1], hp[2] });
+        try w.print("memory_data {d} devs {d} hp {d} {d} {d} {d}\n", .{ n, if (n < 0) 0 else n_devs, hp[0], hp[1], hp[2], hp[3] });
         if (n > 0) for (0..@intCast(n)) |i| try w.print("  {d} {d} {d} {d} {d}\n", .{ out[5 * i], out[5 * i + 1], out[5 * i + 2], out[5 * i + 3], out[5 * i + 4] });
         if (n > 0) for (devs[0..@intCast(n_devs)]) |dv| try w.print("  dev {s}\n", .{std.mem.span(c.ggml_backend_dev_name(dv))});
         const text = try refLogSince();
@@ -578,20 +578,20 @@ fn memoryData(w: *std.Io.Writer, cs: Case, in: *Inputs, ref: bool, fit_log: *std
         const log: fit.Log = .{ .verbosity = fit.Log.level_trace, .out = fit_log, .prefix = true };
         var devs: std.ArrayList(c.ggml_backend_dev_t) = .empty;
         defer devs.deinit(gpa);
-        var hp: [3]u32 = .{ 0, 0, 0 };
-        if (fit.getDeviceMemoryData(gpa, log, pathOf(cs.model).ptr, &in.mp, &in.cp, &devs, &hp[0], &hp[1], &hp[2], @intCast(cs.log_level))) |v| {
+        var hp: [4]u32 = .{ 0, 0, 0, 0 };
+        if (fit.getDeviceMemoryData(gpa, log, &.{pathOf(cs.model).ptr}, &in.mp, &in.cp, &devs, &hp[0], &hp[3], &hp[1], &hp[2], @intCast(cs.log_level))) |v| {
             defer gpa.free(v);
-            try w.print("memory_data {d} devs {d} hp {d} {d} {d}\n", .{ v.len, devs.items.len, hp[0], hp[1], hp[2] });
+            try w.print("memory_data {d} devs {d} hp {d} {d} {d} {d}\n", .{ v.len, devs.items.len, hp[0], hp[1], hp[2], hp[3] });
             for (v) |e| try w.print("  {d} {d} {d} {d} {d}\n", .{ e.total, e.free, @as(i64, @bitCast(e.model)), @as(i64, @bitCast(e.context)), @as(i64, @bitCast(e.compute)) });
             for (devs.items) |dv| try w.print("  dev {s}\n", .{std.mem.span(c.ggml_backend_dev_name(dv))});
         } else |e| switch (e) {
-            error.Runtime => try w.print("memory_data -1 devs 0 hp {d} {d} {d}\n", .{ hp[0], hp[1], hp[2] }),
+            error.Runtime => try w.print("memory_data -1 devs 0 hp {d} {d} {d} {d}\n", .{ hp[0], hp[1], hp[2], hp[3] }),
             else => return e,
         }
 
         var pw: std.Io.Writer.Allocating = .init(gpa);
         defer pw.deinit();
-        if (fit.fitPrint(gpa, log, &pw.writer, pathOf(cs.model).ptr, &in.mp, &in.cp)) {
+        if (fit.fitPrint(gpa, log, &pw.writer, &.{pathOf(cs.model).ptr}, &in.mp, &in.cp)) {
             try w.print("fit_print 0\n", .{});
             try w.writeAll(pw.written());
         } else |e| switch (e) {
@@ -606,7 +606,7 @@ fn memoryData(w: *std.Io.Writer, cs: Case, in: *Inputs, ref: bool, fit_log: *std
         var what: []const u8 = "";
         var cp = in.cp;
         cp.n_ctx = 512;
-        if (fit.fitMeasure(arena_state.allocator(), pathOf(cs.model).ptr, &in.mp, &cp, &n_ctx_train, &n_ctx, @intCast(cs.log_level), &what)) |rows| {
+        if (fit.fitMeasure(arena_state.allocator(), &.{pathOf(cs.model).ptr}, &in.mp, &cp, &n_ctx_train, &n_ctx, @intCast(cs.log_level), &what)) |rows| {
             try w.print("measure {d} {d}\n", .{ n_ctx_train, n_ctx });
             for (rows) |r| try w.print("  row {d} {s}|{s} {d} {d} {d} {d} {d}\n", .{ @as(u8, @intCast(@backingInt(r.kind))), r.name, r.description, r.total, r.free, r.model, r.context, r.compute });
         } else |e| switch (e) {
@@ -621,7 +621,7 @@ fn memoryData(w: *std.Io.Writer, cs: Case, in: *Inputs, ref: bool, fit_log: *std
 /// layers, through `n_gpu_layers` -- the same model parameters, since a
 /// dense model on one device needs no override.
 fn layersUse(k: ModelKey, layers: u32, n_ctx: u32) !usize {
-    var hp: [3]u32 = undefined;
+    var hp: [4]u32 = undefined;
     var devs: std.ArrayList(c.ggml_backend_dev_t) = .empty;
     defer devs.deinit(gpa);
     var dev_list: [2]c.ggml_backend_dev_t = .{ fit_dev_set(0, 1 << 40, 1 << 41, 0), null };
@@ -630,7 +630,7 @@ fn layersUse(k: ModelKey, layers: u32, n_ctx: u32) !usize {
     cp.n_ctx = n_ctx;
     mp.devices = &dev_list;
     mp.n_gpu_layers = @intCast(layers);
-    const v = try fit.getDeviceMemoryData(gpa, .{}, pathOf(k).ptr, &mp, &cp, &devs, &hp[0], &hp[1], &hp[2], c.GGML_LOG_LEVEL_ERROR);
+    const v = try fit.getDeviceMemoryData(gpa, .{}, &.{pathOf(k).ptr}, &mp, &cp, &devs, &hp[0], &hp[3], &hp[1], &hp[2], c.GGML_LOG_LEVEL_ERROR);
     defer gpa.free(v);
     return v[0].model + v[0].context + v[0].compute;
 }
@@ -643,7 +643,7 @@ fn measure(k: ModelKey) !void {
         return;
     }
     const log: fit.Log = .{};
-    var hp: [3]u32 = undefined;
+    var hp: [4]u32 = undefined;
     var devs: std.ArrayList(c.ggml_backend_dev_t) = .empty;
     defer devs.deinit(gpa);
 
@@ -654,17 +654,17 @@ fn measure(k: ModelKey) !void {
     // they say only against it.
     cp.n_ctx = 0;
     mp.devices = &dev_list;
-    const one = try fit.getDeviceMemoryData(gpa, log, pathOf(k).ptr, &mp, &cp, &devs, &hp[0], &hp[1], &hp[2], c.GGML_LOG_LEVEL_ERROR);
+    const one = try fit.getDeviceMemoryData(gpa, log, &.{pathOf(k).ptr}, &mp, &cp, &devs, &hp[0], &hp[3], &hp[1], &hp[2], c.GGML_LOG_LEVEL_ERROR);
     defer gpa.free(one);
     const one_dev: usize = @as(usize, @bitCast(one[0].model)) + @as(usize, @bitCast(one[0].context)) + @as(usize, @bitCast(one[0].compute));
 
     var none: [1]c.ggml_backend_dev_t = .{null};
     mp.devices = &none;
     cp.n_ctx = 4096;
-    const lo = try fit.getDeviceMemoryData(gpa, log, pathOf(k).ptr, &mp, &cp, &devs, &hp[0], &hp[1], &hp[2], c.GGML_LOG_LEVEL_ERROR);
+    const lo = try fit.getDeviceMemoryData(gpa, log, &.{pathOf(k).ptr}, &mp, &cp, &devs, &hp[0], &hp[3], &hp[1], &hp[2], c.GGML_LOG_LEVEL_ERROR);
     defer gpa.free(lo);
     cp.n_ctx = 0;
-    const hi = try fit.getDeviceMemoryData(gpa, log, pathOf(k).ptr, &mp, &cp, &devs, &hp[0], &hp[1], &hp[2], c.GGML_LOG_LEVEL_ERROR);
+    const hi = try fit.getDeviceMemoryData(gpa, log, &.{pathOf(k).ptr}, &mp, &cp, &devs, &hp[0], &hp[3], &hp[1], &hp[2], c.GGML_LOG_LEVEL_ERROR);
     defer gpa.free(hi);
     const host = struct {
         fn total(e: fit.DeviceMemoryData) usize {

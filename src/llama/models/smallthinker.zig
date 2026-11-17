@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/smallthinker.cpp` at v0.9.0
-//! (`cd959bae9`): `llama_model_smallthinker`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/smallthinker.cpp` at v1.0.0
+//! (`b1b770d90`): `llama_model_smallthinker`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph<iswa>`.
 
 const std = @import("std");
@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_smallthinker`'s `load_arch_hparams` (models/smallthinker.cpp:3 @cd959bae9).
+/// Ports `llama_model_smallthinker`'s `load_arch_hparams` (models/smallthinker.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -46,6 +46,11 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         hp.n_no_rope_layer_step = hp.nLayer();
     }
 
+    var il: u32 = 0;
+    while (il < hp.n_layer_all) : (il += 1) {
+        hp.rope_pattern[il] = @intFromBool(hp.n_no_rope_layer_step == hp.nLayer() or il % hp.n_no_rope_layer_step != 0);
+    }
+
     _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, false, exc);
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
     if (try meta.getKey(u32, .expert_gating_func, false, exc)) |v| hp.expert_gating_func = v;
@@ -57,7 +62,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_smallthinker`'s `load_arch_tensors` (models/smallthinker.cpp:30 @cd959bae9).
+/// Ports `llama_model_smallthinker`'s `load_arch_tensors` (models/smallthinker.cpp:34 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -85,8 +90,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
         layer.ffn_norm = try self.createTensor(.{ .tensor = .ffn_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, 0, exc);
 
-        impl.assert(l.n_expert > 0, "models/smallthinker.cpp", 54, "n_expert > 0 && \"n_expert must be > 0 for SMALLTHINKER\"");
-        impl.assert(l.n_expert_used > 0, "models/smallthinker.cpp", 55, "n_expert_used > 0 && \"n_expert_used must be > 0 for SMALLTHINKER\"");
+        impl.assert(l.n_expert > 0, "models/smallthinker.cpp", 58, "n_expert > 0 && \"n_expert must be > 0 for SMALLTHINKER\"");
+        impl.assert(l.n_expert_used > 0, "models/smallthinker.cpp", 59, "n_expert_used > 0 && \"n_expert_used must be > 0 for SMALLTHINKER\"");
 
         // The mixture of experts.
         const n_ff_exp: i64 = self.hparams.nFfExp(0);
@@ -97,7 +102,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_smallthinker`'s `build_arch_graph` (models/smallthinker.cpp:66 @cd959bae9).
+/// Ports `llama_model_smallthinker`'s `build_arch_graph` (models/smallthinker.cpp:70 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     if (@as(hparams_mod.SwaType, @fromBackingInt(@intCast(model.hparams.swa_type))) == .standard) {
         buildGraph(true, model, b);
@@ -107,14 +112,14 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_smallthinker`'s `graph<iswa>`
-/// (models/smallthinker.cpp:75 @cd959bae9).
+/// (models/smallthinker.cpp:79 @b1b770d90).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/smallthinker.cpp", 78, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/smallthinker.cpp", 79, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/smallthinker.cpp", 82, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/smallthinker.cpp", 83, "n_embd_head == n_rot");
 
     var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
 
@@ -128,15 +133,7 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
-        const freq_base_l = model.getRopeFreqBase(b.cparams, @intCast(il));
-        const freq_scale_l = model.getRopeFreqScale(b.cparams, @intCast(il));
-
         var inpSA = inpL;
-
-        // This overlaps with the SWA layers in current models, so the
-        // per-layer RoPE base and scale may be superfluous.
-        const use_rope = hp.n_no_rope_layer_step == b.n_layer or
-            @rem(@as(u32, @intCast(il)), hp.n_no_rope_layer_step) != 0;
 
         var probs: *Tensor = b.buildLoraMm(layer.ffn_gate_inp.?, inpL, null); // [n_expert, n_tokens]
         b.cb(probs, "ffn_moe_logits", il);
@@ -153,10 +150,8 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
             var Kcur = qkv.k;
             const Vcur = qkv.v;
 
-            if (use_rope) {
-                Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-                Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            }
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);
 

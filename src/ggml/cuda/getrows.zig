@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/getrows.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/getrows.cuh` at v0.9.0 (`cd959bae9`). The
+//! `llama.cpp/ggml/src/ggml-cuda/getrows.cuh` at v1.0.0 (`b1b770d90`). The
 //! kernels -- `k_get_rows`, `k_get_rows_kq`, `k_get_rows_float`,
 //! `k_get_rows_float_vec`, `k_get_rows_back_float` -- stay CUDA.
 //!
@@ -25,13 +25,13 @@ const Tensor = c.ggml_tensor;
 const half = kernels.half;
 const bf16 = kernels.bf16;
 
-/// Ports `CUDA_GET_ROWS_BLOCK_SIZE` (getrows.cuh:3 @cd959bae9).
+/// Ports `CUDA_GET_ROWS_BLOCK_SIZE` (getrows.cuh:3 @b1b770d90).
 const block_size = 256;
 
-/// Ports `CUDA_GET_ROWS_BACK_BLOCK_SIZE` (getrows.cuh:4 @cd959bae9).
+/// Ports `CUDA_GET_ROWS_BACK_BLOCK_SIZE` (getrows.cuh:4 @b1b770d90).
 const back_block_size = 256;
 
-/// `QK_K` (ggml-common.h:89 @cd959bae9).
+/// `QK_K` (ggml-common.h:89 @b1b770d90).
 const qk_k = 256;
 
 const u16_max = std.math.maxInt(u16);
@@ -66,7 +66,7 @@ fn ne12Fastdiv(a: *const Args) cu.uint3 {
     return common.initFastdivValues(@bitCast(a.ne12));
 }
 
-/// Ports `get_rows_cuda_q` (getrows.cu:160 @cd959bae9).
+/// Ports `get_rows_cuda_q` (getrows.cu:160 @b1b770d90).
 fn getRowsCudaQ(comptime qk: comptime_int, comptime qr: comptime_int, comptime dq: []const u8, comptime D: type, src0_d: ?*const anyopaque, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: cu.cudaStream_t) void {
     const block_dims: kernels.Dim3 = .{ .x = block_size };
     const block_num_y: c_int = @truncate(@divTrunc(a.ne00 + 2 * block_size - 1, 2 * block_size));
@@ -103,7 +103,7 @@ fn getRowsCudaQ(comptime qk: comptime_int, comptime qr: comptime_int, comptime d
     });
 }
 
-/// Ports `get_rows_cuda_kq` (getrows.cu:197 @cd959bae9).
+/// Ports `get_rows_cuda_kq` (getrows.cu:197 @b1b770d90).
 fn getRowsCudaKq(comptime block_dim: comptime_int, comptime D: type, comptime dq: []const u8, src0_d: ?*const anyopaque, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: cu.cudaStream_t) void {
     impl.assert(@rem(a.ne00, qk_k) == 0, "ne00 % QK_K == 0");
     const nsb: i64 = @divTrunc(a.ne00, qk_k);
@@ -141,7 +141,7 @@ fn getRowsCudaKq(comptime block_dim: comptime_int, comptime D: type, comptime dq
     });
 }
 
-/// Ports `get_rows_cuda_float` (getrows.cu:234 @cd959bae9).
+/// Ports `get_rows_cuda_float` (getrows.cu:234 @b1b770d90).
 fn getRowsCudaFloat(comptime S: type, comptime D: type, src0_d: ?*const anyopaque, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: cu.cudaStream_t) void {
     const block_dims: kernels.Dim3 = .{ .x = block_size };
 
@@ -211,13 +211,15 @@ fn getRowsCudaFloat(comptime S: type, comptime D: type, src0_d: ?*const anyopaqu
     });
 }
 
-/// Ports `ggml_cuda_get_rows_switch_src0_type` (getrows.cu:296 @cd959bae9).
+/// Ports `ggml_cuda_get_rows_switch_src0_type` (getrows.cu:296 @b1b770d90).
+/// `F8_E4M3` is new at v1.0.0.
 fn switchSrc0Type(comptime D: type, src0_d: ?*const anyopaque, src0_type: c.ggml_type, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: cu.cudaStream_t) void {
     switch (src0_type) {
         c.GGML_TYPE_F16 => getRowsCudaFloat(half, D, src0_d, src1_d, dst_d, a, stream),
         c.GGML_TYPE_F32 => getRowsCudaFloat(f32, D, src0_d, src1_d, dst_d, a, stream),
         c.GGML_TYPE_I32 => getRowsCudaFloat(i32, D, src0_d, src1_d, dst_d, a, stream),
         c.GGML_TYPE_BF16 => getRowsCudaFloat(bf16, D, src0_d, src1_d, dst_d, a, stream),
+        c.GGML_TYPE_F8_E4M3 => getRowsCudaFloat(kernels.fp8_e4m3, D, src0_d, src1_d, dst_d, a, stream),
         c.GGML_TYPE_Q1_0 => getRowsCudaQ(128, 1, "dequantize_q1_0", D, src0_d, src1_d, dst_d, a, stream),
         c.GGML_TYPE_Q2_0 => getRowsCudaQ(64, 1, "dequantize_q2_0", D, src0_d, src1_d, dst_d, a, stream),
         c.GGML_TYPE_Q4_0 => getRowsCudaQ(32, 2, "dequantize_q4_0", D, src0_d, src1_d, dst_d, a, stream),
@@ -244,7 +246,7 @@ fn switchSrc0Type(comptime D: type, src0_d: ?*const anyopaque, src0_type: c.ggml
     }
 }
 
-/// Ports `get_rows_cuda` (getrows.cu:412 @cd959bae9).
+/// Ports `get_rows_cuda` (getrows.cu:416 @b1b770d90).
 ///
 /// Parameters:
 /// - `src0_d`, `src0_type`: the rows to gather from.
@@ -301,7 +303,7 @@ fn srcOf(dst: *const Tensor, i: usize) *const Tensor {
     return impl.one(Tensor, dst.src[i]);
 }
 
-/// Ports `ggml_cuda_op_get_rows` (getrows.cu:440 @cd959bae9).
+/// Ports `ggml_cuda_op_get_rows` (getrows.cu:444 @b1b770d90).
 pub fn opGetRows(ctx: *common.Context, dst: *Tensor) void {
     const src0 = srcOf(dst, 0);
     const src1 = srcOf(dst, 1);
@@ -338,7 +340,7 @@ pub fn opGetRows(ctx: *common.Context, dst: *Tensor) void {
     );
 }
 
-/// Ports `ggml_cuda_op_get_rows_back` (getrows.cu:459 @cd959bae9).
+/// Ports `ggml_cuda_op_get_rows_back` (getrows.cu:463 @b1b770d90).
 pub fn opGetRowsBack(ctx: *common.Context, dst: *Tensor) void {
     const src0 = srcOf(dst, 0); // gradients of forward pass output
     const src1 = srcOf(dst, 1); // src1 in forward pass

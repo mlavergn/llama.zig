@@ -1,6 +1,9 @@
 //! The per-model encoder graphs (`llama.cpp/tools/mtmd/models/`), and
-//! `clip_get_graph_builder` (`llama.cpp/tools/mtmd/clip.cpp`, v0.9.0,
-//! `cd959bae9`), which picks one by projector type.
+//! `mtmd_get_graph_builder` (`llama.cpp/tools/mtmd/mtmd-graph.cpp`, v1.0.0,
+//! `b1b770d90`), which picks one by projector type, with
+//! `list_gen_state_slots` and `list_enc_state_slots`
+//! (`llama.cpp/tools/mtmd/mtmd-subcontext.cpp`), which list the state slots
+//! of the builders that keep state between calls.
 //!
 //! Each file here ports the `models/*.cpp` of the same name (hyphens become
 //! underscores) and exposes `build(g, params)`: the class's `build()`, run
@@ -26,6 +29,7 @@ pub const deepseekocr = @import("deepseekocr.zig");
 pub const deepseekocr2 = @import("deepseekocr2.zig");
 pub const dots3note = @import("dots3note.zig");
 pub const dotsocr = @import("dotsocr.zig");
+pub const drama3_gen = @import("drama3_gen.zig");
 pub const exaone4_5 = @import("exaone4_5.zig");
 pub const gemma4a = @import("gemma4a.zig");
 pub const gemma4ua = @import("gemma4ua.zig");
@@ -44,6 +48,7 @@ pub const lfm3vl = @import("lfm3vl.zig");
 pub const llama4 = @import("llama4.zig");
 pub const ling3vl = @import("ling3vl.zig");
 pub const llava = @import("llava.zig");
+pub const magevl = @import("magevl.zig");
 pub const mimo_audio = @import("mimo_audio.zig");
 pub const mimovl = @import("mimovl.zig");
 pub const minicpmv = @import("minicpmv.zig");
@@ -74,7 +79,7 @@ pub const whisper_enc = @import("whisper_enc.zig");
 pub const yasa2 = @import("yasa2.zig");
 pub const youtuvl = @import("youtuvl.zig");
 
-/// What `clip_get_graph_builder(...)->build()` leaves: the graph, and
+/// What `mtmd_get_graph_builder(...)->build()` leaves: the graph, and
 /// whether the builder supports batching. `deinit` frees the builder's
 /// context, as the C++'s temporary does at the end of the expression; the
 /// graph itself lives in `buf_compute_meta` and outlives it.
@@ -89,8 +94,8 @@ pub const Built = struct {
     }
 };
 
-/// The `support_batch()` override of each builder (models.h @cd959bae9),
-/// or null for a projector `clip_get_graph_builder` has no builder for.
+/// The `support_batch()` override of each builder (models.h @b1b770d90),
+/// or null for a projector `mtmd_get_graph_builder` has no builder for.
 pub fn supportBatch(t: names.ProjectorType) ?bool {
     return switch (t) {
         .gemma3, .idefics3, .cohere2v, .lfm2, .d1omni_v, .janus_pro, .phi4 => false,
@@ -102,6 +107,7 @@ pub fn supportBatch(t: names.ProjectorType) ?bool {
         .dots3note_a => false,
         .qwen2vl, .qwen25vl => false,
         .qwen3vl => false,
+        .magevl => false,
         .ling3vl => false,
         .exaone4_5 => false,
         .mimovl => false,
@@ -117,7 +123,7 @@ pub fn supportBatch(t: names.ProjectorType) ?bool {
         .ultravox, .voxtral, .qwen2a, .glma, .meralion, .music_flamingo => false,
         .kimivl => false,
         .paddleocr => false,
-        .kimik25 => false,
+        .kimik25, .kimik31 => false,
         .deepseek4v, .deepseek41v => false,
         .cogvlm => false,
         .hunyuanvl => false,
@@ -149,11 +155,12 @@ pub fn supportBatch(t: names.ProjectorType) ?bool {
         .voxtral_rt => false,
         .muse_spark_audio => false,
         .lfm3a_gen => false,
+        .drama3_gen => false,
         else => null,
     };
 }
 
-/// Ports `clip_get_graph_builder` (mtmd/clip.cpp:980 @cd959bae9) and the
+/// Ports `mtmd_get_graph_builder` (mtmd-graph.cpp:749 @b1b770d90) and the
 /// builder's `build()`.
 pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*const clip.EncodeParams) clip.Error!Built {
     const img = &imgs.entries.items[0];
@@ -171,6 +178,7 @@ pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*con
         .dots3note_a => try dots3note.build(&g, params),
         .qwen2vl, .qwen25vl => try qwen2vl.build(&g, params),
         .qwen3vl => try qwen3vl.build(&g, params),
+        .magevl => try magevl.build(&g, params),
         .ling3vl => try ling3vl.build(&g, params),
         .exaone4_5 => try exaone4_5.build(&g, params),
         .mimovl => try mimovl.build(&g, params),
@@ -186,7 +194,7 @@ pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*con
         .ultravox, .voxtral, .qwen2a, .glma, .meralion, .music_flamingo => try whisper_enc.build(&g, params),
         .kimivl => try kimivl.build(&g, params),
         .paddleocr => try paddleocr.build(&g, params),
-        .kimik25 => try kimik25.build(&g, params),
+        .kimik25, .kimik31 => try kimik25.build(&g, params),
         .deepseek4v, .deepseek41v => try deepseek4v.build(&g, params),
         .cogvlm => try cogvlm.build(&g, params),
         .hunyuanvl => try hunyuanvl.build(&g, params),
@@ -218,27 +226,42 @@ pub fn buildGraph(ctx: *clip.Ctx, imgs: *const impl.ImageF32Batch, params: ?*con
         .voxtral_rt => try voxtral_rt.build(&g, params),
         .muse_spark_audio => try muse_spark_audio.build(&g, params),
         .lfm3a_gen => try lfm3a_gen.build(&g, params),
-        else => impl.abort("clip.cpp", 1273, "missing cgraph builder"),
+        .drama3_gen => try drama3_gen.build(&g, params),
+        else => impl.abort("mtmd-graph.cpp", 1056, "missing cgraph builder"),
     };
     return .{ .gf = gf, .support_batch = supportBatch(ctx.projType()).?, .ctx0 = g.ctx0 };
 }
 
-/// Ports `c2w_state_slot` (mtmd/models/models.h:486 @cd959bae9): a persisted
-/// state slot of a gen-audio decoder.
+/// Ports `c2w_state_slot` (mtmd/models/models.h:498 @b1b770d90): a persisted
+/// state slot of a gen-audio decoder or a streaming audio encoder.
 pub const StateSlot = struct {
     name: [:0]const u8,
     ne0: i64,
     ne1: i64,
+    /// graph writes the slot directly, no state_in/state_out copy
+    in_place: bool = false,
 };
 
-/// Ports `list_gen_state_slots` (mtmd/clip.cpp:5587 @cd959bae9): the persisted
-/// state slots of the gen-audio decoders. The caller
-/// frees the slice with `freeSlots`.
+/// Ports `list_gen_state_slots` (mtmd-subcontext.cpp:389 @b1b770d90): the
+/// persisted state slots of the gen-audio decoders. The caller frees the
+/// slice with `freeSlots`.
 pub fn genStateSlots(hparams: *const model_mod.Hparams, model: *const model_mod.Model) clip.Error![]StateSlot {
     return switch (model.proj_type) {
         .qwen3tts_gen => qwen3tts_gen.listStateSlots(hparams, model),
+        .drama3_gen => drama3_gen.listStateSlots(hparams, model),
         .pockettts_gen => pockettts_gen.listStateSlots(hparams, model),
         .lfm3a_gen => lfm3a_gen.listStateSlots(hparams, model),
+        else => &.{},
+    };
+}
+
+/// Ports `list_enc_state_slots` (mtmd-subcontext.cpp:400 @b1b770d90): the
+/// state slots of the streaming audio encoders. The caller frees the slice
+/// with `freeSlots`.
+pub fn encStateSlots(hparams: *const model_mod.Hparams, model: *const model_mod.Model) clip.Error![]StateSlot {
+    return switch (model.proj_type) {
+        .lfm3a => lfm3a.listStateSlots(hparams, model),
+        .gemma4a => gemma4a.listStateSlots(hparams, model),
         else => &.{},
     };
 }

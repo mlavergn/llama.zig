@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/server/server-queue.cpp` and
-//! `llama.cpp/tools/server/server-queue.h` (llama.cpp v0.9.0, `cd959bae9`):
+//! `llama.cpp/tools/server/server-queue.h` (llama.cpp v1.0.0, `b1b770d90`):
 //! `server_queue`, `server_response` and `server_response_reader`. Each
 //! declaration names what it ports and the line it began at.
 //!
@@ -154,12 +154,12 @@ const Cond = struct {
     }
 };
 
-/// Ports `task_resets_idle_timer` (server-queue.cpp:24 @cd959bae9).
+/// Ports `task_resets_idle_timer` (server-queue.cpp:24 @b1b770d90).
 fn taskResetsIdleTimer(t: anytype) bool {
     return t != .metrics;
 }
 
-/// Ports `server_queue` (server-queue.h:15 @cd959bae9).
+/// Ports `server_queue` (server-queue.h:15 @b1b770d90).
 pub fn Queue(comptime Task: type) type {
     return struct {
         const Self = @This();
@@ -177,6 +177,7 @@ pub fn Queue(comptime Task: type) type {
         sleeping: bool = false,
         req_stop_sleeping: bool = false,
         time_last_task: i64 = 0,
+        n_inflight: c_int = 0, // requests that keep the server awake, see wait_until_no_sleep()
 
         queue_tasks: std.ArrayList(Task) = .empty,
         queue_tasks_deferred: std.ArrayList(Task) = .empty,
@@ -203,7 +204,7 @@ pub fn Queue(comptime Task: type) type {
             return .{ .gpa = gpa };
         }
 
-        /// Ports the destructor of `server_queue` (server-queue.h:50 @cd959bae9), and frees the queued tasks.
+        /// Ports the destructor of `server_queue` (server-queue.h:51 @b1b770d90), and frees the queued tasks.
         pub fn deinit(self: *Self) void {
             self.workerStop();
             for ([_]*std.ArrayList(Task){ &self.queue_tasks, &self.queue_tasks_deferred, &self.queue_tasks_unhandled }) |q| {
@@ -217,7 +218,7 @@ pub fn Queue(comptime Task: type) type {
             if (front) try q.insert(self.gpa, 0, task) else try q.append(self.gpa, task);
         }
 
-        /// Ports `server_queue`'s `post` (server-queue.cpp:28 @cd959bae9): one task,
+        /// Ports `server_queue`'s `post` (server-queue.cpp:28 @b1b770d90): one task,
         /// whose id is already set.
         ///
         /// Return: the task's id.
@@ -236,7 +237,7 @@ pub fn Queue(comptime Task: type) type {
             return task_id;
         }
 
-        /// Ports `server_queue`'s vector `post` (server-queue.cpp:50 @cd959bae9):
+        /// Ports `server_queue`'s vector `post` (server-queue.cpp:50 @b1b770d90):
         /// gives each task without an id the next one, in order.
         pub fn postMany(self: *Self, tasks: []Task, front: bool) !void {
             self.mutex_tasks.lock();
@@ -257,7 +258,7 @@ pub fn Queue(comptime Task: type) type {
             self.condition_tasks.notifyOne();
         }
 
-        /// Ports `server_queue`'s `defer` (server-queue.cpp:76 @cd959bae9).
+        /// Ports `server_queue`'s `defer` (server-queue.cpp:76 @b1b770d90).
         pub fn deferTask(self: *Self, task: Task) !void {
             self.mutex_tasks.lock();
             defer self.mutex_tasks.unlock();
@@ -267,7 +268,7 @@ pub fn Queue(comptime Task: type) type {
             self.condition_tasks.notifyOne();
         }
 
-        /// Ports `server_queue`'s `get_new_id` (server-queue.cpp:84 @cd959bae9).
+        /// Ports `server_queue`'s `get_new_id` (server-queue.cpp:84 @b1b770d90).
         pub fn getNewId(self: *Self) i32 {
             self.mutex_tasks.lock();
             defer self.mutex_tasks.unlock();
@@ -276,7 +277,7 @@ pub fn Queue(comptime Task: type) type {
             return new_id;
         }
 
-        /// Ports `server_queue`'s `pop_deferred_task` (server-queue.cpp:90 @cd959bae9).
+        /// Ports `server_queue`'s `pop_deferred_task` (server-queue.cpp:90 @b1b770d90).
         pub fn popDeferredTask(self: *Self, id_slot: i32) !void {
             self.mutex_tasks.lock();
             defer self.mutex_tasks.unlock();
@@ -303,28 +304,43 @@ pub fn Queue(comptime Task: type) type {
             self.condition_tasks.notifyOne();
         }
 
-        /// Ports `server_queue`'s `wait_until_no_sleep` (server-queue.cpp:115 @cd959bae9).
+        /// Ports `server_queue`'s `wait_until_no_sleep` (server-queue.cpp:115 @b1b770d90):
+        /// if sleeping, request exiting sleep state and wait until it is
+        /// done; the server then stays awake until the caller calls
+        /// `releaseInflight`.
         pub fn waitUntilNoSleep(self: *Self) void {
             self.mutex_tasks.lock();
             defer self.mutex_tasks.unlock();
-            if (!self.sleeping) return;
-            if (!self.req_stop_sleeping) {
-                log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "wait_until_no_sleep", "requesting to stop sleeping\n" });
-                self.req_stop_sleeping = true;
-                self.condition_tasks.notifyOne(); // only main thread is waiting on this
+            if (self.sleeping) {
+                if (!self.req_stop_sleeping) {
+                    log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "wait_until_no_sleep", "requesting to stop sleeping\n" });
+                    self.req_stop_sleeping = true;
+                    self.condition_tasks.notifyOne(); // only main thread is waiting on this
+                }
+                log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "wait_until_no_sleep", "waiting until no sleep\n" });
+                while (self.sleeping) self.condition_tasks.wait(&self.mutex_tasks);
             }
-            log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "wait_until_no_sleep", "waiting until no sleep\n" });
-            while (self.sleeping) self.condition_tasks.wait(&self.mutex_tasks);
+            self.n_inflight += 1;
         }
 
-        /// Ports `server_queue`'s `is_sleeping` (server-queue.h:72 @cd959bae9).
+        /// Ports `server_queue`'s `release_inflight` (server-queue.cpp:131 @b1b770d90):
+        /// let the server sleep again once the caller no longer uses the
+        /// server state.
+        pub fn releaseInflight(self: *Self) void {
+            self.mutex_tasks.lock();
+            defer self.mutex_tasks.unlock();
+            ggmlAssert(self.n_inflight > 0, 133, "n_inflight > 0");
+            self.n_inflight -= 1;
+        }
+
+        /// Ports `server_queue`'s `is_sleeping` (server-queue.h:77 @b1b770d90).
         pub fn isSleeping(self: *Self) bool {
             self.mutex_tasks.lock();
             defer self.mutex_tasks.unlock();
             return self.sleeping;
         }
 
-        /// Ports `server_queue`'s `terminate` (server-queue.cpp:132 @cd959bae9).
+        /// Ports `server_queue`'s `terminate` (server-queue.cpp:137 @b1b770d90).
         pub fn terminate(self: *Self) void {
             self.mutex_tasks.lock();
             defer self.mutex_tasks.unlock();
@@ -332,7 +348,7 @@ pub fn Queue(comptime Task: type) type {
             self.condition_tasks.notifyAll();
         }
 
-        /// Ports `server_queue`'s `queue_tasks_deferred_size` (server-queue.h:107 @cd959bae9).
+        /// Ports `server_queue`'s `queue_tasks_deferred_size` (server-queue.h:112 @b1b770d90).
         pub fn queueTasksDeferredSize(self: *Self) usize {
             self.mutex_tasks.lock();
             defer self.mutex_tasks.unlock();
@@ -340,7 +356,7 @@ pub fn Queue(comptime Task: type) type {
         }
 
         /// Ports `on_new_task`, `on_update_slots` and
-        /// `on_sleeping_state` (server-queue.h:121, 126, 135 @cd959bae9):
+        /// `on_sleeping_state` (server-queue.h:126, 131, 140 @b1b770d90):
         /// one context for the first two, which the server binds to the
         /// same `server_context`.
         pub fn onCallbacks(self: *Self, ctx: *anyopaque, new_task: NewTaskFn, update_slots: UpdateSlotsFn) void {
@@ -353,7 +369,7 @@ pub fn Queue(comptime Task: type) type {
             try self.callback_sleeping_state.append(self.gpa, .{ .ctx = ctx, .f = f });
         }
 
-        /// Ports `server_queue`'s `process_new_tasks` (server-queue.cpp:138 @cd959bae9).
+        /// Ports `server_queue`'s `process_new_tasks` (server-queue.cpp:143 @b1b770d90).
         ///
         /// Return: true when the queue was terminated.
         fn processNewTasks(self: *Self, is_yielding: bool) !bool {
@@ -374,7 +390,7 @@ pub fn Queue(comptime Task: type) type {
                 log.dbg("que  %12.*s: processing task, id = %d\n", .{ @as(c_int, 12), "process_new_tasks", task.id });
                 if (!try self.callback_new_task.?(self.cb_ctx, &task, is_yielding)) {
                     // set it aside, do not put it back in the queue, else we offer it again in a loop
-                    ggmlAssert(is_yielding, 155, "is_yielding && \"a task can only be declined while yielding\"");
+                    ggmlAssert(is_yielding, 160, "is_yielding && \"a task can only be declined while yielding\"");
                     log.dbg("que  %12.*s: task declined, id = %d\n", .{ @as(c_int, 12), "process_new_tasks", task.id });
                     self.mutex_tasks.lock();
                     defer self.mutex_tasks.unlock();
@@ -383,7 +399,7 @@ pub fn Queue(comptime Task: type) type {
             }
         }
 
-        /// Ports `server_queue`'s `worker_loop` (server-queue.cpp:163 @cd959bae9).
+        /// Ports `server_queue`'s `worker_loop` (server-queue.cpp:168 @b1b770d90).
         fn workerLoop(self: *Self) void {
             while (true) {
                 {
@@ -427,7 +443,7 @@ pub fn Queue(comptime Task: type) type {
             }
         }
 
-        /// Ports `server_queue`'s `worker_stop` (server-queue.cpp:209 @cd959bae9).
+        /// Ports `server_queue`'s `worker_stop` (server-queue.cpp:214 @b1b770d90).
         fn workerStop(self: *Self) void {
             const t = self.worker.thread orelse return;
             self.mutex_tasks.lock();
@@ -439,17 +455,17 @@ pub fn Queue(comptime Task: type) type {
             self.worker.thread = null;
         }
 
-        /// Ports `server_queue`'s `yield_to_queue` (server-queue.cpp:222 @cd959bae9):
+        /// Ports `server_queue`'s `yield_to_queue` (server-queue.cpp:227 @b1b770d90):
         /// runs `work` here while the worker thread keeps taking tasks.
         pub fn yieldToQueue(self: *Self, work_ctx: anytype, comptime work: fn (@TypeOf(work_ctx)) anyerror!void) anyerror!void {
-            ggmlAssert(self.worker.thread != null, 223, "worker.thread.joinable() && \"yield_to_queue() requires start_loop() to be running\"");
+            ggmlAssert(self.worker.thread != null, 228, "worker.thread.joinable() && \"yield_to_queue() requires start_loop() to be running\"");
 
             log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "yield_to_queue", "yielding to queue\n" });
 
             {
                 self.mutex_tasks.lock();
                 defer self.mutex_tasks.unlock();
-                ggmlAssert(!self.worker.busy, 229, "!worker.busy && \"yield_to_queue() cannot be nested\"");
+                ggmlAssert(!self.worker.busy, 234, "!worker.busy && \"yield_to_queue() cannot be nested\"");
                 self.worker.busy = true;
                 self.worker.yielding = true;
             }
@@ -493,14 +509,14 @@ pub fn Queue(comptime Task: type) type {
             if (exception) |e| return e;
         }
 
-        /// Ports `server_queue`'s `start_loop` (server-queue.cpp:278 @cd959bae9):
+        /// Ports `server_queue`'s `start_loop` (server-queue.cpp:283 @b1b770d90):
         /// the decode loop, until `terminate`.
         pub fn startLoop(self: *Self, idle_sleep_ms: i64) !void {
             self.running = true;
             self.time_last_task = timeMs();
 
             // spawn the worker thread used by yield_to_queue()
-            ggmlAssert(self.worker.thread == null, 283, "!worker.thread.joinable() && \"start_loop() is already running\"");
+            ggmlAssert(self.worker.thread == null, 288, "!worker.thread.joinable() && \"start_loop() is already running\"");
             self.worker.stop = false;
             self.worker.busy = false;
             self.worker.yielding = false;
@@ -537,7 +553,8 @@ pub fn Queue(comptime Task: type) type {
                     }
 
                     // no tasks, check for sleeping state
-                    const should_sleep = idle_sleep_ms >= 0 and (timeMs() - self.time_last_task) >= idle_sleep_ms;
+                    // the `should_sleep` lambda: caller must hold mutex_tasks
+                    const should_sleep = !(idle_sleep_ms < 0 or self.n_inflight > 0) and (timeMs() - self.time_last_task) >= idle_sleep_ms;
                     if (should_sleep) {
                         log.inf("que  %12.*s: %s", .{ @as(c_int, 12), "start_loop", "entering sleeping state\n" });
                         self.sleeping = true;
@@ -578,7 +595,7 @@ pub fn Queue(comptime Task: type) type {
             }
         }
 
-        /// Ports `server_queue`'s `cleanup_pending_task` (server-queue.cpp:368 @cd959bae9).
+        /// Ports `server_queue`'s `cleanup_pending_task` (server-queue.cpp:373 @b1b770d90).
         /// Called with the lock held, by `post` alone.
         fn cleanupPendingTask(self: *Self, id_target: i32) void {
             for ([_]*std.ArrayList(Task){ &self.queue_tasks, &self.queue_tasks_deferred, &self.queue_tasks_unhandled }) |q| {
@@ -597,7 +614,7 @@ pub fn Queue(comptime Task: type) type {
     };
 }
 
-/// Ports `server_response` (server-queue.h:154 @cd959bae9). `ResultPtr` is a
+/// Ports `server_response` (server-queue.h:159 @b1b770d90). `ResultPtr` is a
 /// pointer to a result; the queue owns the results in it.
 pub fn Response(comptime ResultPtr: type) type {
     return struct {
@@ -620,7 +637,7 @@ pub fn Response(comptime ResultPtr: type) type {
             self.waiting_task_ids.deinit();
         }
 
-        /// Ports `server_response`'s `add_waiting_task_id` (server-queue.cpp:389 @cd959bae9).
+        /// Ports `server_response`'s `add_waiting_task_id` (server-queue.cpp:394 @b1b770d90).
         pub fn addWaitingTaskId(self: *Self, id_task: i32) !void {
             log.dbg("res  %12.*s: add task %d to waiting list. current waiting = %d (before add)\n", .{ @as(c_int, 12), "add_waiting_task_id", id_task, @as(c_int, @intCast(self.waiting_task_ids.count())) });
             self.mutex_results.lock();
@@ -628,7 +645,7 @@ pub fn Response(comptime ResultPtr: type) type {
             try self.waiting_task_ids.insert(id_task);
         }
 
-        /// Ports `server_response`'s `add_waiting_task_ids` (server-queue.cpp:396 @cd959bae9).
+        /// Ports `server_response`'s `add_waiting_task_ids` (server-queue.cpp:401 @b1b770d90).
         pub fn addWaitingTaskIds(self: *Self, id_tasks: *const IdSet) !void {
             self.mutex_results.lock();
             defer self.mutex_results.unlock();
@@ -639,7 +656,7 @@ pub fn Response(comptime ResultPtr: type) type {
             }
         }
 
-        /// Ports `server_response`'s `remove_waiting_task_id` (server-queue.cpp:405 @cd959bae9).
+        /// Ports `server_response`'s `remove_waiting_task_id` (server-queue.cpp:410 @b1b770d90).
         pub fn removeWaitingTaskId(self: *Self, id_task: i32) void {
             log.dbg("res  %12.*s: remove task %d from waiting list. current waiting = %d (before remove)\n", .{ @as(c_int, 12), "remove_waiting_task_id", id_task, @as(c_int, @intCast(self.waiting_task_ids.count())) });
             self.mutex_results.lock();
@@ -658,7 +675,7 @@ pub fn Response(comptime ResultPtr: type) type {
             self.queue_results.shrinkRetainingCapacity(w);
         }
 
-        /// Ports `server_response`'s `remove_waiting_task_ids` (server-queue.cpp:418 @cd959bae9).
+        /// Ports `server_response`'s `remove_waiting_task_ids` (server-queue.cpp:423 @b1b770d90).
         pub fn removeWaitingTaskIds(self: *Self, id_tasks: *const IdSet) void {
             self.mutex_results.lock();
             defer self.mutex_results.unlock();
@@ -692,7 +709,7 @@ pub fn Response(comptime ResultPtr: type) type {
             return null;
         }
 
-        /// Ports `server_response`'s `recv` (server-queue.cpp:427 @cd959bae9).
+        /// Ports `server_response`'s `recv` (server-queue.cpp:432 @b1b770d90).
         pub fn recv(self: *Self, id_tasks: *const IdSet) ResultPtr {
             while (true) {
                 self.mutex_results.lock();
@@ -709,7 +726,7 @@ pub fn Response(comptime ResultPtr: type) type {
             }
         }
 
-        /// Ports `server_response`'s `recv_with_timeout` (server-queue.cpp:450 @cd959bae9):
+        /// Ports `server_response`'s `recv_with_timeout` (server-queue.cpp:455 @b1b770d90):
         /// one deadline for the whole wait, so results of other tasks waking
         /// the condition do not extend it.
         ///
@@ -729,7 +746,7 @@ pub fn Response(comptime ResultPtr: type) type {
             }
         }
 
-        /// Ports `server_response`'s `send` (server-queue.cpp:481 @cd959bae9).
+        /// Ports `server_response`'s `send` (server-queue.cpp:486 @b1b770d90).
         /// Takes the result; drops it when nobody waits for its task.
         pub fn send(self: *Self, result: ResultPtr) !void {
             log.dbg("res  %12.*s: sending result for task id = %d\n", .{ @as(c_int, 12), "send", result.id });
@@ -744,7 +761,7 @@ pub fn Response(comptime ResultPtr: type) type {
             result.destroy(self.gpa);
         }
 
-        /// Ports `server_response`'s `broadcast` (server-queue.cpp:496 @cd959bae9).
+        /// Ports `server_response`'s `broadcast` (server-queue.cpp:501 @b1b770d90).
         pub fn broadcast(self: *Self, result: ResultPtr) !void {
             defer result.destroy(self.gpa);
             self.mutex_results.lock();
@@ -759,7 +776,7 @@ pub fn Response(comptime ResultPtr: type) type {
             self.condition_results.notifyAll();
         }
 
-        /// Ports `server_response`'s `terminate` (server-queue.cpp:507 @cd959bae9).
+        /// Ports `server_response`'s `terminate` (server-queue.cpp:512 @b1b770d90).
         pub fn terminate(self: *Self) void {
             self.running = false;
             self.condition_results.notifyAll();
@@ -767,7 +784,7 @@ pub fn Response(comptime ResultPtr: type) type {
     };
 }
 
-/// Ports `server_response_reader` (server-queue.h:203 @cd959bae9). `State`
+/// Ports `server_response_reader` (server-queue.h:208 @b1b770d90). `State`
 /// is `task_result_state`: `State.init(gpa, session)` makes one, from a
 /// chat session or (null) the default one.
 pub fn ResponseReader(comptime Task: type, comptime ResultPtr: type, comptime State: type) type {
@@ -793,7 +810,7 @@ pub fn ResponseReader(comptime Task: type, comptime ResultPtr: type, comptime St
             };
         }
 
-        /// Ports the destructor of `server_response_reader` (server-queue.h:218 @cd959bae9).
+        /// Ports the destructor of `server_response_reader` (server-queue.h:223 @b1b770d90).
         pub fn deinit(self: *Self) void {
             self.stop() catch |err| switch (err) {
                 error.OutOfMemory => {},
@@ -803,16 +820,16 @@ pub fn ResponseReader(comptime Task: type, comptime ResultPtr: type, comptime St
             self.id_tasks.deinit();
         }
 
-        /// Ports `server_response_reader`'s `get_new_id` (server-queue.h:222 @cd959bae9).
+        /// Ports `server_response_reader`'s `get_new_id` (server-queue.h:227 @b1b770d90).
         pub fn getNewId(self: *Self) i32 {
             return self.queue_tasks.getNewId();
         }
 
-        /// Ports `server_response_reader`'s `post_task` (server-queue.cpp:516 @cd959bae9).
+        /// Ports `server_response_reader`'s `post_task` (server-queue.cpp:521 @b1b770d90).
         pub fn postTask(self: *Self, task_in: Task, front: bool) !void {
             var task = task_in;
-            ggmlAssert(self.id_tasks.count() == 0, 517, "id_tasks.empty() && \"post_task() can only be called once per reader\"");
-            ggmlAssert(!task.isParent(), 518, "!task.is_parent() && \"not supported, use post_tasks() instead\"");
+            ggmlAssert(self.id_tasks.count() == 0, 522, "id_tasks.empty() && \"post_task() can only be called once per reader\"");
+            ggmlAssert(!task.isParent(), 523, "!task.is_parent() && \"not supported, use post_tasks() instead\"");
             task.index = 0;
             try self.id_tasks.insert(task.id);
             try self.states.append(self.gpa, try State.init(self.gpa, null));
@@ -820,11 +837,11 @@ pub fn ResponseReader(comptime Task: type, comptime ResultPtr: type, comptime St
             _ = try self.queue_tasks.post(task, front);
         }
 
-        /// Ports `server_response_reader`'s `post_tasks` (server-queue.cpp:526 @cd959bae9):
+        /// Ports `server_response_reader`'s `post_tasks` (server-queue.cpp:531 @b1b770d90):
         /// every task's state, and its children's, a copy of `session` (null: the
         /// default session).
         pub fn postTasks(self: *Self, tasks: []Task, session: ?*const State.Session, front: bool) !void {
-            ggmlAssert(self.id_tasks.count() == 0, 527, "id_tasks.empty() && \"post_tasks() can only be called once per reader\"");
+            ggmlAssert(self.id_tasks.count() == 0, 532, "id_tasks.empty() && \"post_tasks() can only be called once per reader\"");
             self.id_tasks.deinit();
             self.id_tasks = try Task.getListId(self.gpa, tasks);
             try self.states.ensureTotalCapacity(self.gpa, tasks.len);
@@ -840,17 +857,17 @@ pub fn ResponseReader(comptime Task: type, comptime ResultPtr: type, comptime St
                     try self.states.append(self.gpa, try State.init(self.gpa, session));
                 }
             }
-            ggmlAssert(self.states.items.len == self.id_tasks.count(), 540, "states.size() == id_tasks.size()");
+            ggmlAssert(self.states.items.len == self.id_tasks.count(), 545, "states.size() == id_tasks.size()");
             try self.queue_results.addWaitingTaskIds(&self.id_tasks);
             try self.queue_tasks.postMany(tasks, front);
         }
 
-        /// Ports `server_response_reader`'s `has_next` (server-queue.cpp:545 @cd959bae9).
+        /// Ports `server_response_reader`'s `has_next` (server-queue.cpp:550 @b1b770d90).
         pub fn hasNext(self: *const Self) bool {
             return !self.cancelled and self.received_count < self.id_tasks.count();
         }
 
-        /// Ports `server_response_reader`'s `next` (server-queue.cpp:551 @cd959bae9).
+        /// Ports `server_response_reader`'s `next` (server-queue.cpp:556 @b1b770d90).
         ///
         /// Return: null when `should_stop` said so before a result came.
         pub fn next(self: *Self, should_stop: anytype) !?ResultPtr {
@@ -868,7 +885,7 @@ pub fn ResponseReader(comptime Task: type, comptime ResultPtr: type, comptime St
                 if (self.states.items.len != 0) {
                     // update the generation state if needed
                     const idx = result.index;
-                    ggmlAssert(idx < self.states.items.len, 568, "idx < states.size()");
+                    ggmlAssert(idx < self.states.items.len, 573, "idx < states.size()");
                     try result.update(&self.states.items[idx]);
                 }
                 if (result.isStop()) self.received_count += 1;
@@ -876,7 +893,7 @@ pub fn ResponseReader(comptime Task: type, comptime ResultPtr: type, comptime St
             }
         }
 
-        /// Ports `server_response_reader`'s `batch_response` (server-queue.h:235 @cd959bae9).
+        /// Ports `server_response_reader`'s `batch_response` (server-queue.h:240 @b1b770d90).
         pub const BatchResponse = struct {
             is_terminated: bool = false, // if true, indicates that processing was stopped before all results were received
             results: []?ResultPtr = &.{},
@@ -889,7 +906,7 @@ pub fn ResponseReader(comptime Task: type, comptime ResultPtr: type, comptime St
             }
         };
 
-        /// Ports `server_response_reader`'s `wait_for_all` (server-queue.cpp:581 @cd959bae9).
+        /// Ports `server_response_reader`'s `wait_for_all` (server-queue.cpp:586 @b1b770d90).
         pub fn waitForAll(self: *Self, should_stop: anytype) !BatchResponse {
             var batch_res: BatchResponse = .{};
             errdefer batch_res.deinit(self.gpa);
@@ -905,14 +922,14 @@ pub fn ResponseReader(comptime Task: type, comptime ResultPtr: type, comptime St
                     return batch_res;
                 }
                 const idx = res.index;
-                ggmlAssert(idx < batch_res.results.len, 596, "idx < batch_res.results.size() && \"index out of range\"");
-                ggmlAssert(batch_res.results[idx] == null, 597, "batch_res.results[idx] == nullptr && \"duplicate result received\"");
+                ggmlAssert(idx < batch_res.results.len, 601, "idx < batch_res.results.size() && \"index out of range\"");
+                ggmlAssert(batch_res.results[idx] == null, 602, "batch_res.results[idx] == nullptr && \"duplicate result received\"");
                 batch_res.results[idx] = res;
             }
             return batch_res;
         }
 
-        /// Ports `server_response_reader`'s `stop` (server-queue.cpp:603 @cd959bae9).
+        /// Ports `server_response_reader`'s `stop` (server-queue.cpp:608 @b1b770d90).
         pub fn stop(self: *Self) !void {
             self.queue_results.removeWaitingTaskIds(&self.id_tasks);
             if (self.hasNext() and !self.cancelled) {

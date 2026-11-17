@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/k2-horizon.cpp` (llama.cpp v0.9.0,
-//! `cd959bae9`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/k2-horizon.cpp` (llama.cpp v1.0.0,
+//! `b1b770d90`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -199,7 +199,7 @@ const Build = struct {
 };
 
 /// Ports `common_chat_params_init_k2_horizon` (parsers/k2-horizon.cpp:8
-/// @cd959bae9).
+/// @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
@@ -240,6 +240,11 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
 
     data.thinking_start_tag = THINK_START;
     try data.thinking_end_tags.append(a, THINK_END);
+
+    // The models sometimes close medium/low reasoning with the generic </ifm|think>
+    if (!std.mem.eql(u8, think, "ifm|think")) {
+        try data.thinking_end_tags.append(a, "</ifm|think>");
+    }
 
     try data.preserved_tokens.appendSlice(a, data.thinking_end_tags.items);
     try data.preserved_tokens.appendSlice(a, &.{

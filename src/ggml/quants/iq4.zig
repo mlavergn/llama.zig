@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v0.9.0, `cd959bae9`), lines
+//! Ported from `llama.cpp/ggml/src/ggml-quants.c` (v1.0.0, `b1b770d90`), lines
 //! 28-34 and 4953-5160. Each function names the C function it replaces and the line it
 //! began at.
 //!
@@ -26,7 +26,7 @@ const c = impl.c;
 const fp16 = impl.fp32ToFp16;
 const QK_K = c.QK_K;
 
-/// Ports `best_index_iq4nl` (ggml-quants.c:30 @cd959bae9).
+/// Ports `best_index_iq4nl` (ggml-quants.c:30 @b1b770d90).
 ///
 /// The nearest `kvalues_iq4nl` level, counted down from 15 by every midpoint
 /// `x` lies below; `mid[k]` is `(values[k] + values[k+1]) / 2`. For this table
@@ -38,7 +38,7 @@ fn bestIndexIq4nl(mid: *const [15]f32, x: f32) usize {
     return l;
 }
 
-/// Ports `quantize_row_iq4_nl_impl` (ggml-quants.c:4953 @cd959bae9).
+/// Ports `quantize_row_iq4_nl_impl` (ggml-quants.c:4953 @b1b770d90).
 ///
 /// One routine for both formats: `iq4_nl` calls it with
 /// `super_block_size == block_size == 32` and no sub-block scales, `iq4_xs`
@@ -191,7 +191,7 @@ pub fn quantizeRowIq4NlImpl(
     }
 }
 
-/// Ports `quantize_row_iq4_nl_ref` (ggml-quants.c:5088 @cd959bae9).
+/// Ports `quantize_row_iq4_nl_ref` (ggml-quants.c:5088 @b1b770d90).
 ///
 /// Note `ntry = -1`: no search, and the initial scale keeps the sign of `max`
 /// rather than flipping it. The chunk entry point uses `7` instead.
@@ -233,7 +233,7 @@ pub export fn quantize_row_iq4_nl_ref(x: [*c]const f32, y: [*c]blocks.IQ4_NL, k:
     }
 }
 
-/// Ports `quantize_iq4_nl` (ggml-quants.c:5065 @cd959bae9).
+/// Ports `quantize_iq4_nl` (ggml-quants.c:5065 @b1b770d90).
 pub export fn quantize_iq4_nl(
     src: [*c]const f32,
     dst: ?*anyopaque,
@@ -279,7 +279,7 @@ pub export fn quantize_iq4_nl(
     return @as(usize, @intCast(nrow)) * nblock * @sizeOf(blocks.IQ4_NL);
 }
 
-/// Ports `quantize_iq4_xs` (ggml-quants.c:5103 @cd959bae9).
+/// Ports `quantize_iq4_xs` (ggml-quants.c:5103 @b1b770d90).
 pub export fn quantize_iq4_xs(
     src: [*c]const f32,
     dst: ?*anyopaque,
@@ -323,7 +323,7 @@ pub export fn quantize_iq4_xs(
     return @as(usize, @intCast(nrow)) * nblock * @sizeOf(blocks.IQ4_XS);
 }
 
-/// Ports `quantize_row_iq4_xs_ref` (ggml-quants.c:5123 @cd959bae9).
+/// Ports `quantize_row_iq4_xs_ref` (ggml-quants.c:5123 @b1b770d90).
 pub export fn quantize_row_iq4_xs_ref(x: [*c]const f32, y: [*c]blocks.IQ4_XS, k: i64) void {
     std.debug.assert(@rem(k, QK_K) == 0);
     _ = quantize_iq4_xs(x, @ptrCast(y), 1, k, null);

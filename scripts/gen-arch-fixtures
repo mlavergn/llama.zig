@@ -30,7 +30,8 @@
 # decision model (since v0.7.0), and Voxtral Realtime's adaptive norm, the
 # Qwen4exp merged weights and the DSpark draft of DeepSeek-V4.1 (since v0.8.0),
 # and Mistral Large 4's DSpark draft, with and without its RNN Markov head
-# (since v0.9.0).
+# (since v0.9.0), and Qwen3.5 with the merged linear-attention weights
+# (since v1.0.0).
 #
 # Since v0.7.0 the architectures with an MTP (NextN) head also get a fixture
 # with one NextN block, `--variant mtp`, in `<out-dir>/mtp/`: the C++ loads a

@@ -82,3 +82,45 @@ POST /tts {"input": "one", "n_predict": 2, "seed": 1}
 POST /tts {"input": "x"}
 POST /tts {"input": ""}
 GET /v1/models
+
+# v1.0.0 (08f945ffb): /v1/audio/speech and /audio/speech, OpenAI's speech API
+# converted to /tts -- wav or pcm (16-bit signed, converted from the float32
+# output), stream_format audio, a custom voice {"id": ...}; mp3, sse and speed
+# refused, instructions ignored with a warning. /tts takes "pcm16" and
+# "temperature" too
+!server -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -c 2048 -np 1 --no-warmup --seed 42 -lv 4
+!fulllog
+POST /v1/audio/speech {"model": "tts-1", "input": "hello", "n_predict": 4, "seed": 7}
+POST /audio/speech {"input": "hello", "n_predict": 4, "seed": 7, "response_format": "wav"}
+POST /v1/audio/speech {"input": "hello", "n_predict": 4, "seed": 7, "response_format": "pcm"}
+POST /v1/audio/speech {"input": "stream", "n_predict": 6, "seed": 9, "response_format": "pcm", "stream_format": "audio"}
+POST /v1/audio/speech {"input": "stream", "n_predict": 6, "seed": 9, "stream_format": "audio"}
+POST /v1/audio/speech {"input": "hello", "n_predict": 3, "seed": 7, "instructions": "whisper"}
+POST /v1/audio/speech {"input": "hello", "n_predict": 3, "seed": 7, "speed": 1.0}
+POST /v1/audio/speech {"input": "hello", "response_format": "mp3"}
+POST /v1/audio/speech {"input": "hello", "response_format": "pcm16"}
+POST /v1/audio/speech {"input": "hello", "stream_format": "sse"}
+POST /v1/audio/speech {"input": "hello", "speed": 1.25}
+POST /v1/audio/speech {"input": ""}
+POST /v1/audio/speech {"input": "hello", "voice": {"id": "nobody"}, "n_predict": 2}
+FORM /v1/audio/speech {"input": "form", "n_predict": "3", "seed": "5", "speed": "1", "temperature": "0.5", "response_format": "pcm"}
+FORM /v1/audio/speech {"input": "form", "n_predict": "3", "speed": "fast"}
+POST /v1/audio/speech not json
+POST /tts {"input": "hello", "n_predict": 4, "seed": 7, "response_format": "pcm16"}
+POST /tts {"input": "stream", "n_predict": 6, "seed": 9, "stream": true, "response_format": "pcm16"}
+POST /tts {"input": "warm", "n_predict": 3, "seed": 7, "temperature": 0}
+POST /tts {"input": "warm", "n_predict": 3, "seed": 7, "temperature": 1.5}
+POST /tts {"input": "warm", "n_predict": 3, "seed": 7, "temperature": -1}
+FORM /tts {"input": "warm", "n_predict": "3", "seed": "7", "temperature": "0.25"}
+
+# v1.0.0 (203b5f404): --tts-voice and --tts-lang are server flags now, the
+# default voice and language; a request's own, or a speaker reference, wins
+!server -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -c 4096 -np 1 --no-warmup --seed 42 --tts-voice male --tts-lang en -lv 4
+!fulllog
+POST /tts {"input": "hello", "n_predict": 3, "seed": 7}
+POST /tts {"input": "hello", "n_predict": 3, "seed": 7, "voice": "female"}
+POST /tts {"input": "hello", "n_predict": 3, "seed": 7, "lang": "fr"}
+POST /tts {"input": "hello", "n_predict": 3, "speaker_ref_b64": "$WAV"}
+POST /v1/audio/speech {"input": "hello", "n_predict": 3, "seed": 7, "voice": {"id": "female"}}
+!server -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -c 4096 -np 1 --no-warmup --seed 42 --tts-voice nobody -lv 4
+POST /tts {"input": "hello", "n_predict": 3, "seed": 7}

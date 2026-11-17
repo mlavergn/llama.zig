@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/qwen3vl.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/qwen3vl.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_qwen3vl`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`. `llama_model_qwen3tts`
 //! (`llama.cpp/src/models/qwen3tts.cpp`) adds nothing of its own, so the
@@ -23,7 +23,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_qwen3vl`'s `load_arch_hparams` (src/models/qwen3vl.cpp:3 @cd959bae9).
+/// Ports `llama_model_qwen3vl`'s `load_arch_hparams` (src/models/qwen3vl.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     if (try ml.meta.getKey(u32, .num_deepstack_layers, false, exc)) |v| hp.n_deepstack_layers = v;
@@ -38,7 +38,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_qwen3vl`'s `load_arch_tensors` (src/models/qwen3vl.cpp:16 @cd959bae9).
+/// Ports `llama_model_qwen3vl`'s `load_arch_tensors` (src/models/qwen3vl.cpp:16 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -80,13 +80,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_qwen3vl`'s `build_arch_graph` (src/models/qwen3vl.cpp:56 @cd959bae9).
+/// Ports `llama_model_qwen3vl`'s `build_arch_graph` (src/models/qwen3vl.cpp:56 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_qwen3vl`'s `graph` (src/models/qwen3vl.cpp:60
-/// @cd959bae9).
+/// @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -99,9 +99,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     impl.assert(n_embd_head == b.n_rot, "models/qwen3vl.cpp", 67, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
-
-    var sections: [4]c_int = undefined;
-    @memcpy(&sections, hp.rope_sections[0..4]);
 
     // The positions.
     const inp_pos = b.buildInpPos();
@@ -130,12 +127,12 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             Qcur = b.buildNorm(Qcur, layer.attn_q_norm, null, .rms, il);
             b.cb(Qcur, "Qcur_normed", il);
 
-            Qcur = c.ggml_rope_multi(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), &sections, b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            Qcur = b.buildRope(Qcur, inp_pos, il);
 
             Kcur = b.buildNorm(Kcur, layer.attn_k_norm, null, .rms, il);
             b.cb(Kcur, "Kcur_normed", il);
 
-            Kcur = c.ggml_rope_multi(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), &sections, b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
 
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);
@@ -186,7 +183,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const n_vocab_out = model.output.?.ne[1];
     if (n_vocab_in > n_vocab_out) {
         // Qwen3-TTS, with the codec head as its output.
-        impl.assert(model.output_norm != null, "models/qwen3vl.cpp", 179, "model.output_norm");
+        impl.assert(model.output_norm != null, "models/qwen3vl.cpp", 168, "model.output_norm");
         const pad = n_vocab_in - n_vocab_out;
 
         // A scalar -inf tensor, by this trick, to pad the output with.
@@ -194,7 +191,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         neg_inf = c.ggml_repeat_4d(ctx, neg_inf, pad, cur.ne[1], 1, 1);
         cur = c.ggml_concat(ctx, neg_inf, cur, 0); // [padded .. n_vocab_out, n_stream]
     } else if (n_vocab_in < n_vocab_out) {
-        impl.abort("models/qwen3vl.cpp", 190, "invalid case");
+        impl.abort("models/qwen3vl.cpp", 179, "invalid case");
     }
 
     b.cb(cur, "result_output", -1);

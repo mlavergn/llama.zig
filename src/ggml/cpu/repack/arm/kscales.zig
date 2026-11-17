@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v0.9.0
-//! (`cd959bae9`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp` at v1.0.0
+//! (`b1b770d90`).
 //!
 //! # The same shuffle as `repack/q4_k.zig`, cut differently
 //!
@@ -29,7 +29,7 @@ const kmask2: u32 = 0x0f0f0f0f;
 const kmask3: u32 = 0x03030303;
 const scales_size: usize = 12;
 
-/// Ports `decode_q_Kx8_6bit_scales` (arch/arm/repack.cpp:29 @cd959bae9).
+/// Ports `decode_q_Kx8_6bit_scales` (arch/arm/repack.cpp:29 @b1b770d90).
 ///
 /// Parameters:
 /// - `scales_in`: the twelve packed bytes for one sub-block.

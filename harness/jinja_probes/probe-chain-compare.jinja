@@ -1,0 +1,3 @@
+{{ 1 < 2 < 3 }}|{{ 1 < 3 < 2 }}|{{ 3 > 2 >= 2 == 2 }}|{{ 'a' in 'abc' == true }}|{{ 'x' not in 'abc' not in ['q'] }}|{{ 1 == 1 }}|{{ 2 < 1 < nofn() }}|{{ (1 < 2) == (2 < 3) == true }}
+{% for m in messages %}{{ m.role }}={{ 'user' == m.role != 'system' }},{{ 0 < m.content | length < 1000 }}
+{% endfor %}

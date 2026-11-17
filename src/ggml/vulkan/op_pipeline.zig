@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.9.0
-//! (`cd959bae9`).
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v1.0.0
+//! (`b1b770d90`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -28,7 +28,7 @@ fn isF16(t: *const Tensor) usize {
     return @intFromBool(t.type == c.GGML_TYPE_F16);
 }
 
-/// Ports `ggml_vk_concat_unit_size` (ggml-vulkan.cpp:297 @cd959bae9): the
+/// Ports `ggml_vk_concat_unit_size` (ggml-vulkan.cpp:299 @b1b770d90): the
 /// widest copy unit, for a quantized type the widest that divides a block.
 pub fn concatUnitSize(ty: c.ggml_type) u32 {
     const type_size: u32 = @intCast(c.ggml_type_size(ty));
@@ -39,7 +39,7 @@ pub fn concatUnitSize(ty: c.ggml_type) u32 {
     return 1;
 }
 
-/// Ports `ggml_vk_concat_supported` (ggml-vulkan.cpp:316 @cd959bae9).
+/// Ports `ggml_vk_concat_supported` (ggml-vulkan.cpp:318 @b1b770d90).
 pub fn concatSupported(src0: *const Tensor, src1: *const Tensor, dst: *const Tensor) bool {
     if (src0.type != src1.type or src0.type != dst.type) return false;
     if (!c.ggml_is_quantized(src0.type)) {
@@ -50,14 +50,14 @@ pub fn concatSupported(src0: *const Tensor, src1: *const Tensor, dst: *const Ten
     return c.ggml_is_contiguous_rows(src0) and c.ggml_is_contiguous_rows(src1) and c.ggml_is_contiguous_rows(dst);
 }
 
-/// Ports `ggml_vk_dim01_contiguous` (ggml-vulkan.cpp:6150 @cd959bae9).
+/// Ports `ggml_vk_dim01_contiguous` (ggml-vulkan.cpp:6405 @b1b770d90).
 pub fn dim01Contiguous(t: *const Tensor) bool {
     return t.nb[0] == c.ggml_type_size(t.type) and
         t.nb[1] == (t.nb[0] * @as(usize, @intCast(t.ne[0]))) / @as(usize, @intCast(c.ggml_blck_size(t.type))) and
         (t.ne[3] == 1 or t.nb[3] == t.nb[2] * @as(usize, @intCast(t.ne[2])));
 }
 
-/// Ports `ggml_vk_get_cpy_pipeline` (ggml-vulkan.cpp:6162 @cd959bae9): a
+/// Ports `ggml_vk_get_cpy_pipeline` (ggml-vulkan.cpp:6417 @b1b770d90): a
 /// copy from `src`'s type to `to`, the contiguous variant when both sides
 /// are, the transposing ones when a swap puts the innermost dimension
 /// elsewhere.
@@ -114,7 +114,7 @@ pub fn getCpyPipeline(ctx: *BackendCtx, src: *const Tensor, dst: ?*const Tensor,
     impl.abort("fatal error");
 }
 
-/// Ports `ggml_vk_conv_select_shape` (ggml-vulkan.cpp:8728 @cd959bae9):
+/// Ports `ggml_vk_conv_select_shape` (ggml-vulkan.cpp:9045 @b1b770d90):
 /// the largest tile that still gives every shader core two tiles.
 pub fn convSelectShape(ctx: *const BackendCtx, K: u32, NPQ: u32) ConvShape {
     const nTiles = struct {
@@ -138,7 +138,7 @@ pub fn convSelectShape(ctx: *const BackendCtx, K: u32, NPQ: u32) ConvShape {
     return .@"64x32";
 }
 
-/// Ports `ggml_vk_conv3d_select_shape` (ggml-vulkan.cpp:8760 @cd959bae9):
+/// Ports `ggml_vk_conv3d_select_shape` (ggml-vulkan.cpp:9077 @b1b770d90):
 /// the 256x128 coopmat2 tile, which reuses each loaded input across 256
 /// output channels instead of 128, when `K` fills whole channel tiles and
 /// there are at least as many workgroups as GPU cores; otherwise
@@ -163,7 +163,7 @@ pub fn conv3dSelectShape(ctx: *const BackendCtx, K: u32, NPQ: u32) ConvShape {
     return convSelectShape(ctx, K, NPQ);
 }
 
-/// Ports `ggml_vk_rms_norm_pipeline` (ggml-vulkan.cpp:8780 @cd959bae9): the
+/// Ports `ggml_vk_rms_norm_pipeline` (ggml-vulkan.cpp:9097 @b1b770d90): the
 /// 128, 256 or 512 block size, by row length.
 ///
 /// Return: the pipeline, borrowed from the device.
@@ -171,6 +171,19 @@ pub fn rmsNormPipeline(pipelines: *const [3]?*Pipeline, ncols: i64) ?*Pipeline {
     if (pipelines[0] != null and ncols <= 128) return pipelines[0];
     if (pipelines[1] != null and ncols <= 256) return pipelines[1];
     return pipelines[2];
+}
+
+/// Ports `ggml_vk_concat_is_transposed` (ggml-vulkan.cpp:9107 @b1b770d90):
+/// whether a dim-0 concat of 2-d tensors has a transposed `src1` the
+/// tiled-transpose shader can read, one 32x32 tile per workgroup.
+pub fn concatIsTransposed(device: *const m.device.Device, src0: *const Tensor, src1: *const Tensor, dst: *const Tensor) bool {
+    if (dst.op_params[0] != 0) return false; // dim 0 only
+    if (src0.ne[2] != 1 or src0.ne[3] != 1 or src1.ne[2] != 1 or src1.ne[3] != 1) return false;
+    const ts = c.ggml_type_size(src0.type);
+    if (src0.nb[0] != ts or dst.nb[0] != ts) return false; // src0 and dst rows must be contiguous
+    if (src1.nb[0] <= src1.nb[1]) return false; // src1 must actually be transposed
+    if (@divTrunc(src1.ne[1] + 31, 32) > device.properties.limits.maxComputeWorkGroupCount[0]) return false;
+    return src0.ne[1] == src1.ne[1] and dst.ne[1] == src1.ne[1];
 }
 
 /// A dynamic pipeline: found in `map` by `key`, or made and recorded there,
@@ -188,7 +201,7 @@ fn opI32(t: *const Tensor, i: usize) u32 {
     return @bitCast(t.op_params[i]);
 }
 
-/// Ports `ggml_vk_op_get_pipeline` (ggml-vulkan.cpp:8790 @cd959bae9).
+/// Ports `ggml_vk_op_get_pipeline` (ggml-vulkan.cpp:9127 @b1b770d90).
 ///
 /// Return: the pipeline, or null where the op has none for these types.
 pub fn getPipeline(ctx: *BackendCtx, src0_: ?*const Tensor, src1_: ?*const Tensor, src2_: ?*const Tensor, dst: *const Tensor, op: c.enum_ggml_op) ?*Pipeline {
@@ -251,6 +264,14 @@ pub fn getPipeline(ctx: *BackendCtx, src0_: ?*const Tensor, src1_: ?*const Tenso
         },
         c.GGML_OP_CONCAT => {
             if (!concatSupported(src0_.?, src1_.?, dst)) return null;
+            if (!c.ggml_is_quantized(src0_.?.type) and concatIsTransposed(dev, src0_.?, src1_.?, dst)) {
+                switch (concatUnitSize(src0_.?.type)) {
+                    1 => return dev.pipeline_concat_transpose_i8,
+                    2 => return dev.pipeline_concat_transpose_i16,
+                    4 => return dev.pipeline_concat_transpose_i32,
+                    else => {},
+                }
+            }
             return switch (concatUnitSize(src0_.?.type)) {
                 1 => dev.pipeline_concat_i8,
                 2 => dev.pipeline_concat_i16,
@@ -398,10 +419,6 @@ pub fn getPipeline(ctx: *BackendCtx, src0_: ?*const Tensor, src1_: ?*const Tenso
                 c.GGML_GLU_OP_GEGLU_QUICK => dev.pipeline_geglu_quick[i],
                 else => null,
             };
-        },
-        c.GGML_OP_DIAG_MASK_INF => {
-            if (src0_.?.type == F32 and dst.type == F32) return dev.pipeline_diag_mask_inf_f32;
-            return null;
         },
         c.GGML_OP_SOFT_MAX => {
             const src0 = src0_.?;
@@ -655,14 +672,6 @@ pub fn getPipeline(ctx: *BackendCtx, src0_: ?*const Tensor, src1_: ?*const Tenso
                 const map = if (src0.type == F32) &dev.pipeline_conv3d_f32[si] else if (src0.type == F16) &dev.pipeline_conv3d_f16_f32[si] else return null;
                 return dynamicPipeline(ctx, map, key);
             }
-            return null;
-        },
-        c.GGML_OP_ADD1 => {
-            const t0 = src0_.?.type;
-            const t1 = src1_.?.type;
-            if (t0 == F16 and t1 == F16 and dst.type == F16) return dev.pipeline_add1_f16_f16;
-            if (t0 == F16 and t1 == F32 and dst.type == F16) return dev.pipeline_add1_f16_f32;
-            if (t0 == F32 and t1 == F32 and dst.type == F32) return dev.pipeline_add1_f32_f32;
             return null;
         },
         c.GGML_OP_ARANGE => {

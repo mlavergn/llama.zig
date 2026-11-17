@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml.c` (v0.9.0, `cd959bae9`), lines
+//! Ported from `llama.cpp/ggml/src/ggml.c` (v1.0.0, `b1b770d90`), lines
 //! 7911-8030. Each function names the C function it replaces and the line it
 //! began at.
 //!
@@ -41,7 +41,7 @@ extern fn iq2xs_free_impl(t: c.enum_ggml_type) void;
 extern fn iq3xs_init_impl(grid_size: c_int) void;
 extern fn iq3xs_free_impl(grid_size: c_int) void;
 
-/// The `switch` in `ggml_quantize_chunk` (ggml.c:8198 @cd959bae9), as a table.
+/// The `switch` in `ggml_quantize_chunk` (ggml.c:8004 @b1b770d90), as a table.
 ///
 /// The C spells out one `case` per type, each an identical call differing only
 /// in the routine's name. Listing the pairs instead keeps the mapping readable
@@ -87,7 +87,7 @@ fn quantizerFor(t: c.enum_ggml_type) ?QuantizeFn {
     return null;
 }
 
-/// Ports `ggml_quantize_init` (ggml.c:8158 @cd959bae9).
+/// Ports `ggml_quantize_init` (ggml.c:7964 @b1b770d90).
 ///
 /// Builds the shared codebook the i-quants index into. Idempotent, and a
 /// no-op for every other format.
@@ -109,7 +109,7 @@ pub export fn ggml_quantize_init(t: c.enum_ggml_type) void {
     c.ggml_critical_section_end();
 }
 
-/// Ports `ggml_quantize_free` (ggml.c:8176 @cd959bae9).
+/// Ports `ggml_quantize_free` (ggml.c:7982 @b1b770d90).
 ///
 /// Releases every codebook unconditionally rather than tracking which were
 /// built; the free routines tolerate a table that was never allocated.
@@ -127,7 +127,7 @@ pub export fn ggml_quantize_free() void {
     c.ggml_critical_section_end();
 }
 
-/// Ports `ggml_quantize_requires_imatrix` (ggml.c:8190 @cd959bae9).
+/// Ports `ggml_quantize_requires_imatrix` (ggml.c:7996 @b1b770d90).
 ///
 /// Note `IQ1_M` is absent: the C lists it commented out, and leaving it out is
 /// deliberate rather than an oversight, so it is left out here too.
@@ -137,7 +137,7 @@ pub export fn ggml_quantize_requires_imatrix(t: c.enum_ggml_type) bool {
         t == c.GGML_TYPE_IQ1_S;
 }
 
-/// Ports `ggml_quantize_chunk` (ggml.c:8198 @cd959bae9).
+/// Ports `ggml_quantize_chunk` (ggml.c:8004 @b1b770d90).
 ///
 /// Quantizes `nrows` rows starting at element `start`, which must fall on both
 /// a block boundary and a row boundary.

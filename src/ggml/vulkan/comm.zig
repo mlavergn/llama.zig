@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-comm.cpp` at
-//! v0.9.0 (`cd959bae9`), new in that release. Each declaration below names
+//! v1.0.0 (`b1b770d90`); new at v0.9.0. Each declaration below names
 //! the C++ it replaces and the line it began at.
 //!
 //! # The contract
@@ -65,16 +65,16 @@ fn now() i64 {
     return @as(i64, @intCast(ts.sec)) * std.time.ns_per_s + @as(i64, @intCast(ts.nsec));
 }
 
-/// Ports `ggml_vk_comm_f16_min_size` (ggml-vulkan-comm.cpp:10 @cd959bae9).
+/// Ports `ggml_vk_comm_f16_min_size` (ggml-vulkan-comm.cpp:10 @b1b770d90).
 const f16_min_size: usize = 1024 * 1024;
 
-/// Ports `ggml_vk_comm_needs_f32` (ggml-vulkan-comm.cpp:14 @cd959bae9):
+/// Ports `ggml_vk_comm_needs_f32` (ggml-vulkan-comm.cpp:14 @b1b770d90):
 /// follows the ops the meta backend may delay a reduction across.
 fn needsF32(tensor: ?*const Tensor, depth: c_int) bool {
     const t = tensor orelse return false;
     if (depth > 64) return false;
     return switch (t.op) {
-        c.GGML_OP_MUL_MAT, c.GGML_OP_MUL_MAT_ID => impl.getOpParamsI32(t, 0) == c.GGML_PREC_F32,
+        c.GGML_OP_MUL_MAT, c.GGML_OP_MUL_MAT_ID => c.ggml_prec_get_acc(t) == c.GGML_PREC_BF16 or c.ggml_prec_get_acc(t) == c.GGML_PREC_F32,
         c.GGML_OP_ADD => needsF32(t.src[0], depth + 1) or needsF32(t.src[1], depth + 1),
         c.GGML_OP_MUL, c.GGML_OP_ADD_ID => needsF32(t.src[0], depth + 1),
         c.GGML_OP_VIEW => needsF32(t.src[0], depth + 1),
@@ -82,7 +82,7 @@ fn needsF32(tensor: ?*const Tensor, depth: c_int) bool {
     };
 }
 
-/// Ports `vk_comm_sync` (ggml-vulkan-comm.cpp:36 @cd959bae9).
+/// Ports `vk_comm_sync` (ggml-vulkan-comm.cpp:36 @b1b770d90).
 const Sync = enum {
     // device i signals done[i], a host thread signals go[i] once all peers of i are done
     host_bridge,
@@ -90,7 +90,7 @@ const Sync = enum {
     sync_fd,
 };
 
-/// Ports `vk_comm_device` (ggml-vulkan-comm.cpp:41 @cd959bae9).
+/// Ports `vk_comm_device` (ggml-vulkan-comm.cpp:41 @b1b770d90).
 const CommDevice = struct {
     backend: c.ggml_backend_t = null,
     ctx: *BackendCtx = undefined,
@@ -110,7 +110,7 @@ const CommDevice = struct {
     } = .{},
 };
 
-/// Ports `ggml_backend_vk_comm_context` (ggml-vulkan-comm.cpp:60 @cd959bae9).
+/// Ports `ggml_backend_vk_comm_context` (ggml-vulkan-comm.cpp:60 @b1b770d90).
 const CommCtx = struct {
     devs: []CommDevice = &.{},
     mode: Sync = .host_bridge,
@@ -131,7 +131,7 @@ const CommCtx = struct {
     cv: std.c.pthread_cond_t = std.c.PTHREAD_COND_INITIALIZER,
 };
 
-/// Ports `ggml_vk_comm_free_buffers` (ggml-vulkan-comm.cpp:80 @cd959bae9).
+/// Ports `ggml_vk_comm_free_buffers` (ggml-vulkan-comm.cpp:80 @b1b770d90).
 fn freeBuffers(comm: *CommCtx) void {
     for (comm.devs) |*dv| {
         for (dv.host_buf) |*buf| {
@@ -144,7 +144,7 @@ fn freeBuffers(comm: *CommCtx) void {
     comm.cap = 0;
 }
 
-/// Ports `ggml_backend_vk_comm_ensure` (ggml-vulkan-comm.cpp:92 @cd959bae9).
+/// Ports `ggml_backend_vk_comm_ensure` (ggml-vulkan-comm.cpp:92 @b1b770d90).
 fn ensure(comm: *CommCtx, nbytes: usize) bool {
     if (comm.disabled) return false;
     if (nbytes <= comm.cap) return true;
@@ -175,7 +175,7 @@ fn ensure(comm: *CommCtx, nbytes: usize) bool {
     return true;
 }
 
-/// Ports `ggml_vk_comm_set_slot` (ggml-vulkan-comm.cpp:129 @cd959bae9).
+/// Ports `ggml_vk_comm_set_slot` (ggml-vulkan-comm.cpp:129 @b1b770d90).
 fn setSlot(slot: *Tensor, src: *const Tensor, ty: c.ggml_type, buf: c.ggml_backend_buffer_t, offs: usize) void {
     slot.type = ty;
     slot.nb[0] = c.ggml_type_size(ty);
@@ -187,7 +187,7 @@ fn setSlot(slot: *Tensor, src: *const Tensor, ty: c.ggml_type, buf: c.ggml_backe
     slot.data = @as([*]u8, @ptrCast(c.ggml_backend_buffer_get_base(buf))) + offs;
 }
 
-/// Ports `ggml_vk_comm_submit` (ggml-vulkan-comm.cpp:142 @cd959bae9).
+/// Ports `ggml_vk_comm_submit` (ggml-vulkan-comm.cpp:142 @b1b770d90).
 fn submit(ctx: *BackendCtx, cx: *Context, signal: vk.VkSemaphore, value: u64) void {
     m.submit.ctxEnd(cx);
     m.submit.runMemcpys(cx.in_memcpys.items);
@@ -203,7 +203,7 @@ fn submit(ctx: *BackendCtx, cx: *Context, signal: vk.VkSemaphore, value: u64) vo
     ctx.compute_ctx = null;
 }
 
-/// Ports `ggml_vk_comm_notify_submitted` (ggml-vulkan-comm.cpp:160 @cd959bae9).
+/// Ports `ggml_vk_comm_notify_submitted` (ggml-vulkan-comm.cpp:160 @b1b770d90).
 fn notifySubmitted(comm: *CommCtx, round: u64) void {
     comm.submitted.store(round, .seq_cst);
     if (comm.sleeping.load(.seq_cst)) {
@@ -213,7 +213,7 @@ fn notifySubmitted(comm: *CommCtx, round: u64) void {
     }
 }
 
-/// Ports `ggml_vk_comm_wait_submitted` (ggml-vulkan-comm.cpp:169 @cd959bae9).
+/// Ports `ggml_vk_comm_wait_submitted` (ggml-vulkan-comm.cpp:169 @b1b770d90).
 ///
 /// Return: false on stop.
 fn waitSubmitted(comm: *CommCtx, r: u64) bool {
@@ -252,7 +252,7 @@ fn signalSemaphore(device: vk.VkDevice, sem: vk.VkSemaphore, value: u64) common.
     try common.check(d.vkSignalSemaphore.?(device, &si), "vk::Device::signalSemaphore");
 }
 
-/// Ports `ggml_vk_comm_bridge_release` (ggml-vulkan-comm.cpp:190 @cd959bae9):
+/// Ports `ggml_vk_comm_bridge_release` (ggml-vulkan-comm.cpp:190 @b1b770d90):
 /// signals go[i] once all peers of i are done.
 ///
 /// Return: false on stop; an error where a `vk::SystemError` is thrown.
@@ -302,7 +302,7 @@ fn bridgeRelease(comm: *CommCtx, r: u64, seen: []u64, sent: []bool) common.VkErr
     }
 }
 
-/// Ports `ggml_vk_comm_bridge_thread` (ggml-vulkan-comm.cpp:234 @cd959bae9).
+/// Ports `ggml_vk_comm_bridge_thread` (ggml-vulkan-comm.cpp:234 @b1b770d90).
 fn bridgeThread(comm: *CommCtx) void {
     if (builtin.os.tag == .linux) _ = pthread_setname_np(std.c.pthread_self(), "ggml-vk-comm");
     const seen = allocator.alloc(u64, comm.devs.len) catch oom();
@@ -339,7 +339,7 @@ fn spawnThread(comm: *CommCtx, comptime f: fn (*CommCtx) void) void {
     comm.thread = std.Thread.spawn(.{}, f, .{comm}) catch impl.abort("ggml_vulkan: std::thread failed");
 }
 
-/// Ports `ggml_vk_comm_bridge_init` (ggml-vulkan-comm.cpp:251 @cd959bae9).
+/// Ports `ggml_vk_comm_bridge_init` (ggml-vulkan-comm.cpp:251 @b1b770d90).
 fn bridgeInit(comm: *CommCtx) common.VkError!void {
     for (comm.devs) |*dv| {
         dv.bridge.done = try createTimelineSemaphore(dv.ctx.device.device);
@@ -348,13 +348,13 @@ fn bridgeInit(comm: *CommCtx) common.VkError!void {
     spawnThread(comm, bridgeThread);
 }
 
-/// Ports `ggml_vk_comm_bridge_free` (ggml-vulkan-comm.cpp:262 @cd959bae9).
+/// Ports `ggml_vk_comm_bridge_free` (ggml-vulkan-comm.cpp:262 @b1b770d90).
 fn bridgeFree(dv: *CommDevice) void {
     if (dv.bridge.done != null) d.vkDestroySemaphore.?(dv.ctx.device.device, dv.bridge.done, null);
     if (dv.bridge.go != null) d.vkDestroySemaphore.?(dv.ctx.device.device, dv.bridge.go, null);
 }
 
-/// Ports `ggml_vk_comm_barrier_to_host` (ggml-vulkan-comm.cpp:271 @cd959bae9).
+/// Ports `ggml_vk_comm_barrier_to_host` (ggml-vulkan-comm.cpp:271 @b1b770d90).
 fn barrierToHost(cx: *Context) void {
     var to_host = common.structure(vk.VkMemoryBarrier, vk.VK_STRUCTURE_TYPE_MEMORY_BARRIER);
     to_host.srcAccessMask = vk.VK_ACCESS_TRANSFER_WRITE_BIT | vk.VK_ACCESS_SHADER_WRITE_BIT;
@@ -362,7 +362,7 @@ fn barrierToHost(cx: *Context) void {
     d.vkCmdPipelineBarrier.?(cx.cmd(), cx.p.?.q.?.stage_flags, vk.VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &to_host, 0, null, 0, null);
 }
 
-/// Ports `ggml_vk_comm_barrier_from_host` (ggml-vulkan-comm.cpp:277 @cd959bae9):
+/// Ports `ggml_vk_comm_barrier_from_host` (ggml-vulkan-comm.cpp:277 @b1b770d90):
 /// the peers' slots were made available to the host before the wait
 /// resolved, and the submit predates that.
 fn barrierFromHost(cx: *Context) void {
@@ -372,20 +372,20 @@ fn barrierFromHost(cx: *Context) void {
     d.vkCmdPipelineBarrier.?(cx.cmd(), vk.VK_PIPELINE_STAGE_HOST_BIT, cx.p.?.q.?.stage_flags, 0, 1, &from_host, 0, null, 0, null);
 }
 
-/// Ports `ggml_vk_comm_bridge_signal` (ggml-vulkan-comm.cpp:282 @cd959bae9).
+/// Ports `ggml_vk_comm_bridge_signal` (ggml-vulkan-comm.cpp:282 @b1b770d90).
 fn bridgeSignal(comm: *CommCtx, i: usize, cx: *Context, round: u64) void {
     const dv = &comm.devs[i];
     barrierToHost(cx);
     submit(dv.ctx, cx, dv.bridge.done, round);
 }
 
-/// Ports `ggml_vk_comm_bridge_wait` (ggml-vulkan-comm.cpp:288 @cd959bae9).
+/// Ports `ggml_vk_comm_bridge_wait` (ggml-vulkan-comm.cpp:288 @b1b770d90).
 fn bridgeWait(comm: *CommCtx, i: usize, cx: *Context, round: u64) void {
     cx.s().wait_semaphores.append(allocator, .{ .s = comm.devs[i].bridge.go, .value = round }) catch oom();
     barrierFromHost(cx);
 }
 
-/// Ports `ggml_vk_comm_sfd_supported` (ggml-vulkan-comm.cpp:293 @cd959bae9).
+/// Ports `ggml_vk_comm_sfd_supported` (ggml-vulkan-comm.cpp:293 @b1b770d90).
 fn sfdSupported(dv: *CommDevice) bool {
     const dev = dv.ctx.device;
     const mesa = dev.driver_id == vk.VK_DRIVER_ID_MESA_RADV or
@@ -404,7 +404,7 @@ fn sfdSupported(dv: *CommDevice) bool {
         (esp.compatibleHandleTypes & vk.VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT) != 0;
 }
 
-/// Ports `ggml_vk_comm_sfd_enable_submit_thread` (ggml-vulkan-comm.cpp:315 @cd959bae9):
+/// Ports `ggml_vk_comm_sfd_enable_submit_thread` (ggml-vulkan-comm.cpp:315 @b1b770d90):
 /// Mesa moves a queue to its submit thread on the first wait-before-signal,
 /// taking the CS ioctls off this thread.
 fn sfdEnableSubmitThread(dev: *m.device.Device) common.VkError!void {
@@ -429,7 +429,7 @@ fn sfdEnableSubmitThread(dev: *m.device.Device) common.VkError!void {
     d.vkDestroySemaphore.?(dev.device, sem, null);
 }
 
-/// Ports `ggml_vk_comm_sfd_export` (ggml-vulkan-comm.cpp:334 @cd959bae9).
+/// Ports `ggml_vk_comm_sfd_export` (ggml-vulkan-comm.cpp:334 @b1b770d90).
 /// Requires a submitted signal on sem; the export resets it.
 fn sfdExport(dv: *CommDevice) c_int {
     var fd: c_int = -1;
@@ -444,7 +444,7 @@ fn sfdExport(dv: *CommDevice) c_int {
     return fd;
 }
 
-/// Ports `ggml_vk_comm_sfd_import` (ggml-vulkan-comm.cpp:348 @cd959bae9).
+/// Ports `ggml_vk_comm_sfd_import` (ggml-vulkan-comm.cpp:348 @b1b770d90).
 /// An fd of -1 imports an already signalled payload.
 fn sfdImport(dv: *CommDevice, sem: vk.VkSemaphore, fd: c_int) void {
     var isi = common.structure(vk.VkImportSemaphoreFdInfoKHR, vk.VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR);
@@ -459,7 +459,7 @@ fn sfdImport(dv: *CommDevice, sem: vk.VkSemaphore, fd: c_int) void {
     }
 }
 
-/// Ports `ggml_vk_comm_sfd_exchange` (ggml-vulkan-comm.cpp:361 @cd959bae9).
+/// Ports `ggml_vk_comm_sfd_exchange` (ggml-vulkan-comm.cpp:361 @b1b770d90).
 fn sfdExchange(comm: *CommCtx, r: u64) void {
     const n = comm.devs.len;
     for (0..n) |j| {
@@ -475,14 +475,14 @@ fn sfdExchange(comm: *CommCtx, r: u64) void {
     comm.imported.store(r, .release);
 }
 
-/// Ports `ggml_vk_comm_sfd_thread` (ggml-vulkan-comm.cpp:378 @cd959bae9).
+/// Ports `ggml_vk_comm_sfd_thread` (ggml-vulkan-comm.cpp:378 @b1b770d90).
 fn sfdThread(comm: *CommCtx) void {
     if (builtin.os.tag == .linux) _ = pthread_setname_np(std.c.pthread_self(), "ggml-vk-comm");
     var r: u64 = 1;
     while (waitSubmitted(comm, r)) : (r += 1) sfdExchange(comm, r);
 }
 
-/// Ports `ggml_vk_comm_sfd_init` (ggml-vulkan-comm.cpp:387 @cd959bae9).
+/// Ports `ggml_vk_comm_sfd_init` (ggml-vulkan-comm.cpp:387 @b1b770d90).
 fn sfdInit(comm: *CommCtx) common.VkError!void {
     var esci = common.structure(vk.VkExportSemaphoreCreateInfo, vk.VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO);
     esci.handleTypes = vk.VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
@@ -497,12 +497,12 @@ fn sfdInit(comm: *CommCtx) common.VkError!void {
     spawnThread(comm, sfdThread);
 }
 
-/// Ports `ggml_vk_comm_sfd_free` (ggml-vulkan-comm.cpp:399 @cd959bae9).
+/// Ports `ggml_vk_comm_sfd_free` (ggml-vulkan-comm.cpp:399 @b1b770d90).
 fn sfdFree(dv: *CommDevice) void {
     if (dv.sfd.sem != null) d.vkDestroySemaphore.?(dv.ctx.device.device, dv.sfd.sem, null);
 }
 
-/// Ports `ggml_vk_comm_sfd_signal` (ggml-vulkan-comm.cpp:405 @cd959bae9).
+/// Ports `ggml_vk_comm_sfd_signal` (ggml-vulkan-comm.cpp:405 @b1b770d90).
 fn sfdSignal(comm: *CommCtx, i: usize, cx: *Context) void {
     const dv = &comm.devs[i];
     barrierToHost(cx);
@@ -512,7 +512,7 @@ fn sfdSignal(comm: *CommCtx, i: usize, cx: *Context) void {
     }
 }
 
-/// Ports `ggml_vk_comm_sfd_wait` (ggml-vulkan-comm.cpp:414 @cd959bae9).
+/// Ports `ggml_vk_comm_sfd_wait` (ggml-vulkan-comm.cpp:414 @b1b770d90).
 fn sfdWait(comm: *CommCtx, i: usize, cx: *Context, round: u64) void {
     for (0..comm.devs.len) |j| {
         if (j != i) cx.s().wait_semaphores.append(allocator, .{ .s = comm.devs[i].sfd.imp[j], .value = 0 }) catch oom();
@@ -522,7 +522,7 @@ fn sfdWait(comm: *CommCtx, i: usize, cx: *Context, round: u64) void {
     barrierFromHost(cx);
 }
 
-/// Ports `ggml_backend_vk_comm_free` (ggml-vulkan-comm.cpp:425 @cd959bae9).
+/// Ports `ggml_backend_vk_comm_free` (ggml-vulkan-comm.cpp:425 @b1b770d90).
 pub fn commFree(comm_ctx: ?*anyopaque) callconv(.c) void {
     const comm: *CommCtx = @ptrCast(@alignCast(comm_ctx.?));
     // pending reductions need the thread
@@ -551,7 +551,7 @@ pub fn commFree(comm_ctx: ?*anyopaque) callconv(.c) void {
     allocator.destroy(comm);
 }
 
-/// Ports `ggml_backend_vk_comm_init` (ggml-vulkan-comm.cpp:450 @cd959bae9).
+/// Ports `ggml_backend_vk_comm_init` (ggml-vulkan-comm.cpp:450 @b1b770d90).
 pub fn commInit(backends: [*c]c.ggml_backend_t, n_backends: usize) callconv(.c) ?*anyopaque {
     if (m.instance.instance.allreduce_disabled or n_backends < 2) return null;
     for (0..n_backends) |i| {
@@ -607,7 +607,7 @@ pub fn commInit(backends: [*c]c.ggml_backend_t, n_backends: usize) callconv(.c) 
     return comm;
 }
 
-/// Ports `ggml_backend_vk_comm_allreduce_tensor` (ggml-vulkan-comm.cpp:510 @cd959bae9).
+/// Ports `ggml_backend_vk_comm_allreduce_tensor` (ggml-vulkan-comm.cpp:510 @b1b770d90).
 ///
 /// A: partial to own host slot (round & 1), signal; B: wait on peers' A,
 /// add their slots; all A precede any B. Slot reuse: A(k) follows own
@@ -708,6 +708,12 @@ test "the wire precision follows the ops a reduction may be delayed across" {
     try std.testing.expect(!needsF32(&view, 0));
     mm.op_params[0] = c.GGML_PREC_F32;
     try std.testing.expect(needsF32(&view, 0));
+    // Since v1.0.0 a bf16 accumulator wants the f32 wire too.
+    mm.op_params[0] = c.GGML_PREC_BF16;
+    try std.testing.expect(needsF32(&view, 0));
+    mm.op_params[0] = c.GGML_PREC_F16;
+    try std.testing.expect(!needsF32(&view, 0));
+    mm.op_params[0] = c.GGML_PREC_F32;
     // MUL follows only its first source.
     var mul = std.mem.zeroes(Tensor);
     mul.op = c.GGML_OP_MUL;

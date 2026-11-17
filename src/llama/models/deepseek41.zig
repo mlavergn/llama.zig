@@ -6,7 +6,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/deepseek41.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/deepseek41.cpp` at v1.0.0 (`b1b770d90`):
 //! `dsv41_env_on`, `llama_model_deepseek41`'s `load_arch_hparams`,
 //! `load_arch_tensors`, `build_arch_graph`, `engram_index` and `engram_hash`,
 //! `llm_graph_input_dsv41`, and its `graph` with `build_engram` and
@@ -39,15 +39,15 @@ fn oom() noreturn {
     impl.abort(src, 0, "out of memory");
 }
 
-/// `LLAMA_MAX_PLE_NGRAM` (llama-hparams.h:13 @cd959bae9).
+/// `LLAMA_MAX_PLE_NGRAM` (llama-hparams.h:13 @b1b770d90).
 const max_ple_ngram: usize = 8;
-/// `LLAMA_MAX_PLE_HEADS` (llama-hparams.h:14 @cd959bae9).
+/// `LLAMA_MAX_PLE_HEADS` (llama-hparams.h:14 @b1b770d90).
 const max_ple_heads: usize = 64;
 
-/// Ports `DSV41_ENGRAM_DEAD` (models/deepseek41.cpp:16 @cd959bae9).
+/// Ports `DSV41_ENGRAM_DEAD` (models/deepseek41.cpp:16 @b1b770d90).
 const engram_dead: i64 = -1;
 
-/// Ports `dsv41_env_on` (models/deepseek41.cpp:18 @cd959bae9).
+/// Ports `dsv41_env_on` (models/deepseek41.cpp:18 @b1b770d90).
 fn envOn(name: [*:0]const u8) bool {
     const v = std.c.getenv(name) orelse return true;
     return impl.atoi(v) != 0;
@@ -72,7 +72,7 @@ fn arrList(comptime T: type, meta: anytype, kv: anytype, required: bool, exc: *E
     return (try meta.getArrList(T, kv, required, exc)) orelse &.{};
 }
 
-/// Ports `llama_model_deepseek41`'s `load_arch_hparams` (models/deepseek41.cpp:23 @cd959bae9).
+/// Ports `llama_model_deepseek41`'s `load_arch_hparams` (models/deepseek41.cpp:23 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     try deepseek4.loadArchHparams(self, ml, exc);
 
@@ -190,7 +190,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     }
 }
 
-/// Ports `llama_model_deepseek41`'s `load_arch_tensors` (models/deepseek41.cpp:130 @cd959bae9).
+/// Ports `llama_model_deepseek41`'s `load_arch_tensors` (models/deepseek41.cpp:130 @b1b770d90).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -285,7 +285,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports `llama_model_deepseek41`'s `build_arch_graph` (models/deepseek41.cpp:220 @cd959bae9).
+/// Ports `llama_model_deepseek41`'s `build_arch_graph` (models/deepseek41.cpp:220 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) {
         // The C++ throws here. The port's builders have no error path, so
@@ -296,7 +296,7 @@ pub fn buildArchGraph(model: *const Model, b: *const Builder, params: *const gra
 }
 
 /// Ports `llama_model_deepseek41`'s `engram_index` (models/deepseek41.cpp:229
-/// @cd959bae9): the Engram n-gram hash module of a layer, or -1.
+/// @b1b770d90): the Engram n-gram hash module of a layer, or -1.
 fn engramIndex(model: *const Model, il: i32) i32 {
     const hp = &model.hparams;
     if (hp.ple_n_heads == 0 or !hp.isPle(@intCast(il))) {
@@ -311,7 +311,7 @@ fn engramIndex(model: *const Model, il: i32) i32 {
 }
 
 /// Ports `llama_model_deepseek41`'s `engram_hash` (models/deepseek41.cpp:240
-/// @cd959bae9): engram.py's `NgramHashState.forward`, the table row of each
+/// @b1b770d90): engram.py's `NgramHashState.forward`, the table row of each
 /// head for every token of the ubatch.
 fn engramHash(model: *const Model, e: usize, ubatch: *const Ubatch, prev: []const i32, out: []i32) void {
     const hp = &model.hparams;
@@ -358,7 +358,7 @@ fn engramHash(model: *const Model, e: usize, ubatch: *const Ubatch, prev: []cons
     }
 }
 
-/// Ports `llm_graph_input_dsv41` (models/deepseek41.cpp:281 @cd959bae9).
+/// Ports `llm_graph_input_dsv41` (models/deepseek41.cpp:281 @b1b770d90).
 /// `cand_pin` is +1e30 on the block with the newest compressed row of each
 /// query, so that a partly filled block is always kept; the reference uses
 /// +inf, but a finite pin keeps fully masked blocks at -inf rather than NaN.
@@ -381,7 +381,7 @@ const InpDsv41 = struct {
         return if (self.cand_csa) self.mctx.getCsaPlanFor(ubatch) else self.mctx.getHcaPlanFor(ubatch);
     }
 
-    /// Ports `llm_graph_input_dsv41`'s `set_input` (models/deepseek41.cpp:303 @cd959bae9).
+    /// Ports `llm_graph_input_dsv41`'s `set_input` (models/deepseek41.cpp:303 @b1b770d90).
     pub fn setInput(self: *InpDsv41, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         const hp = &self.model.hparams;
@@ -449,7 +449,7 @@ const InpDsv41 = struct {
         }
     }
 
-    /// Ports `llm_graph_input_dsv41`'s `can_reuse` (models/deepseek41.cpp:352 @cd959bae9).
+    /// Ports `llm_graph_input_dsv41`'s `can_reuse` (models/deepseek41.cpp:352 @b1b770d90).
     pub fn canReuse(self: *InpDsv41, params: *const graph.Params) bool {
         self.mctx = params.mctx.?.cast(kv_cache_dsv4.Dsv4Context);
         const hp = &self.model.hparams;
@@ -473,8 +473,8 @@ const InpDsv41 = struct {
     }
 };
 
-/// The members of `llama_model_deepseek41`'s `graph` (src/models/models.h:1519
-/// @cd959bae9) that one build carries from layer to layer.
+/// The members of `llama_model_deepseek41`'s `graph` (src/models/models.h:1440
+/// @b1b770d90) that one build carries from layer to layer.
 const Graph = struct {
     /// The top-k of each index source layer.
     topk_of: []?*Tensor,
@@ -505,7 +505,7 @@ const Graph = struct {
 };
 
 /// Ports `llama_model_deepseek41::graph`'s `build_engram`
-/// (models/deepseek41.cpp:372 @cd959bae9).
+/// (models/deepseek41.cpp:372 @b1b770d90).
 fn buildEngram(b: *const Builder, model: *const Model, x: *Tensor, rows: *Tensor, keep: ?*Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -582,7 +582,7 @@ fn join(ctx: *c.ggml_context, v: *std.ArrayList(*Tensor)) *Tensor {
 }
 
 /// Ports `llama_model_deepseek41::graph`'s `build_attention41`
-/// (models/deepseek41.cpp:409 @cd959bae9).
+/// (models/deepseek41.cpp:409 @b1b770d90).
 fn buildAttention41(self: *Graph, b: *const Builder, model: *const Model, inp_dsv4: *const graph.InpDsv4, cur: *Tensor, inp_pos: *Tensor, cand_pin: ?*Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -962,7 +962,7 @@ fn buildAttention41(self: *Graph, b: *const Builder, model: *const Model, inp_ds
 }
 
 /// Ports the constructor of `llama_model_deepseek41`'s `graph`
-/// (models/deepseek41.cpp:768 @cd959bae9).
+/// (models/deepseek41.cpp:768 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -1094,8 +1094,8 @@ fn buildGraph(model: *const Model, b: *const Builder) void {
         cur = b.buildNorm(cur, layer.ffn_norm, null, .rms, il);
         b.cb(cur, "ffn_norm", il);
 
-        // F32 router accumulation: the expert selection is near-tie
-        // sensitive.
+        // The reference computes the router in F32:
+        // https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017/blob/1bae0e1088993b9b82de08f59de5be5a34e42170/inference/model.py#L813
         const logits = b.buildLoraMm(layer.ffn_gate_inp.?, cur, null);
         _ = c.ggml_prec_set_acc(logits, c.GGML_PREC_F32);
         b.cb(logits, "ffn_moe_logits", il);

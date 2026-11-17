@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/siglip.cpp` at v0.9.0 (`cd959bae9`).
+//! Ports `llama.cpp/tools/mtmd/models/siglip.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -11,7 +11,7 @@ const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
 const c = impl.c;
 
-/// Ports `build` (siglip.cpp:3 @cd959bae9), a member of `clip_graph_siglip`.
+/// Ports `build` (siglip.cpp:3 @b1b770d90), a member of `mtmd_graph_siglip`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

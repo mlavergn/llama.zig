@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from the host half of
-//! `llama.cpp/ggml/src/ggml-cuda/fattn-vec.cuh` at v0.9.0 (`cd959bae9`).
+//! `llama.cpp/ggml/src/ggml-cuda/fattn-vec.cuh` at v1.0.0 (`b1b770d90`).
 //! The kernel stays CUDA, one instantiation set per (K type, V type) in
 //! `template-instances/fattn-vec-instance-<K>-<V>.cu`, which every
 //! `ggml_cuda_flash_attn_ext_vec_case` is declared `extern` against.
@@ -18,7 +18,7 @@ const fattn_common = @import("fattn_common.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `ggml_cuda_fattn_vec_get_nthreads_host` (fattn-vec.cuh:4 @cd959bae9).
+/// Ports `ggml_cuda_fattn_vec_get_nthreads_host` (fattn-vec.cuh:4 @b1b770d90).
 fn getNthreadsHost(cc: c_int) c_int {
     _ = cc;
     return 128;
@@ -34,11 +34,12 @@ fn typeStem(comptime t: c.enum_ggml_type) []const u8 {
         c.GGML_TYPE_Q5_1 => "q5_1",
         c.GGML_TYPE_Q8_0 => "q8_0",
         c.GGML_TYPE_BF16 => "bf16",
+        c.GGML_TYPE_F8_E4M3 => "f8_e4m3",
         else => @compileError("no fattn-vec instance for this type"),
     };
 }
 
-/// Ports `ggml_cuda_flash_attn_ext_vec_case_impl` (fattn-vec.cuh:536 @cd959bae9).
+/// Ports `ggml_cuda_flash_attn_ext_vec_case_impl` (fattn-vec.cuh:557 @b1b770d90).
 fn vecCaseImpl(comptime D: comptime_int, comptime cols_per_block: comptime_int, comptime type_K: c.enum_ggml_type, comptime type_V: c.enum_ggml_type, comptime use_logit_softcap: bool, ctx: *common.Context, dst: *Tensor) void {
     const library = comptime std.fmt.comptimePrint("fattn-vec-instance-{s}-{s}", .{ typeStem(type_K), typeStem(type_V) });
     const cc = common.info().devices[@intCast(common.getDevice())].cc;
@@ -67,7 +68,7 @@ fn vecCaseImpl(comptime D: comptime_int, comptime cols_per_block: comptime_int, 
     });
 }
 
-/// Ports `ggml_cuda_flash_attn_ext_vec_case` (fattn-vec.cuh:549 @cd959bae9).
+/// Ports `ggml_cuda_flash_attn_ext_vec_case` (fattn-vec.cuh:570 @b1b770d90).
 pub fn vecCase(comptime D: comptime_int, comptime type_K: c.enum_ggml_type, comptime type_V: c.enum_ggml_type, ctx: *common.Context, dst: *Tensor) void {
     const KQV = dst;
     const Q = impl.one(Tensor, dst.src[0]);

@@ -1,7 +1,7 @@
 //! Barrel for the ported vocabulary.
 //!
 //! **Not a port.** Each file it re-exports names its source; together they
-//! are `llama.cpp/src/llama-vocab.cpp` at v0.9.0 (`cd959bae9`): the
+//! are `llama.cpp/src/llama-vocab.cpp` at v1.0.0 (`b1b770d90`): the
 //! vocabulary itself in `vocab.zig`, one file per tokenizer, and the trie two
 //! of them share.
 

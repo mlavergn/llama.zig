@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/mimo2.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/mimo2.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_mimo2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `graph` and its `graph_mtp`.
 
@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_mimo2`'s `load_arch_hparams` (models/mimo2.cpp:3 @cd959bae9).
+/// Ports `llama_model_mimo2`'s `load_arch_hparams` (models/mimo2.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -47,7 +47,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_mimo2`'s `load_arch_tensors` (models/mimo2.cpp:25 @cd959bae9).
+/// Ports `llama_model_mimo2`'s `load_arch_tensors` (models/mimo2.cpp:25 @b1b770d90).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -106,7 +106,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports `llama_model_mimo2`'s `build_arch_graph` (models/mimo2.cpp:80 @cd959bae9):
+/// Ports `llama_model_mimo2`'s `build_arch_graph` (models/mimo2.cpp:80 @b1b770d90):
 /// the MTP draft head for that graph type, the main model otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -114,7 +114,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports the constructor of `llama_model_mimo2`'s `graph`
-/// (models/mimo2.cpp:87 @cd959bae9).
+/// (models/mimo2.cpp:87 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -139,8 +139,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
         const n_head_l: i64 = hp.nHead(@intCast(il));
         const n_head_kv_l: i64 = hp.nHeadKv(@intCast(il));
-        const freq_base_l = model.getRopeFreqBase(b.cparams, @intCast(il));
-        const freq_scale_l = model.getRopeFreqScale(b.cparams, @intCast(il));
 
         var cur = inpL;
 
@@ -184,8 +182,8 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 Vcur = c.ggml_reshape_3d(ctx, Vcur, b.n_embd_head_v, n_head_kv_l, b.n_tokens);
             }
 
-            Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
 
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);
@@ -274,7 +272,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_mimo2`'s `graph_mtp`
-/// (models/mimo2.cpp:261 @cd959bae9).
+/// (models/mimo2.cpp:250 @b1b770d90).
 ///
 /// Mirrors MiMo's appended NextN block: normalize and fuse the token and
 /// hidden inputs, run the decoder block, expose its state before the head
@@ -284,25 +282,23 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
-    impl.assert(hp.n_layer_nextn > 0, "models/mimo2.cpp", 263, "hparams.n_layer_nextn > 0 && \"MIMO2 MTP requires n_layer_nextn > 0\"");
+    impl.assert(hp.n_layer_nextn > 0, "models/mimo2.cpp", 252, "hparams.n_layer_nextn > 0 && \"MIMO2 MTP requires n_layer_nextn > 0\"");
 
     const il: c_int = @as(c_int, @intCast(hp.nLayer())) + b.cparams.nextn_layer_offset;
-    impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/mimo2.cpp", 268, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
+    impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/mimo2.cpp", 257, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
 
     const layer = &model.layers[@intCast(il)];
-    impl.assert(layer.nextn.eh_proj != null, "models/mimo2.cpp", 271, "layer.nextn.eh_proj && \"MIMO2 MTP block missing nextn.eh_proj\"");
-    impl.assert(layer.nextn.enorm != null, "models/mimo2.cpp", 272, "layer.nextn.enorm   && \"MIMO2 MTP block missing nextn.enorm\"");
-    impl.assert(layer.nextn.hnorm != null, "models/mimo2.cpp", 273, "layer.nextn.hnorm   && \"MIMO2 MTP block missing nextn.hnorm\"");
-    impl.assert(layer.wqkv != null, "models/mimo2.cpp", 274, "layer.wqkv          && \"MIMO2 MTP requires fused attn_qkv\"");
+    impl.assert(layer.nextn.eh_proj != null, "models/mimo2.cpp", 260, "layer.nextn.eh_proj && \"MIMO2 MTP block missing nextn.eh_proj\"");
+    impl.assert(layer.nextn.enorm != null, "models/mimo2.cpp", 261, "layer.nextn.enorm   && \"MIMO2 MTP block missing nextn.enorm\"");
+    impl.assert(layer.nextn.hnorm != null, "models/mimo2.cpp", 262, "layer.nextn.hnorm   && \"MIMO2 MTP block missing nextn.hnorm\"");
+    impl.assert(layer.wqkv != null, "models/mimo2.cpp", 263, "layer.wqkv          && \"MIMO2 MTP requires fused attn_qkv\"");
 
     const n_head_l: i64 = hp.nHead(@intCast(il));
     const n_head_kv_l: i64 = hp.nHeadKv(@intCast(il));
 
-    const freq_base_l = model.getRopeFreqBase(b.cparams, @intCast(il));
-    const freq_scale_l = model.getRopeFreqScale(b.cparams, @intCast(il));
     const v_scale = hp.f_attn_value_scale;
 
-    const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("models/mimo2.cpp", 283, "out of memory");
+    const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("models/mimo2.cpp", 270, "out of memory");
     inp.* = .{ .n_embd = hp.nEmbdInp(), .n_embd_state = hp.n_embd };
 
     inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens);
@@ -311,9 +307,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     inp.embd = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
     c.ggml_set_input(inp.embd);
 
-    inp.h = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, hp.n_embd, b.n_tokens);
-    c.ggml_set_input(inp.h);
-    _ = c.ggml_set_name(inp.h, "mtp_h_input");
+    inp.h = b.buildInpEmbdState(inp, hp.n_embd);
 
     const tok_embd_w = layer.nextn.embed_tokens orelse model.tok_embd.?;
     const h_input = inp.h.?;
@@ -356,8 +350,8 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     var Kcur: *Tensor = c.ggml_view_3d(ctx, qkv, b.n_embd_head_k, n_head_kv_l, b.n_tokens, row_k, row_full, k_off);
     const Vcur: *Tensor = c.ggml_view_3d(ctx, qkv, b.n_embd_head_v, n_head_kv_l, b.n_tokens, row_v, row_full, v_off);
 
-    Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-    Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+    Qcur = b.buildRope(Qcur, inp_pos, il);
+    Kcur = b.buildRope(Kcur, inp_pos, il);
 
     b.cb(Qcur, "mtp_Qcur", il);
     b.cb(Kcur, "mtp_Kcur", il);
@@ -377,7 +371,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
     b.cb(cur, "mtp_ffn_norm", il);
 
-    impl.assert(layer.ffn_gate != null and layer.ffn_down != null and layer.ffn_up != null, "models/mimo2.cpp", 367, "layer.ffn_gate && layer.ffn_down && layer.ffn_up && \"MIMO2 MTP requires dense FFN tensors\"");
+    impl.assert(layer.ffn_gate != null and layer.ffn_down != null and layer.ffn_up != null, "models/mimo2.cpp", 345, "layer.ffn_gate && layer.ffn_down && layer.ffn_up && \"MIMO2 MTP requires dense FFN tensors\"");
     cur = b.buildFfn(cur, layer.ffn_up, layer.ffn_up_b, null, layer.ffn_gate, layer.ffn_gate_b, null, layer.ffn_down, layer.ffn_down_b, null, null, .silu, .par, il);
     b.cb(cur, "mtp_ffn_out", il);
 
@@ -390,13 +384,13 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.res.t_h_nextn = cur;
 
     const head_norm_w = layer.nextn.shared_head_norm orelse (layer.layer_out_norm orelse model.output_norm);
-    impl.assert(head_norm_w != null, "models/mimo2.cpp", 387, "head_norm_w && \"MIMO2 MTP missing head norm fallback\"");
+    impl.assert(head_norm_w != null, "models/mimo2.cpp", 365, "head_norm_w && \"MIMO2 MTP missing head norm fallback\"");
     cur = b.buildNorm(cur, head_norm_w, null, .rms, -1);
     b.cb(cur, "mtp_shared_head_norm", -1);
 
     const head_w = layer.nextn.shared_head_head orelse model.output;
     const head_s = if (layer.nextn.shared_head_head != null) layer.nextn.shared_head_head_s else model.output_s;
-    impl.assert(head_w != null, "models/mimo2.cpp", 393, "head_w && \"MIMO2 MTP missing LM head fallback\"");
+    impl.assert(head_w != null, "models/mimo2.cpp", 371, "head_w && \"MIMO2 MTP missing LM head fallback\"");
     cur = b.buildLoraMm(head_w.?, cur, head_s);
     b.cb(cur, "result_output", -1);
 

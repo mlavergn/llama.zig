@@ -8,8 +8,8 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/server/server-realtime.cpp` and
-//! `llama.cpp/tools/server/server-realtime.h` (llama.cpp v0.9.0,
-//! `cd959bae9`) whole: `server_realtime_deps`,
+//! `llama.cpp/tools/server/server-realtime.h` (llama.cpp v1.0.0,
+//! `b1b770d90`) whole: `server_realtime_deps`,
 //! `server_realtime_conversation`, `realtime_conversation`,
 //! `server_realtime_op` and `server_realtime_slot`. Each declaration names
 //! what it ports and the line it began at.
@@ -21,11 +21,12 @@
 //! runs on the server thread. The two meet through control tasks, and share
 //! what `mutex` guards.
 //!
-//! # What escapes
+//! # Exceptions
 //!
-//! Upstream's reader thread has no `try`: a `session.update` whose `session`
-//! is not an object throws from `json::value` and terminates the server. The
-//! port logs the exception and closes this connection instead (`readerLoop`).
+//! As upstream: an exception from a client event or from a result is sent
+//! to the client as an `error` event with type `server_error`; one from a
+//! result ends the session. What escapes the reader thread past that (only
+//! a failed send) is logged and closes this connection (`readerLoop`).
 //!
 //! # Memory
 //!
@@ -53,6 +54,7 @@ const sampling = tc.sampling;
 const Value = json.Value;
 const Allocator = std.mem.Allocator;
 const Sampling = tc.params.Sampling;
+const Params = tc.params.Params;
 const Token = common.Token;
 const Task = task_mod.Task;
 const ControlAction = task_mod.ControlAction;
@@ -104,7 +106,7 @@ fn randomId(a: Allocator, prefix: []const u8) common.Error![]u8 {
 // -----------------------------------------------------------------------------
 // request values
 
-/// Ports `parse_output_modalities` (server-realtime.cpp:34 @cd959bae9):
+/// Ports `parse_output_modalities` (server-realtime.cpp:35 @b1b770d90):
 /// output_modalities of a response, unset: the model switches between text
 /// and audio itself.
 ///
@@ -136,7 +138,7 @@ fn parseOutputModalities(a: Allocator, j: *const Value, mode: *OutMode) common.E
     return null;
 }
 
-/// Ports `parse_max_output_tokens` (server-realtime.cpp:63 @cd959bae9).
+/// Ports `parse_max_output_tokens` (server-realtime.cpp:64 @b1b770d90).
 fn parseMaxOutputTokens(j: *const Value, n: *i32) bool {
     if (valueIs(j, "inf")) {
         n.* = -1;
@@ -158,7 +160,7 @@ fn parseMaxOutputTokens(j: *const Value, n: *i32) bool {
     return true;
 }
 
-/// Ports `tool_choice_str` (server-realtime.cpp:100 @cd959bae9).
+/// Ports `tool_choice_str` (server-realtime.cpp:106 @b1b770d90).
 fn toolChoiceStr(choice: chat.ToolChoice) []const u8 {
     return switch (choice) {
         .none => "none",
@@ -167,7 +169,7 @@ fn toolChoiceStr(choice: chat.ToolChoice) []const u8 {
     };
 }
 
-/// Ports `output_modalities_json` (server-realtime.cpp:108 @cd959bae9).
+/// Ports `output_modalities_json` (server-realtime.cpp:114 @b1b770d90).
 fn outputModalitiesJson(a: Allocator, mode: OutMode) common.Error!Value {
     return switch (mode) {
         c.MTMD_HELPER_GEN_AUDIO_OUT_TEXT => array(a, .{"text"}),
@@ -177,7 +179,7 @@ fn outputModalitiesJson(a: Allocator, mode: OutMode) common.Error!Value {
     };
 }
 
-/// Ports `parse_tool_choice` (server-realtime.cpp:86 @cd959bae9).
+/// Ports `parse_tool_choice` (server-realtime.cpp:92 @b1b770d90).
 ///
 /// Return: null, or the error's text in `a`.
 fn parseToolChoice(a: Allocator, j: *const Value, choice: *chat.ToolChoice) common.Error!?[]const u8 {
@@ -194,12 +196,12 @@ fn parseToolChoice(a: Allocator, j: *const Value, choice: *chat.ToolChoice) comm
 // -----------------------------------------------------------------------------
 // server_realtime_deps
 
-/// Ports `server_realtime_deps` (server-realtime.h:23 @cd959bae9).
+/// Ports `server_realtime_deps` (server-realtime.h:23 @b1b770d90).
 pub const Deps = struct {
     queue_tasks: *context.TaskQueue,
     queue_results: *context.ResultQueue,
     meta: *const Meta,
-    sampling: *const Sampling,
+    params: *const Params,
     mctx: ?*c.mtmd_context,
     cap: *const c.mtmd_helper_cap,
     vocab: ?*const c.llama_vocab,
@@ -219,7 +221,7 @@ const Stop = struct {
 /// `tool_call_index -> output index`, a `std::map`: walked in key order.
 const CallItem = struct { index: usize, idx: usize };
 
-/// Ports `realtime_conversation` (server-realtime.cpp:117 @cd959bae9).
+/// Ports `realtime_conversation` (server-realtime.cpp:123 @b1b770d90).
 const Conversation = struct {
     deps: Deps,
     conn: *http.WsConn,
@@ -234,6 +236,8 @@ const Conversation = struct {
     type: []const u8 = "realtime",
     instructions: []const u8 = "",
     language: []const u8 = "", // transcription
+    out_language: []const u8 = "", // `deps.params.tts_lang` at first
+    out_voice: []const u8 = "", // `deps.params.tts_voice` at first
     out_mode: OutMode = c.MTMD_HELPER_GEN_AUDIO_OUT_AUTO,
     max_output_tokens: i32 = -1, // "inf"
     input_rate: c_int = 16000,
@@ -260,6 +264,7 @@ const Conversation = struct {
     tool_results: bool = false, // tool results went in after the last response, the next one answers them
     n_turns: c_int = 0,
     next_header: []const u8 = "", // text that goes in before the next user turn
+    resampler: ?*c.mtmd_helper_resampler = null, // input_rate -> model rate
 
     // the item or response the results belong to, shared with the result loop
     mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
@@ -313,7 +318,7 @@ const Conversation = struct {
     // events
     //
 
-    /// Ports `send_event` (server-realtime.cpp:178 @cd959bae9). `ev` is
+    /// Ports `send_event` (server-realtime.cpp:188 @b1b770d90). `ev` is
     /// allocated in `ea`, an arena that outlives the call.
     fn sendEvent(self: *Conversation, ea: Allocator, ev: Value) !void {
         var e = ev;
@@ -321,7 +326,7 @@ const Conversation = struct {
         _ = self.conn.send(try common.safeJsonToStr(ea, &e));
     }
 
-    /// Ports `send_error` (server-realtime.cpp:183 @cd959bae9).
+    /// Ports `send_error` (server-realtime.cpp:193 @b1b770d90).
     fn sendError(self: *Conversation, ea: Allocator, message: []const u8, type_err: []const u8) !void {
         try self.sendEvent(ea, try object(ea, .{
             .{ "type", "error" },
@@ -338,7 +343,7 @@ const Conversation = struct {
         return self.sendError(ea, message, "invalid_request_error");
     }
 
-    /// Ports `session_json` (server-realtime.cpp:190 @cd959bae9).
+    /// Ports `session_json` (server-realtime.cpp:200 @b1b770d90).
     fn sessionJson(self: *Conversation, ea: Allocator) !Value {
         var audio_in = try object(ea, .{
             .{ "format", try object(ea, .{ .{ "type", "audio/pcm" }, .{ "rate", self.input_rate } }) },
@@ -360,6 +365,8 @@ const Conversation = struct {
         if (self.deps.cap.audio_gen) {
             try audio.set(ea, "output", try object(ea, .{
                 .{ "format", try object(ea, .{ .{ "type", "audio/pcm" }, .{ "rate", self.output_rate } }) },
+                .{ "voice", try orNull(ea, self.out_voice) },
+                .{ "language", try orNull(ea, self.out_language) },
             }));
         }
         const max_tokens: Value = if (self.max_output_tokens < 0) try Value.initString(ea, "inf") else .{ .number_integer = self.max_output_tokens };
@@ -381,7 +388,7 @@ const Conversation = struct {
     // slot controls, run on the slot in the order they are posted
     //
 
-    /// Ports `control` (server-realtime.cpp:223 @cd959bae9).
+    /// Ports `control` (server-realtime.cpp:237 @b1b770d90).
     fn control(self: *Conversation, action: ControlAction, text: []const u8, audio: []const f32, response: ?*const ControlResponse) !bool {
         var ctl = try Reader.init(gpa, self.deps.queue_tasks, self.deps.queue_results, 1);
         defer ctl.deinit();
@@ -393,8 +400,7 @@ const Conversation = struct {
         task.params.control_text = try ta.dupe(u8, text);
         task.params.control_audio = try ta.dupe(f32, audio);
         if (response) |r| {
-            task.params.control_response = r.*;
-            task.params.control_response.sampling = try task_mod.deepClone(ta, r.sampling);
+            task.params.control_response = try task_mod.deepClone(ta, r.*);
         }
         try ctl.postTask(task, false);
         const result = (try ctl.next(Stop{ .conv = self, .with_closed = true })) orelse return false;
@@ -405,11 +411,11 @@ const Conversation = struct {
         };
     }
 
-    /// Ports `response_sampling` (server-realtime.cpp:240 @cd959bae9):
+    /// Ports `response_sampling` (server-realtime.cpp:254 @b1b770d90):
     /// sampling of a response: the server defaults, with the tool call
     /// grammar of `session`.
     fn responseSampling(self: *Conversation, ea: Allocator, session: ?*const chat.session.Session) !Sampling {
-        var s = try task_mod.deepClone(ea, self.deps.sampling.*);
+        var s = try task_mod.deepClone(ea, self.deps.params.sampling);
         if (session) |ss| {
             try ss.applySampling(ea, &s);
         }
@@ -420,7 +426,7 @@ const Conversation = struct {
     // chat template
     //
 
-    /// Ports `chat_inputs` (server-realtime.cpp:252 @cd959bae9).
+    /// Ports `chat_inputs` (server-realtime.cpp:266 @b1b770d90).
     fn chatInputs(self: *Conversation, ea: Allocator, messages: []const chat.Msg, add_generation_prompt: bool) !chat.templates.TemplatesInputs {
         const params = self.deps.meta.chat_params;
         return .{
@@ -434,7 +440,7 @@ const Conversation = struct {
         };
     }
 
-    /// Ports `render` (server-realtime.cpp:265 @cd959bae9).
+    /// Ports `render` (server-realtime.cpp:279 @b1b770d90).
     fn render(self: *Conversation, ea: Allocator, messages: []const chat.Msg, add_generation_prompt: bool) ![]const u8 {
         const inputs = try self.chatInputs(ea, messages, add_generation_prompt);
         const params = try chat.templates.apply(ea, self.deps.meta.chat_params.tmpls, &inputs);
@@ -447,7 +453,7 @@ const Conversation = struct {
         return self.render(ea, all, add_generation_prompt);
     }
 
-    /// Ports `derive_turn_text` (server-realtime.cpp:270 @cd959bae9): the
+    /// Ports `derive_turn_text` (server-realtime.cpp:284 @b1b770d90): the
     /// text around a user and an assistant turn, from placeholder messages.
     fn deriveTurnText(self: *Conversation, instructions: []const u8) !bool {
         var tmp = std.heap.ArenaAllocator.init(gpa);
@@ -508,7 +514,7 @@ const Conversation = struct {
     // conversation
     //
 
-    /// Ports `ensure_turn` (server-realtime.cpp:331 @cd959bae9): the header
+    /// Ports `ensure_turn` (server-realtime.cpp:345 @b1b770d90): the header
     /// of a user turn goes in before its first audio or text.
     fn ensureTurn(self: *Conversation, ea: Allocator) !bool {
         if (self.turn_open) {
@@ -524,14 +530,17 @@ const Conversation = struct {
         return true;
     }
 
-    /// Ports `on_append` (server-realtime.cpp:345 @cd959bae9).
+    /// Ports `on_append` (server-realtime.cpp:359 @b1b770d90).
     fn onAppend(self: *Conversation, ea: Allocator, ev: *const Value) !void {
         const pcm = tokens_mod.base64HppDecode(ea, jsonValue(ev, "audio", []const u8, "")) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
             else => return self.sendInvalid(ea, "invalid base64 audio"),
         };
-        const samples = try pcm16ToF32(ea, pcm);
-        if (samples.len == 0 or !try self.ensureTurn(ea)) {
+        var samples = try pcm16ToF32(ea, pcm);
+        if (samples.len == 0) {
+            return;
+        }
+        if (!try self.resample(ea, &samples) or samples.len == 0 or !try self.ensureTurn(ea)) {
             return;
         }
         if (try self.control(.audio_append, "", samples, null)) {
@@ -539,7 +548,30 @@ const Conversation = struct {
         }
     }
 
-    /// Ports `commit` (server-realtime.cpp:368 @cd959bae9): ends the audio
+    /// Ports `resample` (server-realtime.cpp:384 @b1b770d90): `samples` at
+    /// `input_rate` to the model's rate, the resampler made on first use;
+    /// false after sending the error.
+    fn resample(self: *Conversation, ea: Allocator, samples: *[]f32) !bool {
+        if (self.resampler == null) {
+            self.resampler = c.mtmd_helper_resampler_init(self.input_rate, c.mtmd_get_audio_sample_rate(self.deps.mctx));
+            if (self.resampler == null) {
+                try self.sendError(ea, "failed to initialize the audio resampler", "server_error");
+                return false;
+            }
+        }
+        var out: [*c]const f32 = null;
+        const n = c.mtmd_helper_resampler_process(self.resampler, samples.ptr, samples.len, &out);
+        if (n < 0) {
+            try self.sendError(ea, "failed to resample the audio", "server_error");
+            return false;
+        }
+        if (out != samples.ptr) {
+            samples.* = try ea.dupe(f32, out[0..@intCast(n)]);
+        }
+        return true;
+    }
+
+    /// Ports `commit` (server-realtime.cpp:405 @b1b770d90): ends the audio
     /// of the open turn, it becomes a user item.
     fn commit(self: *Conversation, ea: Allocator) !bool {
         if (!self.has_audio) {
@@ -586,7 +618,7 @@ const Conversation = struct {
         }));
     }
 
-    /// Ports `on_commit` (server-realtime.cpp:389 @cd959bae9).
+    /// Ports `on_commit` (server-realtime.cpp:426 @b1b770d90).
     fn onCommit(self: *Conversation, ea: Allocator) !void {
         if (!try self.commit(ea) or !std.mem.eql(u8, self.type, "transcription")) {
             return;
@@ -620,7 +652,7 @@ const Conversation = struct {
         return randomId(ea, "item_");
     }
 
-    /// Ports `on_item_create` (server-realtime.cpp:411 @cd959bae9).
+    /// Ports `on_item_create` (server-realtime.cpp:448 @b1b770d90).
     fn onItemCreate(self: *Conversation, ea: Allocator, ev: *const Value) !void {
         if (std.mem.eql(u8, self.type, "transcription")) {
             return self.sendInvalid(ea, "conversation.item.create: not supported in a transcription session");
@@ -677,7 +709,7 @@ const Conversation = struct {
         return true;
     }
 
-    /// Ports `on_tool_output` (server-realtime.cpp:447 @cd959bae9): the
+    /// Ports `on_tool_output` (server-realtime.cpp:484 @b1b770d90): the
     /// result of a tool call of the last response, the next response
     /// answers it.
     fn onToolOutput(self: *Conversation, ea: Allocator, item: *const Value) !void {
@@ -707,7 +739,7 @@ const Conversation = struct {
         try self.sendItemEvents(ea, &prev, &out);
     }
 
-    /// Ports `on_response_create` (server-realtime.cpp:468 @cd959bae9).
+    /// Ports `on_response_create` (server-realtime.cpp:505 @b1b770d90).
     fn onResponseCreate(self: *Conversation, ea: Allocator, ev: *const Value) !void {
         if (std.mem.eql(u8, self.type, "transcription")) {
             return self.sendInvalid(ea, "response.create: not supported in a transcription session");
@@ -749,6 +781,8 @@ const Conversation = struct {
             return self.sendInvalid(ea, "response.create: max_output_tokens must be an integer or \"inf\"");
         }
         response.out_mode = mode;
+        response.lang = self.out_language;
+        response.voice = self.out_voice;
 
         // with tools, the output goes through the tool call parser of the chat template and its grammar
         var session: ?chat.session.Session = null;
@@ -805,10 +839,12 @@ const Conversation = struct {
         self.n_turns += 1;
     }
 
-    /// Ports `on_session_update` (server-realtime.cpp:564 @cd959bae9).
+    /// Ports `on_session_update` (server-realtime.cpp:603 @b1b770d90).
     fn onSessionUpdate(self: *Conversation, ea: Allocator, ev: *const Value) !void {
-        const empty = Value.emptyObject();
-        const session: *const Value = if (ev.contains("session")) try ev.at("session") else &empty;
+        const session = try valueOr(ev, "session");
+        if (!session.isObject()) {
+            return self.sendInvalid(ea, "session.update: session must be an object");
+        }
         if (session.contains("type")) {
             const st = try session.at("type");
             if (st.isString() and !std.mem.eql(u8, st.string, self.type)) {
@@ -853,16 +889,45 @@ const Conversation = struct {
         if (session.contains("max_output_tokens") and !parseMaxOutputTokens(try session.at("max_output_tokens"), &self.max_output_tokens)) {
             return self.sendInvalid(ea, "session.update: max_output_tokens must be an integer or \"inf\"");
         }
-        const audio = try valueOr(session, "audio");
+        const audio = try valueOr(&session, "audio");
         const in = try valueOr(&audio, "input");
-        if (in.contains("format")) {
-            const format = try in.at("format");
-            if (format.isObject() and jsonValue(format, "rate", c_int, self.input_rate) != self.input_rate) {
-                try self.sendInvalid(ea, try std.fmt.allocPrint(ea, "session.update: the input audio must be PCM16 at {d} Hz", .{self.input_rate}));
+        if (in.contains("format") and (try in.at("format")).isObject()) {
+            const rate = jsonValue(try in.at("format"), "rate", c_int, self.input_rate);
+            if (rate < 8000 or rate > 192000) {
+                return self.sendInvalid(ea, "session.update: the input audio rate must be between 8000 and 192000 Hz");
+            }
+            if (rate != self.input_rate) {
+                self.input_rate = rate;
+                if (self.resampler) |r| c.mtmd_helper_resampler_free(r);
+                self.resampler = null;
             }
         }
         if (in.contains("transcription") and (try in.at("transcription")).isObject()) {
             self.language = try self.a().dupe(u8, jsonValue(try in.at("transcription"), "language", []const u8, self.language));
+        }
+        const out = try valueOr(&audio, "output");
+        if (out.contains("voice") or out.contains("language")) {
+            var voice = self.out_voice;
+            if (out.contains("voice")) {
+                // string or {"id": name}
+                const v = try out.at("voice");
+                voice = if (v.isObject()) jsonValue(v, "id", []const u8, "") else if (v.isString()) v.string else "";
+            }
+            const lang = jsonValue(&out, "language", []const u8, self.out_language);
+            const voices = self.deps.meta.tts_voices;
+            if (voice.len != 0 and voices.len != 0) {
+                const known = for (voices) |name| {
+                    if (std.mem.eql(u8, name, voice)) break true;
+                } else false;
+                if (!known) {
+                    return self.sendInvalid(ea, try std.mem.concat(ea, u8, &.{ "session.update: unknown voice \"", voice, "\", see \"voices\" in GET /props" }));
+                }
+            }
+            if (self.started and (!std.mem.eql(u8, voice, self.out_voice) or !std.mem.eql(u8, lang, self.out_language))) {
+                return self.sendInvalid(ea, "session.update: the output voice and language cannot change after the first audio or message");
+            }
+            self.out_voice = try self.a().dupe(u8, voice);
+            self.out_language = try self.a().dupe(u8, lang);
         }
         if (!self.started and !try self.configure(ea)) {
             return self.sendError(ea, "the chat template does not fit the realtime turn format", "server_error");
@@ -873,8 +938,10 @@ const Conversation = struct {
         }));
     }
 
-    /// Ports `parse_tools` (server-realtime.cpp:76 @cd959bae9): realtime
-    /// tools have the format of the Responses API.
+    /// Ports `parse_tools` (server-realtime.cpp:77 @b1b770d90): realtime
+    /// tools have the format of the Responses API. A schema that would
+    /// fail later, when the chat template builds the tool call grammar, is
+    /// rejected here.
     ///
     /// Return: null, or the error's text in `ea`.
     fn parseTools(self: *Conversation, ea: Allocator, j: *const Value) !?[]const u8 {
@@ -882,26 +949,44 @@ const Conversation = struct {
             if (e == error.OutOfMemory) return error.OutOfMemory;
             return try std.mem.concat(ea, u8, &.{ "tools: ", context.whatOf(e) });
         };
-        const tools = chat.msg.toolsParseOaicompat(self.a(), &converted) catch |e| {
+        const parsed = chat.msg.toolsParseOaicompat(self.a(), &converted) catch |e| {
             if (e == error.OutOfMemory) return error.OutOfMemory;
             return try std.mem.concat(ea, u8, &.{ "tools: ", context.whatOf(e) });
         };
-        self.tools = tools;
+        // reject the schemas that would fail later, when the chat template builds the tool call grammar
+        for (parsed.items) |*tool| {
+            const schema = json.parse(ea, tool.parameters) catch |e| {
+                if (e == error.OutOfMemory) return error.OutOfMemory;
+                return try std.mem.concat(ea, u8, &.{ "tools: ", context.whatOf(e) });
+            };
+            _ = oaicompat.schemaToGrammar(ea, &schema) catch |e| {
+                if (e == error.OutOfMemory) return error.OutOfMemory;
+                return try std.mem.concat(ea, u8, &.{ "tools: ", context.whatOf(e) });
+            };
+        }
+        self.tools = parsed;
         return null;
     }
 
-    /// Ports `configure` (server-realtime.cpp:630 @cd959bae9): turn text of
-    /// the session type, before anything went into the slot.
+    /// Ports `configure` (server-realtime.cpp:702 @b1b770d90): turn text of
+    /// the session type, before anything went into the slot; a model that
+    /// speaks takes the speech system prompt of its chat template before
+    /// the instructions.
     fn configure(self: *Conversation, ea: Allocator) !bool {
         var instructions = self.instructions;
         if (std.mem.eql(u8, self.type, "transcription")) {
             const preset = try chat.templates.getAsrPrompt(ea, self.deps.meta.chat_params.tmpls, self.language);
             instructions = preset.system;
+        } else if (self.deps.cap.audio_gen) {
+            const speech = try chat.templates.getSpeechSystemPrompt(ea, self.deps.meta.chat_params.tmpls, self.out_language, self.out_voice);
+            if (speech.len != 0) {
+                instructions = if (instructions.len == 0) speech else try std.mem.concat(ea, u8, &.{ speech, "\n", instructions });
+            }
         }
         return self.deriveTurnText(instructions);
     }
 
-    /// Ports `handle` (server-realtime.cpp:641 @cd959bae9).
+    /// Ports `handle` (server-realtime.cpp:718 @b1b770d90).
     fn handle(self: *Conversation, ea: Allocator, msg: []const u8) !void {
         var ev = json.parse(ea, msg) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
@@ -932,7 +1017,7 @@ const Conversation = struct {
     // results of the slot
     //
 
-    /// Ports `open_message` (server-realtime.cpp:684 @cd959bae9): the message
+    /// Ports `open_message` (server-realtime.cpp:756 @b1b770d90): the message
     /// item of the response is added with its first delta.
     fn openMessage(self: *Conversation, ea: Allocator) !void {
         if (self.idx_message >= 0) {
@@ -956,7 +1041,7 @@ const Conversation = struct {
         }));
     }
 
-    /// Ports `open_part` (server-realtime.cpp:696 @cd959bae9): a part of the
+    /// Ports `open_part` (server-realtime.cpp:768 @b1b770d90): a part of the
     /// message is opened on its first delta, in order of appearance.
     fn openPart(self: *Conversation, ea: Allocator, part_type: []const u8) !i32 {
         try self.openMessage(ea);
@@ -978,7 +1063,7 @@ const Conversation = struct {
         return @intCast(n - 1);
     }
 
-    /// Ports `on_text` (server-realtime.cpp:705 @cd959bae9).
+    /// Ports `on_text` (server-realtime.cpp:777 @b1b770d90).
     fn onText(self: *Conversation, ea: Allocator, text: []const u8) !void {
         if (self.idx_text < 0) {
             self.idx_text = try self.openPart(ea, "output_text");
@@ -994,7 +1079,7 @@ const Conversation = struct {
         }));
     }
 
-    /// Ports `on_tool_call` (server-realtime.cpp:715 @cd959bae9): a tool call
+    /// Ports `on_tool_call` (server-realtime.cpp:787 @b1b770d90): a tool call
     /// is an output item of its own: its name comes first, then its
     /// arguments.
     fn onToolCall(self: *Conversation, ea: Allocator, diff: *const chat.MsgDiff) !void {
@@ -1043,18 +1128,19 @@ const Conversation = struct {
         }));
     }
 
-    /// Ports `on_result` (server-realtime.cpp:735 @cd959bae9).
+    /// Ports `on_result` (server-realtime.cpp:807 @b1b770d90).
     fn onResult(self: *Conversation, ea: Allocator, res: *const result_mod.Realtime) !void {
         self.lock();
         defer self.unlock();
+        const res_text = res.content.text.items;
         if (self.transcribe_item_id.len != 0) {
-            if (res.text.len != 0) {
-                try self.transcript.appendSlice(gpa, res.text);
+            if (!res.content.empty()) {
+                try self.transcript.appendSlice(gpa, res_text);
                 try self.sendEvent(ea, try object(ea, .{
                     .{ "type", "conversation.item.input_audio_transcription.delta" },
                     .{ "item_id", self.transcribe_item_id },
                     .{ "content_index", 0 },
-                    .{ "delta", res.text },
+                    .{ "delta", res_text },
                 }));
             }
             if (res.response_done) {
@@ -1072,12 +1158,12 @@ const Conversation = struct {
         // with tools, the text goes through the parser: content and tool calls
         var diffs: std.ArrayList(chat.MsgDiff) = .empty;
         if (self.parse) |*p| {
-            if (res.text.len != 0 or res.response_done) {
-                var added = try chat.input.Input.fromText(ea, res.text);
+            if (!res.content.empty() or res.response_done) {
+                var added = try res.content.clone(ea);
                 _ = try p.updateChatMsg(ea, &added, !res.response_done, &diffs, true);
             }
-        } else if (res.text.len != 0) {
-            try diffs.append(ea, .{ .content_delta = res.text });
+        } else if (!res.content.empty()) {
+            try diffs.append(ea, .{ .content_delta = res_text });
         }
         for (diffs.items) |*diff| {
             if (diff.content_delta.len != 0) {
@@ -1187,11 +1273,14 @@ const Conversation = struct {
         defer ev_arena.deinit();
         while (try self.conn.read(gpa, &msg) != 0) {
             _ = ev_arena.reset(.retain_capacity);
-            try self.handle(ev_arena.allocator(), msg.items);
+            const ea = ev_arena.allocator();
+            self.handle(ea, msg.items) catch |e| {
+                try self.sendError(ea, context.whatOf(e), "server_error");
+            };
         }
     }
 
-    /// Ports `run` (server-realtime.cpp:820 @cd959bae9).
+    /// Ports `run` (server-realtime.cpp:892 @b1b770d90).
     fn run(self: *Conversation) !void {
         var ev_arena = std.heap.ArenaAllocator.init(gpa);
         defer ev_arena.deinit();
@@ -1215,7 +1304,7 @@ const Conversation = struct {
             task.id = rd.getNewId();
             const ta = try task.arenaAlloc(gpa);
             task.params = try task_mod.TaskParams.init(ta);
-            task.params.sampling = try task_mod.deepClone(ta, self.deps.sampling.*);
+            task.params.sampling = try task_mod.deepClone(ta, self.deps.params.sampling);
             task.params.stream = true;
             task.params.oaicompat_cmpl_id = try ta.dupe(u8, self.id);
             task.params.oaicompat_model = try ta.dupe(u8, self.deps.meta.model_name);
@@ -1255,7 +1344,10 @@ const Conversation = struct {
                 break;
             }
             switch (result.kind) {
-                .realtime => |*res| try self.onResult(ea, res),
+                .realtime => |*res| self.onResult(ea, res) catch |e| {
+                    try self.sendError(ea, context.whatOf(e), "server_error");
+                    break;
+                },
                 else => {},
             }
         }
@@ -1276,17 +1368,11 @@ fn valueOr(v: *const Value, key: []const u8) !Value {
     return Value.emptyObject();
 }
 
-/// Ports `encode_pcm16` (server-realtime.cpp:674 @cd959bae9).
+/// Ports `encode_pcm16` (server-realtime.cpp:751 @b1b770d90).
 ///
 /// Return: owned by `a`.
 fn encodePcm16(a: Allocator, samples: []const f32) common.Error![]u8 {
-    const bytes = try a.alloc(u8, samples.len * 2);
-    for (samples, 0..) |x, i| {
-        // std::lround
-        const v: i16 = @intFromFloat(@round(@max(-1.0, @min(1.0, x)) * 32767.0));
-        std.mem.writeInt(i16, bytes[2 * i ..][0..2], v, .little);
-    }
-    return oaicompat.base64Encode(a, bytes);
+    return oaicompat.base64Encode(a, try common.pcmF32ToS16(a, samples));
 }
 
 /// The PCM16 of an `input_audio_buffer.append`, as float samples.
@@ -1301,7 +1387,7 @@ pub fn pcm16ToF32(a: Allocator, pcm: []const u8) common.Error![]f32 {
     return samples;
 }
 
-/// Ports `server_realtime_conversation` (server-realtime.cpp:886 @cd959bae9):
+/// Ports `server_realtime_conversation` (server-realtime.cpp:967 @b1b770d90):
 /// a realtime conversation over websocket, for models that answer after the
 /// audio (e.g. LFM3-Audio): the audio is prefilled as it arrives, responses
 /// follow output_modalities or the model's own switching.
@@ -1311,8 +1397,11 @@ pub fn conversation(deps: Deps, conn: *http.WsConn) void {
         .conn = conn,
         .arena = std.heap.ArenaAllocator.init(gpa),
         .resp_arena = std.heap.ArenaAllocator.init(gpa),
+        .out_language = deps.params.tts_lang,
+        .out_voice = deps.params.tts_voice,
     };
     defer {
+        if (session.resampler) |r| c.mtmd_helper_resampler_free(r);
         if (session.parse) |*p| p.deinit(gpa);
         gpa.free(session.last_item_id);
         gpa.free(session.transcribe_item_id);
@@ -1331,7 +1420,7 @@ pub fn conversation(deps: Deps, conn: *http.WsConn) void {
 // -----------------------------------------------------------------------------
 // server_realtime_slot
 
-/// Ports `server_realtime_op` (server-realtime.h:38 @cd959bae9): one control
+/// Ports `server_realtime_op` (server-realtime.h:38 @b1b770d90): one control
 /// of a realtime conversation. Its strings are `arena`'s, the control task's
 /// own.
 const Op = struct {
@@ -1350,7 +1439,7 @@ const Op = struct {
     }
 };
 
-/// Ports `server_realtime_slot` (server-realtime.h:47 @cd959bae9): the
+/// Ports `server_realtime_slot` (server-realtime.h:47 @b1b770d90): the
 /// conversation of a slot that holds a realtime session
 /// (SERVER_TASK_TYPE_REALTIME), it runs on the server thread. The controls
 /// run in order; the sequence is decoded by its own calls, not in the shared
@@ -1384,7 +1473,7 @@ pub const RealtimeSlot = struct {
     smpl: ?*sampling.Sampler = null,
     preserved: std.ArrayList(Token) = .empty, // special tokens of the response that go out as text (tool calls)
 
-    /// Ports the constructor of `server_realtime_slot` (server-realtime.cpp:895 @cd959bae9).
+    /// Ports the constructor of `server_realtime_slot` (server-realtime.cpp:976 @b1b770d90).
     pub fn create(ctx: ?*c.llama_context, mctx: ?*c.mtmd_context, seq_id: c.llama_seq_id, n_ctx: i32, params: *const Sampling, queue_results: *context.ResultQueue, id_task: c_int, index: usize) !*RealtimeSlot {
         const self = try gpa.create(RealtimeSlot);
         const model = c.llama_get_model(ctx);
@@ -1418,7 +1507,7 @@ pub const RealtimeSlot = struct {
         gpa.destroy(self);
     }
 
-    /// Ports `push` (server-realtime.cpp:904 @cd959bae9): takes the control
+    /// Ports `push` (server-realtime.cpp:985 @b1b770d90): takes the control
     /// task's parameters, its arena with them.
     pub fn push(self: *RealtimeSlot, task: *Task) !void {
         try self.ops.append(gpa, .{
@@ -1431,19 +1520,19 @@ pub const RealtimeSlot = struct {
         task.arena = null;
     }
 
-    /// Ports `cancel` (server-realtime.cpp:908 @cd959bae9): stops the
+    /// Ports `cancel` (server-realtime.cpp:989 @b1b770d90): stops the
     /// response being generated.
     pub fn cancel(self: *RealtimeSlot) void {
         self.cancelled = self.responding;
     }
 
-    /// Ports `is_idle` (server-realtime.cpp:912 @cd959bae9): nothing to run
+    /// Ports `is_idle` (server-realtime.cpp:993 @b1b770d90): nothing to run
     /// until the next control.
     pub fn isIdle(self: *const RealtimeSlot) bool {
         return self.ops.items.len == 0 and !self.responding;
     }
 
-    /// Ports `fail` (server-realtime.cpp:916 @cd959bae9).
+    /// Ports `fail` (server-realtime.cpp:997 @b1b770d90).
     fn fail(self: *RealtimeSlot, msg: []const u8, ty: ErrorType) !bool {
         gpa.free(self.err_msg);
         self.err_msg = "";
@@ -1452,14 +1541,15 @@ pub const RealtimeSlot = struct {
         return false;
     }
 
-    /// Ports `send_result` (server-realtime.cpp:922 @cd959bae9).
-    fn sendResult(self: *RealtimeSlot, text: []const u8, audio: []const f32, response_done: bool) !void {
+    /// Ports `send_result` (server-realtime.cpp:1003 @b1b770d90): the text
+    /// goes with its tokens.
+    fn sendResult(self: *RealtimeSlot, content: *const chat.input.Input, audio: []const f32, response_done: bool) !void {
         const res = try Result.create(gpa, .realtime);
         errdefer res.destroy(gpa);
         const r = &res.kind.realtime;
         res.id = self.id_task;
         res.index = self.index;
-        r.text = try res.alloc().dupe(u8, text);
+        r.content = try content.clone(res.alloc());
         r.audio = try res.alloc().dupe(f32, audio);
         r.response_done = response_done;
         r.cancelled = response_done and self.cancelled;
@@ -1467,7 +1557,7 @@ pub const RealtimeSlot = struct {
         try self.queue_results.send(res);
     }
 
-    /// Ports `decode` (server-realtime.cpp:935 @cd959bae9): appends tokens or
+    /// Ports `decode` (server-realtime.cpp:1016 @b1b770d90): appends tokens or
     /// embedding rows to the conversation, logits of the last one if asked.
     fn decode(self: *RealtimeSlot, tokens: ?[*]const Token, rows: ?[*]const f32, n: i32, logits_last: bool) !bool {
         const n_embd: usize = @intCast(c.llama_model_n_embd_inp(self.model));
@@ -1504,7 +1594,7 @@ pub const RealtimeSlot = struct {
         return true;
     }
 
-    /// Ports `audio_rows` (server-realtime.cpp:967 @cd959bae9): decodes the
+    /// Ports `audio_rows` (server-realtime.cpp:1048 @b1b770d90): decodes the
     /// rows the audio stream has ready.
     fn audioRows(self: *RealtimeSlot) !bool {
         while (true) {
@@ -1521,7 +1611,7 @@ pub const RealtimeSlot = struct {
         }
     }
 
-    /// Ports `sample_next` (server-realtime.cpp:984 @cd959bae9): samples the
+    /// Ports `sample_next` (server-realtime.cpp:1065 @b1b770d90): samples the
     /// next text token of a response from the logits of the slot's own last
     /// decode; several slots respond in turns on the same context, so this
     /// runs before any other slot decodes.
@@ -1534,7 +1624,7 @@ pub const RealtimeSlot = struct {
         self.smpl.?.accept(self.sampled, true);
     }
 
-    /// Ports `response_start` (server-realtime.cpp:993 @cd959bae9).
+    /// Ports `response_start` (server-realtime.cpp:1074 @b1b770d90).
     fn responseStart(self: *RealtimeSlot, op: *Op) !bool {
         const sparams = &op.response.sampling;
         self.n_predict = op.response.n_predict;
@@ -1553,6 +1643,15 @@ pub const RealtimeSlot = struct {
             inp.data.stream = true;
             inp.data.out_type = c.MTMD_HELPER_GEN_AUDIO_OUTTYPE_PCM;
             inp.data.out_mode = op.response.out_mode;
+            inp.lang_str = try ar.dupeSentinel(u8, op.response.lang, 0);
+            // predefined voice -> speaker ref, LFM3 uses the system prompt instead
+            if (op.response.voice.len != 0 and c.mtmd_gen_audio_get_info(self.mctx).n_voices > 0) {
+                const voice = c.mtmd_gen_audio_get_voice(self.mctx, (try ar.dupeSentinel(u8, op.response.voice, 0)).ptr);
+                if (voice == null) {
+                    return self.fail(try std.mem.concat(ar, u8, &.{ "unknown voice \"", op.response.voice, "\"" }), .invalid_request);
+                }
+                inp.setSpeakerRef(voice);
+            }
             if (c.mtmd_helper_gen_audio_set_input(self.gen, inp.get()) != 0) {
                 return self.fail("failed to start the response", .server);
             }
@@ -1594,7 +1693,7 @@ pub const RealtimeSlot = struct {
         return true;
     }
 
-    /// Ports `piece` (server-realtime.cpp:1042 @cd959bae9): control tokens
+    /// Ports `piece` (server-realtime.cpp:1132 @b1b770d90): control tokens
     /// stay out of the text, except the preserved ones the client parses
     /// (tool calls).
     ///
@@ -1607,7 +1706,7 @@ pub const RealtimeSlot = struct {
         return "";
     }
 
-    /// Ports `response_step` (server-realtime.cpp:1048 @cd959bae9): one text
+    /// Ports `response_step` (server-realtime.cpp:1138 @b1b770d90): one text
     /// token or audio frame of the response being generated.
     fn responseStep(self: *RealtimeSlot) !bool {
         var tmp = std.heap.ArenaAllocator.init(gpa);
@@ -1615,7 +1714,7 @@ pub const RealtimeSlot = struct {
         const ta = tmp.allocator();
 
         var stop = false;
-        var text: []const u8 = "";
+        var content = chat.input.Input.init(ta);
         var audio: []const f32 = &.{};
 
         if (self.gen != null) {
@@ -1624,7 +1723,7 @@ pub const RealtimeSlot = struct {
                 return self.fail("response generation failed", .server);
             }
             if (self.sampled != token_null and !stop) {
-                text = try self.piece(ta, self.sampled);
+                try content.append(try self.piece(ta, self.sampled), self.sampled);
             }
             if (h_next != null) {
                 const n: usize = @intCast(c.llama_model_n_embd(self.model));
@@ -1634,7 +1733,7 @@ pub const RealtimeSlot = struct {
         } else {
             stop = c.llama_vocab_is_eog(self.vocab, self.sampled);
             if (!stop) {
-                text = try self.piece(ta, self.sampled);
+                try content.append(try self.piece(ta, self.sampled), self.sampled);
                 if (!try self.decode(@ptrCast(&self.sampled), null, 1, true)) {
                     return false;
                 }
@@ -1665,27 +1764,29 @@ pub const RealtimeSlot = struct {
                 audio = samples;
             }
         }
-        if (text.len != 0 or audio.len != 0) {
-            try self.sendResult(text, audio, false);
+        if (!content.empty() or audio.len != 0) {
+            try self.sendResult(&content, audio, false);
         }
         if (done) {
             if (self.gen != null) {
                 // the pipeline decoded the response, the sequence ends where it stopped
                 self.n_past = c.llama_memory_seq_pos_max(c.llama_get_memory(self.ctx), self.seq_id) + 1;
             }
-            try self.sendResult("", &.{}, true);
+            const none = chat.input.Input.init(ta);
+            try self.sendResult(&none, &.{}, true);
             self.responding = false;
             self.cancelled = false;
         }
         return true;
     }
 
-    /// Ports `update` (server-realtime.cpp:1109 @cd959bae9): runs the queued
-    /// controls, or one step of the response.
+    /// Ports `update` (server-realtime.cpp:1199 @b1b770d90): runs the queued
+    /// controls, or one step of the response. Only the gen-audio pipeline
+    /// steps from the hidden state, so only it turns embeddings on.
     ///
     /// Return: false on error, see `err_msg` and `err_type`.
     pub fn update(self: *RealtimeSlot) !bool {
-        c.llama_set_embeddings(self.ctx, true);
+        c.llama_set_embeddings(self.ctx, self.gen != null);
 
         if (self.responding) {
             return self.responseStep();

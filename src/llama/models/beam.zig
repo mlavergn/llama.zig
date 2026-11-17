@@ -7,7 +7,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/beam.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/beam.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_beam`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, `beam_residual_add`, and its `graph`.
 
@@ -24,7 +24,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_beam`'s `load_arch_hparams` (models/beam.cpp:3 @cd959bae9).
+/// Ports `llama_model_beam`'s `load_arch_hparams` (models/beam.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -80,7 +80,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     self.type = .unknown;
 }
 
-/// Ports `llama_model_beam`'s `load_arch_tensors` (models/beam.cpp:59 @cd959bae9).
+/// Ports `llama_model_beam`'s `load_arch_tensors` (models/beam.cpp:59 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -131,12 +131,12 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_beam`'s `build_arch_graph` (models/beam.cpp:105 @cd959bae9).
+/// Ports `llama_model_beam`'s `build_arch_graph` (models/beam.cpp:105 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
-/// Ports `beam_residual_add` (models/beam.cpp:109 @cd959bae9): the running
+/// Ports `beam_residual_add` (models/beam.cpp:109 @b1b770d90): the running
 /// average of the sublayers' outputs, `i` the sublayer's ordinal.
 fn beamResidualAdd(ctx: *c.ggml_context, h: *Tensor, r: *Tensor, i: c_int) *Tensor {
     const di: f64 = @floatFromInt(i);
@@ -146,7 +146,7 @@ fn beamResidualAdd(ctx: *c.ggml_context, h: *Tensor, r: *Tensor, i: c_int) *Tens
 }
 
 /// Ports the constructor of `llama_model_beam`'s `graph`
-/// (models/beam.cpp:115 @cd959bae9).
+/// (models/beam.cpp:115 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -197,11 +197,8 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(Kcur, "Kcur_normed", il);
 
             if (is_swa) {
-                const freq_base_l = model.getRopeFreqBase(b.cparams, @intCast(il));
-                const freq_scale_l = model.getRopeFreqScale(b.cparams, @intCast(il));
-
-                Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-                Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+                Qcur = b.buildRope(Qcur, inp_pos, il);
+                Kcur = b.buildRope(Kcur, inp_pos, il);
                 b.cb(Qcur, "Qcur_rope", il);
                 b.cb(Kcur, "Kcur_rope", il);
             } else {

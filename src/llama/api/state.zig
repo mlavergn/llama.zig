@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-context.cpp` (v0.9.0, `cd959bae9`):
-//! the C API from `llama_get_state_size` through
+//! Ported from `llama.cpp/src/llama-context.cpp` (v1.0.0, `b1b770d90`):
+//! the C API from `llama_state_get_size` through
 //! `llama_state_seq_load_file`. Each function is `pub`, not `export`; see
 //! `api/context.zig`.
 
@@ -17,51 +17,26 @@ const c = impl.c;
 const Exception = impl.Exception;
 const ctxOf = api_context.ctxOf;
 
-/// Ports `llama_get_state_size` (llama-context.cpp:4761 @cd959bae9).
-pub fn llama_get_state_size(ctx: ?*c.struct_llama_context) callconv(.c) usize {
-    return llama_state_get_size(ctx);
-}
-
-/// Ports `llama_copy_state_data` (llama-context.cpp:4766 @cd959bae9).
-pub fn llama_copy_state_data(ctx: ?*c.struct_llama_context, dst: [*]u8) callconv(.c) usize {
-    return llama_state_get_data(ctx, dst, std.math.maxInt(usize));
-}
-
-/// Ports `llama_set_state_data` (llama-context.cpp:4771 @cd959bae9).
-pub fn llama_set_state_data(ctx: ?*c.struct_llama_context, src: [*]const u8) callconv(.c) usize {
-    return llama_state_set_data(ctx, src, std.math.maxInt(usize));
-}
-
-/// Ports `llama_load_session_file` (llama-context.cpp:4776 @cd959bae9).
-pub fn llama_load_session_file(ctx: ?*c.struct_llama_context, path_session: [*:0]const u8, tokens_out: [*]c.llama_token, n_token_capacity: usize, n_token_count_out: *usize) callconv(.c) bool {
-    return llama_state_load_file(ctx, path_session, tokens_out, n_token_capacity, n_token_count_out);
-}
-
-/// Ports `llama_save_session_file` (llama-context.cpp:4781 @cd959bae9).
-pub fn llama_save_session_file(ctx: ?*c.struct_llama_context, path_session: [*:0]const u8, tokens: [*]const c.llama_token, n_token_count: usize) callconv(.c) bool {
-    return llama_state_save_file(ctx, path_session, tokens, n_token_count);
-}
-
-/// Ports `llama_state_get_size` (llama-context.cpp:4787 @cd959bae9).
+/// Ports `llama_state_get_size` (llama-context.cpp:4977 @b1b770d90).
 pub fn llama_state_get_size(ctx: ?*c.struct_llama_context) callconv(.c) usize {
     return context_state.stateGetSize(ctxOf(ctx));
 }
 
-/// Ports `llama_state_get_data` (llama-context.cpp:4791 @cd959bae9).
+/// Ports `llama_state_get_data` (llama-context.cpp:4981 @b1b770d90).
 pub fn llama_state_get_data(ctx: ?*c.struct_llama_context, dst: [*]u8, size: usize) callconv(.c) usize {
     const self = ctxOf(ctx);
     self.synchronize();
     return context_state.stateGetData(self, dst, size);
 }
 
-/// Ports `llama_state_set_data` (llama-context.cpp:4798 @cd959bae9).
+/// Ports `llama_state_set_data` (llama-context.cpp:4988 @b1b770d90).
 pub fn llama_state_set_data(ctx: ?*c.struct_llama_context, src: [*]const u8, size: usize) callconv(.c) usize {
     const self = ctxOf(ctx);
     self.synchronize();
     return context_state.stateSetData(self, src, size);
 }
 
-/// Ports `llama_state_load_file` (llama-context.cpp:4804 @cd959bae9).
+/// Ports `llama_state_load_file` (llama-context.cpp:4994 @b1b770d90).
 pub fn llama_state_load_file(ctx: ?*c.struct_llama_context, path_session: [*:0]const u8, tokens_out: [*]c.llama_token, n_token_capacity: usize, n_token_count_out: *usize) callconv(.c) bool {
     const self = ctxOf(ctx);
     self.synchronize();
@@ -72,7 +47,7 @@ pub fn llama_state_load_file(ctx: ?*c.struct_llama_context, path_session: [*:0]c
     };
 }
 
-/// Ports `llama_state_save_file` (llama-context.cpp:4815 @cd959bae9).
+/// Ports `llama_state_save_file` (llama-context.cpp:5005 @b1b770d90).
 pub fn llama_state_save_file(ctx: ?*c.struct_llama_context, path_session: [*:0]const u8, tokens: [*]const c.llama_token, n_token_count: usize) callconv(.c) bool {
     const self = ctxOf(ctx);
     self.synchronize();
@@ -83,41 +58,41 @@ pub fn llama_state_save_file(ctx: ?*c.struct_llama_context, path_session: [*:0]c
     };
 }
 
-/// Ports `llama_state_seq_get_size` (llama-context.cpp:4826 @cd959bae9).
+/// Ports `llama_state_seq_get_size` (llama-context.cpp:5016 @b1b770d90).
 pub fn llama_state_seq_get_size(ctx: ?*c.struct_llama_context, seq_id: c.llama_seq_id) callconv(.c) usize {
     return llama_state_seq_get_size_ext(ctx, seq_id, 0);
 }
 
-/// Ports `llama_state_seq_get_data` (llama-context.cpp:4830 @cd959bae9).
+/// Ports `llama_state_seq_get_data` (llama-context.cpp:5020 @b1b770d90).
 pub fn llama_state_seq_get_data(ctx: ?*c.struct_llama_context, dst: [*]u8, size: usize, seq_id: c.llama_seq_id) callconv(.c) usize {
     return llama_state_seq_get_data_ext(ctx, dst, size, seq_id, 0);
 }
 
-/// Ports `llama_state_seq_set_data` (llama-context.cpp:4834 @cd959bae9).
+/// Ports `llama_state_seq_set_data` (llama-context.cpp:5024 @b1b770d90).
 pub fn llama_state_seq_set_data(ctx: ?*c.struct_llama_context, src: [*]const u8, size: usize, seq_id: c.llama_seq_id) callconv(.c) usize {
     return llama_state_seq_set_data_ext(ctx, src, size, seq_id, 0);
 }
 
-/// Ports `llama_state_seq_get_size_ext` (llama-context.cpp:4838 @cd959bae9).
+/// Ports `llama_state_seq_get_size_ext` (llama-context.cpp:5028 @b1b770d90).
 pub fn llama_state_seq_get_size_ext(ctx: ?*c.struct_llama_context, seq_id: c.llama_seq_id, flags: c.llama_state_seq_flags) callconv(.c) usize {
     return context_state.stateSeqGetSize(ctxOf(ctx), seq_id, flags);
 }
 
-/// Ports `llama_state_seq_get_data_ext` (llama-context.cpp:4842 @cd959bae9).
+/// Ports `llama_state_seq_get_data_ext` (llama-context.cpp:5032 @b1b770d90).
 pub fn llama_state_seq_get_data_ext(ctx: ?*c.struct_llama_context, dst: [*]u8, size: usize, seq_id: c.llama_seq_id, flags: c.llama_state_seq_flags) callconv(.c) usize {
     const self = ctxOf(ctx);
     self.synchronize();
     return context_state.stateSeqGetData(self, seq_id, dst, size, flags);
 }
 
-/// Ports `llama_state_seq_set_data_ext` (llama-context.cpp:4847 @cd959bae9).
+/// Ports `llama_state_seq_set_data_ext` (llama-context.cpp:5037 @b1b770d90).
 pub fn llama_state_seq_set_data_ext(ctx: ?*c.struct_llama_context, src: [*]const u8, size: usize, seq_id: c.llama_seq_id, flags: c.llama_state_seq_flags) callconv(.c) usize {
     const self = ctxOf(ctx);
     self.synchronize();
     return context_state.stateSeqSetData(self, seq_id, src, size, flags);
 }
 
-/// Ports `llama_state_seq_save_file` (llama-context.cpp:4853 @cd959bae9).
+/// Ports `llama_state_seq_save_file` (llama-context.cpp:5043 @b1b770d90).
 pub fn llama_state_seq_save_file(ctx: ?*c.struct_llama_context, filepath: [*:0]const u8, seq_id: c.llama_seq_id, tokens: [*]const c.llama_token, n_token_count: usize) callconv(.c) usize {
     const self = ctxOf(ctx);
     self.synchronize();
@@ -128,7 +103,7 @@ pub fn llama_state_seq_save_file(ctx: ?*c.struct_llama_context, filepath: [*:0]c
     };
 }
 
-/// Ports `llama_state_seq_load_file` (llama-context.cpp:4864 @cd959bae9).
+/// Ports `llama_state_seq_load_file` (llama-context.cpp:5054 @b1b770d90).
 pub fn llama_state_seq_load_file(ctx: ?*c.struct_llama_context, filepath: [*:0]const u8, dest_seq_id: c.llama_seq_id, tokens_out: ?[*]c.llama_token, n_token_capacity: usize, n_token_count_out: *usize) callconv(.c) usize {
     const self = ctxOf(ctx);
     self.synchronize();

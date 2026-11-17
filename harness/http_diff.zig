@@ -367,6 +367,20 @@ fn configure(name: []const u8, params: *http.Params, ready: *bool) void {
     } else if (std.mem.eql(u8, name, "multiport0")) {
         // port 0 with two TCP addresses is refused
         params.hostnames = &.{ "127.0.0.1", "::1" };
+    } else if (std.mem.eql(u8, name, "corslocal") or std.mem.eql(u8, name, "child")) {
+        // v1.0.0: same-origin only, and the DNS rebinding guard on Host;
+        // "child" also has LLAMA_SERVER_ROUTER_PORT set by the driver
+        params.cors_origins = "localhost";
+        params.cors_credentials = false;
+    } else if (std.mem.eql(u8, name, "corslist")) {
+        params.cors_origins = "http://good.example:8080, HTTPS://Other.Example ,bad";
+        params.cors_credentials = false;
+    } else if (std.mem.eql(u8, name, "lan")) {
+        // every address, so a request can reach a non-loopback one
+        params.hostnames = &.{"0.0.0.0"};
+        params.port = envPort();
+        params.cors_origins = "localhost";
+        params.cors_credentials = false;
     } else if (std.mem.eql(u8, name, "multibad")) {
         // the second address cannot be bound: the first is stopped again
         params.hostnames = &.{ "127.0.0.1", "256.1.1.1" };

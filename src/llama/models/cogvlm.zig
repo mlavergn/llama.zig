@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/cogvlm.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/cogvlm.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_cogvlm`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -18,9 +18,11 @@ const c = impl.c;
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
+const Cparams = @import("../cparams.zig").Cparams;
+const RopeParams = model_mod.RopeParams;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_cogvlm`'s `load_arch_hparams` (src/models/cogvlm.cpp:3 @cd959bae9).
+/// Ports `llama_model_cogvlm`'s `load_arch_hparams` (src/models/cogvlm.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
@@ -31,7 +33,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_cogvlm`'s `load_arch_tensors` (src/models/cogvlm.cpp:12 @cd959bae9).
+/// Ports `llama_model_cogvlm`'s `load_arch_tensors` (src/models/cogvlm.cpp:12 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -71,21 +73,45 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_cogvlm`'s `build_arch_graph` (src/models/cogvlm.cpp:49 @cd959bae9).
+/// Ports `llama_model_cogvlm`'s `get_rope_params` (src/models/cogvlm.cpp:49 @b1b770d90).
+///
+/// Parameters:
+/// - `model`: the model.
+/// - `cparams`: the context's parameters.
+/// - `il`: the layer.
+///
+/// Return: the RoPE of layer `il`, for the graph and the K-shift alike.
+pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+    var res = model.getRopeParamsBase(cparams, il);
+
+    // A plain ggml_rope.
+    res.n_ctx_orig = 0;
+    res.freq_base = 10000.0;
+    res.freq_scale = 1.0;
+    res.ext_factor = 0.0;
+    res.attn_factor = 1.0;
+    res.beta_fast = 0.0;
+    res.beta_slow = 0.0;
+    res.factors = null;
+
+    return res;
+}
+
+/// Ports `llama_model_cogvlm`'s `build_arch_graph` (src/models/cogvlm.cpp:65 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
-/// Ports the constructor of `llama_model_cogvlm`'s `graph` (src/models/cogvlm.cpp:53
-/// @cd959bae9).
+/// Ports the constructor of `llama_model_cogvlm`'s `graph` (src/models/cogvlm.cpp:69
+/// @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
     const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head));
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/cogvlm.cpp", 58, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/cogvlm.cpp", 59, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/cogvlm.cpp", 74, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/cogvlm.cpp", 75, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -94,7 +120,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const inp_attn = b.buildAttnInpKv();
 
     // Input tokens are text; an input embedding vector is an image.
-    b.ubatch.assertEmbdOrToken("models/cogvlm.cpp", 73);
+    b.ubatch.assertEmbdOrToken("models/cogvlm.cpp", 89);
     const is_text = b.ubatch.token != null;
 
     var il: c_int = 0;
@@ -137,8 +163,8 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             var Kcur: *Tensor = c.ggml_view_3d(ctx, qkv, n_embd_head, b.n_head_kv, b.n_tokens, @as(usize, @intCast(n_embd_head)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(b.n_embd)) * c.ggml_element_size(qkv));
             const Vcur: *Tensor = c.ggml_view_3d(ctx, qkv, n_embd_head, b.n_head_kv, b.n_tokens, @as(usize, @intCast(n_embd_head)) * @sizeOf(f32), qkv.nb[1], 2 * @as(usize, @intCast(b.n_embd)) * c.ggml_element_size(qkv));
 
-            Qcur = c.ggml_rope(ctx, Qcur, inp_pos, @intCast(n_embd_head), b.rope_type);
-            Kcur = c.ggml_rope(ctx, Kcur, inp_pos, @intCast(n_embd_head), b.rope_type);
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
 
             cur = b.buildAttn(inp_attn, wo, null, wo_s, Qcur, Kcur, Vcur, null, null, null, kq_scale, il);
             b.cb(cur, "attn_out", il);

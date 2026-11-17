@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/pockettts-spkenc.cpp` at v0.9.0
-//! (`cd959bae9`). Each declaration names what it ports and the line it
+//! Ports `llama.cpp/tools/mtmd/models/pockettts-spkenc.cpp` at v1.0.0
+//! (`b1b770d90`). Each declaration names what it ports and the line it
 //! began at.
 
 const std = @import("std");
@@ -19,8 +19,8 @@ const gpa = impl.gpa;
 const T = graph.T;
 const ne = graph.ne;
 
-/// Ports `tfm_layer_forward` (pockettts-spkenc.cpp:7 @cd959bae9), a member
-/// of `clip_graph_pockettts_spkenc`: a pre-norm block with layer scale on
+/// Ports `tfm_layer_forward` (pockettts-spkenc.cpp:7 @b1b770d90), a member
+/// of `mtmd_graph_pockettts_spkenc`: a pre-norm block with layer scale on
 /// both residual paths, see mimi_transformer.py.
 fn tfmLayerForward(g: *const graph.Graph, cur_in: T, layer: *const model_mod.Layer, inp_pos: T, kq_mask: T, il: c_int) T {
     const ctx0 = g.ctx0;
@@ -53,8 +53,8 @@ fn tfmLayerForward(g: *const graph.Graph, cur_in: T, layer: *const model_mod.Lay
     return cur;
 }
 
-/// Ports `build` (pockettts-spkenc.cpp:39 @cd959bae9), a member of
-/// `clip_graph_pockettts_spkenc`.
+/// Ports `build` (pockettts-spkenc.cpp:39 @b1b770d90), a member of
+/// `mtmd_graph_pockettts_spkenc`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

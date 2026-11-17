@@ -5,8 +5,8 @@
 // chat templates with; ours renders them through `zigjinja` (PLAN.md,
 // Decisions 25 and 27). This compiles the unmodified engine and renders a
 // template the way `common_chat_template` and
-// `common_chat_template_direct_apply_impl` do (chat.cpp:1425, 1042
-// @cd959bae9): `lexer::tokenize`, `parse_from_tokens`, a `context` over the
+// `common_chat_template_direct_apply_impl` do (chat.cpp:1445, 1074
+// @b1b770d90): `lexer::tokenize`, `parse_from_tokens`, a `context` over the
 // lexer's source, `global_from_json` with input marking on, then `bos_token`
 // and `eos_token` set again unmarked -- they come from the model, not the
 // user -- `runtime::execute` and `gather_string_parts`.
@@ -15,6 +15,7 @@
 // upstream's `is_input` -- so the harness can check ours never trusts a byte
 // upstream marks as input.
 
+#include "chat-tts-norm.h"
 #include "jinja/caps.h"
 #include "jinja/lexer.h"
 #include "jinja/parser.h"
@@ -22,10 +23,12 @@
 #include "jinja/value.h"
 #include "json.h"
 
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <string>
+#include <vector>
 
 static char * dup_bytes(const std::string & s) {
     char * p = static_cast<char *>(std::malloc(s.size() + 1));
@@ -94,7 +97,7 @@ extern "C" int jinja_ref_render(const char * tmpl, size_t tmpl_len, const char *
 }
 
 // The capabilities `jinja::caps_get` reads off `tmpl`, as
-// `common_chat_template`'s constructor computes them (chat.cpp:1425 @cd959bae9),
+// `common_chat_template`'s constructor computes them (chat.cpp:1445 @b1b770d90),
 // in `caps::to_map`'s order: one byte each, and `levels` (holding `levels_cap`
 // bytes) the reasoning effort levels, comma-separated, NUL-terminated. Returns
 // 1 if the template fails to lex or parse.
@@ -116,6 +119,107 @@ extern "C" int jinja_ref_caps(const char * tmpl, size_t tmpl_len, unsigned char 
         return 0;
     } catch (const std::exception &) {
         return 1;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TTS normalization patterns (common/chat-tts-norm.cpp), for the tts-norm
+// phase: `common_tts_norm_sub` and `common_tts_norm_scan` on bytes, and a task
+// template rendered as `common_chat_template_render` (chat.cpp:809
+// @b1b770d90) renders one, with `common_chat_tts_norm_add_builtins`.
+
+// `common_tts_norm_sub(text, pattern, repl)`. Returns 0 with the result in
+// `*out`, or 1 with the exception's `what()` there.
+extern "C" int tts_norm_ref_sub(const char * text, size_t text_len, const char * pat, size_t pat_len,
+                                const char * repl, size_t repl_len, char ** out, size_t * out_len) {
+    try {
+        const common_tts_norm_pattern pattern(std::string(pat, pat_len));
+        const std::string res = common_tts_norm_sub(std::string(text, text_len), pattern, std::string(repl, repl_len));
+        *out     = dup_bytes(res);
+        *out_len = res.size();
+        return 0;
+    } catch (const std::exception & e) {
+        const std::string w = e.what();
+        *out     = dup_bytes(w);
+        *out_len = w.size();
+        return 1;
+    }
+}
+
+// `common_tts_norm_scan(text, rules)` over `n` patterns, each segment written
+// "<rule> <start> <end>" and each group " <start>:<end>" or " -", one per
+// line. Returns 0, or 1 with the exception's `what()` in `*out`.
+extern "C" int tts_norm_ref_scan(const char * text, size_t text_len, const char * const * pats, const size_t * pat_lens,
+                                 size_t n, char ** out, size_t * out_len) {
+    std::string s;
+    int rc = 0;
+    try {
+        std::vector<common_tts_norm_pattern> patterns;
+        patterns.reserve(n);
+        for (size_t i = 0; i < n; i++) {
+            patterns.emplace_back(std::string(pats[i], pat_lens[i]));
+        }
+        std::vector<const common_tts_norm_pattern *> ptrs;
+        for (const auto & p : patterns) {
+            ptrs.push_back(&p);
+        }
+        for (const auto & seg : common_tts_norm_scan(std::string(text, text_len), ptrs)) {
+            s += std::to_string(seg.rule) + " " + std::to_string(seg.start) + " " + std::to_string(seg.end);
+            for (const auto & g : seg.groups) {
+                s += g.first == std::string::npos ? std::string(" -") : " " + std::to_string(g.first) + ":" + std::to_string(g.second);
+            }
+            s += "\n";
+        }
+    } catch (const std::exception & e) {
+        s  = e.what();
+        rc = 1;
+    }
+    *out     = dup_bytes(s);
+    *out_len = s.size();
+    return rc;
+}
+
+// A task template rendered with the TTS norm builtins: `vars` bound by
+// `global_from_json(ctx, vars, mark_input)`. Returns as jinja_ref_render.
+extern "C" int tts_norm_ref_render(const char * tmpl, size_t tmpl_len, const char * vars, size_t vars_len, int mark_input,
+                                   char ** out, size_t * out_len, char ** parts) {
+    *out     = nullptr;
+    *out_len = 0;
+    *parts   = nullptr;
+
+    jinja::program prog;
+    std::string source;
+    try {
+        jinja::lexer lexer;
+        auto lexed = lexer.tokenize(std::string(tmpl, tmpl_len));
+        prog       = jinja::parse_from_tokens(lexed);
+        source     = lexed.source;
+    } catch (const std::exception & e) {
+        *out = dup_bytes(e.what());
+        return 1;
+    }
+
+    try {
+        jinja::context ctx(source);
+        common_chat_tts_norm_add_builtins(ctx);
+        jinja::global_from_json(ctx, common_json::parse(std::string(vars, vars_len)), mark_input != 0);
+        jinja::runtime runtime(ctx);
+        const jinja::value results = runtime.execute(prog);
+        const jinja::string text   = jinja::runtime::gather_string_parts(results)->as_string();
+
+        std::string flat;
+        std::string list;
+        for (const auto & part : text.parts) {
+            flat += part.val;
+            list += (part.is_input ? "I" : "T") + std::to_string(part.val.size()) + ",";
+        }
+        *out     = dup_bytes(flat);
+        *out_len = flat.size();
+        *parts   = dup_bytes(list);
+        return 0;
+    } catch (const std::exception & e) {
+        *out = dup_bytes(e.what());
+        return 2;
     }
 }
 

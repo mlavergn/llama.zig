@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` and
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.9.0
-//! (`cd959bae9`). Upstream split `ggml-vulkan.cpp` into those files at
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v1.0.0
+//! (`b1b770d90`). Upstream split `ggml-vulkan.cpp` into those files at
 //! v0.5.0. The C++ keys `std::map`s by name and prints them in that order;
 //! the port keeps the entries unordered and sorts the names when it prints,
 //! which is the same order.
@@ -20,7 +20,7 @@ fn oom() noreturn {
     impl.abort("ggml_vulkan: out of memory");
 }
 
-/// Ports `vk_perf_logger` (ggml-vulkan-types.h:1186 @cd959bae9).
+/// Ports `vk_perf_logger` (ggml-vulkan-types.h:1236 @b1b770d90).
 pub const PerfLogger = struct {
     timings: std.StringHashMapUnmanaged(std.ArrayList(u64)) = .empty,
     flops: std.StringHashMapUnmanaged(std.ArrayList(u64)) = .empty,
@@ -41,7 +41,7 @@ pub const PerfLogger = struct {
         map.clearRetainingCapacity();
     }
 
-    /// Ports `vk_perf_logger`'s `print_timings` (ggml-vulkan.cpp:16642 @cd959bae9).
+    /// Ports `vk_perf_logger`'s `print_timings` (ggml-vulkan.cpp:17011 @b1b770d90).
     pub fn printTimings(self: *PerfLogger, force: bool) void {
         if (self.timings.count() == 0) return;
         self.print_count += 1;
@@ -85,7 +85,7 @@ pub const PerfLogger = struct {
         clearMap(&self.flops);
     }
 
-    /// Ports `vk_perf_logger`'s `get_node_fusion_name` (ggml-vulkan.cpp:16687 @cd959bae9):
+    /// Ports `vk_perf_logger`'s `get_node_fusion_name` (ggml-vulkan.cpp:17056 @b1b770d90):
     /// the label a node's timing is filed under, with its flops.
     fn nodeFusionName(w: *std.Io.Writer, node: *const c.ggml_tensor, fusion_name: ?[*:0]const u8, n_flops: *u64) void {
         n_flops.* = m.graph.getNodeFlops(node);
@@ -155,7 +155,7 @@ pub const PerfLogger = struct {
         gop.value_ptr.append(allocator, value) catch oom();
     }
 
-    /// Ports `vk_perf_logger`'s `log_timing` (ggml-vulkan-types.h:1203 @cd959bae9)
+    /// Ports `vk_perf_logger`'s `log_timing` (ggml-vulkan-types.h:1253 @b1b770d90)
     /// for a fused run of nodes; one node is the first overload.
     pub fn logTiming(self: *PerfLogger, nodes: []const *c.ggml_tensor, names: []const ?[*:0]const u8, time: u64) void {
         var buf: [4096]u8 = undefined;
@@ -172,6 +172,77 @@ pub const PerfLogger = struct {
         file(&self.timings, name, time);
     }
 };
+
+// -----------------------------------------------------------------------------
+// The test-fusion interface (`tests/test-fusion.cpp`), reached through
+// `ggml_backend_reg_get_proc_address`
+
+const Device = m.device.Device;
+
+/// Ports `ggml_vk_count_fusion` (ggml-vulkan-debug.cpp:15 @b1b770d90): one
+/// more use of the fusion `label`, when the stats are on.
+pub fn countFusion(device: *Device, label: []const u8) void {
+    if (!device.fusion_stats_enabled.load(.monotonic)) return;
+    _ = std.c.pthread_mutex_lock(&device.fusion_mutex);
+    defer _ = std.c.pthread_mutex_unlock(&device.fusion_mutex);
+    // `device->fusion_counts[label]++`, kept in the map's order.
+    const items = device.fusion_counts.items;
+    var lo: usize = 0;
+    var hi: usize = items.len;
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        switch (std.mem.order(u8, items[mid].label, label)) {
+            .lt => lo = mid + 1,
+            .gt => hi = mid,
+            .eq => {
+                items[mid].count += 1;
+                return;
+            },
+        }
+    }
+    const owned = allocator.dupeSentinel(u8, label, 0) catch oom();
+    device.fusion_counts.insert(allocator, lo, .{ .label = owned, .count = 1 }) catch oom();
+}
+
+/// Ports `ggml_backend_vk_fusion_stats_init` (ggml-vulkan-debug.cpp:28 @b1b770d90).
+pub fn fusionStatsInit(finfo: ?*anyopaque) callconv(.c) void {
+    const device: *Device = @ptrCast(@alignCast(finfo.?));
+    device.fusion_stats_enabled.store(true, .monotonic);
+}
+
+/// Ports `ggml_backend_vk_fusion_stats_reset` (ggml-vulkan-debug.cpp:33 @b1b770d90).
+pub fn fusionStatsReset(finfo: ?*anyopaque) callconv(.c) void {
+    const device: *Device = @ptrCast(@alignCast(finfo.?));
+    _ = std.c.pthread_mutex_lock(&device.fusion_mutex);
+    defer _ = std.c.pthread_mutex_unlock(&device.fusion_mutex);
+    // Keep labels and their order stable between fused and unfused runs.
+    for (device.fusion_counts.items) |*e| e.count = 0;
+}
+
+/// Ports `ggml_backend_vk_fusion_stats_get` (ggml-vulkan-debug.cpp:42 @b1b770d90):
+/// the label count when `labels` is null, else up to `n` labels and counts
+/// in label order.
+pub fn fusionStatsGet(finfo: ?*anyopaque, labels: [*c][*c]const u8, counts: [*c]u64, n: c_int) callconv(.c) c_int {
+    const device: *Device = @ptrCast(@alignCast(finfo.?));
+    _ = std.c.pthread_mutex_lock(&device.fusion_mutex);
+    defer _ = std.c.pthread_mutex_unlock(&device.fusion_mutex);
+    if (labels == null) return @intCast(device.fusion_counts.items.len);
+    var i: c_int = 0;
+    for (device.fusion_counts.items) |e| {
+        if (i >= n) break;
+        const k: usize = @intCast(i);
+        labels[k] = e.label.ptr;
+        if (counts != null) counts[k] = e.count;
+        i += 1;
+    }
+    return i;
+}
+
+/// Ports `ggml_backend_vk_fusion_set_enabled` (ggml-vulkan-debug.cpp:62 @b1b770d90).
+pub fn fusionSetEnabled(finfo: ?*anyopaque, enabled: bool) callconv(.c) void {
+    const device: *Device = @ptrCast(@alignCast(finfo.?));
+    device.disable_fusion = !enabled;
+}
 
 // -----------------------------------------------------------------------------
 // Unit Tests

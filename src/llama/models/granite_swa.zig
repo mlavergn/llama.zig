@@ -6,8 +6,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/granite-swa.cpp` at v0.9.0
-//! (`cd959bae9`): `llama_model_granite_swa`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/granite-swa.cpp` at v1.0.0
+//! (`b1b770d90`): `llama_model_granite_swa`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` with
 //! `build_attention_layer` and `build_layer_ffn`.
 
@@ -24,8 +24,10 @@ const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
+const Cparams = @import("../cparams.zig").Cparams;
+const RopeParams = model_mod.RopeParams;
 
-/// Ports `llama_model_granite_swa`'s `load_arch_hparams` (models/granite-swa.cpp:5 @cd959bae9).
+/// Ports `llama_model_granite_swa`'s `load_arch_hparams` (models/granite-swa.cpp:5 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -84,7 +86,7 @@ fn oom() noreturn {
     impl.abort("models/granite-swa.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_model_granite_swa`'s `load_arch_tensors` (models/granite-swa.cpp:56 @cd959bae9).
+/// Ports `llama_model_granite_swa`'s `load_arch_tensors` (models/granite-swa.cpp:56 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -151,20 +153,40 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_granite_swa`'s `build_arch_graph` (models/granite-swa.cpp:117 @cd959bae9).
+/// Ports `llama_model_granite_swa`'s `get_rope_params`
+/// (models/granite-swa.cpp:117 @b1b770d90): the SWA layers take the global
+/// base and scale.
+///
+/// Parameters:
+/// - `model`: the model.
+/// - `cparams`: the context's parameters.
+/// - `il`: the layer.
+///
+/// Return: the layer's RoPE parameters.
+pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+    var res = model.getRopeParamsBase(cparams, il);
+
+    // The SWA layers use the global base and scale.
+    res.freq_base = cparams.rope_freq_base;
+    res.freq_scale = cparams.rope_freq_scale;
+
+    return res;
+}
+
+/// Ports `llama_model_granite_swa`'s `build_arch_graph` (models/granite-swa.cpp:127 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_granite_swa`'s `graph`
-/// (models/granite-swa.cpp:121 @cd959bae9).
+/// (models/granite-swa.cpp:131 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/granite-swa.cpp", 128, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/granite-swa.cpp", 129, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/granite-swa.cpp", 135, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/granite-swa.cpp", 136, "n_embd_head == n_rot");
 
     var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
 
@@ -225,7 +247,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_granite_swa`'s `graph`'s `build_attention_layer`
-/// (models/granite-swa.cpp:200 @cd959bae9).
+/// (models/granite-swa.cpp:207 @b1b770d90).
 fn buildAttentionLayer(
     b: *const graph.Builder,
     cur_: *Tensor,
@@ -235,7 +257,6 @@ fn buildAttentionLayer(
     n_embd_head: i64,
     il: c_int,
 ) *Tensor {
-    const ctx = b.ctx0;
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
 
@@ -244,12 +265,8 @@ fn buildAttentionLayer(
     var Kcur = qkv.k;
     const Vcur = qkv.v;
 
-    const use_rope = hp.hasRope(@intCast(il));
-    if (use_rope) {
-        const rope_factors = model.getRopeFactors(b.cparams, @intCast(il));
-        Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-        Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-    }
+    Qcur = b.buildRope(Qcur, inp_pos, il);
+    Kcur = b.buildRope(Kcur, inp_pos, il);
 
     b.cb(Qcur, "Qcur", il);
     b.cb(Kcur, "Kcur", il);
@@ -264,7 +281,7 @@ fn buildAttentionLayer(
 }
 
 /// Ports `llama_model_granite_swa`'s `graph`'s `build_layer_ffn`
-/// (models/granite-swa.cpp:241 @cd959bae9).
+/// (models/granite-swa.cpp:234 @b1b770d90).
 fn buildLayerFfn(b: *const graph.Builder, cur_: *Tensor, inpSA: *Tensor, model: *const Model, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -283,7 +300,7 @@ fn buildLayerFfn(b: *const graph.Builder, cur_: *Tensor, inpSA: *Tensor, model: 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
         b.cb(cur, "ffn_norm", il);
 
-        cur = b.buildFfn(cur, layer.ffn_up, layer.ffn_up_b, null, layer.ffn_gate, layer.ffn_gate_b, null, layer.ffn_down, layer.ffn_down_b, null, null, .silu, .par, il);
+        cur = b.buildFfn(cur, layer.ffn_up, layer.ffn_up_b, layer.ffn_up_s, layer.ffn_gate, layer.ffn_gate_b, layer.ffn_gate_s, layer.ffn_down, layer.ffn_down_b, layer.ffn_down_s, null, .silu, .par, il);
         b.cb(cur, "ffn_out", il);
     } else {
         // The mixture of experts.
@@ -302,12 +319,15 @@ fn buildLayerFfn(b: *const graph.Builder, cur_: *Tensor, inpSA: *Tensor, model: 
             .w_scale = hp.expert_weights_scale,
             .gating_op = .softmax,
             .gate_up_exps = layer.ffn_gate_up_exps,
+            .up_exps_s = layer.ffn_up_exps_s,
+            .gate_exps_s = layer.ffn_gate_exps_s,
+            .down_exps_s = layer.ffn_down_exps_s,
         }, il);
         b.cb(moe_out, "ffn_moe_out", il);
 
         // Granite MoE Shared, its gate and up fused in ffn_up_shexp.
         if (hp.n_ff_shexp > 0) {
-            const ffn_shexp = b.buildFfn(cur, layer.ffn_up_shexp, null, null, null, null, null, layer.ffn_down_shexp, null, null, null, .swiglu, .seq, il);
+            const ffn_shexp = b.buildFfn(cur, layer.ffn_up_shexp, null, layer.ffn_up_shexp_s, null, null, null, layer.ffn_down_shexp, null, layer.ffn_down_shexp_s, null, .swiglu, .seq, il);
             b.cb(ffn_shexp, "ffn_shexp", il);
 
             cur = c.ggml_add(ctx, moe_out, ffn_shexp);

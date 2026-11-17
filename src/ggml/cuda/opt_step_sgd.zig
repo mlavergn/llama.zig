@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/opt-step-sgd.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/opt-step-sgd.cuh` at v0.9.0
-//! (`cd959bae9`). The kernel, `opt_step_sgd_f32`, stays CUDA.
+//! `llama.cpp/ggml/src/ggml-cuda/opt-step-sgd.cuh` at v1.0.0
+//! (`b1b770d90`). The kernel, `opt_step_sgd_f32`, stays CUDA.
 
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
@@ -14,10 +14,10 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_OPT_STEP_SGD_BLOCK_SIZE` (opt-step-sgd.cuh:3 @cd959bae9).
+/// Ports `CUDA_OPT_STEP_SGD_BLOCK_SIZE` (opt-step-sgd.cuh:3 @b1b770d90).
 const block_size = 256;
 
-/// Ports `opt_step_sgd_f32_cuda` (opt-step-sgd.cu:18 @cd959bae9).
+/// Ports `opt_step_sgd_f32_cuda` (opt-step-sgd.cu:18 @b1b770d90).
 fn optStepSgdF32Cuda(x: ?*anyopaque, g: ?*const anyopaque, pars: ?*const anyopaque, k: i64, stream: cu.cudaStream_t) void {
     const block_dims: kernels.Dim3 = .{ .x = block_size };
     const block_nums: kernels.Dim3 = .{ .x = @truncate(@as(u64, @bitCast(@divTrunc(k + block_size - 1, block_size)))) };
@@ -29,7 +29,7 @@ fn optStepSgdF32Cuda(x: ?*anyopaque, g: ?*const anyopaque, pars: ?*const anyopaq
     }, .{ x, g, pars, k });
 }
 
-/// Ports `ggml_cuda_opt_step_sgd` (opt-step-sgd.cu:26 @cd959bae9).
+/// Ports `ggml_cuda_opt_step_sgd` (opt-step-sgd.cu:26 @b1b770d90).
 pub fn opOptStepSgd(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_grad = impl.one(Tensor, dst.src[1]);

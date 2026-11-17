@@ -681,8 +681,6 @@ static void graph_props(graph_t * g, weights_t * w) {
     P("permute_mir", ggml_cont(c, ggml_permute(c, a, 1, 0, 2, 3)));
     P("get_rows_back", ggml_get_rows_back(c, ga, id, a));
     P("diag", ggml_diag(c, v));
-    P("diag_mask_inf", ggml_diag_mask_inf(c, sq, 0));
-    P("diag_mask_zero", ggml_diag_mask_zero(c, sq, 0));
     P("soft_max_back", ggml_soft_max_ext_back(c, a, b, 1.0f, 0.0f));
     P("clamp", ggml_clamp(c, a, -1.0f, 1.0f));
     P("upscale", ggml_upscale(c, a, 2, GGML_SCALE_MODE_NEAREST));
@@ -706,7 +704,6 @@ static void graph_props(graph_t * g, weights_t * w) {
     P("view_mir", ggml_cont(c, ggml_view_2d(c, a, 4, 4, a->nb[1] * 2, 0)));
     P("transpose_mir", ggml_cont(c, ggml_transpose(c, a)));
     P("cpy_mir", ggml_cpy(c, a, ggml_new_tensor_2d(c, GGML_TYPE_F16, 16, 8)));
-    P("add1", ggml_add1(c, a, ggml_new_tensor_1d(c, GGML_TYPE_F32, 1)));
     P("custom1", ggml_map_custom1(c, a, custom1_noop, 1, NULL));
     {
         struct ggml_tensor * rpos = ggml_new_tensor_1d(c, GGML_TYPE_I32, 4);

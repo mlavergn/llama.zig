@@ -117,6 +117,35 @@ static void ask_buffers(size_t i, ggml_backend_dev_t dev, ggml_backend_reg_t reg
         printf("dev %zu clear = %016llx\n", i, (unsigned long long) read_all(b, tb, scratch, n));
         ggml_backend_tensor_copy(ta, tb);
         printf("dev %zu cpy_tensor = %016llx\n", i, (unsigned long long) read_all(b, tb, scratch, n));
+
+        /* v1.0.0's batched transfers (set_tensor_n, get_tensor_n,
+         * cpy_tensor_n): five regions over views of both buffers, one of
+         * them empty, staged in as few submissions as the staging buffer
+         * allows -- GGML_VK_SUBALLOCATION_BLOCK_SIZE caps it. */
+        struct ggml_tensor * va[3], * vb[3];
+        for (int k = 0; k < 3; k++) {
+            va[k] = ggml_view_1d(ctx, ta, 8192 + k * 1000, (size_t) k * 20000);
+            vb[k] = ggml_view_1d(ctx, tb, 8192 + k * 1000, (size_t) k * 20000 + 333);
+            va[k]->buffer = a; va[k]->data = (char *) ta->data + (size_t) k * 20000;
+            vb[k]->buffer = b; vb[k]->data = (char *) tb->data + (size_t) k * 20000 + 333;
+        }
+        struct ggml_tensor * set_t[5] = { va[0], va[1], va[2], vb[0], vb[2] };
+        size_t offs[5] = { 0, 17, 100, 0, 4000 }, szs[5] = { 8192, 3000, 0, 6000, 5000 }, doffs[5] = { 0, 9000, 11, 20000, 33000 };
+        /* one batch on each buffer: a mixed batch falls back to groups */
+        ggml_backend_tensor_set_n(set_t, src, offs, szs, doffs, 3);
+        ggml_backend_tensor_set_n(set_t + 3, src, offs + 3, szs + 3, doffs + 3, 2);
+        printf("dev %zu set_n a = %016llx\n", i, (unsigned long long) read_all(a, ta, scratch, n));
+        printf("dev %zu set_n b = %016llx\n", i, (unsigned long long) read_all(b, tb, scratch, n));
+        uint8_t * out = malloc(n);
+        memset(out, 0x11, n);
+        ggml_backend_tensor_get_n((const struct ggml_tensor * const *) set_t, out, offs, szs, doffs, 3);
+        ggml_backend_tensor_get_n((const struct ggml_tensor * const *) set_t + 3, out, offs + 3, szs + 3, doffs + 3, 2);
+        printf("dev %zu get_n = %016llx\n", i, (unsigned long long) fnv(out, n));
+        free(out);
+        const struct ggml_tensor * cs[3] = { va[0], va[1], va[2] };
+        struct ggml_tensor * cd[3] = { vb[0], vb[1], vb[2] };
+        ggml_backend_tensor_copy_n(cs, cd, 3);
+        printf("dev %zu copy_n = %016llx\n", i, (unsigned long long) read_all(b, tb, scratch, n));
     }
     if (a) ggml_backend_buffer_free(a);
     if (b) ggml_backend_buffer_free(b);
@@ -558,6 +587,86 @@ static struct ggml_cgraph * graph_hc_post_gate(struct ggml_context * ctx) {
     return g;
 }
 
+/*
+ * v1.0.0's test-fusion interface (`tests/test-fusion.cpp`'s proc
+ * addresses): which fusions the graph walk took, by label and count, over
+ * the graphs above computed on zeroed buffers -- once fused, then reset and
+ * with fusion disabled, then enabled again. The labels are a sorted map, so
+ * their order is part of the answer.
+ */
+typedef void * (*fusion_get_t)(ggml_backend_dev_t);
+typedef void (*fusion_init_t)(void *);
+typedef void (*fusion_reset_t)(void *);
+typedef int (*fusion_stats_get_t)(void *, const char **, uint64_t *, int);
+typedef void (*fusion_set_enabled_t)(void *, bool);
+
+static void print_fusion_stats(size_t i, const char * what, fusion_stats_get_t get, void * finfo) {
+    const int total = get(finfo, NULL, NULL, 0);
+    const char * labels[256];
+    uint64_t counts[256];
+    const int got = get(finfo, labels, counts, total < 256 ? total : 256);
+    printf("dev %zu fusion %s: %d labels, %d returned\n", i, what, total, got);
+    for (int k = 0; k < got; k++) printf("dev %zu fusion %s %s = %llu\n", i, what, labels[k], (unsigned long long) counts[k]);
+    /* a short array stops at n */
+    const int two = get(finfo, labels, NULL, 2);
+    printf("dev %zu fusion %s first two: %d\n", i, what, two);
+}
+
+/* One row, ADD then RMS_NORM of the sum: the add+rms_norm partials, which
+ * since v1.0.0 GGML_VK_DISABLE_FUSION turns off at each use. */
+static struct ggml_cgraph * graph_add_rms_row(struct ggml_context * ctx) {
+    struct ggml_cgraph * g = ggml_new_graph(ctx);
+    struct ggml_tensor * a = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 4096);
+    struct ggml_tensor * b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 4096);
+    ggml_build_forward_expand(g, ggml_rms_norm(ctx, ggml_add(ctx, a, b), 1e-6f));
+    ggml_build_forward_expand(g, ggml_rms_norm(ctx, ggml_add(ctx, ggml_add(ctx, a, b), b), 1e-6f));
+    return g;
+}
+
+static void compute_zeroed(ggml_backend_t be, struct ggml_cgraph * (*make)(struct ggml_context *)) {
+    struct ggml_init_params params = { 4096 * ggml_tensor_overhead() + 2 * ggml_graph_overhead(), NULL, true };
+    struct ggml_context * ctx = ggml_init(params);
+    struct ggml_cgraph * g = make(ctx);
+    ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(ctx, be);
+    if (buf) {
+        ggml_backend_buffer_clear(buf, 0);
+        ggml_backend_graph_compute(be, g);
+        ggml_backend_buffer_free(buf);
+    }
+    ggml_free(ctx);
+}
+
+static void ask_fusion(size_t i, ggml_backend_dev_t dev, ggml_backend_reg_t reg) {
+    fusion_get_t get_fi = (fusion_get_t) ggml_backend_reg_get_proc_address(reg, "ggml_backend_fusion_get");
+    fusion_init_t init = (fusion_init_t) ggml_backend_reg_get_proc_address(reg, "ggml_backend_fusion_stats_init");
+    fusion_reset_t reset = (fusion_reset_t) ggml_backend_reg_get_proc_address(reg, "ggml_backend_fusion_stats_reset");
+    fusion_stats_get_t get = (fusion_stats_get_t) ggml_backend_reg_get_proc_address(reg, "ggml_backend_fusion_stats_get");
+    fusion_set_enabled_t set_enabled = (fusion_set_enabled_t) ggml_backend_reg_get_proc_address(reg, "ggml_backend_fusion_set_enabled");
+    if (!get_fi || !init || !reset || !get || !set_enabled) { printf("dev %zu fusion: unavailable\n", i); return; }
+    ggml_backend_t be = ggml_backend_dev_init(dev, NULL);
+    if (be == NULL) return;
+    void * finfo = get_fi(dev);
+    print_fusion_stats(i, "before init", get, finfo);
+    init(finfo);
+    compute_zeroed(be, graph_decoder);
+    compute_zeroed(be, graph_fusions_041);
+    compute_zeroed(be, graph_hc_post_gate);
+    compute_zeroed(be, graph_snake_tail);
+    compute_zeroed(be, graph_add_rms_row);
+    compute_zeroed(be, graph_add_rms_row);
+    print_fusion_stats(i, "fused", get, finfo);
+    reset(finfo);
+    set_enabled(finfo, false);
+    compute_zeroed(be, graph_decoder);
+    compute_zeroed(be, graph_fusions_041);
+    print_fusion_stats(i, "unfused", get, finfo);
+    set_enabled(finfo, true);
+    compute_zeroed(be, graph_decoder);
+    compute_zeroed(be, graph_add_rms_row);
+    print_fusion_stats(i, "re-enabled", get, finfo);
+    ggml_backend_free(be);
+}
+
 static void ask_graph_optimize(size_t i, ggml_backend_dev_t dev) {
     ggml_backend_t be = ggml_backend_dev_init(dev, NULL);
     if (be == NULL) return;
@@ -776,7 +885,9 @@ int main(int argc, char ** argv) {
     const size_t n_dev = ggml_backend_reg_dev_count(reg);
     printf("reg dev_count = %zu\n", n_dev);
     static const char * procs[] = { "ggml_backend_get_features", "ggml_backend_split_buffer_type", "no_such_function",
-                                    "ggml_backend_comm_init", "ggml_backend_comm_free", "ggml_backend_comm_allreduce_tensor" };
+                                    "ggml_backend_comm_init", "ggml_backend_comm_free", "ggml_backend_comm_allreduce_tensor",
+                                    "ggml_backend_fusion_get", "ggml_backend_fusion_stats_init", "ggml_backend_fusion_stats_reset",
+                                    "ggml_backend_fusion_stats_get", "ggml_backend_fusion_set_enabled" };
     for (size_t i = 0; i < sizeof(procs) / sizeof(procs[0]); i++) {
         printf("reg proc %s = %s\n", procs[i], ggml_backend_reg_get_proc_address(reg, procs[i]) ? "yes" : "null");
     }
@@ -820,6 +931,7 @@ int main(int argc, char ** argv) {
             ask_buffers(i, ggml_backend_reg_dev_get(reg, i), reg, ctx);
             ask_backend(i, ggml_backend_reg_dev_get(reg, i), ctx);
             ask_graph_optimize(i, ggml_backend_reg_dev_get(reg, i));
+            ask_fusion(i, ggml_backend_reg_dev_get(reg, i), reg);
         }
         ask_allreduce(reg, n_dev);
     }

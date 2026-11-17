@@ -8,8 +8,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/deepseek32.cpp` at v0.9.0
-//! (`cd959bae9`): `llama_model_deepseek32`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/deepseek32.cpp` at v1.0.0
+//! (`b1b770d90`): `llama_model_deepseek32`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` and
 //! `graph_mtp`.
 
@@ -25,7 +25,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_deepseek32`'s `load_arch_hparams` (models/deepseek32.cpp:6 @cd959bae9).
+/// Ports `llama_model_deepseek32`'s `load_arch_hparams` (models/deepseek32.cpp:6 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -71,7 +71,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_deepseek32`'s `load_arch_tensors` (models/deepseek32.cpp:46 @cd959bae9).
+/// Ports `llama_model_deepseek32`'s `load_arch_tensors` (models/deepseek32.cpp:46 @b1b770d90).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -186,22 +186,19 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 // The graph
 
 /// Ports `llama_model_deepseek32`'s `build_arch_graph` (models/deepseek32.cpp:149
-/// @cd959bae9): the MTP draft head for that graph type, the main model
+/// @b1b770d90): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(variant, model, b);
     return buildGraph(variant, model, b);
 }
 
-/// What GLM-DSA's graphs (`glm_dsa.zig`) change in these: the indexer's
-/// RoPE, the layers that reuse the previous full indexer's top-k, and the
+/// What GLM-DSA's graphs (`glm_dsa.zig`) change in these: the layers that reuse the previous full indexer's top-k, and the
 /// source the assertions name.
 pub const Variant = struct {
     file: [:0]const u8,
     /// The architecture's name in the MTP head's assertions.
     name: [:0]const u8,
-    /// The RoPE mode of the indexer's q and k.
-    indexer_rope_type: c_int,
     /// Whether layers without a full indexer reuse the previous full
     /// layer's top-k.
     shared_indexers: bool,
@@ -224,16 +221,15 @@ pub const Variant = struct {
 const variant: Variant = .{
     .file = "models/deepseek32.cpp",
     .name = "DEEPSEEK32",
-    .indexer_rope_type = c.LLAMA_ROPE_TYPE_NEOX,
     .shared_indexers = false,
     .line_is_mla = 159,
     .line_n_rot = 174,
     .line_ext_factor = 183,
-    .line_mtp = 489,
-    .line_mtp_inp = 521,
-    .line_mtp_embd_or_token = 530,
-    .line_mtp_head_norm = 701,
-    .line_mtp_head = 712,
+    .line_mtp = 483,
+    .line_mtp_inp = 515,
+    .line_mtp_embd_or_token = 524,
+    .line_mtp_head_norm = 691,
+    .line_mtp_head = 702,
 };
 
 /// The YaRN pre-scaling both graphs share: the KQ scale, from the
@@ -246,7 +242,7 @@ fn mlaKqScale(b: *const graph.Builder, n_embd_head_k: i64) f32 {
 }
 
 /// Ports the constructor of `llama_model_deepseek32`'s `graph`
-/// (models/deepseek32.cpp:156 @cd959bae9), and with `v` GLM-DSA's.
+/// (models/deepseek32.cpp:156 @b1b770d90), and with `v` GLM-DSA's.
 pub fn buildGraph(comptime v: Variant, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -313,7 +309,7 @@ pub fn buildGraph(comptime v: Variant, model: *const Model, b: *const graph.Buil
             var top_k: *Tensor = undefined;
             if (!v.shared_indexers or hp.isIndexerFull(@intCast(il))) {
                 // A "full" indexer layer.
-                top_k = lightningIndexer(b, v.indexer_rope_type, layer, inp_attn_dsa, cur, qr, inp_pos, n_indexer_head, n_embd_indexer_head, n_indexer_top_k, il);
+                top_k = lightningIndexer(b, layer, inp_attn_dsa, cur, qr, inp_pos, n_indexer_head, n_embd_indexer_head, n_indexer_top_k, il);
                 prev_top_k = top_k;
                 b.cb(top_k, "top_k", il);
             } else {
@@ -346,10 +342,10 @@ pub fn buildGraph(comptime v: Variant, model: *const Model, b: *const graph.Buil
             var k_pe: *Tensor = c.ggml_view_3d(ctx, kv_cmpr_pe, n_embd_head_qk_rope, 1, b.n_tokens, c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank + n_embd_head_qk_rope), c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank + n_embd_head_qk_rope), c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank));
             b.cb(k_pe, "k_pe", il);
 
-            q_pe = c.ggml_rope_ext(ctx, q_pe, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            q_pe = b.buildRope(q_pe, inp_pos, il);
             b.cb(q_pe, "q_pe", il);
 
-            k_pe = c.ggml_rope_ext(ctx, k_pe, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            k_pe = b.buildRope(k_pe, inp_pos, il);
             b.cb(k_pe, "k_pe", il);
 
             kv_cmpr = b.buildNorm(kv_cmpr, layer.attn_kv_a_norm, null, .rms, il);
@@ -456,14 +452,12 @@ pub fn buildGraph(comptime v: Variant, model: *const Model, b: *const graph.Buil
 /// and dots.llm3's build too: scores every cached indexer key for each
 /// query, stores this ubatch's keys, and picks the top-k positions
 /// attention may see.
-///
-/// Parameters:
-/// - `rope_type`: the RoPE mode of the indexer's q and k.
+/// The indexer's q and k are roped with `build_rope_indexer`, whose
+/// parameters an architecture overrides through `get_rope_params_indexer`.
 ///
 /// Return: the top-k indices, `[n_top_k, n_tokens]`.
 pub fn lightningIndexer(
     b: *const graph.Builder,
-    rope_type: c_int,
     layer: *const model_mod.Layer,
     inp_attn_dsa: *graph.InpAttnKDsa,
     cur: *Tensor,
@@ -481,7 +475,7 @@ pub fn lightningIndexer(
 
     // `{n_embd_indexer_head, n_indexer_head, n_tokens}`.
     indexer_q = c.ggml_reshape_3d(ctx, indexer_q, n_embd_indexer_head, n_indexer_head, b.n_tokens);
-    indexer_q = c.ggml_rope_ext(ctx, indexer_q, inp_pos, null, @intCast(b.n_rot), rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+    indexer_q = b.buildRopeIndexer(indexer_q, inp_pos, il);
     b.cb(indexer_q, "indexer_q", il);
 
     var indexer_k: *Tensor = c.ggml_mul_mat(ctx, layer.indexer_attn_k, cur);
@@ -492,7 +486,7 @@ pub fn lightningIndexer(
 
     // `{n_embd_indexer_head, 1, n_tokens}`.
     indexer_k = c.ggml_reshape_3d(ctx, indexer_k, n_embd_indexer_head, 1, b.n_tokens);
-    indexer_k = c.ggml_rope_ext(ctx, indexer_k, inp_pos, null, @intCast(b.n_rot), rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+    indexer_k = b.buildRopeIndexer(indexer_k, inp_pos, il);
     b.cb(indexer_k, "indexer_k", il);
 
     // The Hadamard transform of the indexer's q and k.
@@ -593,7 +587,7 @@ pub fn buildMoe(b: *const graph.Builder, layer: *const model_mod.Layer, cur: *Te
 }
 
 /// Ports the constructor of `llama_model_deepseek32`'s `graph_mtp`
-/// (models/deepseek32.cpp:487 @cd959bae9): the `LLM_GRAPH_TYPE_DECODER_MTP`
+/// (models/deepseek32.cpp:481 @b1b770d90): the `LLM_GRAPH_TYPE_DECODER_MTP`
 /// draft head, the DeepSeek family's NextN/MTP layer -- `enorm(embed) +
 /// hnorm(prev_hidden)`, concatenated, through `eh_proj`, then a whole
 /// decoder block of dense MLA and the sigmoid-gated MoE with its shared
@@ -652,9 +646,7 @@ pub fn buildGraphMtp(comptime v: Variant, model: *const Model, b: *const graph.B
     }
     b.cb(tok_embd, "mtp_tok_embd", il);
 
-    inp.h = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, hp.n_embd, b.n_tokens);
-    c.ggml_set_input(inp.h);
-    _ = c.ggml_set_name(inp.h, "mtp_h_input");
+    inp.h = b.buildInpEmbdState(inp, hp.n_embd);
 
     const h_embd = inp.h.?;
 
@@ -714,10 +706,10 @@ pub fn buildGraphMtp(comptime v: Variant, model: *const Model, b: *const graph.B
         var k_pe: *Tensor = c.ggml_view_3d(ctx, kv_cmpr_pe, n_embd_head_qk_rope, 1, b.n_tokens, c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank + n_embd_head_qk_rope), c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank + n_embd_head_qk_rope), c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank));
         b.cb(k_pe, "mtp_k_pe", il);
 
-        q_pe = c.ggml_rope_ext(ctx, q_pe, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+        q_pe = b.buildRope(q_pe, inp_pos, il);
         b.cb(q_pe, "mtp_q_pe", il);
 
-        k_pe = c.ggml_rope_ext(ctx, k_pe, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+        k_pe = b.buildRope(k_pe, inp_pos, il);
         b.cb(k_pe, "mtp_k_pe", il);
 
         kv_cmpr = b.buildNorm(kv_cmpr, layer.attn_kv_a_norm, null, .rms, il);

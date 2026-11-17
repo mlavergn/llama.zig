@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/batch-get.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/batch-get.cuh` at v0.9.0 (`cd959bae9`),
+//! `llama.cpp/ggml/src/ggml-cuda/batch-get.cuh` at v1.0.0 (`b1b770d90`),
 //! new at v0.9.0, the non-HIP, non-MUSA arm. The kernel,
 //! `ggml_cuda_batch_get_kernel`, stays CUDA, in a new top-level `.cu`.
 //! The caller is `backend.zig`'s `get_tensor_n`.
@@ -22,7 +22,7 @@ const Tensor = c.ggml_tensor;
 /// `cudaStreamPerThread`.
 const stream_per_thread: cu.cudaStream_t = @ptrFromInt(0x2);
 
-/// Ports `ggml_cuda_batch_get_descriptor` (batch-get.cu:8 @cd959bae9): one
+/// Ports `ggml_cuda_batch_get_descriptor` (batch-get.cu:8 @b1b770d90): one
 /// copy, as the kernel reads it.
 const Descriptor = extern struct {
     src: ?[*]const u8,
@@ -35,7 +35,7 @@ comptime {
     std.debug.assert(@sizeOf(Descriptor) == 24);
 }
 
-/// Ports `ggml_cuda_batch_get_mapping` (batch-get.cu:53 @cd959bae9): the
+/// Ports `ggml_cuda_batch_get_mapping` (batch-get.cu:53 @b1b770d90): the
 /// host span registered and mapped for the kernel, unregistered on `deinit`
 /// only if this object registered it.
 const Mapping = struct {
@@ -87,7 +87,7 @@ fn rangeLess(_: void, a: Range, b: Range) bool {
     return a.first < b.first or (a.first == b.first and a.second < b.second);
 }
 
-/// Ports `ggml_cuda_get_tensor_n` (batch-get.cu:85 @cd959bae9).
+/// Ports `ggml_cuda_get_tensor_n` (batch-get.cu:85 @b1b770d90).
 ///
 /// Parameters:
 /// - `device`: the buffer's device, already current.

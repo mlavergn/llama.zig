@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/clip.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/clip.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_clip`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, all three stubs.
 
@@ -19,19 +19,19 @@ const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 
-/// Ports `llama_model_clip`'s `load_arch_hparams` (src/models/clip.cpp:6 @cd959bae9).
+/// Ports `llama_model_clip`'s `load_arch_hparams` (src/models/clip.cpp:6 @b1b770d90).
 pub fn loadArchHparams(_: *Model, _: *const loader.Loader, _: *Exception) Thrown!void {
     impl.abort("models/clip.cpp", 7, "CLIP is a quant-only stub; load_arch_hparams should not be called");
 }
 
-/// Ports `llama_model_clip`'s `load_arch_tensors` (src/models/clip.cpp:11 @cd959bae9).
+/// Ports `llama_model_clip`'s `load_arch_tensors` (src/models/clip.cpp:11 @b1b770d90).
 pub fn loadArchTensors(_: *Model, _: *loader.Loader, _: *Exception) Thrown!void {
     impl.abort("models/clip.cpp", 12, "CLIP is a quant-only stub; load_arch_tensors should not be called");
 }
 
-/// Ports `llama_model_clip`'s `build_arch_graph` (src/models/clip.cpp:16 @cd959bae9).
+/// Ports `llama_model_clip`'s `build_arch_graph` (src/models/clip.cpp:16 @b1b770d90).
 pub fn buildArchGraph(_: *const Model, _: *const graph.Builder, _: *const graph.Params) void {
-    impl.abort("models/clip.cpp", 17, "CLIP has no inference graph via llama_model dispatch; runtime lives in tools/mtmd/clip.cpp");
+    impl.abort("models/clip.cpp", 17, "CLIP has no inference graph via llama_model dispatch; runtime lives in tools/mtmd");
 }
 
 // -----------------------------------------------------------------------------

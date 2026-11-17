@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.9.0 (`cd959bae9`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v1.0.0 (`b1b770d90`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # Four fused multiply-adds
@@ -48,7 +48,7 @@ const at = common.ptr;
 /// Stride as `i64`; see `common.sz`.
 const s = common.sz;
 
-/// Ports `rope_yarn_ramp` (ops.cpp:6164 @cd959bae9).
+/// Ports `rope_yarn_ramp` (ops.cpp:6076 @b1b770d90).
 ///
 /// `MIN` and `MAX` are the C's ternary macros, mixing `int` literals with
 /// `float`; the comparisons happen in `float`.
@@ -64,7 +64,7 @@ fn ropeYarnRamp(low: f32, high: f32, j0: c_int) f32 {
 /// The cosine and sine `rope_yarn` writes through its two out-pointers.
 const CosSin = struct { cos: f32, sin: f32 };
 
-/// Ports `rope_yarn` (ops.cpp:6171 @cd959bae9).
+/// Ports `rope_yarn` (ops.cpp:6083 @b1b770d90).
 ///
 /// YaRN algorithm based on LlamaYaRNScaledRotaryEmbedding.py from
 /// https://github.com/jquesnelle/yarn — MIT licensed. Copyright (c) 2023
@@ -95,7 +95,7 @@ fn ropeYarn(
     return .{ .cos = sc.cos * mscale, .sin = sc.sin * mscale };
 }
 
-/// Ports `ggml_rope_cache_init` (ops.cpp:6188 @cd959bae9).
+/// Ports `ggml_rope_cache_init` (ops.cpp:6100 @b1b770d90).
 fn ropeCacheInit(
     theta_base: f32,
     freq_scale: f32,
@@ -123,7 +123,7 @@ fn ropeCacheInit(
     }
 }
 
-/// Ports `ggml_mrope_cache_init` (ops.cpp:6204 @cd959bae9).
+/// Ports `ggml_mrope_cache_init` (ops.cpp:6116 @b1b770d90).
 fn mropeCacheInit(
     theta_base_t: f32,
     theta_base_h: f32,
@@ -205,7 +205,7 @@ fn mropeCacheInit(
     }
 }
 
-/// Ports `rotate_pairs` (ops.cpp:6276 @cd959bae9).
+/// Ports `rotate_pairs` (ops.cpp:6188 @b1b770d90).
 ///
 /// Parameters:
 /// - `n`: elements to rotate, stepped two at a time.
@@ -234,7 +234,7 @@ inline fn rotatePairs(comptime T: type, n: i64, n_offset: i64, cache: [*]const f
     }
 }
 
-/// Ports `ggml_compute_forward_rope_flt` (ops.cpp:6295 @cd959bae9).
+/// Ports `ggml_compute_forward_rope_flt` (ops.cpp:6207 @b1b770d90).
 ///
 /// Parameters:
 /// - `T`: `f32` or `ggml_fp16_t`.
@@ -251,8 +251,8 @@ fn ropeFlt(comptime T: type, params: *const ComputeParams, dst: *Tensor, forward
     //const n_past     = ((int32_t *) dst->op_params)[0];
     const n_dims: c_int = impl.getOpParamsI32(dst, 1);
     const mode: c_int = impl.getOpParamsI32(dst, 2);
-    //const n_ctx      = ((int32_t *) dst->op_params)[3];
     const n_ctx_orig: c_int = impl.getOpParamsI32(dst, 4);
+    const truncate = c.ggml_rope_get_truncate(dst);
 
     const freq_base = impl.getOpParamsF32(dst, 5);
     const freq_scale = impl.getOpParamsF32(dst, 6);
@@ -299,7 +299,7 @@ fn ropeFlt(comptime T: type, params: *const ComputeParams, dst: *Tensor, forward
     const theta_scale = powf(freq_base, -2.0 / @as(f32, @floatFromInt(n_dims)));
 
     var corr_dims: [2]f32 = undefined;
-    c.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, &corr_dims);
+    c.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, truncate, &corr_dims);
 
     const is_imrope = mode == c.GGML_ROPE_TYPE_IMROPE; // qwen3vl apply interleaved mrope
     const mrope_used = (mode & c.GGML_ROPE_TYPE_MROPE) != 0; // ggml_rope_multi, note: also true for vision (24 & 8 == true) and for imrope
@@ -414,7 +414,7 @@ fn ropeFlt(comptime T: type, params: *const ComputeParams, dst: *Tensor, forward
     }
 }
 
-/// Ports `ggml_compute_forward_rope` (ops.cpp:6453 @cd959bae9).
+/// Ports `ggml_compute_forward_rope` (ops.cpp:6365 @b1b770d90).
 pub export fn ggml_compute_forward_rope(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -425,7 +425,7 @@ pub export fn ggml_compute_forward_rope(params: *const ComputeParams, dst: *Tens
     }
 }
 
-/// Ports `ggml_compute_forward_rope_back` (ops.cpp:6477 @cd959bae9).
+/// Ports `ggml_compute_forward_rope_back` (ops.cpp:6389 @b1b770d90).
 pub export fn ggml_compute_forward_rope_back(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/t5encoder.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/t5encoder.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_t5encoder`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`. Its graph is `llama_model_t5`'s encoder graph,
 //! which `t5.zig` ports.
@@ -19,7 +19,7 @@ const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 
-/// Ports `llama_model_t5encoder`'s `load_arch_hparams` (models/t5encoder.cpp:3 @cd959bae9).
+/// Ports `llama_model_t5encoder`'s `load_arch_hparams` (models/t5encoder.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -29,7 +29,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     self.type = .unknown;
 }
 
-/// Ports `llama_model_t5encoder`'s `load_arch_tensors` (models/t5encoder.cpp:9 @cd959bae9).
+/// Ports `llama_model_t5encoder`'s `load_arch_tensors` (models/t5encoder.cpp:9 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -51,7 +51,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_t5encoder`'s `build_arch_graph` (models/t5encoder.cpp:42
-/// @cd959bae9): T5's encoder graph, whatever the graph type.
+/// @b1b770d90): T5's encoder graph, whatever the graph type.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     t5.buildEncoder(model, b);
 }

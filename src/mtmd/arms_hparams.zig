@@ -1,10 +1,10 @@
-//! The model-specific arms of the clip loader's hyperparameter pass.
+//! The model-specific arms of the mtmd loader's hyperparameter pass.
 //!
 //! # Provenance
 //!
-//! Ports the per-projector `switch` inside `clip_model_loader::load_hparams`
-//! of `llama.cpp/tools/mtmd/clip.cpp` (lines 1481-2162) at v0.9.0
-//! (`cd959bae9`). The code before and after the switch is `clip.zig`'s
+//! Ports the per-projector `switch` inside `mtmd_model_loader::load_hparams`
+//! of `llama.cpp/tools/mtmd/mtmd-model.cpp` at v1.0.0 (`b1b770d90`) --
+//! `clip.cpp`'s `clip_model_loader` until v0.9.0. The code before and after the switch is `clip.zig`'s
 //! `Loader.loadHparams`, which calls `load` here. Each arm keeps upstream's
 //! keys, required flags, defaults, log lines and messages verbatim; a comment
 //! names the `case` labels it covers.
@@ -45,8 +45,8 @@ var wa_ordered: std.ArrayList(i32) = .empty;
 
 const func = "load_hparams";
 
-/// Ports the model-specific switch of `load_hparams` (mtmd/clip.cpp:1374
-/// @cd959bae9), a member of `clip_model_loader`.
+/// Ports the model-specific switch of `load_hparams` (mtmd-model.cpp:117
+/// @b1b770d90), a member of `mtmd_model_loader`.
 pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!void {
     const hparams = &model.hparams;
     var kb: [256]u8 = undefined;
@@ -84,7 +84,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             // ViT merger 2x2 + final merger 2x2 = 4x spatial merge per dimension
             hparams.n_merge = 4;
             try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
-            impl.ggmlAssert(hparams.n_merge == 2 or hparams.n_merge == 4, "clip.cpp", 1591, "hparams.n_merge == 2 || hparams.n_merge == 4");
+            impl.ggmlAssert(hparams.n_merge == 2 or hparams.n_merge == 4, "mtmd-model.cpp", 334, "hparams.n_merge == 2 || hparams.n_merge == 4");
 
             // no padding: the reference stretches the refined image to the target size
             hparams.image_pad_ov = .none;
@@ -110,7 +110,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
             try ld.getU32(names.KEY_PREPROC_MIN_TILES, &hparams.preproc_min_tiles, false);
             try ld.getU32(names.KEY_PREPROC_MAX_TILES, &hparams.preproc_max_tiles, false);
-            impl.ggmlAssert(hparams.preproc_min_tiles <= hparams.preproc_max_tiles and hparams.preproc_max_tiles < std.math.maxInt(i32), "clip.cpp", 1618, "hparams.preproc_min_tiles <= hparams.preproc_max_tiles && hparams.preproc_max_tiles < INT32_MAX");
+            impl.ggmlAssert(hparams.preproc_min_tiles <= hparams.preproc_max_tiles and hparams.preproc_max_tiles < std.math.maxInt(i32), "mtmd-model.cpp", 361, "hparams.preproc_min_tiles <= hparams.preproc_max_tiles && hparams.preproc_max_tiles < INT32_MAX");
             try clip.Loader.setInternvlDhrResCandidates(model);
         },
         // PROJECTOR_TYPE_NEMOTRON_V2_VL
@@ -130,9 +130,9 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
         // PROJECTOR_TYPE_PARAKEET
         .parakeet => {
             try ld.getU32(names.KEY_AUDIO_SUBSMPL_FACTOR, &hparams.subsampling_factor, true);
-            impl.ggmlAssert(hparams.subsampling_factor == 8, "clip.cpp", 1639, "hparams.subsampling_factor == 8 && \"subsampling_factor must match the conv strides in clip_graph_parakeet::build()\"");
+            impl.ggmlAssert(hparams.subsampling_factor == 8, "mtmd-model.cpp", 382, "hparams.subsampling_factor == 8 && \"subsampling_factor must match the conv strides in mtmd_graph_parakeet::build()\"");
             try ld.getU32(names.KEY_A_CONV_KERNEL_SIZE, &hparams.audio_conv_kernel_size, true);
-            impl.ggmlAssert(hparams.audio_conv_kernel_size > 0 and @rem(hparams.audio_conv_kernel_size, 2) == 1, "clip.cpp", 1642, "hparams.audio_conv_kernel_size > 0 && hparams.audio_conv_kernel_size % 2 == 1 && \"audio_conv_kernel_size must be a positive odd integer\"");
+            impl.ggmlAssert(hparams.audio_conv_kernel_size > 0 and @rem(hparams.audio_conv_kernel_size, 2) == 1, "mtmd-model.cpp", 385, "hparams.audio_conv_kernel_size > 0 && hparams.audio_conv_kernel_size % 2 == 1 && \"audio_conv_kernel_size must be a positive odd integer\"");
             hparams.audio_chunk_len = 0;
             hparams.audio_sample_rate = 16000;
             hparams.audio_n_fft = 512;
@@ -208,7 +208,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             try ld.getU32(names.KEY_PREPROC_MAX_TILES, &hparams.preproc_max_tiles, false);
             try ld.getU32(names.KEY_PREPROC_TILE_SIZE, &hparams.preproc_tile_size, false);
             try ld.getF32(names.KEY_PREPROC_MAX_PIXELS_TOLERANCE, &hparams.preproc_max_pixels_tolerance, false);
-            impl.ggmlAssert(hparams.preproc_min_tiles >= 1 and hparams.preproc_min_tiles <= hparams.preproc_max_tiles, "clip.cpp", 1718, "hparams.preproc_min_tiles >= 1 && hparams.preproc_min_tiles <= hparams.preproc_max_tiles");
+            impl.ggmlAssert(hparams.preproc_min_tiles >= 1 and hparams.preproc_min_tiles <= hparams.preproc_max_tiles, "mtmd-model.cpp", 461, "hparams.preproc_min_tiles >= 1 && hparams.preproc_min_tiles <= hparams.preproc_max_tiles");
             hparams.setLimitImageTokens(64, 256);
         },
         // PROJECTOR_TYPE_PHI4
@@ -291,8 +291,8 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.setLimitImageTokens(8, 1024);
             hparams.setWarmupNTokens(256); // avoid OOM on warmup
         },
-        // PROJECTOR_TYPE_KIMIK25
-        .kimik25 => {
+        // PROJECTOR_TYPE_KIMIK25, KIMIK31
+        .kimik25, .kimik31 => {
             hparams.image_resize_algo = .bicubic;
             hparams.rope_theta = 10000.0;
             try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
@@ -307,6 +307,9 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
                 hparams.warmup_image_size = @intFromFloat(@sqrt(@as(f64, @floatFromInt(max_pixels))));
             } else {
                 hparams.setLimitImageTokens(2, 4096);
+            }
+            if (model.proj_type == .kimik31) {
+                hparams.setWarmupNTokens(46 * 46); // avoid OOM on warmup
             }
         },
         // PROJECTOR_TYPE_DEEPSEEK4V
@@ -398,6 +401,10 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.image_resize_pad = .none; // the HF processor resizes to the smart_resize size, no padding
             hparams.image_round_half_even = true; // smart_resize uses Python round()
             try ld.getU32(names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
+            if (hparams.n_merge != 2) {
+                // the temporal merge input and the merger use a 2x2 patch grid
+                return clip.throwErr("%s: spatial_merge_size (%d) must be 2\n", .{ func, hparams.n_merge });
+            }
             try ld.getU32(names.KEY_WIN_ATTN_PATTERN, &hparams.n_wa_pattern, model.proj_type == .qwen25vl); // only 2.5 requires it
             // ref: https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct/blob/main/preprocessor_config.json
             hparams.setLimitImageTokens(8, 4096);
@@ -415,6 +422,18 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
                 impl.logWrn("%s: if you encounter problems with accuracy, try adding --image-min-tokens 1024\n", .{func});
                 impl.logWrn("%s: more info: https://github.com/ggml-org/llama.cpp/issues/16842\n\n", .{func});
             }
+        },
+        // PROJECTOR_TYPE_MAGEVL
+        .magevl => {
+            hparams.ffn_op = .gelu_erf;
+            info.log_ffn_op.* = "gelu_erf";
+            hparams.image_resize_algo = .bicubic;
+            hparams.image_resize_pad = .none; // the HF processor resizes to the smart_resize size, no padding
+            hparams.image_round_half_even = true; // smart_resize uses Python round()
+            try ld.getU32(names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, true);
+            try ld.getU32(names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
+            try ld.getU32(names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
+            hparams.setWarmupNTokens(46 * 46); // avoid OOM on warmup
         },
         // PROJECTOR_TYPE_SENSENOVA_U1
         .sensenova_u1 => {
@@ -471,7 +490,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.image_resize_pad = .none;
             try ld.getU32(names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
             // n_merge is used as a divisor; reject 0 to avoid int div-by-zero
-            impl.ggmlAssert(hparams.n_merge > 0, "clip.cpp", 1991, "hparams.n_merge > 0");
+            impl.ggmlAssert(hparams.n_merge > 0, "mtmd-model.cpp", 754, "hparams.n_merge > 0");
             hparams.rope_theta = 10000.0; // vision_config.rope_theta
             // MiniMax-M3: max_pixels 451584 (=672^2) -> 576 merged tokens (image_seq_length)
             hparams.setLimitImageTokens(8, 576);
@@ -487,16 +506,16 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
 
             // the graph indexes the three arrays by stage and model.layers by the running depth sum
             const n_stage = hparams.audio_patch_sizes.items.len;
-            impl.ggmlAssert(n_stage > 0, "clip.cpp", 2007, "n_stage > 0");
-            impl.ggmlAssert(hparams.audio_hidden_sizes.items.len == n_stage, "clip.cpp", 2008, "hparams.audio_hidden_sizes.size() == n_stage");
-            impl.ggmlAssert(hparams.audio_depths.items.len == n_stage, "clip.cpp", 2009, "hparams.audio_depths.size() == n_stage");
-            impl.ggmlAssert(hparams.n_mel_bins == 1, "clip.cpp", 2010, "hparams.n_mel_bins == 1");
-            impl.ggmlAssert(hparams.audio_conv_kernel_size >= 1, "clip.cpp", 2011, "hparams.audio_conv_kernel_size >= 1");
+            impl.ggmlAssert(n_stage > 0, "mtmd-model.cpp", 770, "n_stage > 0");
+            impl.ggmlAssert(hparams.audio_hidden_sizes.items.len == n_stage, "mtmd-model.cpp", 771, "hparams.audio_hidden_sizes.size() == n_stage");
+            impl.ggmlAssert(hparams.audio_depths.items.len == n_stage, "mtmd-model.cpp", 772, "hparams.audio_depths.size() == n_stage");
+            impl.ggmlAssert(hparams.n_mel_bins == 1, "mtmd-model.cpp", 773, "hparams.n_mel_bins == 1");
+            impl.ggmlAssert(hparams.audio_conv_kernel_size >= 1, "mtmd-model.cpp", 774, "hparams.audio_conv_kernel_size >= 1");
 
             var n_blocks: i64 = 0;
             for (0..n_stage) |i| {
-                impl.ggmlAssert(hparams.audio_hidden_sizes.items[i] >= 1, "clip.cpp", 2015, "hparams.audio_hidden_sizes[i] >= 1");
-                impl.ggmlAssert(hparams.audio_depths.items[i] >= 0, "clip.cpp", 2016, "hparams.audio_depths[i] >= 0");
+                impl.ggmlAssert(hparams.audio_hidden_sizes.items[i] >= 1, "mtmd-model.cpp", 778, "hparams.audio_hidden_sizes[i] >= 1");
+                impl.ggmlAssert(hparams.audio_depths.items[i] >= 0, "mtmd-model.cpp", 779, "hparams.audio_depths[i] >= 0");
                 n_blocks += hparams.audio_depths.items[i];
             }
             if (n_blocks != hparams.n_layer) {
@@ -528,7 +547,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             var pat: std.ArrayList(i32) = .empty;
             defer pat.deinit(gpa);
             try ld.getArrInt(names.KEY_WA_PATTERN_MODE, &pat, true);
-            impl.ggmlAssert(@as(i32, @intCast(pat.items.len)) == hparams.n_layer, "clip.cpp", 2047, "(int) pat.size() == hparams.n_layer && \"mimovl wa_pattern_mode length must equal n_layer\"");
+            impl.ggmlAssert(@as(i32, @intCast(pat.items.len)) == hparams.n_layer, "mtmd-model.cpp", 810, "(int) pat.size() == hparams.n_layer && \"mimovl wa_pattern_mode length must equal n_layer\"");
             hparams.wa_pattern_mode.clearRetainingCapacity();
             try hparams.wa_pattern_mode.appendSlice(gpa, pat.items);
             try ld.getU32(names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
@@ -626,7 +645,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.audio_n_fft = 400;
             hparams.audio_window_len = 400;
             hparams.audio_hop_len = 160;
-            // 2 context frames + 8 s of new frames, see clip_enc_state_init()
+            // 2 context frames + 8 s of new frames, see mtmd_subcontext::enc_state_init()
             hparams.warmup_audio_size = 2 + 2 * 400;
         },
         // PROJECTOR_TYPE_MIMO_AUDIO
@@ -675,7 +694,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.audio_window_len = 1024;
             hparams.audio_hop_len = 256;
         },
-        // `PROJECTOR_TYPE_CHATTERBOX_SPKENC` (mtmd/clip.cpp:2206 @cd959bae9)
+        // `PROJECTOR_TYPE_CHATTERBOX_SPKENC` (mtmd-model.cpp:969 @b1b770d90)
         .chatterbox_spkenc => {
             // kaldi fbank front-end of CAMPPlus: 25 ms / 10 ms framing, 512-point spectrum
             hparams.audio_sample_rate = 16000;
@@ -685,6 +704,9 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
         },
         // PROJECTOR_TYPE_LFM3A_GEN
         .lfm3a_gen => {
+            // TODO: CUDA has no flash attention kernel for the depthformer head dim 32, enable it once it does
+            model.flash_attn_auto = false;
+
             // fixed by LiquidCodecConfig, head counts come from the tensors
             hparams.rope_theta = 1000000.0;
 
@@ -729,6 +751,22 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             // matches the reference decoder's sliding_window (speech_tokenizer/config.json)
             hparams.wav_tfm_swa = 72;
         },
+        // PROJECTOR_TYPE_DRAMA3_GEN
+        .drama3_gen => {
+            // Fish DAC decoder, codec.pth has no config
+            hparams.audio_sample_rate = 44100;
+            hparams.wav_tfm_n_layer = 8;
+            hparams.wav_tfm_n_embd = 1024;
+            hparams.wav_tfm_n_ff = 3072;
+            hparams.wav_tfm_n_head = 16;
+            hparams.wav_tfm_n_head_kv = 16;
+            hparams.wav_tfm_eps = 1e-5;
+            hparams.wav_tfm_rope_theta = 10000.0;
+            hparams.wav_tfm_swa = 128;
+            hparams.wav_upsample_n_block = 2;
+            hparams.wav_dac_n_block = 4;
+            hparams.wav_dac_n_res = 3;
+        },
         // PROJECTOR_TYPE_POCKETTTS_SPKENC, POCKETTTS_GEN
         .pockettts_spkenc, .pockettts_gen => {
             // mimi front-end takes the raw waveform, no mel
@@ -747,6 +785,9 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
         },
         // PROJECTOR_TYPE_CHATTERBOX
         .chatterbox => {
+            // the classic cfm solver unrolls up to 10 steps x 2 cfg estimator evaluations in one graph
+            model.max_nodes = 65536;
+
             // s3gen output rate
             hparams.audio_sample_rate = 24000;
         },
@@ -792,7 +833,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             // unlimited-ocr shares the v1 projector but tiles up to 32
             try ld.getU32(names.KEY_PREPROC_MIN_TILES, &hparams.preproc_min_tiles, false);
             try ld.getU32(names.KEY_PREPROC_MAX_TILES, &hparams.preproc_max_tiles, false);
-            impl.ggmlAssert(hparams.preproc_min_tiles >= 0 and hparams.preproc_min_tiles <= hparams.preproc_max_tiles and hparams.preproc_max_tiles <= 256, "clip.cpp", 2327, "hparams.preproc_min_tiles >= 0 && hparams.preproc_min_tiles <= hparams.preproc_max_tiles && hparams.preproc_max_tiles <= 256");
+            impl.ggmlAssert(hparams.preproc_min_tiles >= 0 and hparams.preproc_min_tiles <= hparams.preproc_max_tiles and hparams.preproc_max_tiles <= 256, "mtmd-model.cpp", 1112, "hparams.preproc_min_tiles >= 0 && hparams.preproc_min_tiles <= hparams.preproc_max_tiles && hparams.preproc_max_tiles <= 256");
         },
         // PROJECTOR_TYPE_HUNYUANVL
         .hunyuanvl => {
@@ -871,7 +912,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.audio_hop_len = 160;
             try ld.getU32(names.KEY_A_CHUNK_SIZE, &hparams.audio_chunk_size, true);
             // context_size is squared for the attn_dists/mask buffers; cap to prevent int32 overflow
-            impl.ggmlAssert(hparams.audio_chunk_size > 0 and hparams.audio_chunk_size <= 8192, "clip.cpp", 2411, "hparams.audio_chunk_size > 0 && hparams.audio_chunk_size <= 8192");
+            impl.ggmlAssert(hparams.audio_chunk_size > 0 and hparams.audio_chunk_size <= 8192, "mtmd-model.cpp", 1196, "hparams.audio_chunk_size > 0 && hparams.audio_chunk_size <= 8192");
             try ld.getU32(names.KEY_A_CONV_KERNEL_SIZE, &hparams.audio_conv_kernel_size, true);
             try ld.getU32(names.KEY_A_MAX_POS_EMB, &hparams.audio_max_pos_emb, true);
             try ld.getU32(names.KEY_A_PROJ_WINDOW_SIZE, &hparams.audio_proj_window_size, true);
@@ -904,7 +945,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
     }
 }
 
-/// The granite4_vision mismatch throw, line 1970 of clip.cpp.
+/// The granite4_vision mismatch throw, line 1218 of mtmd-model.cpp.
 ///
 /// Upstream formats `"%s: feature_layers.size() %d != proj_spatial_offsets.size() %d"`
 /// with only the two `size_t` sizes -- `__func__` is missing -- so `%s`

@@ -6,7 +6,7 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` and
-//! `llama.cpp/ggml/include/ggml-vulkan.h` at v0.9.0 (`cd959bae9`). The C++
+//! `llama.cpp/ggml/include/ggml-vulkan.h` at v1.0.0 (`b1b770d90`). The C++
 //! is written against `vulkan.hpp`, a header-only C++ wrapper over the C API
 //! in `vulkan_core.h`; what it adds that changes behaviour is reproduced here
 //! -- the dispatcher, exceptions on a failed `VkResult`, and the
@@ -25,16 +25,16 @@ pub const vk = @import("vulkan_c");
 /// in ggml.
 pub const allocator = std.heap.c_allocator;
 
-/// Ports `GGML_VK_NAME` (ggml-vulkan.h:10 @cd959bae9).
+/// Ports `GGML_VK_NAME` (ggml-vulkan.h:10 @b1b770d90).
 pub const name = "Vulkan";
 
-/// Ports `GGML_VK_MAX_DEVICES` (ggml-vulkan.h:11 @cd959bae9).
+/// Ports `GGML_VK_MAX_DEVICES` (ggml-vulkan.h:11 @b1b770d90).
 pub const max_devices = 16;
 
 /// The PCI vendor ids the C++ defines for itself. Ports `VK_VENDOR_ID_AMD`,
 /// `VK_VENDOR_ID_APPLE`, `VK_VENDOR_ID_INTEL`, `VK_VENDOR_ID_NVIDIA`,
 /// `VK_VENDOR_ID_QUALCOMM` and `VK_VENDOR_ID_SAMSUNG`
-/// (ggml-vulkan-types.h:181, 183, 185, 187, 189, 191 @cd959bae9).
+/// (ggml-vulkan-types.h:181, 183, 185, 187, 189, 191 @b1b770d90).
 pub const vendor_id = struct {
     pub const amd = 0x1002;
     pub const apple = 0x106b;
@@ -44,7 +44,7 @@ pub const vendor_id = struct {
     pub const samsung = 0x144d;
 };
 
-/// Ports `ggml_vk_external_memory_host_usable` (ggml-vulkan.cpp:4012 @cd959bae9).
+/// Ports `ggml_vk_external_memory_host_usable` (ggml-vulkan.cpp:4211 @b1b770d90).
 pub fn externalMemoryHostUsable(driver_id: vk.VkDriverId) bool {
     // Disable external_memory_host until
     // https://github.com/KhronosGroup/MoltenVK/pull/2622 is available in the
@@ -52,10 +52,30 @@ pub fn externalMemoryHostUsable(driver_id: vk.VkDriverId) bool {
     return driver_id != vk.VK_DRIVER_ID_MOLTENVK;
 }
 
-/// Ports `ggml_vk_host_buffer_import_usable` (ggml-vulkan.cpp:4018 @cd959bae9).
+/// Ports `ggml_vk_host_buffer_import_usable` (ggml-vulkan.cpp:4217 @b1b770d90).
 pub fn hostBufferImportUsable(vendor: u32) bool {
     // amdgpu re-faults all pages of every imported host allocation on each submission
     return vendor != vendor_id.amd;
+}
+
+/// Ports `ggml_vk_has_rebar` (ggml-vulkan.cpp:4222 @b1b770d90): whether a
+/// memory type that is device-local, host-visible and host-coherent lives on
+/// the heap of the first device-local type, i.e. the whole of VRAM is
+/// mappable (resizable BAR).
+pub fn hasRebar(physical_device: vk.VkPhysicalDevice) bool {
+    var mem_props: vk.VkPhysicalDeviceMemoryProperties = undefined;
+    dispatch.vkGetPhysicalDeviceMemoryProperties.?(physical_device, &mem_props);
+    const hvv: vk.VkMemoryPropertyFlags = vk.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+        vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+        vk.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    var vram_heap: u32 = std.math.maxInt(u32);
+    for (mem_props.memoryTypes[0..mem_props.memoryTypeCount]) |t| {
+        if (vram_heap == std.math.maxInt(u32) and (t.propertyFlags & vk.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0) {
+            vram_heap = t.heapIndex;
+        }
+        if ((t.propertyFlags & hvv) == hvv and t.heapIndex == vram_heap) return true;
+    }
+    return false;
 }
 
 /// The loader's one entry point every other command is found through. The
@@ -77,7 +97,7 @@ const global_commands = [_][:0]const u8{
 };
 
 /// Ports `vulkan.hpp`'s `DispatchLoaderDynamic`, the C++'s
-/// `ggml_vk_default_dispatcher_instance` (ggml-vulkan.cpp:5214 @cd959bae9):
+/// `ggml_vk_default_dispatcher_instance` (ggml-vulkan.cpp:5464 @b1b770d90):
 /// one function pointer per command the host layer calls, each field named
 /// after its command and typed by its `PFN_`.
 ///
@@ -367,7 +387,7 @@ pub fn structure(comptime T: type, s_type: vk.VkStructureType) T {
     return s;
 }
 
-/// Ports `YIELD` (ggml-vulkan-types.h:82 @cd959bae9), the clang arm on ARM,
+/// Ports `YIELD` (ggml-vulkan-types.h:82 @b1b770d90), the clang arm on ARM,
 /// `__yield()`; on x86 the clang arm is `_mm_pause()` -- `zig c++` is clang
 /// on Windows too, so `YieldProcessor()` is never compiled -- and elsewhere
 /// it is empty.

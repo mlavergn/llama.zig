@@ -11,7 +11,10 @@
 //!   1, 2 and 4 for the base files: null-ness, the failure reason, `x`, `y`,
 //!   `comp` and every byte;
 //! - `decode_audio_from_buf` at several rates: the step that failed, the
-//!   length, and every sample's bits.
+//!   length, and every sample's bits;
+//! - `mtmd_helper_resampler` (v1.0.0), streaming over every pair of common
+//!   rates with chunks from empty to larger than one call's estimate: each
+//!   call's count and every sample's bits.
 //!
 //! Usage: mtmd-decode-diff [--quick] [--verbose] [--list] [--only=<substring>] [path...]
 //!
@@ -41,6 +44,9 @@ extern fn ref_mp3_decode_scalefactors(hdr: [*]const u8, ist_pos: [*]u8, bs: *any
 extern fn ref_mp3_bs_get_bits(bs: *anyopaque, n: c_int) u32;
 extern fn ref_mp3_decode_frame(dec: *anyopaque, mp3: [*]const u8, mp3_bytes: c_int, pcm: [*]i16, frame_bytes: *c_int) c_int;
 extern fn ref_mp3_ldexp_q2(y: f32, e: c_int) f32;
+extern fn ref_resampler_init(rate_in: i32, rate_out: i32) ?*anyopaque;
+extern fn ref_resampler_free(ctx: ?*anyopaque) void;
+extern fn ref_resampler_process(ctx: *anyopaque, in: ?[*]const f32, n_in: usize, out: *?[*]const f32) i64;
 
 /// A length past which neither side allocates: a corrupt header can claim
 /// billions of frames, and upstream would then zero-fill gigabytes.
@@ -456,6 +462,76 @@ fn lengthSweep() void {
     };
 }
 
+/// `mtmd_helper_resampler`: the port's `HelperResampler` (what
+/// `helper.zig`'s exports wrap) beside the reference's copy of upstream's
+/// body over miniaudio's `ma_resampler`, streaming one random signal
+/// through both in chunks of random size, empty ones included. The 8th-order
+/// low-pass filter and `ma_resampler_get_expected_output_frame_count` are
+/// reached by nothing else here: the decoder resamples at order 4 and never
+/// asks for the expected count.
+fn resamplerSweep(gpa: std.mem.Allocator) void {
+    const rate_list = [_]i32{ 8000, 11025, 16000, 22050, 24000, 44100, 48000, 96000, 7, 1 };
+    var prng = std.Random.DefaultPrng.init(0x7e5a);
+    const rnd = prng.random();
+    const n_total: usize = if (quick) 3000 else 30000;
+    const sig_in = gpa.alloc(f32, n_total) catch @panic("OOM");
+    defer gpa.free(sig_in);
+    for (sig_in, 0..) |*x, i| {
+        // a tone plus noise, with a few full-scale spikes
+        const t: f32 = @floatFromInt(i);
+        x.* = 0.5 * @sin(t * 0.07) + 0.3 * (rnd.float(f32) * 2 - 1);
+        if (rnd.uintLessThan(u32, 500) == 0) x.* = if (rnd.boolean()) 1 else -1;
+    }
+    var both: u64 = 0;
+    for (rate_list) |rin| for (rate_list) |rout| {
+        const rc = ref_resampler_init(rin, rout);
+        defer ref_resampler_free(rc);
+        const pc = (ma.HelperResampler.create(gpa, @intCast(rin), @intCast(rout)) catch @panic("OOM")) orelse {
+            stats.audio_fail += 1;
+            return report("resampler {d} -> {d}: the port refused to init", .{ rin, rout });
+        };
+        defer pc.destroy(gpa);
+        if (rc == null) {
+            stats.audio_fail += 1;
+            return report("resampler {d} -> {d}: the reference refused to init", .{ rin, rout });
+        }
+        var pos: usize = 0;
+        var call: usize = 0;
+        while (pos < n_total) : (call += 1) {
+            const n = @min(n_total - pos, switch (call % 5) {
+                0 => 0,
+                1 => 1,
+                2 => rnd.uintLessThan(usize, 64),
+                3 => rnd.uintLessThan(usize, 2048),
+                else => rnd.uintLessThan(usize, 9000),
+            });
+            const in: [*]const f32 = sig_in.ptr + pos;
+            var ro: ?[*]const f32 = null;
+            var po: ?[*]const f32 = null;
+            const rn = ref_resampler_process(rc.?, in, n, &ro);
+            const pn = pc.process(gpa, in, n, &po) catch @panic("OOM");
+            stats.audio_checks += 1;
+            if (rn != pn) {
+                stats.audio_fail += 1;
+                return report("resampler {d} -> {d}, call {d} ({d} in): ref {d} samples, port {d}", .{ rin, rout, call, n, rn, pn });
+            }
+            if (rn > 0) {
+                const k: usize = @intCast(rn);
+                if (bitsEq(ro.?[0..k], po.?[0..k])) |i| {
+                    stats.audio_fail += 1;
+                    return report("resampler {d} -> {d}, call {d}: sample {d} differs", .{ rin, rout, call, i });
+                }
+                both += 1;
+            }
+            pos += n;
+        }
+    };
+    if (both == 0) {
+        stats.audio_fail += 1;
+        report("resampler: no call produced samples on both sides", .{});
+    }
+}
+
 /// `ma_dr_mp3d_synth_pair` on many windows at amplitudes where `int16`
 /// rounding is decided by the last bit: its contractions show nowhere else.
 fn synthPairSweep() void {
@@ -608,6 +684,7 @@ pub fn main(init: std.process.Init) !void {
     mp3Kernels();
     synthPairSweep();
     lengthSweep();
+    resamplerSweep(gpa);
     var corpus = try synth(gpa);
     defer {
         for (corpus.items) |f| {

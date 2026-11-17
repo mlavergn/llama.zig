@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v0.9.0
-//! (`cd959bae9`). Each declaration names the C++ it replaces and the line
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v1.0.0
+//! (`b1b770d90`). Each declaration names the C++ it replaces and the line
 //! it began at.
 //!
 //! # This layer is invisible to the symbol count
@@ -31,7 +31,7 @@
 //! the C writes those as explicit template specialisations.
 //!
 //! The five `<…, 1, 16>` instantiations next to them, the first being
-//! `q4_0_16x1_q8_0` (ggml-cpu/repack.cpp:4972 @cd959bae9), are inside
+//! `q4_0_16x1_q8_0` (ggml-cpu/repack.cpp:4972 @b1b770d90), are inside
 //! `#if defined __riscv_zvfh` and are not ported — see `convert.zig` for
 //! the converters they would have reached.
 
@@ -106,7 +106,7 @@ const kernels = struct {
 pub const Bloc = enum { q1_0, q4_0, q4_K, q2_K, q5_K, q6_K, iq4_nl, mxfp4, q8_0 };
 
 /// Ports the eighteen live specialisations of `gemv`
-/// (ggml-cpu/repack.cpp:4344 @cd959bae9) as one comptime table.
+/// (ggml-cpu/repack.cpp:4344 @b1b770d90) as one comptime table.
 fn gemvFor(comptime b: Bloc, comptime inter: i64, comptime cols: i64) *const kernels.Gemm {
     return switch (b) {
         .q1_0 => if (inter == 4) &kernels.ggml_gemv_q1_0_4x4_q8_0 else &kernels.ggml_gemv_q1_0_4x8_q8_0,
@@ -127,7 +127,7 @@ fn gemvFor(comptime b: Bloc, comptime inter: i64, comptime cols: i64) *const ker
 }
 
 /// Ports the eighteen live specialisations of `gemm`
-/// (ggml-cpu/repack.cpp:4449 @cd959bae9).
+/// (ggml-cpu/repack.cpp:4449 @b1b770d90).
 fn gemmFor(comptime b: Bloc, comptime inter: i64, comptime cols: i64) *const kernels.Gemm {
     return switch (b) {
         .q1_0 => if (inter == 4) &kernels.ggml_gemm_q1_0_4x4_q8_0 else &kernels.ggml_gemm_q1_0_4x8_q8_0,
@@ -149,7 +149,7 @@ fn gemmFor(comptime b: Bloc, comptime inter: i64, comptime cols: i64) *const ker
 
 /// Ports the four specialisations of `ggml_quantize_mat_t`, `ggml_quantize_mat_t`,
 /// `ggml_quantize_mat_t` and `ggml_quantize_mat_t`
-/// (ggml-cpu/repack.cpp:318, 324, 330, 336 @cd959bae9): four rows of
+/// (ggml-cpu/repack.cpp:318, 324, 330, 336 @b1b770d90): four rows of
 /// activations at a time.
 fn quantizeMatFor(comptime inter: i64, comptime param: c_uint) *const fn ([*c]const f32, ?*anyopaque, i64) callconv(.c) void {
     return if (param == c.GGML_TYPE_Q8_0)
@@ -159,7 +159,7 @@ fn quantizeMatFor(comptime inter: i64, comptime param: c_uint) *const fn ([*c]co
 }
 
 /// Ports the specialisations of `repack` (ggml-cpu/repack.cpp:4241
-/// @cd959bae9), which pair a block type and shape with one of
+/// @b1b770d90), which pair a block type and shape with one of
 /// `convert.zig`'s drivers.
 fn repackFor(comptime b: Bloc, comptime inter: i64, comptime cols: i64) *const ConvertFn {
     return switch (b) {
@@ -183,8 +183,8 @@ fn repackFor(comptime b: Bloc, comptime inter: i64, comptime cols: i64) *const C
 // tensor_traits
 
 /// Ports the class template `tensor_traits` (ggml-cpu/repack.cpp:4555
-/// @cd959bae9), together with the `tensor_traits_base`
-/// (ggml-cpu/repack.cpp:4550 @cd959bae9) above it, whose only job is to add
+/// @b1b770d90), together with the `tensor_traits_base`
+/// (ggml-cpu/repack.cpp:4550 @b1b770d90) above it, whose only job is to add
 /// `repack` to the interface.
 ///
 /// Parameters (all comptime, the C's template parameters):
@@ -220,7 +220,7 @@ fn TensorTraits(
         };
 
         /// Ports `tensor_traits`'s own `repack` (ggml-cpu/repack.cpp:4921
-        /// @cd959bae9): the log line, then the converter the template
+        /// @b1b770d90): the log line, then the converter the template
         /// parameters select.
         ///
         /// `INTER_SIZE` is a template argument in the C, so it is baked in
@@ -237,7 +237,7 @@ fn TensorTraits(
             return repackTensor(t, @intCast(inter_size), data, data_size);
         }
 
-        /// Ports `work_size` (ggml-cpu/repack.cpp:4557 @cd959bae9).
+        /// Ports `work_size` (ggml-cpu/repack.cpp:4557 @b1b770d90).
         fn workSize(self: *const extra.TensorTraits, n_threads: c_int, op: *const Tensor, size: *usize) callconv(.c) bool {
             _ = self;
             _ = n_threads;
@@ -269,7 +269,7 @@ fn TensorTraits(
             return false;
         }
 
-        /// Ports `compute_forward` (ggml-cpu/repack.cpp:4586 @cd959bae9).
+        /// Ports `compute_forward` (ggml-cpu/repack.cpp:4586 @b1b770d90).
         fn computeForward(self: *const extra.TensorTraits, params: *ComputeParams, op: *Tensor) callconv(.c) bool {
             _ = self;
             switch (op.op) {
@@ -286,7 +286,7 @@ fn TensorTraits(
             return false;
         }
 
-        /// Ports `forward_mul_mat_one_chunk` (ggml-cpu/repack.cpp:4601 @cd959bae9).
+        /// Ports `forward_mul_mat_one_chunk` (ggml-cpu/repack.cpp:4601 @b1b770d90).
         fn forwardMulMatOneChunk(
             params: *ComputeParams,
             op: *Tensor,
@@ -358,7 +358,7 @@ fn TensorTraits(
             }
         }
 
-        /// Ports `forward_mul_mat` (ggml-cpu/repack.cpp:4650 @cd959bae9).
+        /// Ports `forward_mul_mat` (ggml-cpu/repack.cpp:4650 @b1b770d90).
         fn forwardMulMat(params: *ComputeParams, op: *Tensor) void {
             const src0 = impl.one(Tensor, op.src[0]);
             const src1 = impl.one(Tensor, op.src[1]);
@@ -498,7 +498,7 @@ fn TensorTraits(
             }
         }
 
-        /// Ports `forward_mul_mat_id` (ggml-cpu/repack.cpp:4783 @cd959bae9).
+        /// Ports `forward_mul_mat_id` (ggml-cpu/repack.cpp:4783 @b1b770d90).
         fn forwardMulMatId(params: *ComputeParams, op: *Tensor) void {
             const src0 = impl.one(Tensor, op.src[0]);
             const src1 = impl.one(Tensor, op.src[1]);
@@ -660,7 +660,7 @@ fn TensorTraits(
     };
 }
 
-/// Ports `mmid_row_mapping` (ggml-cpu/repack.cpp:4820 @cd959bae9),
+/// Ports `mmid_row_mapping` (ggml-cpu/repack.cpp:4820 @b1b770d90),
 /// declared inside `forward_mul_mat_id` in the C.
 const MmidRowMapping = extern struct {
     i1: i32,
@@ -672,7 +672,7 @@ const MmidRowMapping = extern struct {
 
 /// Ports the `static const` instances inside
 /// `ggml_repack_get_optimal_repack_type` (ggml-cpu/repack.cpp:4930
-/// @cd959bae9). The five RISC-V ones beside them are behind `#if defined
+/// @b1b770d90). The five RISC-V ones beside them are behind `#if defined
 /// __riscv_zvfh` and are not here.
 const inst = struct {
     const q1_0_4x4_q8_0 = TensorTraits(.q1_0, 4, 4, c.GGML_TYPE_Q8_0);
@@ -696,7 +696,7 @@ const inst = struct {
 };
 
 /// The one method `tensor_traits_base` (ggml-cpu/repack.cpp:4550
-/// @cd959bae9) adds to the interface. Three parameters, like the C's:
+/// @b1b770d90) adds to the interface. Three parameters, like the C's:
 /// `INTER_SIZE` reaches the converter as a template argument, not an
 /// argument.
 const RepackFn = fn (*c.ggml_tensor, *const anyopaque, usize) callconv(.c) c_int;
@@ -726,7 +726,7 @@ inline fn traitsOf(comptime T: type) *const extra.TensorTraits {
 }
 
 /// Ports `ggml_repack_get_optimal_repack_type` (ggml-cpu/repack.cpp:4930
-/// @cd959bae9).
+/// @b1b770d90).
 ///
 /// Parameters:
 /// - `cur`: the weight tensor being considered.
@@ -820,7 +820,7 @@ pub fn getOptimalRepackType(cur: *const Tensor) ?*const extra.TensorTraits {
 // The buffer
 
 /// Ports `ggml_backend_cpu_repack_buffer_init_tensor` (ggml-cpu/repack.cpp:5148
-/// @cd959bae9).
+/// @b1b770d90).
 fn bufferInitTensor(buffer: c.ggml_backend_buffer_t, tensor: [*c]c.ggml_tensor) callconv(.c) c.ggml_status {
     _ = buffer;
     const t = impl.one(c.ggml_tensor, tensor);
@@ -829,7 +829,7 @@ fn bufferInitTensor(buffer: c.ggml_backend_buffer_t, tensor: [*c]c.ggml_tensor) 
 }
 
 /// Ports `ggml_backend_cpu_repack_buffer_set_tensor` (ggml-cpu/repack.cpp:5155
-/// @cd959bae9).
+/// @b1b770d90).
 ///
 /// This is where the weights are interleaved: the loader writes the stored
 /// blocks here once, and they are repacked in place of being copied.
@@ -853,14 +853,14 @@ fn bufferSetTensor(
 }
 
 /// Ports `ggml_backend_cpu_repack_buffer_type_get_name` (ggml-cpu/repack.cpp:5167
-/// @cd959bae9).
+/// @b1b770d90).
 fn buftGetName(buft: c.ggml_backend_buffer_type_t) callconv(.c) [*c]const u8 {
     _ = buft;
     return "CPU_REPACK";
 }
 
 /// Ports `ggml_backend_cpu_repack_buffer_type_alloc_buffer`
-/// (ggml-cpu/repack.cpp:5173 @cd959bae9).
+/// (ggml-cpu/repack.cpp:5173 @b1b770d90).
 ///
 /// The allocation itself is the plain CPU buffer type's; only three of the
 /// iface entries are swapped, which is what makes this a *view* of host
@@ -880,7 +880,7 @@ fn buftAllocBuffer(buft: c.ggml_backend_buffer_type_t, size: usize) callconv(.c)
 }
 
 /// Ports `ggml_backend_cpu_repack_buffer_type_get_alignment`
-/// (ggml-cpu/repack.cpp:5188 @cd959bae9).
+/// (ggml-cpu/repack.cpp:5188 @b1b770d90).
 fn buftGetAlignment(buft: c.ggml_backend_buffer_type_t) callconv(.c) usize {
     _ = buft;
     return impl.tensor_alignment;
@@ -889,7 +889,7 @@ fn buftGetAlignment(buft: c.ggml_backend_buffer_type_t) callconv(.c) usize {
 // -----------------------------------------------------------------------------
 // extra_buffer_type
 
-/// Ports `extra_buffer_type` (ggml-cpu/repack.cpp:5195 @cd959bae9), in the
+/// Ports `extra_buffer_type` (ggml-cpu/repack.cpp:5195 @b1b770d90), in the
 /// C's `ggml::cpu::repack` namespace.
 const ExtraBuffer = struct {
     const vtable: extra.ExtraBufferType.VTable = .{
@@ -901,7 +901,7 @@ const ExtraBuffer = struct {
     /// deleted. A static serves, since it holds no state.
     const instance: extra.ExtraBufferType = .{ .vtable = &vtable };
 
-    /// Ports `supports_op` (ggml-cpu/repack.cpp:5196 @cd959bae9).
+    /// Ports `supports_op` (ggml-cpu/repack.cpp:5196 @b1b770d90).
     ///
     /// The C writes two branches, `MUL_MAT` requiring a 2D `src[0]` and
     /// `MUL_MAT_ID` a 3D one, with identical bodies otherwise. They are
@@ -929,7 +929,7 @@ const ExtraBuffer = struct {
         return false;
     }
 
-    /// Ports `get_tensor_traits` (ggml-cpu/repack.cpp:5232 @cd959bae9).
+    /// Ports `get_tensor_traits` (ggml-cpu/repack.cpp:5232 @b1b770d90).
     fn getTensorTraits(self: *const extra.ExtraBufferType, op: *const Tensor) callconv(.c) ?*const extra.TensorTraits {
         _ = self;
         if (op.op == c.GGML_OP_MUL_MAT or op.op == c.GGML_OP_MUL_MAT_ID) {
@@ -943,7 +943,7 @@ const ExtraBuffer = struct {
 };
 
 /// Ports `ggml_backend_cpu_repack_buffer_type` (ggml-cpu/repack.cpp:5243
-/// @cd959bae9).
+/// @b1b770d90).
 ///
 /// The C's is a function-local `static` whose `.device` member is a call —
 /// so it is dynamically initialised under a guard, which is the shape

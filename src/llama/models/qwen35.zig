@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/qwen35.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/qwen35.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_qwen35`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph` and `graph_mtp`.
 
@@ -21,7 +21,7 @@ const Model = model_mod.Model;
 const Layer = model_mod.Layer;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_qwen35`'s `load_arch_hparams` (qwen35.cpp:4 @cd959bae9).
+/// Ports `llama_model_qwen35`'s `load_arch_hparams` (qwen35.cpp:4 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -53,7 +53,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_qwen35`'s `load_arch_tensors` (qwen35.cpp:33 @cd959bae9).
+/// Ports `llama_model_qwen35`'s `load_arch_tensors` (qwen35.cpp:33 @b1b770d90).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const n_layer: i32 = @intCast(hp.nLayer());
@@ -93,7 +93,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// `load_block_trunk`, a lambda of `load_arch_tensors` (qwen35.cpp:33
-/// @cd959bae9).
+/// @b1b770d90).
 fn loadBlockTrunk(self: *Model, il: i32, flags: u32, n_embd: i64, n_head: i64, n_embd_head_k: i64, n_embd_k_gqa: i64, n_embd_v_gqa: i64, n_ff: i64, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const layer = &self.layers[@intCast(il)];
@@ -121,13 +121,20 @@ fn loadBlockTrunk(self: *Model, il: i32, flags: u32, n_embd: i64, n_head: i64, n
         layer.attn_k_norm = try self.createTensor(.{ .tensor = .attn_k_norm, .suffix = "weight", .bid = il }, &.{n_embd_head_k}, flags, exc);
     } else {
         // Linear attention (gated delta net).
-        layer.wqkv = try self.createTensor(.{ .tensor = .attn_qkv, .suffix = "weight", .bid = il }, &.{ n_embd, key_dim * 2 + value_dim }, nr, exc);
-        layer.wqkv_gate = try self.createTensor(.{ .tensor = .attn_gate, .suffix = "weight", .bid = il }, &.{ n_embd, value_dim }, nr, exc);
+        const separate_flags: u32 = if (flags & loader.tensor_skip != 0) flags | nr else flags;
+        layer.wqkv_z = try self.createTensor(.{ .tensor = .attn_qkv_gate, .suffix = "weight", .bid = il }, &.{ n_embd, key_dim * 2 + value_dim * 2 }, flags | nr | loader.tensor_skip_if_virtual, exc);
+        if (layer.wqkv_z == null) {
+            layer.wqkv = try self.createTensor(.{ .tensor = .attn_qkv, .suffix = "weight", .bid = il }, &.{ n_embd, key_dim * 2 + value_dim }, separate_flags, exc);
+            layer.wqkv_gate = try self.createTensor(.{ .tensor = .attn_gate, .suffix = "weight", .bid = il }, &.{ n_embd, value_dim }, separate_flags, exc);
+        }
         layer.ssm_conv1d = try self.createTensor(.{ .tensor = .ssm_conv1d, .suffix = "weight", .bid = il }, &.{ hp.ssm_d_conv, conv_dim }, flags, exc);
         layer.ssm_dt = try self.createTensor(.{ .tensor = .ssm_dt, .suffix = "bias", .bid = il }, &.{hp.ssm_dt_rank}, flags, exc);
         layer.ssm_a = try self.createTensor(.{ .tensor = .ssm_a_noscan, .bid = il }, &.{hp.ssm_dt_rank}, flags, exc);
-        layer.ssm_beta = try self.createTensor(.{ .tensor = .ssm_beta, .suffix = "weight", .bid = il }, &.{ n_embd, n_v_heads }, flags, exc);
-        layer.ssm_alpha = try self.createTensor(.{ .tensor = .ssm_alpha, .suffix = "weight", .bid = il }, &.{ n_embd, n_v_heads }, flags, exc);
+        layer.ssm_beta_alpha_cat = try self.createTensor(.{ .tensor = .ssm_beta_alpha_cat, .suffix = "weight", .bid = il }, &.{ n_embd, n_v_heads * 2 }, flags | nr | loader.tensor_skip_if_virtual, exc);
+        if (layer.ssm_beta_alpha_cat == null) {
+            layer.ssm_beta = try self.createTensor(.{ .tensor = .ssm_beta, .suffix = "weight", .bid = il }, &.{ n_embd, n_v_heads }, separate_flags, exc);
+            layer.ssm_alpha = try self.createTensor(.{ .tensor = .ssm_alpha, .suffix = "weight", .bid = il }, &.{ n_embd, n_v_heads }, separate_flags, exc);
+        }
         layer.ssm_norm = try self.createTensor(.{ .tensor = .ssm_norm, .suffix = "weight", .bid = il }, &.{head_v_dim}, flags, exc);
         layer.ssm_out = try self.createTensor(.{ .tensor = .ssm_out, .suffix = "weight", .bid = il }, &.{ value_dim, n_embd }, flags, exc);
     }
@@ -138,7 +145,7 @@ fn loadBlockTrunk(self: *Model, il: i32, flags: u32, n_embd: i64, n_head: i64, n
 }
 
 /// `load_block_mtp`, a lambda of `load_arch_tensors` (qwen35.cpp:33
-/// @cd959bae9): the MTP block looks like a full-attention decoder block.
+/// @b1b770d90): the MTP block looks like a full-attention decoder block.
 fn loadBlockMtp(self: *Model, il: i32, mtp_flags: u32, n_embd: i64, n_head: i64, n_embd_head_k: i64, n_embd_k_gqa: i64, n_embd_v_gqa: i64, n_ff: i64, n_vocab: i64, exc: *Exception) Thrown!void {
     const layer = &self.layers[@intCast(il)];
     const nr = loader.tensor_not_required;
@@ -167,22 +174,19 @@ fn loadBlockMtp(self: *Model, il: i32, mtp_flags: u32, n_embd: i64, n_head: i64,
 // -----------------------------------------------------------------------------
 // The graph
 
-/// Ports `llama_model_qwen35`'s `build_arch_graph` (qwen35.cpp:130 @cd959bae9):
+/// Ports `llama_model_qwen35`'s `build_arch_graph` (qwen35.cpp:137 @b1b770d90):
 /// the MTP draft head for that graph type, the main model otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
     return buildGraph(model, b);
 }
 
-/// Ports the constructor of `llama_model_qwen35`'s `graph` (qwen35.cpp:137 @cd959bae9).
+/// Ports the constructor of `llama_model_qwen35`'s `graph` (qwen35.cpp:144 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "qwen35.cpp", 141, "n_embd_head == hparams.n_embd_head_k()");
-
-    var sections: [4]c_int = undefined;
-    @memcpy(&sections, hp.rope_sections[0..4]);
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "qwen35.cpp", 148, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
     b.cb(inpL, "model.input_embed", -1);
@@ -209,7 +213,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             cur = buildLayerAttnLinear(model, b, inp.getRecr(), cur, il);
         } else {
             // Full attention.
-            cur = buildLayerAttn(model, b, inp.getAttn(), cur, inp_pos, &sections, il);
+            cur = buildLayerAttn(model, b, inp.getAttn(), cur, inp_pos, il);
         }
 
         if (il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids)) {
@@ -270,11 +274,27 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     b.res.t_logits = cur;
 }
 
-/// Ports `llama_model_qwen35::graph`'s `build_qkvz` (qwen35.cpp:239 @cd959bae9).
+/// Ports `llama_model_qwen35::graph`'s `build_qkvz` (qwen35.cpp:243 @b1b770d90).
 fn buildQkvz(model: *const Model, b: *const graph.Builder, input: *Tensor, il: c_int) struct { *Tensor, *Tensor } {
     const layer = &model.layers[@intCast(il)];
     const n_seqs: i64 = b.ubatch.n_seqs;
     const n_seq_tokens: i64 = b.ubatch.n_seq_tokens;
+
+    if (layer.wqkv_z) |wqkv_z| {
+        const qkvz = b.buildLoraMm(wqkv_z, input, null);
+        b.cb(qkvz, "linear_attn_qkvz", il);
+
+        const n_z: i64 = b.hparams.ssm_d_state * b.hparams.ssm_dt_rank;
+        const n_qkv: i64 = qkvz.ne[0] - n_z;
+
+        const qkv_mixed = c.ggml_view_3d(b.ctx0, qkvz, n_qkv, n_seq_tokens, n_seqs, qkvz.nb[1], qkvz.nb[1] * @as(usize, @intCast(n_seq_tokens)), 0);
+        b.cb(qkv_mixed, "linear_attn_qkv_mixed", il);
+
+        const z = c.ggml_view_2d(b.ctx0, qkvz, n_z, n_seq_tokens * n_seqs, qkvz.nb[1], c.ggml_row_size(qkvz.type, n_qkv));
+        b.cb(z, "z", il);
+
+        return .{ qkv_mixed, z };
+    }
 
     var qkv_mixed = b.buildLoraMm(layer.wqkv.?, input, layer.wqkv_s);
     qkv_mixed = c.ggml_reshape_3d(b.ctx0, qkv_mixed, qkv_mixed.*.ne[0], n_seq_tokens, n_seqs);
@@ -286,22 +306,22 @@ fn buildQkvz(model: *const Model, b: *const graph.Builder, input: *Tensor, il: c
     return .{ qkv_mixed, z };
 }
 
-/// Ports `llama_model_qwen35::graph`'s `build_norm_gated` (qwen35.cpp:255 @cd959bae9).
+/// Ports `llama_model_qwen35::graph`'s `build_norm_gated` (qwen35.cpp:275 @b1b770d90).
 fn buildNormGated(b: *const graph.Builder, input: *Tensor, weights: ?*Tensor, gate: *Tensor, layer: c_int) *Tensor {
     const normalized = b.buildNorm(input, weights, null, .rms, layer);
     const gated_silu = c.ggml_silu(b.ctx0, gate);
     return c.ggml_mul(b.ctx0, normalized, gated_silu);
 }
 
-/// Ports `llama_model_qwen35::graph`'s `build_layer_attn` (qwen35.cpp:266
-/// @cd959bae9): a joint Q and gate projection, Q and K norms, M-RoPE,
+/// Ports `llama_model_qwen35::graph`'s `build_layer_attn` (qwen35.cpp:286
+/// @b1b770d90): a joint Q and gate projection, Q and K norms, M-RoPE,
 /// attention, and the sigmoid gate.
-fn buildLayerAttn(model: *const Model, b: *const graph.Builder, inp: *graph.InpAttnKv, cur_: *Tensor, inp_pos: *Tensor, sections: *[4]c_int, il: c_int) *Tensor {
+fn buildLayerAttn(model: *const Model, b: *const graph.Builder, inp: *graph.InpAttnKv, cur_: *Tensor, inp_pos: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const layer = &model.layers[@intCast(il)];
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "qwen35.cpp", 273, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "qwen35.cpp", 292, "n_embd_head == hparams.n_embd_head_k()");
     const n_head = b.n_head;
     const n_head_kv = b.n_head_kv;
     const n_tokens = b.n_tokens;
@@ -334,8 +354,8 @@ fn buildLayerAttn(model: *const Model, b: *const graph.Builder, inp: *graph.InpA
     Vcur = c.ggml_reshape_3d(ctx, Vcur, n_embd_head, n_head_kv, n_tokens);
 
     // M-RoPE.
-    Qcur = c.ggml_rope_multi(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), sections, b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-    Kcur = c.ggml_rope_multi(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), sections, b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+    Qcur = b.buildRope(Qcur, inp_pos, il);
+    Kcur = b.buildRope(Kcur, inp_pos, il);
 
     b.cb(Qcur, "Qcur", il);
     b.cb(Kcur, "Kcur", il);
@@ -358,8 +378,8 @@ fn buildLayerAttn(model: *const Model, b: *const graph.Builder, inp: *graph.InpA
     return cur;
 }
 
-/// Ports `llama_model_qwen35::graph`'s `build_layer_attn_linear` (qwen35.cpp:347
-/// @cd959bae9): the gated delta net layer.
+/// Ports `llama_model_qwen35::graph`'s `build_layer_attn_linear` (qwen35.cpp:357
+/// @b1b770d90): the gated delta net layer.
 fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, inp: *graph.InpRs, cur_: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const layer = &model.layers[@intCast(il)];
@@ -374,23 +394,33 @@ fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, inp: *grap
     const head_v_dim: i64 = @divTrunc(d_inner, num_v_heads);
     const n_seq_tokens: i64 = b.ubatch.n_seq_tokens;
 
-    impl.assert(n_seqs != 0, "qwen35.cpp", 361, "n_seqs != 0");
-    impl.assert(b.ubatch.equalSeqs(), "qwen35.cpp", 362, "ubatch.equal_seqs()");
-    impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "qwen35.cpp", 363, "ubatch.n_tokens == n_seq_tokens * n_seqs");
+    impl.assert(n_seqs != 0, "qwen35.cpp", 371, "n_seqs != 0");
+    impl.assert(b.ubatch.equalSeqs(), "qwen35.cpp", 372, "ubatch.equal_seqs()");
+    impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "qwen35.cpp", 373, "ubatch.n_tokens == n_seq_tokens * n_seqs");
 
     // The input projections.
     const qkv_mixed, const z = buildQkvz(model, b, cur_, il);
 
-    var beta = b.buildLoraMm(layer.ssm_beta.?, cur_, layer.ssm_beta_s);
-    beta = c.ggml_reshape_4d(ctx, beta, 1, num_v_heads, n_seq_tokens, n_seqs);
+    var beta: *Tensor = undefined;
+    var alpha: *Tensor = undefined;
+    if (layer.ssm_beta_alpha_cat) |cat| {
+        const ba = b.buildLoraMm(cat, cur_, null);
+        b.cb(ba, "beta_alpha", il);
+
+        beta = c.ggml_view_4d(ctx, ba, 1, num_v_heads, n_seq_tokens, n_seqs, c.ggml_element_size(ba), ba.nb[1], ba.nb[1] * @as(usize, @intCast(n_seq_tokens)), 0);
+        alpha = c.ggml_view_3d(ctx, ba, num_v_heads, n_seq_tokens, n_seqs, ba.nb[1], ba.nb[1] * @as(usize, @intCast(n_seq_tokens)), c.ggml_row_size(ba.type, num_v_heads));
+    } else {
+        beta = b.buildLoraMm(layer.ssm_beta.?, cur_, layer.ssm_beta_s);
+        beta = c.ggml_reshape_4d(ctx, beta, 1, num_v_heads, n_seq_tokens, n_seqs);
+
+        alpha = b.buildLoraMm(layer.ssm_alpha.?, cur_, layer.ssm_alpha_s);
+        alpha = c.ggml_reshape_3d(ctx, alpha, num_v_heads, n_seq_tokens, n_seqs);
+    }
     b.cb(beta, "beta", il);
+    b.cb(alpha, "alpha", il);
 
     beta = c.ggml_sigmoid(ctx, beta);
     b.cb(beta, "beta_sigmoid", il);
-
-    var alpha = b.buildLoraMm(layer.ssm_alpha.?, cur_, layer.ssm_alpha_s);
-    alpha = c.ggml_reshape_3d(ctx, alpha, num_v_heads, n_seq_tokens, n_seqs);
-    b.cb(alpha, "alpha", il);
 
     const alpha_biased = c.ggml_add(ctx, alpha, layer.ssm_dt);
     const alpha_softplus = c.ggml_softplus(ctx, alpha_biased);
@@ -441,14 +471,6 @@ fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, inp: *grap
     q_conv = delta_net.buildGdnL2Norm(ctx, q_conv, eps_norm);
     k_conv = delta_net.buildGdnL2Norm(ctx, k_conv, eps_norm);
 
-    // Differing key and value head counts repeat to match, unless the
-    // fused delta net handles the broadcast.
-    if (num_k_heads != num_v_heads and (!b.cparams.fused_gdn_ar or !b.cparams.fused_gdn_ch)) {
-        impl.assert(@rem(num_v_heads, num_k_heads) == 0, "qwen35.cpp", 451, "num_v_heads % num_k_heads == 0");
-        q_conv = c.ggml_repeat_4d(ctx, q_conv, head_k_dim, num_v_heads, n_seq_tokens, n_seqs);
-        k_conv = c.ggml_repeat_4d(ctx, k_conv, head_k_dim, num_v_heads, n_seq_tokens, n_seqs);
-    }
-
     b.cb(q_conv, "q_conv_predelta", il);
     b.cb(k_conv, "k_conv_predelta", il);
     b.cb(v_conv, "v_conv_predelta", il);
@@ -456,7 +478,7 @@ fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, inp: *grap
     const output = delta_net.buildRecurrentAttn(b, inp, ssm_states_all, q_conv, k_conv, v_conv, gate, beta, state, il);
 
     // z: [head_dim, n_heads, n_tokens, n_seqs] -> [n_heads * n_tokens * n_seqs, head_dim]
-    const z_2d = c.ggml_reshape_4d(ctx, z, head_v_dim, num_v_heads, n_seq_tokens, n_seqs);
+    const z_2d = c.ggml_view_4d(ctx, z, head_v_dim, num_v_heads, n_seq_tokens, n_seqs, c.ggml_row_size(z.type, head_v_dim), z.nb[1], z.nb[1] * @as(usize, @intCast(n_seq_tokens)), 0);
 
     // The gated norm, self.norm(core_attn_out, z).
     const attn_out_norm = buildNormGated(b, output, layer.ssm_norm, z_2d, il);
@@ -472,37 +494,34 @@ fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, inp: *grap
     return cur;
 }
 
-/// Ports `llama_model_qwen35::graph`'s `build_layer_ffn` (qwen35.cpp:479
-/// @cd959bae9): a dense FFN, never MoE.
+/// Ports `llama_model_qwen35::graph`'s `build_layer_ffn` (qwen35.cpp:494
+/// @b1b770d90): a dense FFN, never MoE.
 fn buildLayerFfn(model: *const Model, b: *const graph.Builder, cur_: *Tensor, il: c_int) *Tensor {
     const layer = &model.layers[@intCast(il)];
-    impl.assert(layer.ffn_gate_inp == null, "qwen35.cpp", 481, "model.layers[il].ffn_gate_inp == nullptr");
+    impl.assert(layer.ffn_gate_inp == null, "qwen35.cpp", 496, "model.layers[il].ffn_gate_inp == nullptr");
     const cur = b.buildFfn(cur_, layer.ffn_up, null, layer.ffn_up_s, layer.ffn_gate, null, layer.ffn_gate_s, layer.ffn_down, null, layer.ffn_down_s, null, .silu, .par, il);
     b.cb(cur, "ffn_out", il);
     return cur;
 }
 
-/// Ports the constructor of `llama_model_qwen35`'s `graph_mtp` (qwen35.cpp:495
-/// @cd959bae9): the dense series' MTP draft head.
+/// Ports the constructor of `llama_model_qwen35`'s `graph_mtp` (qwen35.cpp:510
+/// @b1b770d90): the dense series' MTP draft head.
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
-    impl.assert(hp.n_layer_nextn > 0, "qwen35.cpp", 497, "hparams.n_layer_nextn > 0 && \"QWEN35 MTP requires n_layer_nextn > 0\"");
-    impl.assert(hp.n_layer_nextn == 1, "qwen35.cpp", 498, "hparams.n_layer_nextn == 1 && \"QWEN35 MTP currently only supports a single MTP block\"");
+    impl.assert(hp.n_layer_nextn > 0, "qwen35.cpp", 512, "hparams.n_layer_nextn > 0 && \"QWEN35 MTP requires n_layer_nextn > 0\"");
+    impl.assert(hp.n_layer_nextn == 1, "qwen35.cpp", 513, "hparams.n_layer_nextn == 1 && \"QWEN35 MTP currently only supports a single MTP block\"");
 
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "qwen35.cpp", 501, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "qwen35.cpp", 516, "n_embd_head == hparams.n_embd_head_k()");
 
     // The MTP layer is stored right after the main layers.
     const il: c_int = @intCast(hp.nLayer());
     const layer = &model.layers[@intCast(il)];
 
-    impl.assert(layer.nextn.eh_proj != null, "qwen35.cpp", 508, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
-    impl.assert(layer.nextn.enorm != null, "qwen35.cpp", 509, "layer.nextn.enorm   && \"MTP block missing nextn.enorm\"");
-    impl.assert(layer.nextn.hnorm != null, "qwen35.cpp", 510, "layer.nextn.hnorm   && \"MTP block missing nextn.hnorm\"");
-
-    var sections: [4]c_int = undefined;
-    @memcpy(&sections, hp.rope_sections[0..4]);
+    impl.assert(layer.nextn.eh_proj != null, "qwen35.cpp", 523, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
+    impl.assert(layer.nextn.enorm != null, "qwen35.cpp", 524, "layer.nextn.enorm   && \"MTP block missing nextn.enorm\"");
+    impl.assert(layer.nextn.hnorm != null, "qwen35.cpp", 525, "layer.nextn.hnorm   && \"MTP block missing nextn.hnorm\"");
 
     const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("qwen35.cpp", 0, "out of memory");
     inp.* = .{ .n_embd = hp.nEmbdInp(), .n_embd_state = hp.n_embd };
@@ -514,7 +533,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     c.ggml_set_input(inp.embd);
 
     var tok_embd: *Tensor = undefined;
-    b.ubatch.assertEmbdOrToken("qwen35.cpp", 527);
+    b.ubatch.assertEmbdOrToken("qwen35.cpp", 539);
     if (b.ubatch.token != null) {
         const tok_embd_w = layer.nextn.embed_tokens orelse model.tok_embd.?;
         tok_embd = c.ggml_get_rows(ctx, tok_embd_w, inp.tokens);
@@ -534,9 +553,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     }
     b.cb(tok_embd, "mtp_tok_embd", il);
 
-    inp.h = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, hp.n_embd, b.n_tokens);
-    c.ggml_set_input(inp.h);
-    _ = c.ggml_set_name(inp.h, "mtp_h_input");
+    inp.h = b.buildInpEmbdState(inp, hp.n_embd);
 
     const h_embd = inp.h.?;
 
@@ -589,8 +606,8 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     Vcur = c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, b.n_tokens);
     b.cb(Vcur, "mtp_Vcur", il);
 
-    Qcur = c.ggml_rope_multi(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), &sections, b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-    Kcur = c.ggml_rope_multi(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), &sections, b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+    Qcur = b.buildRope(Qcur, inp_pos, il);
+    Kcur = b.buildRope(Kcur, inp_pos, il);
 
     const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)) else hp.f_attention_scale;
 
@@ -615,7 +632,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.cb(cur, "mtp_post_ffn", il);
 
     const head_norm_w = layer.nextn.shared_head_norm orelse model.output_norm;
-    impl.assert(head_norm_w != null, "qwen35.cpp", 647, "head_norm_w && \"QWEN35 MTP: missing both nextn.shared_head_norm and output_norm\"");
+    impl.assert(head_norm_w != null, "qwen35.cpp", 653, "head_norm_w && \"QWEN35 MTP: missing both nextn.shared_head_norm and output_norm\"");
     cur = b.buildNorm(cur, head_norm_w, null, .rms, -1);
 
     b.cb(cur, "h_nextn", -1);
@@ -626,7 +643,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
 
     const head_w = layer.nextn.shared_head_head orelse model.output;
     const head_s = if (layer.nextn.shared_head_head != null) layer.nextn.shared_head_head_s else model.output_s;
-    impl.assert(head_w != null, "qwen35.cpp", 658, "head_w && \"QWEN35 MTP: missing LM head (nextn.shared_head_head or model.output)\"");
+    impl.assert(head_w != null, "qwen35.cpp", 664, "head_w && \"QWEN35 MTP: missing LM head (nextn.shared_head_head or model.output)\"");
     cur = b.buildLoraMm(head_w.?, cur, head_s);
     b.cb(cur, "result_output", -1);
 

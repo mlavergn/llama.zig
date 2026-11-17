@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/tts/tts.cpp` at v0.9.0 (`cd959bae9`). Each
+//! Ported from `llama.cpp/tools/tts/tts.cpp` at v1.0.0 (`b1b770d90`). Each
 //! declaration names the C++ it replaces and the line it began at.
 //!
 //! The C++ holds the mtmd context, the speaker bitmap and the generation
@@ -27,7 +27,7 @@ extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*c.FILE;
 extern fn fwrite(p: ?*const anyopaque, size: usize, n: usize, f: ?*c.FILE) usize;
 extern fn fclose(f: ?*c.FILE) c_int;
 
-/// Ports `tts_timings` (tts.cpp:20 @cd959bae9): a progress line every two
+/// Ports `tts_timings` (tts.cpp:20 @b1b770d90): a progress line every two
 /// seconds.
 const Timings = struct {
     t_start_us: i64,
@@ -38,7 +38,7 @@ const Timings = struct {
         return .{ .t_start_us = t, .t_last_us = t };
     }
 
-    /// `report` (tts.cpp:24 @cd959bae9), a member of `tts_timings`.
+    /// `report` (tts.cpp:24 @b1b770d90), a member of `tts_timings`.
     fn report(self: *Timings, n_frames: c_int) void {
         const t_now_us = c.ggml_time_us();
         if (t_now_us - self.t_last_us < 2000000) return;
@@ -49,7 +49,7 @@ const Timings = struct {
     }
 };
 
-/// Ports `print_usage` (tts.cpp:36 @cd959bae9).
+/// Ports `print_usage` (tts.cpp:36 @b1b770d90).
 fn printUsage(argv: []const [:0]const u8) void {
     log.out("\nexample usage:\n", .{});
     log.out("\n    %s -m backbone.gguf -mm mmproj.gguf -p \"text to speak\" -o output.wav", .{argv[0].ptr});
@@ -83,11 +83,6 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
 
     // always enable embd, so that we can pass hidden states to the audio generation helper
     params.embedding = true;
-
-    // for chatterbox multilingual: its cfg pairs slot i with sequence n_parallel + i in a unified kv cache
-    // TODO: this applies to every model, find a better way for a pipeline to request extra sequences
-    params.n_parallel *= 2;
-    params.kv_unified = true;
 
     c.llama_backend_init();
     c.llama_numa_init(params.numa);
@@ -180,6 +175,10 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     inp.top_k = params.sampling.top_k;
     inp.top_p = params.sampling.top_p;
     inp.seed = params.sampling.seed;
+    // without --temp the audio frames keep the model default, not the CLI default
+    if ((params.sampling.user_sampling_config & tc.params.SamplingConfig.temp) != 0) {
+        inp.temp = params.sampling.temp;
+    }
 
     //
     // stage 1: process prompt via backbone model, generate semantic representation
@@ -268,7 +267,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     return 0;
 }
 
-/// Ports `main` (tts.cpp:46 @cd959bae9).
+/// Ports `main` (tts.cpp:46 @b1b770d90).
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);

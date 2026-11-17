@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/tools/fit-params/fit-params.cpp` at v0.9.0
-//! (`cd959bae9`). The fitting itself is `cli/fit.zig`, the port of
+//! Ported from `llama.cpp/tools/fit-params/fit-params.cpp` at v1.0.0
+//! (`b1b770d90`). The fitting itself is `cli/fit.zig`, the port of
 //! `common/fit.cpp` gated by `make fit-diff`; this is the command line
 //! around it.
 
@@ -21,7 +21,7 @@ comptime {
     _ = @import("llama");
 }
 
-/// Ports `llama_fit_params` (fit-params.cpp:18 @cd959bae9).
+/// Ports `llama_fit_params` (fit-params.cpp:17 @b1b770d90).
 fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     const func = "llama_fit_params";
     var params = try tc.params.Params.init(a);
@@ -37,7 +37,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     var cparams = tc.common.contextParamsToLlama(&params);
 
     const fit_log: fit.Log = .{ .verbosity = std.math.maxInt(i32), .sink = tc.common.fitLogSink, .json = tc.common.fitLogJson };
-    const model_path = try a.dupeSentinel(u8, params.model.path, 0);
+    const model_paths = try tc.common.modelPaths(a, &params.model);
 
     if (!params.fit_params_print) {
         var patterns = try fit.Patterns.init(a);
@@ -45,7 +45,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
             init.gpa,
             &patterns,
             fit_log,
-            model_path.ptr,
+            model_paths,
             @ptrCast(&mparams),
             @ptrCast(&cparams),
             &params.tensor_split,
@@ -92,7 +92,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
         io.flushStdout();
         var out_buf: [4096]u8 = undefined;
         var stdout = std.Io.File.stdout().writerStreaming(init.io, &out_buf);
-        fit.fitPrint(init.gpa, fit_log, &stdout.interface, model_path.ptr, @ptrCast(&mparams), @ptrCast(&cparams)) catch |e| switch (e) {
+        fit.fitPrint(init.gpa, fit_log, &stdout.interface, model_paths, @ptrCast(&mparams), @ptrCast(&cparams)) catch |e| switch (e) {
             // the C's exception escapes `main`: libc++ reports it and aborts
             error.Runtime => {
                 stdout.interface.flush() catch {};
@@ -107,7 +107,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     return 0;
 }
 
-/// Ports `main` (tools/fit-params/main.cpp:3 @cd959bae9).
+/// Ports `main` (tools/fit-params/main.cpp:3 @b1b770d90).
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);

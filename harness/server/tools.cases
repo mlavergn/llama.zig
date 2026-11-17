@@ -219,6 +219,12 @@ POST /tools {"tool": "get_info"}
 POST /tools {"tool": "write_file", "params": {"path": "x", "content": "y"}}
 !header x-tool-runtime: docker-container:override
 POST /tools {"tool": "get_info"}
+# v1.0.0 (60d46a5ab): --tools-runtime is the sandbox, x-tool-runtime beside it is refused
+POST /tools {"tool": "exec_shell_command", "params": {"command": "echo x"}, "stream": true}
+POST /tools {"tool": "bogus"}
+!noheaders
+!header x-tool-runtime:
+POST /tools {"tool": "get_info"}
 !noheaders
 !server -m $QWEN3 -c 512 -np 1 --no-jinja --tools exec_shell_command --tools-runtime docker:busybox
 POST /tools {"tool": "exec_shell_command", "params": {"command": "echo in the container"}}
@@ -235,3 +241,23 @@ POST /tools {"tool": "exec_shell_command", "params": {"command": "cat a.txt"}}
 !server -m $QWEN3 -c 512 -np 1 --no-jinja --tools-runtime ssh:fakehost
 GET /tools
 POST /tools {"tool": "get_info"}
+
+# v1.0.0 (a1a68eb79): tools, MCP servers or the MCP proxy on a non-loopback
+# address need an API key or --allow-unauthenticated-tools
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --tools all --host 0.0.0.0
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --ui-mcp-proxy --host 0.0.0.0
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --mcp-servers-json {} --host 0.0.0.0
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --tools all --host 127.0.0.1,0.0.0.0
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --tools all --host 0.0.0.0 --allow-unauthenticated-tools
+GET /tools
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --tools get_info --host 0.0.0.0 --api-key k1
+GET /tools
+!header Authorization: Bearer k1
+GET /tools
+POST /tools {"tool": "get_info"}
+!noheaders
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --tools get_info --host 127.0.0.2
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --tools get_info --host localhost
+GET /tools
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --host 0.0.0.0
+GET /tools

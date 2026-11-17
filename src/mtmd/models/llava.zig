@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/llava.cpp` at v0.9.0 (`cd959bae9`).
+//! Ports `llama.cpp/tools/mtmd/models/llava.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -15,7 +15,7 @@ const c = impl.c;
 const T = graph.T;
 const ne = graph.ne;
 
-/// Ports `build` (llava.cpp:5 @cd959bae9), a member of `clip_graph_llava`.
+/// Ports `build` (llava.cpp:5 @b1b770d90), a member of `mtmd_graph_llava`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
@@ -161,10 +161,8 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
             embeddings = c.ggml_add(ctx0, embeddings, model.mm_0_b);
 
             embeddings = c.ggml_gelu(ctx0, embeddings);
-            if (model.mm_2_w != null) {
-                embeddings = g.buildMm(model.mm_2_w, embeddings);
-                embeddings = c.ggml_add(ctx0, embeddings, model.mm_2_b);
-            }
+            embeddings = g.buildMm(model.mm_2_w, embeddings);
+            embeddings = c.ggml_add(ctx0, embeddings, model.mm_2_b);
         } else if (g.proj_type == .mlp_norm) {
             embeddings = g.buildMm(model.mm_0_w, embeddings);
             embeddings = c.ggml_add(ctx0, embeddings, model.mm_0_b);
@@ -295,7 +293,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
             peg_0 = c.ggml_reshape_3d(ctx0, peg_0, ne(peg_0, 0), ne(peg_0, 1) * ne(peg_0, 2), ne(peg_0, 3));
             embeddings = peg_0;
         } else {
-            impl.abort("llava.cpp", 331, "fatal error");
+            impl.abort("llava.cpp", 329, "fatal error");
         }
     }
 
@@ -327,7 +325,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
             embeddings = c.ggml_concat(ctx0, embeddings, model.mm_eoi, 1); // EOI
         }
     } else {
-        impl.abort("llava.cpp", 366, "llava: unknown projector type");
+        impl.abort("llava.cpp", 364, "llava: unknown projector type");
     }
 
     // build the graph

@@ -11,8 +11,8 @@
 //! embedding added, each ending in the classifier, so the output is one
 //! score per question type.
 //!
-//! Ported from `llama.cpp/src/models/modern-bert.cpp` at v0.9.0
-//! (`cd959bae9`): `N_DECISION_TYPES`, `llama_model_modern_bert`'s
+//! Ported from `llama.cpp/src/models/modern-bert.cpp` at v1.0.0
+//! (`b1b770d90`): `N_DECISION_TYPES`, `llama_model_modern_bert`'s
 //! `load_arch_hparams`, `load_arch_tensors` and `build_arch_graph`, and
 //! its `graph` with `build_decision_head`; and from
 //! `llama.cpp/src/llama-model.cpp`, `llm_ffn_op_type_from_string`, which
@@ -31,11 +31,11 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `N_DECISION_TYPES` (models/modern-bert.cpp:4 @cd959bae9): the
+/// Ports `N_DECISION_TYPES` (models/modern-bert.cpp:4 @b1b770d90): the
 /// question types of a decision model -- choice, score and noul.
 const n_decision_types: u32 = 3;
 
-/// Ports `LLM_FFN_OP_TYPES_FROM_STRING` (llama-model.cpp:1192 @cd959bae9):
+/// Ports `LLM_FFN_OP_TYPES_FROM_STRING` (llama-model.cpp:1210 @b1b770d90):
 /// the GGUF activation names, mapped to the gated feed-forward op the graph
 /// builders use. `"gelu"` is the exact (erf) variant.
 const ffn_op_types_from_string = [_]struct { []const u8, graph.FfnOp }{
@@ -54,7 +54,7 @@ const ffn_op_types_from_string = [_]struct { []const u8, graph.FfnOp }{
     .{ "reglu", .reglu },
 };
 
-/// Ports `llm_ffn_op_type_from_string` (llama-model.cpp:1215 @cd959bae9).
+/// Ports `llm_ffn_op_type_from_string` (llama-model.cpp:1233 @b1b770d90).
 ///
 /// Parameters:
 /// - `name`: the activation's name.
@@ -66,7 +66,7 @@ fn ffnOpTypeFromString(name: []const u8, fallback: graph.FfnOp) graph.FfnOp {
     return fallback;
 }
 
-/// Ports `llama_model_modern_bert`'s `load_arch_hparams` (models/modern-bert.cpp:6 @cd959bae9).
+/// Ports `llama_model_modern_bert`'s `load_arch_hparams` (models/modern-bert.cpp:6 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -121,7 +121,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_modern_bert`'s `load_arch_tensors` (models/modern-bert.cpp:61 @cd959bae9).
+/// Ports `llama_model_modern_bert`'s `load_arch_tensors` (models/modern-bert.cpp:61 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -195,13 +195,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_modern_bert`'s `build_arch_graph` (models/modern-bert.cpp:134 @cd959bae9).
+/// Ports `llama_model_modern_bert`'s `build_arch_graph` (models/modern-bert.cpp:134 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_modern_bert`'s `graph`
-/// (models/modern-bert.cpp:138 @cd959bae9).
+/// (models/modern-bert.cpp:138 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -229,8 +229,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     var il: c_int = 0;
     while (il < n_layer_enc) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
-        const freq_base_l = model.getRopeFreqBase(b.cparams, @intCast(il));
-        const freq_scale_l = model.getRopeFreqScale(b.cparams, @intCast(il));
 
         var cur = inpL;
 
@@ -247,9 +245,9 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         const Vcur = qkv.v;
 
         // RoPE.
-        Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+        Qcur = b.buildRope(Qcur, inp_pos, il);
 
-        Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+        Kcur = b.buildRope(Kcur, inp_pos, il);
 
         b.cb(Qcur, "Qcur", il);
         b.cb(Kcur, "Kcur", il);
@@ -294,7 +292,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_modern_bert::graph`'s `build_decision_head`
-/// (models/modern-bert.cpp:248 @cd959bae9): one score per question type for
+/// (models/modern-bert.cpp:237 @b1b770d90): one score per question type for
 /// each output token, read at the option markers by the caller. The
 /// question type is not a graph input, so the head is evaluated once per
 /// type.

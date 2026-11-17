@@ -6,9 +6,9 @@
 // role `tests/test-llama-archs.cpp` plays for `make arch-model-diff`. No
 // mmproj file exists on this machine and upstream ships no generator, so
 // each projector type's keys and tensor shapes here are read off
-// `llama.cpp/tools/mtmd/clip.cpp` (`load_hparams`, `load_tensors`,
-// `clip_n_mmproj_embd`) and the graph builders under `models/`, at
-// v0.9.0 (`cd959bae9`). Weights are small and random (fixed seed per
+// `llama.cpp/tools/mtmd/mtmd-model.cpp` (`load_hparams`, `load_tensors`,
+// `mtmd_model::n_mmproj_embd`) and the graph builders under `models/`, at
+// v1.0.0 (`b1b770d90`) -- `clip.cpp` until v0.9.0. Weights are small and random (fixed seed per
 // type), so a fixture checks plumbing and numerics, not output quality.
 //
 // Every projector targets n_embd 256, the arch fixtures' width. The text
@@ -24,7 +24,7 @@
 // Manifest: one fixture per line, tab-separated:
 //   projector  mmproj-path  text-model-path  modality  inputs
 // where modality is vision|audio|vision+audio|tts-qwen3|tts-pocket|tts-soprano|tts-lfm3a|
-// tts-chatterbox|tts-chatterbox-mtl, or
+// tts-chatterbox|tts-chatterbox-mtl|tts-drama3, or
 // expect-fail for a type upstream declares but cannot load, and inputs lists
 // what to feed, `;`-separated: `img:WxH,...` for images, `vid:WxHxN,...` for
 // N mergeable frames of one video (v0.7.0), `aud:N,...` audio sample counts,
@@ -39,7 +39,7 @@
 #include "mtmd-helper.h"
 
 // the KEY_* / TN_* names the loader reads, from the header that defines them
-#include "clip-impl.h"
+#include "mtmd-impl.h"
 
 #include <algorithm>
 #include <cmath>
@@ -375,7 +375,10 @@ static void cbx_spkenc_fixture(G & g, bool mtl) {
 // meanflow mixer (2 euler steps, no cfg); `mtl` the 10-step cfg solver and
 // the T3 position tables the multilingual pipeline reads.
 static void chatterbox_gen_fixture(G & g, bool mtl) {
-    const int NC = 4300;      // speech codebook: turbo's silence tail is code 4299
+    // speech codebook: all 3^8 of the S3 tokenizer's FSQ codes (turbo's silence tail is
+    // code 4299); with 4300 rows, as until v0.9.0, the speaker clip tokenized to code
+    // 5467 at v1.0.0 and the reference refused it ("speech token out of range")
+    const int NC = 6561;
     const int FF = 512, C = 64, TD = 64, C0 = 32, CF = 32;
     const ggml_type H = GGML_TYPE_F16;
     g.b(KEY_HAS_GEN_AUDIO_ENC, true);
@@ -968,6 +971,46 @@ static std::vector<Fixture> fixtures() {
         g.w(fmt(TN_LLAVA_PROJ, 2, "weight"), 64, N_TEXT);
         g.bias(fmt(TN_LLAVA_PROJ, 2, "bias"), N_TEXT);
     }});
+    // v1.0.0 (351025ec5): Kimi K3.1 -- K2.5's ViT RMS-normed, positions
+    // resized bilinearly, and patchmergerv2: no pre-norm, a bias-free MLP
+    // (erf GELU), then an RMS post-norm
+    f.push_back({"kimik31", "qwen3", "vision", "img:64x64,96x48", [](G & g) {
+        const int E = 32, P = 8;
+        vision(g, "kimik31", 64, P);
+        hp(g, "vision", E, 64, 2, 2, N_TEXT);
+        g.u32(KEY_PROJ_SCALE_FACTOR, 2);
+        g.u32(KEY_IMAGE_MIN_PIXELS, 32 * 32);
+        g.u32(KEY_IMAGE_MAX_PIXELS, 128 * 128);
+        patch_embd(g, P, E, 0);
+        g.t(fmt(TN_POS_EMBD, "v"), {E, 8, 8}, 0.02f);
+        VitOpts o;
+        o.ln_bias = false;
+        vit_layers(g, "v", 2, E, 64, 2, o);
+        g.w(fmt(TN_LLAVA_PROJ, 1, "weight"), 4 * E, 64);
+        g.w(fmt(TN_LLAVA_PROJ, 2, "weight"), 64, N_TEXT);
+        g.norm(fmt(TN_MM_POST_NORM, "weight"), N_TEXT);
+    }});
+    // v1.0.0 (9f0e5098a): MageVL-Cowork -- an F32 im2col patch embedding,
+    // 2x2 block order, M-RoPE pairs over the two halves of rope_freqs
+    // (d_head 32: the smallest the 4:6:6 split allows), a 4-patch FFN
+    f.push_back({"magevl", "qwen3", "vision", "img:64x64,96x48,48x80", [](G & g) {
+        const int E = 64, P = 8, H = 128, NH = 2, DH = E / NH;
+        vision(g, "magevl", 64, P, false);
+        hp(g, "vision", E, 128, NH, 2, N_TEXT);
+        g.u32(KEY_SPATIAL_MERGE_SIZE, 2);
+        g.u32(KEY_IMAGE_MIN_PIXELS, 32 * 32);
+        g.u32(KEY_IMAGE_MAX_PIXELS, 128 * 128);
+        g.t(TN_PATCH_EMBD, {P, P, 3, E}, 1.0f / std::sqrt((float) (P * P * 3)));
+        // ggml's theta = pos / rope_freqs: positive factors around 1
+        g.t(TN_ROPE_FREQS, {DH}, 0.4f, 1.0f);
+        VitOpts o;
+        o.qkv = true;
+        vit_layers(g, "v", 2, E, 128, NH, o);
+        g.w(fmt(TN_LLAVA_PROJ, 0, "weight"), 4 * E, H);
+        g.bias(fmt(TN_LLAVA_PROJ, 0, "bias"), H);
+        g.w(fmt(TN_LLAVA_PROJ, 2, "weight"), H, N_TEXT);
+        g.bias(fmt(TN_LLAVA_PROJ, 2, "bias"), N_TEXT);
+    }});
     f.push_back({"youtuvl", "qwen2vl", "vision", "img:64x64,96x48,40x80", [](G & g) {
         // the patch embedding is linear; layer 1 is full attention, 0 windowed
         const int E = 64, P = 8, H = 128;
@@ -1527,7 +1570,8 @@ static std::vector<Fixture> fixtures() {
         g.w(fmt(TN_MM_AUDIO_MLP, 3, "weight"), H, N_TEXT);
         g.bias(fmt(TN_MM_AUDIO_MLP, 3, "bias"), N_TEXT);
     }});
-    f.push_back({"gemma4a", "qwen3", "audio", AUD, [](G & g) {
+    // v1.0.0 (20c2e9665): Gemma 4 streams audio too; 500000 samples cross its 30 s segment
+    f.push_back({"gemma4a", "qwen3", "audio", std::string(AUD) + ";strm:0,1,3000,40000,500000", [](G & g) {
         // a conformer: two stride-2 conv2d, then per layer a half-step ffn,
         // chunked attention with a relative-position term, a gated depthwise
         // conv (ssm_conv, kernel 5) and a second half-step ffn
@@ -2012,6 +2056,109 @@ static std::vector<Fixture> fixtures() {
         g.bias(fmt(TN_A_GEN_WAV_DAC_POST_CONV, "bias"), 1);
     };
     f.push_back({"qwen3tts", "qwen3tts", "tts-qwen3", "tts:3", [qwen3tts](G & g) { qwen3tts(g, false); }});
+
+    // --- TTS: v1.0.0 (5851a8e50) drama-3 (codebook tower / Fish DAC codec,
+    // models/drama3-gen.cpp). What the host code fixes is kept: 10
+    // codebooks (the helper's n_cb), so 9 heads and one shared layer before
+    // them; a 4096-row tower vocabulary (code0 of a frame is any of the
+    // helper's 4096 semantic tokens, and is bounded by embd's ne1); the
+    // tower's codebook rows as wide as the backbone (they are added to the
+    // backbone's embedding); 64-wide heads, as the tower's RoPE rotates
+    // 64 dims. The codec's layer and head counts are hardcoded as qwen3-tts's
+    // are; it has no quantizer projections, pre_conv or tfm projections, so
+    // its width is the codebooks'. The 4096-row tables are F16, to keep the
+    // file small.
+    f.push_back({"drama3_gen", "qwen35moe-drama3", "tts-drama3", "tts:3", [](G & g) {
+        const ggml_type H16 = GGML_TYPE_F16;
+        g.b(KEY_HAS_GEN_AUDIO_ENC, true);
+        g.str(KEY_GEN_AUDIO_PROJ_TYPE, "drama3_gen");
+        const int NCB = 10, NHEAD = NCB - 1, NL = NHEAD + 1, V = 4096, Vh = 64;
+        const int D = 64, NH = 2, NKV = 1, DH = 64, F = 128;
+        hp(g, "gen.audio", D, F, NH, NL, N_TEXT, 1e-5f);
+        g.u32(fmt(KEY_N_HEAD_KV, "gen.audio"), NKV);
+        for (int il = 0; il < NL; il++) {
+            const char * p = "a.gen.code";
+            const int x_in = il == 0 ? N_TEXT : D; // layer 0 mixes in the backbone's hidden state
+            g.w(fmt(TN_ATTN_Q, p, il, "weight"), D, NH * DH);
+            g.w(fmt(TN_ATTN_K, p, il, "weight"), D, NKV * DH);
+            g.w(fmt(TN_ATTN_V, p, il, "weight"), D, NKV * DH);
+            g.w(fmt(TN_ATTN_GATE, p, il, "weight"), D, NH * DH);
+            g.w(fmt(TN_ATTN_OUTPUT, p, il, "weight"), NH * DH, D);
+            g.norm(fmt(TN_ATTN_Q_NORM, p, il, "weight"), DH);
+            g.norm(fmt(TN_ATTN_K_NORM, p, il, "weight"), DH);
+            g.norm(fmt(TN_LN_1, p, il, "weight"), D);
+            g.norm(fmt(TN_LN_2, p, il, "weight"), D);
+            g.w(fmt(TN_FFN_GATE, p, il, "weight"), D, F);
+            g.w(fmt(TN_FFN_UP, p, il, "weight"), D, F);
+            g.w(fmt(TN_FFN_DOWN, p, il, "weight"), F, D);
+            g.norm(fmt(TN_A_GEN_CODE_ENORM, il, "weight"), N_TEXT);
+            g.norm(fmt(TN_A_GEN_CODE_HNORM, il, "weight"), x_in);
+            g.w(fmt(TN_A_GEN_CODE_EH_PROJ, il, "weight"), N_TEXT + x_in, D);
+            // the shared layer and the first head layer embed the main code, the others the previous head's
+            g.t(fmt(TN_A_GEN_CODE_BLK_EMBD, il, "weight"), {N_TEXT, il <= NL - NHEAD ? V : Vh}, 0.05f, 0.0f, H16);
+            g.norm(fmt(TN_A_GEN_CODE_BLK_OUT_NORM, il, "weight"), D);
+        }
+        g.t(fmt(TN_A_GEN_CODE_EMBD, "weight"), {N_TEXT, V, NCB}, 0.05f, 0.0f, H16);
+        g.t(fmt(TN_A_GEN_CODE_HEAD, "weight"), {D, Vh, NHEAD}, 0.3f);
+        g.t(fmt(TN_A_GEN_CODE_OUT_EMBD, "weight"), {N_TEXT, V}, 0.05f, 0.0f, H16);
+
+        // codec: codebook rows straight into the transformer (8 layers, 16 heads)
+        const int C1 = 32, dht = 2, Ft = 64, Vr = 48;
+        g.t(fmt(TN_A_GEN_WAV_QUANT_FIRST_CB, "weight"), {C1, V}, 0.5f);
+        g.t(fmt(TN_A_GEN_WAV_QUANT_REST_CB, "weight"), {C1, Vr, NCB - 1}, 0.5f);
+        for (int il = 0; il < 8; il++) {
+            const char * p = "a.gen.wav.tfm";
+            g.w(fmt(TN_ATTN_Q, p, il, "weight"), C1, 16 * dht);
+            g.w(fmt(TN_ATTN_K, p, il, "weight"), C1, 16 * dht);
+            g.w(fmt(TN_ATTN_V, p, il, "weight"), C1, 16 * dht);
+            g.w(fmt(TN_ATTN_OUTPUT, p, il, "weight"), 16 * dht, C1);
+            g.norm(fmt(TN_LN_1, p, il, "weight"), C1);
+            g.norm(fmt(TN_LN_2, p, il, "weight"), C1);
+            g.t(fmt(TN_LS_1, p, il, "weight"), {C1}, 0.05f, 0.1f);
+            g.t(fmt(TN_LS_2, p, il, "weight"), {C1}, 0.05f, 0.1f);
+            g.w(fmt(TN_FFN_GATE, p, il, "weight"), C1, Ft);
+            g.w(fmt(TN_FFN_UP, p, il, "weight"), C1, Ft);
+            g.w(fmt(TN_FFN_DOWN, p, il, "weight"), Ft, C1);
+        }
+        g.norm(fmt(TN_A_GEN_WAV_TFM_OUT_NORM, "weight"), C1);
+        for (int il = 0; il < 2; il++) {
+            g.t(fmt(TN_A_GEN_WAV_UP_CONV, il, "weight"), {2, C1, C1}, 0.15f);
+            g.bias(fmt(TN_A_GEN_WAV_UP_CONV, il, "bias"), C1);
+            g.t(fmt(TN_A_GEN_WAV_UP_DWCONV, il, "weight"), {7, 1, C1}, 0.2f);
+            g.bias(fmt(TN_A_GEN_WAV_UP_DWCONV, il, "bias"), C1);
+            g.norm(fmt(TN_A_GEN_WAV_UP_NORM, il, "weight"), C1);
+            g.bias(fmt(TN_A_GEN_WAV_UP_NORM, il, "bias"), C1);
+            g.w(fmt(TN_A_GEN_WAV_UP_PW1, il, "weight"), C1, 4 * C1);
+            g.bias(fmt(TN_A_GEN_WAV_UP_PW1, il, "bias"), 4 * C1);
+            g.w(fmt(TN_A_GEN_WAV_UP_PW2, il, "weight"), 4 * C1, C1);
+            g.bias(fmt(TN_A_GEN_WAV_UP_PW2, il, "bias"), C1);
+            g.t(fmt(TN_A_GEN_WAV_UP_GAMMA, il), {C1}, 0.05f, 0.1f);
+        }
+        const int Cd[5] = { 32, 32, 16, 16, 8 };
+        g.t(fmt(TN_A_GEN_WAV_DAC_ENTRY, "weight"), {7, C1, Cd[0]}, 0.1f);
+        g.bias(fmt(TN_A_GEN_WAV_DAC_ENTRY, "bias"), Cd[0]);
+        for (int il = 0; il < 4; il++) {
+            const int IC = Cd[il], OC = Cd[il + 1];
+            g.t(fmt(TN_A_GEN_WAV_DAC_SNAKE, il, "alpha"), {IC}, 0.1f, 1.0f);
+            g.t(fmt(TN_A_GEN_WAV_DAC_SNAKE, il, "beta"), {IC}, 0.1f, 1.0f);
+            g.t(fmt(TN_A_GEN_WAV_DAC_CONV, il, "weight"), {4, OC, IC}, 0.15f); // kernel 4 = 2 x stride 2
+            g.bias(fmt(TN_A_GEN_WAV_DAC_CONV, il, "bias"), OC);
+            for (int ir = 0; ir < 3; ir++) {
+                g.t(fmt(TN_A_GEN_WAV_DAC_RES_ACT1, il, ir, "alpha"), {OC}, 0.1f, 1.0f);
+                g.t(fmt(TN_A_GEN_WAV_DAC_RES_ACT1, il, ir, "beta"), {OC}, 0.1f, 1.0f);
+                g.t(fmt(TN_A_GEN_WAV_DAC_RES_CONV1, il, ir, "weight"), {7, OC, OC}, 0.1f);
+                g.bias(fmt(TN_A_GEN_WAV_DAC_RES_CONV1, il, ir, "bias"), OC);
+                g.t(fmt(TN_A_GEN_WAV_DAC_RES_ACT2, il, ir, "alpha"), {OC}, 0.1f, 1.0f);
+                g.t(fmt(TN_A_GEN_WAV_DAC_RES_ACT2, il, ir, "beta"), {OC}, 0.1f, 1.0f);
+                g.t(fmt(TN_A_GEN_WAV_DAC_RES_CONV2, il, ir, "weight"), {1, OC, OC}, 0.2f);
+                g.bias(fmt(TN_A_GEN_WAV_DAC_RES_CONV2, il, ir, "bias"), OC);
+            }
+        }
+        g.t(fmt(TN_A_GEN_WAV_DAC_POST_SNAKE, "alpha"), {Cd[4]}, 0.1f, 1.0f);
+        g.t(fmt(TN_A_GEN_WAV_DAC_POST_SNAKE, "beta"), {Cd[4]}, 0.1f, 1.0f);
+        g.t(fmt(TN_A_GEN_WAV_DAC_POST_CONV, "weight"), {7, Cd[4], 1}, 0.2f);
+        g.bias(fmt(TN_A_GEN_WAV_DAC_POST_CONV, "bias"), 1);
+    }});
 
     // --- TTS: pocket-tts (mimi speaker encoder + flow decoder / mimi decoder)
     f.push_back({"pockettts", "pockettts", "tts-pocket", "tts:3", [](G & g) {
@@ -2761,6 +2908,9 @@ static const std::vector<std::string> k_specials_lfm3 = {
     "<|audio_start|>", "<|mixed_start|>", "<|text_end|>", "<|mixed_end|>", "<|im_start|>", "<|im_end|>",
     "<|endoftext|>", "<|vision_start|>", "<|vision_end|>",
 };
+// v1.0.0: drama-3's prompt tokens (mtmd-helper-gen.cpp's drama3 pipeline);
+// the <|semantic:N|> tokens fill the widened vocabulary after them
+static const std::vector<std::string> k_specials_drama3 = { "<|im_start|>", "<|im_end|>", "<|voice|>" };
 // soprano's prompt tokens (mtmd-helper-gen.cpp)
 static const std::vector<std::string> k_specials_soprano = { "[TEXT]", "[START]", "[STOP]" };
 // voxtral realtime's pad (mtmd.cpp's stream init)
@@ -2775,7 +2925,7 @@ static const std::vector<std::string> k_specials_cbx = {};
 // the tokens that fill it, as `codec` fills with codec tokens
 static bool write_text_model(const std::string & in, const std::string & out, bool codec, int deepstack = 0, bool mrope = false,
                              const std::vector<std::string> * extra = nullptr, int delay = 0, const char * tmpl = nullptr,
-                             const char * tmpl_tts = nullptr, int n_vocab = 0, const char * fill = nullptr) {
+                             const char * tmpl_tts = nullptr, int n_vocab = 0, const char * fill = nullptr, bool cfg = false) {
     ggml_context * ctx = nullptr;
     gguf_init_params ip = { false, &ctx };
     gguf_context * src = gguf_init_from_file(in.c_str(), ip);
@@ -2846,6 +2996,8 @@ static bool write_text_model(const std::string & in, const std::string & out, bo
         gguf_set_arr_data(dst, (std::string(arch) + ".rope.dimension_sections").c_str(), GGUF_TYPE_INT32, sections, 4);
     }
     if (delay > 0) gguf_set_val_u32(dst, (std::string(arch) + ".realtime_delay_tokens").c_str(), delay);
+    // v1.0.0 (b1c902f02): multilingual chatterbox requires its backbone to declare classifier-free guidance
+    if (cfg) gguf_set_val_bool(dst, (std::string(arch) + ".classifier_free_guidance").c_str(), true);
     if (tmpl) gguf_set_val_str(dst, "tokenizer.chat_template", tmpl);
     if (tmpl_tts) gguf_set_val_str(dst, "tokenizer.chat_template.tts", tmpl_tts);
     ggml_context * wide = nullptr;
@@ -2887,7 +3039,7 @@ static int cmd_gen(const std::string & arch_dir, const std::string & out_dir, co
     struct Text {
         const char * key; const char * fixture; bool codec; int deepstack; bool mrope = false;
         const std::vector<std::string> * extra = nullptr; int delay = 0; const char * tmpl = nullptr; const char * tmpl_tts = nullptr;
-        int n_vocab = 0; const char * fill = nullptr;
+        int n_vocab = 0; const char * fill = nullptr; bool cfg = false;
     };
     const char * lfm3_chat = "{% for m in messages %}<|im_start|>{{ m.role }}\n{{ m.content }}<|im_end|>\n{% endfor %}"
                              "{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}";
@@ -2913,12 +3065,15 @@ static int cmd_gen(const std::string & arch_dir, const std::string & out_dir, co
         { "mistral3-rt", "mistral3-dense", false, 0, false, &k_specials_voxtral, 6 },
         // v0.9.0: chatterbox's speech tokens after the text ones; 320 rows, as
         // the multilingual prompt opens with token 255
-        { "qwen3-cbx", "qwen3-dense", false, 0, false, &k_specials_cbx, 0, nullptr, nullptr, 320, "<|speech_%d|>" },
+        { "qwen3-cbx", "qwen3-dense", false, 0, false, &k_specials_cbx, 0, nullptr, nullptr, 320, "<|speech_%d|>", true },
+        // v1.0.0: drama-3's Qwen3.5-MoE backbone, its 4096 semantic tokens after
+        // the specials (the helper samples <|semantic:0|> + 0..4095)
+        { "qwen35moe-drama3", "qwen35moe-moe", false, 0, false, &k_specials_drama3, 0, nullptr, nullptr, 4224, "<|semantic:%d|>" },
     };
     for (const auto & t : texts) {
         const std::string out = out_dir + "/text-" + t.key + ".gguf";
         if (!write_text_model(arch_dir + "/" + t.fixture + ".gguf", out, t.codec, t.deepstack, t.mrope, t.extra, t.delay, t.tmpl, t.tmpl_tts,
-                              t.n_vocab, t.fill)) return 1;
+                              t.n_vocab, t.fill, t.cfg)) return 1;
     }
 
     FILE * man = fopen((out_dir + "/manifest.txt").c_str(), "w");

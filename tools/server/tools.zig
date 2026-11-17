@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/server/server-tools.cpp` and
-//! `llama.cpp/tools/server/server-tools.h` (llama.cpp v0.9.0, `cd959bae9`):
+//! `llama.cpp/tools/server/server-tools.h` (llama.cpp v1.0.0, `b1b770d90`):
 //! the seven tools, `tools_io` with its host (`tools_io_basic`) and isolate
 //! (`tools_io_isolate`, `tools_io_container`, `tools_io_ssh`)
 //! implementations, `run_subprocess`, the `--tools-runtime` runtimes,
@@ -73,17 +73,17 @@ fn z(s: []const u8) [*:0]const u8 {
 // -----------------------------------------------------------------------------
 // internal helpers
 
-/// Ports `SERVER_TOOL_GIT_LS_FILES_MAX_OUTPUT` (server-tools.cpp:104 @cd959bae9).
+/// Ports `SERVER_TOOL_GIT_LS_FILES_MAX_OUTPUT` (server-tools.cpp:104 @b1b770d90).
 const git_ls_files_max_output: usize = 8 * 1024 * 1024; // 8 MB
-/// Ports `SERVER_TOOL_LIST_ENTRIES_TIMEOUT` (server-tools.cpp:106 @cd959bae9): the
+/// Ports `SERVER_TOOL_LIST_ENTRIES_TIMEOUT` (server-tools.cpp:106 @b1b770d90): the
 /// budget for one listing call, shared by the git and walker paths.
 const list_entries_timeout: c_int = 15; // seconds
 
-/// Ports `list_kind` (server-tools.cpp:109 @cd959bae9): the entry kinds a directory
+/// Ports `list_kind` (server-tools.cpp:109 @b1b770d90): the entry kinds a directory
 /// listing may return.
 pub const ListKind = enum { files, dirs, all };
 
-/// Ports `home_dir` (server-tools.cpp:128 @cd959bae9): `HOME`. The C++ reads it
+/// Ports `home_dir` (server-tools.cpp:116 @b1b770d90): `HOME`. The C++ reads it
 /// once, at first use; nothing here sets it, so reading it each time
 /// gives the same answer.
 fn homeDir() []const u8 {
@@ -91,7 +91,7 @@ fn homeDir() []const u8 {
     return std.mem.span(h);
 }
 
-/// Ports `expand_home` (server-tools.cpp:143 @cd959bae9): a leading `~` or `~/`.
+/// Ports `expand_home` (server-tools.cpp:128 @b1b770d90): a leading `~` or `~/`.
 fn expandHome(a: Allocator, path: []const u8) ![]const u8 {
     if (path.len == 0 or path[0] != '~') return path;
     if (path.len > 1 and path[1] != '/' and path[1] != '\\') return path;
@@ -100,12 +100,12 @@ fn expandHome(a: Allocator, path: []const u8) ![]const u8 {
     return std.mem.concat(a, u8, &.{ home, path[1..] });
 }
 
-/// Ports `entry_depth` (server-tools.cpp:152 @cd959bae9): `"a/b/c"` is 3.
+/// Ports `entry_depth` (server-tools.cpp:137 @b1b770d90): `"a/b/c"` is 3.
 fn entryDepth(rel: []const u8) c_int {
     return 1 + @as(c_int, @intCast(std.mem.count(u8, rel, "/")));
 }
 
-/// Ports `SERVER_TOOL_JUNK_DIR_NAMES` (server-tools.cpp:158 @cd959bae9): directories a
+/// Ports `SERVER_TOOL_JUNK_DIR_NAMES` (server-tools.cpp:143 @b1b770d90): directories a
 /// listing reports but never descends into.
 const junk_dir_names = [_][]const u8{
     ".git",   ".svn",  ".hg",     "node_modules", "__pycache__",
@@ -261,20 +261,20 @@ fn readWhole(a: Allocator, path: []const u8) ?[]u8 {
 // -----------------------------------------------------------------------------
 // tools_io
 
-/// Ports `tools_io`'s `exec_result` (server-tools.cpp:165 @cd959bae9).
+/// Ports `tools_io`'s `exec_result` (server-tools.cpp:150 @b1b770d90).
 const ExecResult = struct {
     output: []const u8 = "",
     exit_code: c_int = -1,
     timed_out: bool = false,
 };
 
-/// Ports `tools_io`'s `list_entry` (server-tools.cpp:180 @cd959bae9).
+/// Ports `tools_io`'s `list_entry` (server-tools.cpp:165 @b1b770d90).
 const ListEntry = struct {
     rel: []const u8, // '/'-separated, relative to `base`
     is_dir: bool = false,
 };
 
-/// Ports `tools_io`'s `list_result` (server-tools.cpp:184 @cd959bae9).
+/// Ports `tools_io`'s `list_result` (server-tools.cpp:169 @b1b770d90).
 const ListResult = struct {
     entries: std.ArrayList(ListEntry) = .empty,
     err: []const u8 = "", // set when `base` is not a directory
@@ -288,7 +288,7 @@ const OnChunk = struct {
     f: *const fn (ctx: *anyopaque, chunk: []const u8) bool,
 };
 
-/// Ports `run_subprocess` (server-tools.cpp:203 @cd959bae9): runs `args` with a
+/// Ports `run_subprocess` (server-tools.cpp:188 @b1b770d90): runs `args` with a
 /// supervisory timeout, writing `stdin_data` first and reading raw output
 /// as it comes, past the size cap so the child never blocks on a full pipe.
 fn runSubprocess(
@@ -388,13 +388,13 @@ fn runSubprocess(
     return res;
 }
 
-/// Ports `tools_io_basic` (server-tools.cpp:314 @cd959bae9): the tools run on
+/// Ports `tools_io_basic` (server-tools.cpp:299 @b1b770d90): the tools run on
 /// the host. `cwd`, if set, resolves relative paths and is where `run`
 /// runs.
 const Basic = struct {
     cwd: []const u8 = "",
 
-    /// Ports `tools_io_basic`'s `resolve` (server-tools.cpp:321 @cd959bae9): `~`
+    /// Ports `tools_io_basic`'s `resolve` (server-tools.cpp:306 @b1b770d90): `~`
     /// expanded, then against `cwd` (or the server's working directory), so
     /// the result is always absolute; `.` and `..` dropped.
     fn resolve(self: *const Basic, a: Allocator, path: []const u8) ![]const u8 {
@@ -417,17 +417,17 @@ const Basic = struct {
         return full;
     }
 
-    /// Ports `tools_io_basic`'s `is_directory` (server-tools.cpp:345 @cd959bae9).
+    /// Ports `tools_io_basic`'s `is_directory` (server-tools.cpp:330 @b1b770d90).
     fn isDirectory(self: *const Basic, a: Allocator, path: []const u8) !bool {
         return statType(try self.resolve(a, path), null) == .directory;
     }
 
-    /// Ports `tools_io_basic`'s `is_regular_file` (server-tools.cpp:350 @cd959bae9).
+    /// Ports `tools_io_basic`'s `is_regular_file` (server-tools.cpp:335 @b1b770d90).
     fn isRegularFile(self: *const Basic, a: Allocator, path: []const u8) !bool {
         return statType(try self.resolve(a, path), null) == .regular;
     }
 
-    /// Ports `tools_io_basic`'s `file_size` (server-tools.cpp:355 @cd959bae9): a
+    /// Ports `tools_io_basic`'s `file_size` (server-tools.cpp:340 @b1b770d90): a
     /// regular file's size; anything else is an error.
     fn fileSize(self: *const Basic, a: Allocator, path: []const u8, out_size: *u64) !bool {
         var size: u64 = 0;
@@ -436,12 +436,12 @@ const Basic = struct {
         return ty == .regular;
     }
 
-    /// Ports `tools_io_basic`'s `read_file` (server-tools.cpp:361 @cd959bae9).
+    /// Ports `tools_io_basic`'s `read_file` (server-tools.cpp:346 @b1b770d90).
     fn readFile(self: *const Basic, a: Allocator, path: []const u8) !?[]const u8 {
         return readWhole(a, try self.resolve(a, path));
     }
 
-    /// Ports `tools_io_basic`'s `write_file` (server-tools.cpp:370 @cd959bae9): parent
+    /// Ports `tools_io_basic`'s `write_file` (server-tools.cpp:355 @b1b770d90): parent
     /// directories created first.
     fn writeFile(self: *const Basic, a: Allocator, path: []const u8, content: []const u8) !bool {
         const fpath = try self.resolve(a, path);
@@ -462,7 +462,7 @@ const Basic = struct {
         return true;
     }
 
-    /// Ports `tools_io_basic`'s `list_entries` (server-tools.cpp:383 @cd959bae9): `git
+    /// Ports `tools_io_basic`'s `list_entries` (server-tools.cpp:368 @b1b770d90): `git
     /// ls-files` for files inside a repository, the walker otherwise.
     fn listEntries(self: *const Basic, a: Allocator, base: []const u8, max_depth: c_int, kind: ListKind) !ListResult {
         var out: ListResult = .{};
@@ -499,13 +499,13 @@ const Basic = struct {
         return out;
     }
 
-    /// Ports `tools_io_basic`'s `run` (server-tools.cpp:420 @cd959bae9): stdout and
+    /// Ports `tools_io_basic`'s `run` (server-tools.cpp:405 @b1b770d90): stdout and
     /// stderr combined, in `cwd`.
     fn run(self: *const Basic, a: Allocator, args: []const []const u8, max_output: usize, timeout_secs: c_int, on_chunk: ?OnChunk) !ExecResult {
         return runSubprocess(a, args, max_output, timeout_secs, on_chunk, true, self.cwd, null);
     }
 
-    /// Ports `tools_io_basic`'s `list_entries_fallback` (server-tools.cpp:473 @cd959bae9): a
+    /// Ports `tools_io_basic`'s `list_entries_fallback` (server-tools.cpp:458 @b1b770d90): a
     /// depth-first walk that lists junk directories without entering them
     /// and never follows a link.
     fn listEntriesFallback(a: Allocator, base: []const u8, max_depth: c_int, kind: ListKind, deadline: i128, truncated: *bool) !std.ArrayList(ListEntry) {
@@ -561,7 +561,7 @@ const Basic = struct {
         return result;
     }
 
-    /// Ports `tools_io_basic`'s `is_link` (server-tools.cpp:432 @cd959bae9): a link can
+    /// Ports `tools_io_basic`'s `is_link` (server-tools.cpp:417 @b1b770d90): a link can
     /// point back to an ancestor, so it is never walked.
     fn isLink(a: Allocator, path: []const u8) bool {
         const pz = a.dupeSentinel(u8, path, 0) catch return true;
@@ -592,13 +592,13 @@ const GetLines = struct {
     }
 };
 
-/// Ports `SERVER_TOOL_ISOLATE_EXEC_TIMEOUT` (server-tools.cpp:534 @cd959bae9): auxiliary
+/// Ports `SERVER_TOOL_ISOLATE_EXEC_TIMEOUT` (server-tools.cpp:519 @b1b770d90): auxiliary
 /// isolate calls; `exec_shell_command` uses its own.
 const isolate_exec_timeout: c_int = 15; // seconds
-/// Ports `SERVER_TOOL_ISOLATE_READ_FILE_MAX_SIZE` (server-tools.cpp:535 @cd959bae9).
+/// Ports `SERVER_TOOL_ISOLATE_READ_FILE_MAX_SIZE` (server-tools.cpp:520 @b1b770d90).
 const isolate_read_file_max_size: usize = 64 * 1024 * 1024; // 64 MB
 
-/// Ports `tools_io_isolate` (server-tools.cpp:540 @cd959bae9): every operation as a
+/// Ports `tools_io_isolate` (server-tools.cpp:525 @b1b770d90): every operation as a
 /// command inside an isolate -- a container (`tools_io_container`) or a
 /// remote host (`tools_io_ssh`) -- that provides `sh`, `cat`, `wc`,
 /// `mkdir`, `dirname`, `find` and `timeout`. Paths are POSIX.
@@ -611,24 +611,24 @@ const Isolate = struct {
         ssh: struct { target: []const u8 },
     };
 
-    /// Ports `tools_io_isolate`'s `resolve` (server-tools.cpp:547 @cd959bae9): against
+    /// Ports `tools_io_isolate`'s `resolve` (server-tools.cpp:532 @b1b770d90): against
     /// `cwd` when relative and `cwd` is set.
     fn resolve(self: *const Isolate, a: Allocator, path: []const u8) ![]const u8 {
         if (self.cwd.len == 0 or (path.len != 0 and path[0] == '/')) return path;
         return std.mem.concat(a, u8, &.{ self.cwd, "/", path });
     }
 
-    /// Ports `tools_io_isolate`'s `is_directory` (server-tools.cpp:554 @cd959bae9).
+    /// Ports `tools_io_isolate`'s `is_directory` (server-tools.cpp:539 @b1b770d90).
     fn isDirectory(self: *const Isolate, a: Allocator, path: []const u8) !bool {
         return self.shellTest(a, "-d", try self.resolve(a, path));
     }
 
-    /// Ports `tools_io_isolate`'s `is_regular_file` (server-tools.cpp:558 @cd959bae9).
+    /// Ports `tools_io_isolate`'s `is_regular_file` (server-tools.cpp:543 @b1b770d90).
     fn isRegularFile(self: *const Isolate, a: Allocator, path: []const u8) !bool {
         return self.shellTest(a, "-f", try self.resolve(a, path));
     }
 
-    /// Ports `tools_io_isolate`'s `file_size` (server-tools.cpp:562 @cd959bae9): `wc
+    /// Ports `tools_io_isolate`'s `file_size` (server-tools.cpp:547 @b1b770d90): `wc
     /// -c`, read with `std::stoull`.
     fn fileSize(self: *const Isolate, a: Allocator, path: []const u8, out_size: *u64) !bool {
         const res = try self.exec(a, &.{ "sh", "-c", "wc -c < \"$1\"", "_", try self.resolve(a, path) }, 64, true);
@@ -642,7 +642,7 @@ const Isolate = struct {
         return true;
     }
 
-    /// Ports `tools_io_isolate`'s `read_file` (server-tools.cpp:574 @cd959bae9): `cat`,
+    /// Ports `tools_io_isolate`'s `read_file` (server-tools.cpp:559 @b1b770d90): `cat`,
     /// with stderr kept out of the bytes.
     fn readFile(self: *const Isolate, a: Allocator, path: []const u8) !?[]const u8 {
         const res = try self.exec(a, &.{ "cat", "--", try self.resolve(a, path) }, isolate_read_file_max_size, false);
@@ -650,7 +650,7 @@ const Isolate = struct {
         return res.output;
     }
 
-    /// Ports `tools_io_isolate`'s `write_file` (server-tools.cpp:582 @cd959bae9): the
+    /// Ports `tools_io_isolate`'s `write_file` (server-tools.cpp:567 @b1b770d90): the
     /// content travels on stdin.
     fn writeFile(self: *const Isolate, a: Allocator, path: []const u8, content: []const u8) !bool {
         const argv = try self.buildArgv(a, &.{ "sh", "-c", "mkdir -p \"$(dirname \"$1\")\" && cat > \"$1\"", "_", try self.resolve(a, path) }, true);
@@ -658,7 +658,7 @@ const Isolate = struct {
         return res.exit_code == 0 and !res.timed_out;
     }
 
-    /// Ports `tools_io_isolate`'s `list_entries` (server-tools.cpp:591 @cd959bae9).
+    /// Ports `tools_io_isolate`'s `list_entries` (server-tools.cpp:576 @b1b770d90).
     fn listEntries(self: *const Isolate, a: Allocator, base: []const u8, max_depth: c_int, kind: ListKind) !ListResult {
         var out: ListResult = .{};
 
@@ -693,7 +693,7 @@ const Isolate = struct {
         return out;
     }
 
-    /// Ports `tools_io_isolate`'s `run` (server-tools.cpp:631 @cd959bae9): wrapped in an
+    /// Ports `tools_io_isolate`'s `run` (server-tools.cpp:616 @b1b770d90): wrapped in an
     /// in-isolate `timeout`, since killing the host-side client does not
     /// kill the process tree inside.
     fn run(self: *const Isolate, a: Allocator, args: []const []const u8, max_output: usize, timeout_secs: c_int, on_chunk: ?OnChunk) !ExecResult {
@@ -707,8 +707,8 @@ const Isolate = struct {
         return runSubprocess(a, argv, max_output, timeout_secs +% 5, on_chunk, true, "", null);
     }
 
-    /// Ports `tools_io_container`'s `build_argv` (server-tools.cpp:740 @cd959bae9), and
-    /// `tools_io_ssh`'s `build_argv` (server-tools.cpp:774 @cd959bae9): the host-side
+    /// Ports `tools_io_container`'s `build_argv` (server-tools.cpp:725 @b1b770d90), and
+    /// `tools_io_ssh`'s `build_argv` (server-tools.cpp:759 @b1b770d90): the host-side
     /// argv that runs `inner` in the isolate.
     fn buildArgv(self: *const Isolate, a: Allocator, inner: []const []const u8, needs_stdin: bool) ![]const []const u8 {
         var argv: std.ArrayList([]const u8) = .empty;
@@ -730,7 +730,7 @@ const Isolate = struct {
         return argv.items;
     }
 
-    /// Ports `tools_io_isolate`'s `shell_quote_join` (server-tools.cpp:651 @cd959bae9): one
+    /// Ports `tools_io_isolate`'s `shell_quote_join` (server-tools.cpp:636 @b1b770d90): one
     /// string a POSIX shell re-parses into exactly `argv`.
     fn shellQuoteJoin(a: Allocator, argv: []const []const u8) ![]u8 {
         var out: std.ArrayList(u8) = .empty;
@@ -746,7 +746,7 @@ const Isolate = struct {
         return out.items;
     }
 
-    /// Ports `tools_io_isolate`'s `with_cwd` (server-tools.cpp:671 @cd959bae9): the working
+    /// Ports `tools_io_isolate`'s `with_cwd` (server-tools.cpp:656 @b1b770d90): the working
     /// directory set in the command itself.
     fn withCwd(self: *const Isolate, a: Allocator, inner: []const []const u8) ![]const []const u8 {
         if (self.cwd.len == 0) return inner;
@@ -757,23 +757,23 @@ const Isolate = struct {
         return out.items;
     }
 
-    /// Ports `tools_io_isolate`'s `exec` (server-tools.cpp:681 @cd959bae9).
+    /// Ports `tools_io_isolate`'s `exec` (server-tools.cpp:666 @b1b770d90).
     fn exec(self: *const Isolate, a: Allocator, inner: []const []const u8, max_output: usize, combine_stderr: bool) !ExecResult {
         return runSubprocess(a, try self.buildArgv(a, inner, false), max_output, isolate_exec_timeout, null, combine_stderr, "", null);
     }
 
-    /// Ports `tools_io_isolate`'s `shell_run` (server-tools.cpp:687 @cd959bae9).
+    /// Ports `tools_io_isolate`'s `shell_run` (server-tools.cpp:672 @b1b770d90).
     fn shellRun(self: *const Isolate, a: Allocator, inner: []const []const u8) !bool {
         const res = try self.exec(a, inner, 4096, true);
         return res.exit_code == 0 and !res.timed_out;
     }
 
-    /// Ports `tools_io_isolate`'s `shell_test` (server-tools.cpp:692 @cd959bae9).
+    /// Ports `tools_io_isolate`'s `shell_test` (server-tools.cpp:677 @b1b770d90).
     fn shellTest(self: *const Isolate, a: Allocator, flag: []const u8, path: []const u8) !bool {
         return self.shellRun(a, &.{ "sh", "-c", try std.mem.concat(a, u8, &.{ "[ ", flag, " \"$1\" ]" }), "_", path });
     }
 
-    /// Ports `tools_io_isolate`'s `split_lines` (server-tools.cpp:696 @cd959bae9).
+    /// Ports `tools_io_isolate`'s `split_lines` (server-tools.cpp:681 @b1b770d90).
     fn splitLines(a: Allocator, text: []const u8, strip_dot_slash: bool) !std.ArrayList([]const u8) {
         var result: std.ArrayList([]const u8) = .empty;
         var it = GetLines.init(text);
@@ -789,7 +789,7 @@ const Isolate = struct {
         return result;
     }
 
-    /// Ports `tools_io_isolate`'s `find_entries` (server-tools.cpp:712 @cd959bae9): one
+    /// Ports `tools_io_isolate`'s `find_entries` (server-tools.cpp:697 @b1b770d90): one
     /// `find` pass; junk directories listed but never entered.
     fn findEntries(self: *const Isolate, a: Allocator, abs_base: []const u8, max_depth: c_int, dirs: bool, truncated: *bool) !std.ArrayList([]const u8) {
         var prune_expr: std.ArrayList(u8) = .empty;
@@ -810,14 +810,14 @@ const Isolate = struct {
         return splitLines(a, res.output, true);
     }
 
-    /// Ports `tools_io_ssh`'s `ssh_argv` (server-tools.cpp:790 @cd959bae9): no console, so
+    /// Ports `tools_io_ssh`'s `ssh_argv` (server-tools.cpp:775 @b1b770d90): no console, so
     /// key-based auth only and a host key trusted beforehand.
     fn sshArgv() [9][]const u8 {
         return .{ "ssh", "-o", "BatchMode=yes", "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no", "-o", "StrictHostKeyChecking=yes" };
     }
 };
 
-/// Ports `tools_io_ssh`'s `is_valid_target` (server-tools.cpp:764 @cd959bae9): a target
+/// Ports `tools_io_ssh`'s `is_valid_target` (server-tools.cpp:749 @b1b770d90): a target
 /// starting with `-` would be an ssh option.
 fn sshIsValidTarget(target: []const u8) bool {
     if (target.len == 0 or target[0] == '-') return false;
@@ -827,7 +827,7 @@ fn sshIsValidTarget(target: []const u8) bool {
     return true;
 }
 
-/// Ports `container_runtime_spec` (server-tools.cpp:802 @cd959bae9):
+/// Ports `container_runtime_spec` (server-tools.cpp:787 @b1b770d90):
 /// `"<engine>:<image>"` spawns a container, `"<engine>-container:<id>"`
 /// attaches to one.
 const ContainerSpec = struct {
@@ -835,7 +835,7 @@ const ContainerSpec = struct {
     arg: []const u8 = "", // image name when spawning, container id when attaching
     attach: bool = false,
 
-    /// Ports `container_runtime_spec`'s `parse` (server-tools.cpp:807 @cd959bae9).
+    /// Ports `container_runtime_spec`'s `parse` (server-tools.cpp:792 @b1b770d90).
     fn parse(spec: []const u8) ?ContainerSpec {
         // docker and podman take the same verbs, hence a single implementation
         for ([_][]const u8{ "docker", "podman" }) |bin| {
@@ -849,7 +849,7 @@ const ContainerSpec = struct {
         return null;
     }
 
-    /// Ports `container_runtime_spec`'s `is_valid_id` (server-tools.cpp:827 @cd959bae9): an
+    /// Ports `container_runtime_spec`'s `is_valid_id` (server-tools.cpp:812 @b1b770d90): an
     /// id starting with `-` would be an engine option.
     fn isValidId(id: []const u8) bool {
         if (id.len == 0 or !std.ascii.isAlphanumeric(id[0])) return false;
@@ -860,7 +860,7 @@ const ContainerSpec = struct {
     }
 };
 
-/// Ports `tools_io` (server-tools.cpp:163 @cd959bae9): where a tool's file and
+/// Ports `tools_io` (server-tools.cpp:148 @b1b770d90): where a tool's file and
 /// process operations run.
 const Io = union(enum) {
     basic: Basic,
@@ -908,7 +908,7 @@ const Io = union(enum) {
     }
 };
 
-/// Ports `make_tools_io` (server-tools.cpp:837 @cd959bae9): the host for an empty
+/// Ports `make_tools_io` (server-tools.cpp:822 @b1b770d90): the host for an empty
 /// `runtime`, an attached container or an ssh host otherwise; anything
 /// else throws rather than fall back to the host.
 fn makeToolsIo(a: Allocator, params: *const Value) !Io {
@@ -942,7 +942,7 @@ fn cch(b: u8) c_char {
     return @bitCast(b);
 }
 
-/// Ports `glob_class_match` (common/common.cpp:721 @cd959bae9): whether `c` is in
+/// Ports `glob_class_match` (common/common.cpp:721 @b1b770d90): whether `c` is in
 /// the class `pattern[0..class_end]` (after its `[`).
 fn globClassMatch(ch: u8, pattern: []const u8, class_end: usize) bool {
     var class_start: usize = 0;
@@ -985,10 +985,10 @@ fn at0(s: []const u8, i: usize) u8 {
     return if (i < s.len) s[i] else 0;
 }
 
-/// Ports `COMMON_RECURSIVE_LIMIT` (common/common.h:34 @cd959bae9).
+/// Ports `COMMON_RECURSIVE_LIMIT` (common/common.h:34 @b1b770d90).
 const recursive_limit: usize = 128;
 
-/// Ports `glob_match` (common/common.cpp:763 @cd959bae9): `*` matches non-`/`
+/// Ports `glob_match` (common/common.cpp:763 @b1b770d90): `*` matches non-`/`
 /// characters, `**` anything including `/`, `[]` a character class. Over
 /// C strings, so the first NUL ends either.
 fn globMatch(pattern: []const u8, str: []const u8) bool {
@@ -1047,7 +1047,7 @@ fn globMatchAt(pattern_in: []const u8, str_in: []const u8, depth: usize) bool {
     return at0(str, 0) == 0;
 }
 
-/// Ports `path_glob_match` (server-tools.cpp:868 @cd959bae9): no `/` in the pattern
+/// Ports `path_glob_match` (server-tools.cpp:853 @b1b770d90): no `/` in the pattern
 /// matches the basename at any depth; otherwise the full relative path,
 /// anchored with `**/` unless it already is.
 fn pathGlobMatch(a: Allocator, pattern: []const u8, rel_path: []const u8) !bool {
@@ -1061,52 +1061,52 @@ fn pathGlobMatch(a: Allocator, pattern: []const u8, rel_path: []const u8) !bool 
 // -----------------------------------------------------------------------------
 // the tools
 
-/// Ports `SERVER_TOOL_READ_FILE_MAX_SIZE` (server-tools.cpp:882 @cd959bae9).
+/// Ports `SERVER_TOOL_READ_FILE_MAX_SIZE` (server-tools.cpp:867 @b1b770d90).
 const read_file_max_size: usize = 16 * 1024; // 16 KB
-/// Ports `SERVER_TOOL_READ_FILE_MAX_SIZE_BASE64` (server-tools.cpp:883 @cd959bae9).
+/// Ports `SERVER_TOOL_READ_FILE_MAX_SIZE_BASE64` (server-tools.cpp:868 @b1b770d90).
 const read_file_max_size_base64: usize = 32 * 1024 * 1024; // 32 MB
-/// Ports `SERVER_TOOL_FILE_SEARCH_MAX_RESULTS` (server-tools.cpp:988 @cd959bae9).
+/// Ports `SERVER_TOOL_FILE_SEARCH_MAX_RESULTS` (server-tools.cpp:973 @b1b770d90).
 const file_search_max_results: c_int = 100;
-/// Ports `SERVER_TOOL_GREP_SEARCH_MAX_RESULTS` (server-tools.cpp:1106 @cd959bae9).
+/// Ports `SERVER_TOOL_GREP_SEARCH_MAX_RESULTS` (server-tools.cpp:1091 @b1b770d90).
 const grep_search_max_results: usize = 100;
-/// Ports `SERVER_TOOL_EXEC_SHELL_COMMAND_MAX_OUTPUT_SIZE` (server-tools.cpp:1258 @cd959bae9).
+/// Ports `SERVER_TOOL_EXEC_SHELL_COMMAND_MAX_OUTPUT_SIZE` (server-tools.cpp:1243 @b1b770d90).
 const exec_shell_command_max_output_size: usize = 16 * 1024; // 16 KB
-/// Ports `SERVER_TOOL_EXEC_SHELL_COMMAND_MAX_TIMEOUT` (server-tools.cpp:1259 @cd959bae9).
+/// Ports `SERVER_TOOL_EXEC_SHELL_COMMAND_MAX_TIMEOUT` (server-tools.cpp:1244 @b1b770d90).
 const exec_shell_command_max_timeout: c_int = 60; // seconds
-/// Ports `SERVER_TOOL_GET_INFO_MAX_OUTPUT` (server-tools.cpp:1714 @cd959bae9).
+/// Ports `SERVER_TOOL_GET_INFO_MAX_OUTPUT` (server-tools.cpp:1699 @b1b770d90).
 const get_info_max_output: usize = 4096;
-/// Ports `SERVER_TOOL_GET_INFO_TIMEOUT` (server-tools.cpp:1715 @cd959bae9).
+/// Ports `SERVER_TOOL_GET_INFO_TIMEOUT` (server-tools.cpp:1700 @b1b770d90).
 const get_info_timeout: c_int = 5; // seconds
 
 /// The definitions, as JSON text in the C++ initializer lists' order (an
 /// ordered object keeps insertion order, so parsing the text builds the
 /// same value).
 const defs = struct {
-    /// Ports `server_tool_read_file`'s `get_definition` (server-tools.cpp:893 @cd959bae9).
+    /// Ports `server_tool_read_file`'s `get_definition` (server-tools.cpp:878 @b1b770d90).
     const read_file =
         \\{"type":"function","function":{"name":"read_file","description":"Read the contents of a file. Optionally specify a 1-based line range. If append_loc is true, each line is prefixed with its line number (e.g. \"1→...\").","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Path to the file"},"start_line":{"type":"integer","description":"First line to read, 1-based (default: 1)"},"end_line":{"type":"integer","description":"Last line to read, 1-based inclusive (default: end of file)"},"append_loc":{"type":"boolean","description":"Prefix each line with its line number"}},"required":["path"]}}}
     ;
-    /// Ports `server_tool_file_glob_search`'s `get_definition` (server-tools.cpp:1001 @cd959bae9).
+    /// Ports `server_tool_file_glob_search`'s `get_definition` (server-tools.cpp:986 @b1b770d90).
     const file_glob_search = std.fmt.comptimePrint(
         \\{{"type":"function","function":{{"name":"file_glob_search","description":"Recursively search for files matching a glob pattern under a directory. Automatically skips files ignored by .gitignore (when the directory is inside a git repo) and common junk directories (.git, node_modules, build, dist, etc.) otherwise. A pattern with no '/' (e.g. \"*.cpp\") matches the file's basename at any depth. A pattern containing '/' matches the full relative path; unless already anchored with \"**/\" or a leading '/', it is automatically prefixed with \"**/\". Use type=\"dir\" or \"all\" to also list directories; directory entries are suffixed with '/' in the output. Note: directory listings do not apply .gitignore filtering.","parameters":{{"type":"object","properties":{{"path":{{"type":"string","description":"Base directory to search in"}},"include":{{"type":"string","description":"Glob pattern for files to include (e.g. \"*.cpp\" or \"src/**/*.cpp\"). Default: **"}},"exclude":{{"type":"string","description":"Glob pattern for files to exclude"}},"type":{{"type":"string","description":"Entry type to return: \"file\" (default), \"dir\" or \"all\""}},"max_depth":{{"type":"integer","description":"Maximum depth to descend into subdirectories (default: 0 = unlimited; 1 = direct children only)"}},"limit":{{"type":"integer","description":"Maximum number of results to return, capped at {d} (default {d})"}}}},"required":["path"]}}}}}}
     , .{ file_search_max_results, file_search_max_results });
-    /// Ports `server_tool_grep_search`'s `get_definition` (server-tools.cpp:1116 @cd959bae9).
+    /// Ports `server_tool_grep_search`'s `get_definition` (server-tools.cpp:1101 @b1b770d90).
     const grep_search =
         \\{"type":"function","function":{"name":"grep_search","description":"Search for a pattern in files under a path. Returns matching lines with file paths (and, unless searching a single file, paths relative to the given directory). Automatically skips files ignored by .gitignore (when the directory is inside a git repo) and common junk directories (.git, node_modules, build, dist, etc.) otherwise. include/exclude: a pattern with no '/' matches the basename at any depth; a pattern containing '/' matches the full relative path (auto-anchored with \"**/\" unless already anchored).","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File or directory to search in"},"pattern":{"type":"string","description":"Pattern to search for (regular expression unless literal is true)"},"include":{"type":"string","description":"Glob pattern to filter files (default: **)"},"exclude":{"type":"string","description":"Glob pattern to exclude files"},"return_line_numbers":{"type":"boolean","description":"If true, include line numbers in results"},"literal":{"type":"boolean","description":"Treat pattern as a literal string instead of a regular expression (default: false)"},"ignore_case":{"type":"boolean","description":"Case-insensitive search (default: false)"},"context_lines":{"type":"integer","description":"Number of lines of context to show before and after each match (default: 0)"}},"required":["path","pattern"]}}}
     ;
-    /// Ports `server_tool_exec_shell_command`'s `get_definition` (server-tools.cpp:1270 @cd959bae9).
+    /// Ports `server_tool_exec_shell_command`'s `get_definition` (server-tools.cpp:1255 @b1b770d90).
     const exec_shell_command = std.fmt.comptimePrint(
         \\{{"type":"function","function":{{"name":"exec_shell_command","description":"Execute a shell command and return its output (stdout and stderr combined).","parameters":{{"type":"object","properties":{{"command":{{"type":"string","description":"Shell command to execute"}},"timeout":{{"type":"integer","description":"Timeout in seconds (default 10, max {d})"}},"max_output_size":{{"type":"integer","description":"Maximum output size in bytes (default {d})"}}}},"required":["command"]}}}}}}
     , .{ exec_shell_command_max_timeout, exec_shell_command_max_output_size });
-    /// Ports `server_tool_write_file`'s `get_definition` (server-tools.cpp:1348 @cd959bae9).
+    /// Ports `server_tool_write_file`'s `get_definition` (server-tools.cpp:1333 @b1b770d90).
     const write_file =
         \\{"type":"function","function":{"name":"write_file","description":"Write content to a file, creating it (including parent directories) if it does not exist. May use with edit_file for more complex edits.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Path of the file to write"},"content":{"type":"string","description":"Content to write"}},"required":["path","content"]}}}
     ;
-    /// Ports `server_tool_edit_file`'s `get_definition` (server-tools.cpp:1391 @cd959bae9).
+    /// Ports `server_tool_edit_file`'s `get_definition` (server-tools.cpp:1376 @b1b770d90).
     const edit_file =
         \\{"type":"function","function":{"name":"edit_file","description":"Edit a file using exact text replacement. Each edits[].old_text must be unique in the file and is matched against the original content, not incrementally. Merge nearby changes into one edit instead of overlapping edits. Use write_file to replace the whole file.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Path to the file to edit"},"edits":{"type":"array","description":"One or more exact text replacements to apply","items":{"type":"object","properties":{"old_text":{"type":"string","description":"Exact text to find; must be unique in the file and must not overlap with other edits"},"new_text":{"type":"string","description":"Text to replace old_text with"}},"required":["old_text","new_text"]}}},"required":["path","edits"]}}}
     ;
-    /// Ports `server_tool_get_info`'s `get_definition` (server-tools.cpp:1725 @cd959bae9).
+    /// Ports `server_tool_get_info`'s `get_definition` (server-tools.cpp:1710 @b1b770d90).
     const get_info =
         \\{"type":"function","function":{"name":"get_info","description":"Returns runtime info: the OS name/version and the current working directory","parameters":{"type":"object","properties":{}}}}
     ;
@@ -1115,14 +1115,14 @@ const defs = struct {
 /// Which tool a `Tool` is: the seven built in, or one from an MCP server.
 pub const Kind = enum { read_file, file_glob_search, grep_search, exec_shell_command, write_file, edit_file, get_info, mcp };
 
-/// Ports `server_tool`'s `stream` (server-tools.h:23 @cd959bae9): where a
+/// Ports `server_tool`'s `stream` (server-tools.h:23 @b1b770d90): where a
 /// streaming tool pushes its output.
 pub const Stream = struct {
     qr: *ResultQueue,
     id: i32,
     alive: ?mcp.StopFn, // true while the client is there
 
-    /// Ports `server_tool`'s `stream`'s `push` (server-tools.cpp:1792 @cd959bae9).
+    /// Ports `server_tool`'s `stream`'s `push` (server-tools.cpp:1777 @b1b770d90).
     fn push(self: *const Stream, chunk: []const u8) !void {
         if (chunk.len == 0) return;
         const r = try StreamResult.create();
@@ -1136,8 +1136,8 @@ pub const Stream = struct {
     }
 };
 
-/// Ports `server_tool` (server-tools.h:12 @cd959bae9) and its subclasses, one
-/// per `Kind`; `server_mcp_tool` (server-tools.cpp:1818 @cd959bae9) is `.mcp`.
+/// Ports `server_tool` (server-tools.h:12 @b1b770d90) and its subclasses, one
+/// per `Kind`; `server_mcp_tool` (server-tools.cpp:1803 @b1b770d90) is `.mcp`.
 pub const Tool = struct {
     name: []const u8,
     display_name: []const u8,
@@ -1152,14 +1152,14 @@ pub const Tool = struct {
     def: ?mcp.ToolDef = null,
     mcp_mgr: ?*mcp.Mcp = null,
 
-    /// Ports `server_tool`'s `type` (server-tools.h:21 @cd959bae9), and
-    /// `server_mcp_tool`'s `type` (server-tools.cpp:1836 @cd959bae9).
+    /// Ports `server_tool`'s `type` (server-tools.h:21 @b1b770d90), and
+    /// `server_mcp_tool`'s `type` (server-tools.cpp:1821 @b1b770d90).
     fn typeName(self: *const Tool) []const u8 {
         return if (self.kind == .mcp) "mcp" else "server";
     }
 
     /// Ports each tool's `get_definition`, `server_mcp_tool`'s
-    /// `get_definition` (server-tools.cpp:1838 @cd959bae9) among them.
+    /// `get_definition` (server-tools.cpp:1823 @b1b770d90) among them.
     fn getDefinition(self: *const Tool, a: Allocator) !Value {
         const text = switch (self.kind) {
             .read_file => defs.read_file,
@@ -1185,7 +1185,7 @@ pub const Tool = struct {
         return json.parse(a, text);
     }
 
-    /// Ports `server_tool`'s `to_json` (server-tools.cpp:91 @cd959bae9).
+    /// Ports `server_tool`'s `to_json` (server-tools.cpp:91 @b1b770d90).
     fn toJson(self: *const Tool, a: Allocator) !Value {
         var perms = common.Obj.init(a);
         try perms.put("write", self.permission_write);
@@ -1200,9 +1200,12 @@ pub const Tool = struct {
     }
 
     /// Ports each tool's `invoke`: the result, or null when it streamed.
+    /// `should_stop` is true once the caller stopped waiting, e.g. the
+    /// client dropped the connection; null means "never stop". Only the
+    /// MCP tools read it.
     ///
     /// Return: allocated by `a`.
-    fn invoke(self: *const Tool, a: Allocator, params: *const Value, st: ?*const Stream) !Value {
+    fn invoke(self: *const Tool, a: Allocator, params: *const Value, st: ?*const Stream, should_stop: ?mcp.StopFn) !Value {
         return switch (self.kind) {
             .read_file => invokeReadFile(a, params),
             .file_glob_search => invokeFileGlobSearch(a, params),
@@ -1211,8 +1214,8 @@ pub const Tool = struct {
             .write_file => invokeWriteFile(a, params),
             .edit_file => invokeEditFile(a, params),
             .get_info => invokeGetInfo(a, params),
-            // Ports `server_mcp_tool`'s `invoke` (server-tools.cpp:1853 @cd959bae9).
-            .mcp => self.mcp_mgr.?.callTool(a, self.server_name, self.tool_name, params, null),
+            // Ports `server_mcp_tool`'s `invoke` (server-tools.cpp:1838 @b1b770d90).
+            .mcp => self.mcp_mgr.?.callTool(a, self.server_name, self.tool_name, params, should_stop),
         };
     }
 };
@@ -1236,7 +1239,7 @@ fn atString(params: *const Value, key: []const u8) ![]const u8 {
     return (try params.at(key)).get([]const u8);
 }
 
-/// Ports `server_tool_read_file`'s `invoke` (server-tools.cpp:914 @cd959bae9): a
+/// Ports `server_tool_read_file`'s `invoke` (server-tools.cpp:899 @b1b770d90): a
 /// line range, optionally numbered; or, asked by the `x-resp-type` header,
 /// the whole file in base64.
 fn invokeReadFile(a: Allocator, params: *const Value) !Value {
@@ -1297,7 +1300,7 @@ fn invokeReadFile(a: Allocator, params: *const Value) !Value {
     return plainText(a, result.items);
 }
 
-/// Ports `server_tool_file_glob_search`'s `invoke` (server-tools.cpp:1031 @cd959bae9).
+/// Ports `server_tool_file_glob_search`'s `invoke` (server-tools.cpp:1016 @b1b770d90).
 fn invokeFileGlobSearch(a: Allocator, params: *const Value) !Value {
     const io = try makeToolsIo(a, params);
 
@@ -1366,7 +1369,7 @@ fn invokeFileGlobSearch(a: Allocator, params: *const Value) !Value {
     return o.done();
 }
 
-/// Ports `server_tool_grep_search`'s `invoke` (server-tools.cpp:1146 @cd959bae9): an
+/// Ports `server_tool_grep_search`'s `invoke` (server-tools.cpp:1131 @b1b770d90): an
 /// ECMAScript regex (or a literal) over every line of the files under a
 /// path, with context lines.
 fn invokeGrepSearch(a: Allocator, params: *const Value) !Value {
@@ -1469,7 +1472,7 @@ fn invokeGrepSearch(a: Allocator, params: *const Value) !Value {
     return plainText(a, output_text.items);
 }
 
-/// Ports `server_tool_exec_shell_command`'s `invoke` (server-tools.cpp:1289 @cd959bae9):
+/// Ports `server_tool_exec_shell_command`'s `invoke` (server-tools.cpp:1274 @b1b770d90):
 /// `sh -c` with a timeout and an output cap; with a stream, each chunk as
 /// it comes and the exit code last.
 fn invokeExecShellCommand(a: Allocator, params: *const Value, st: ?*const Stream) !Value {
@@ -1511,7 +1514,7 @@ fn invokeExecShellCommand(a: Allocator, params: *const Value, st: ?*const Stream
     return plainText(a, text_output);
 }
 
-/// Ports `server_tool_write_file`'s `invoke` (server-tools.cpp:1366 @cd959bae9).
+/// Ports `server_tool_write_file`'s `invoke` (server-tools.cpp:1351 @b1b770d90).
 fn invokeWriteFile(a: Allocator, params: *const Value) !Value {
     const path = try atString(params, "path");
     const content = try atString(params, "content");
@@ -1528,7 +1531,7 @@ fn invokeWriteFile(a: Allocator, params: *const Value) !Value {
     return o.done();
 }
 
-/// Ports `server_tool_edit_file`'s `matched_edit` (server-tools.cpp:1614 @cd959bae9).
+/// Ports `server_tool_edit_file`'s `matched_edit` (server-tools.cpp:1599 @b1b770d90).
 const MatchedEdit = struct {
     edit_index: usize,
     match_index: usize, // offset into the "base content"
@@ -1551,7 +1554,7 @@ fn find(s: []const u8, needle: []const u8) usize {
 }
 
 /// Ports `server_tool_edit_file`'s `normalize_line_for_fuzzy_match`
-/// (server-tools.cpp:1514 @cd959bae9): trailing whitespace stripped, smart quotes,
+/// (server-tools.cpp:1499 @b1b770d90): trailing whitespace stripped, smart quotes,
 /// dashes and spaces made ASCII.
 fn normalizeLineForFuzzyMatch(a: Allocator, line: []const u8) ![]const u8 {
     var end = line.len;
@@ -1583,7 +1586,7 @@ fn normalizeLineForFuzzyMatch(a: Allocator, line: []const u8) ![]const u8 {
     return s;
 }
 
-/// Ports `server_tool_edit_file`'s `normalize_for_fuzzy_match` (server-tools.cpp:1556 @cd959bae9):
+/// Ports `server_tool_edit_file`'s `normalize_for_fuzzy_match` (server-tools.cpp:1541 @b1b770d90):
 /// every line normalized, line count and positions kept.
 fn normalizeForFuzzyMatch(a: Allocator, content: []const u8) ![]const u8 {
     var result: std.ArrayList(u8) = .empty;
@@ -1599,7 +1602,7 @@ fn normalizeForFuzzyMatch(a: Allocator, content: []const u8) ![]const u8 {
     return result.items;
 }
 
-/// Ports `server_tool_edit_file`'s `split_lines_with_endings` (server-tools.cpp:1573 @cd959bae9).
+/// Ports `server_tool_edit_file`'s `split_lines_with_endings` (server-tools.cpp:1558 @b1b770d90).
 fn splitLinesWithEndings(a: Allocator, content: []const u8) !std.ArrayList([]const u8) {
     var lines: std.ArrayList([]const u8) = .empty;
     var start: usize = 0;
@@ -1614,10 +1617,10 @@ fn splitLinesWithEndings(a: Allocator, content: []const u8) !std.ArrayList([]con
     return lines;
 }
 
-/// Ports `server_tool_edit_file`'s `line_span` (server-tools.cpp:1588 @cd959bae9).
+/// Ports `server_tool_edit_file`'s `line_span` (server-tools.cpp:1573 @b1b770d90).
 const LineSpan = struct { start: usize, end: usize };
 
-/// Ports `server_tool_edit_file`'s `get_line_spans` (server-tools.cpp:1593 @cd959bae9).
+/// Ports `server_tool_edit_file`'s `get_line_spans` (server-tools.cpp:1578 @b1b770d90).
 fn getLineSpans(a: Allocator, content: []const u8) !std.ArrayList(LineSpan) {
     var spans: std.ArrayList(LineSpan) = .empty;
     var offset: usize = 0;
@@ -1628,7 +1631,7 @@ fn getLineSpans(a: Allocator, content: []const u8) !std.ArrayList(LineSpan) {
     return spans;
 }
 
-/// Ports `server_tool_edit_file`'s `count_occurrences` (server-tools.cpp:1604 @cd959bae9):
+/// Ports `server_tool_edit_file`'s `count_occurrences` (server-tools.cpp:1589 @b1b770d90):
 /// non-overlapping.
 fn countOccurrences(content: []const u8, needle: []const u8) usize {
     if (needle.len == 0) return 0;
@@ -1641,7 +1644,7 @@ fn countOccurrences(content: []const u8, needle: []const u8) usize {
     return count;
 }
 
-/// Ports `server_tool_edit_file`'s `apply_replacements` (server-tools.cpp:1622 @cd959bae9):
+/// Ports `server_tool_edit_file`'s `apply_replacements` (server-tools.cpp:1607 @b1b770d90):
 /// sorted, non-overlapping replacements applied from the back.
 fn applyReplacements(a: Allocator, content: []const u8, replacements: []const MatchedEdit, offset: usize) ![]const u8 {
     var result = content;
@@ -1655,7 +1658,7 @@ fn applyReplacements(a: Allocator, content: []const u8, replacements: []const Ma
     return result;
 }
 
-/// Ports `server_tool_edit_file`'s `get_replacement_line_range` (server-tools.cpp:1635 @cd959bae9):
+/// Ports `server_tool_edit_file`'s `get_replacement_line_range` (server-tools.cpp:1620 @b1b770d90):
 /// a replacement's byte range widened to the lines it touches.
 fn getReplacementLineRange(lines: []const LineSpan, match_index: usize, match_length: usize, out_start_line: *usize, out_end_line: *usize) bool {
     const replacement_start = match_index;
@@ -1680,7 +1683,7 @@ fn getReplacementLineRange(lines: []const LineSpan, match_index: usize, match_le
 }
 
 /// Ports `server_tool_edit_file`'s `apply_replacements_preserving_unchanged_lines`
-/// (server-tools.cpp:1663 @cd959bae9): as `apply_replacements`, but untouched
+/// (server-tools.cpp:1648 @b1b770d90): as `apply_replacements`, but untouched
 /// lines come from the original content.
 fn applyReplacementsPreservingUnchangedLines(a: Allocator, original_content: []const u8, base_content: []const u8, replacements: []const MatchedEdit) ![]const u8 {
     const original_lines = (try splitLinesWithEndings(a, original_content)).items;
@@ -1727,7 +1730,7 @@ fn applyReplacementsPreservingUnchangedLines(a: Allocator, original_content: []c
     return result.items;
 }
 
-/// Ports `server_tool_edit_file`'s `invoke` (server-tools.cpp:1423 @cd959bae9): every
+/// Ports `server_tool_edit_file`'s `invoke` (server-tools.cpp:1408 @b1b770d90): every
 /// edit matched against the original content, exactly or -- when any one
 /// has no exact match -- after normalizing whitespace and typography.
 fn invokeEditFile(a: Allocator, params: *const Value) !Value {
@@ -1811,7 +1814,7 @@ fn invokeEditFile(a: Allocator, params: *const Value) !Value {
     return o.done();
 }
 
-/// Ports `server_tool_get_info`'s `invoke` (server-tools.cpp:1739 @cd959bae9): `uname
+/// Ports `server_tool_get_info`'s `invoke` (server-tools.cpp:1724 @b1b770d90): `uname
 /// -a` and the working directory.
 fn invokeGetInfo(a: Allocator, params: *const Value) !Value {
     const io = try makeToolsIo(a, params);
@@ -1840,7 +1843,7 @@ fn invokeGetInfo(a: Allocator, params: *const Value) !Value {
 // -----------------------------------------------------------------------------
 // streaming
 
-/// Ports `server_tool_stream_result` (server-tools.cpp:1774 @cd959bae9): one chunk of a
+/// Ports `server_tool_stream_result` (server-tools.cpp:1759 @b1b770d90): one chunk of a
 /// streamed tool's output, or the end.
 pub const StreamResult = struct {
     id: i32 = -1,
@@ -1860,7 +1863,7 @@ pub const StreamResult = struct {
         al.destroy(self);
     }
 
-    /// Ports `server_tool_stream_result`'s `to_json` (server-tools.cpp:1779 @cd959bae9).
+    /// Ports `server_tool_stream_result`'s `to_json` (server-tools.cpp:1764 @b1b770d90).
     fn toJson(self: *const StreamResult, a: Allocator) !Value {
         var o = common.Obj.init(a);
         if (!self.done) {
@@ -1876,7 +1879,7 @@ pub const StreamResult = struct {
 /// `server_response` over tool stream results.
 pub const ResultQueue = queue.Response(*StreamResult);
 
-/// Ports `server_tools_res` (server-tools.cpp:1800 @cd959bae9): a response whose
+/// Ports `server_tools_res` (server-tools.cpp:1785 @b1b770d90): a response whose
 /// destructor joins the streaming worker and stops waiting for its id.
 const ToolsRes = struct {
     base: http.Res,
@@ -1896,7 +1899,7 @@ const ToolsRes = struct {
         return self;
     }
 
-    /// Ports `server_tools_res`'s destructor (server-tools.cpp:1805 @cd959bae9).
+    /// Ports `server_tools_res`'s destructor (server-tools.cpp:1790 @b1b770d90).
     fn destroyRes(res: *http.Res) void {
         const self: *ToolsRes = @fieldParentPtr("base", res);
         if (self.worker) |t| t.join();
@@ -1913,16 +1916,16 @@ const ToolsRes = struct {
 // -----------------------------------------------------------------------------
 // runtimes
 
-/// Ports `server_tools_runtime` (server-tools.cpp:1860 @cd959bae9), and its two
-/// subclasses: `server_tools_static_runtime` (server-tools.cpp:1867 @cd959bae9), a
+/// Ports `server_tools_runtime` (server-tools.cpp:1845 @b1b770d90), and its two
+/// subclasses: `server_tools_static_runtime` (server-tools.cpp:1852 @b1b770d90), a
 /// target that already exists, and `server_tools_container_runtime`
-/// (server-tools.cpp:1877 @cd959bae9), a container this server spawns and owns.
+/// (server-tools.cpp:1862 @b1b770d90), a container this server spawns and owns.
 const Runtime = union(enum) {
     static: []const u8,
     container: *ContainerRuntime,
 
-    /// Ports `server_tools_static_runtime`'s `spec` (server-tools.cpp:1869 @cd959bae9)
-    /// and `server_tools_container_runtime`'s `spec` (server-tools.cpp:1901 @cd959bae9):
+    /// Ports `server_tools_static_runtime`'s `spec` (server-tools.cpp:1854 @b1b770d90)
+    /// and `server_tools_container_runtime`'s `spec` (server-tools.cpp:1886 @b1b770d90):
     /// the runtime string `make_tools_io` takes, once per tool call.
     ///
     /// Return: owned by `a`.
@@ -1941,7 +1944,7 @@ const Runtime = union(enum) {
     }
 };
 
-/// Ports `server_tools_container_runtime` (server-tools.cpp:1877 @cd959bae9): owns
+/// Ports `server_tools_container_runtime` (server-tools.cpp:1862 @b1b770d90): owns
 /// the container `--tools-runtime "<engine>:<image>"` names, spawned here
 /// and stopped when the server exits.
 const ContainerRuntime = struct {
@@ -1951,7 +1954,7 @@ const ContainerRuntime = struct {
     proc: Subproc = .{}, // `<engine> run` client that keeps the container alive
     mutex: mcp.Mutex = .{},
 
-    /// Ports `server_tools_container_runtime`'s constructor (server-tools.cpp:1880 @cd959bae9).
+    /// Ports `server_tools_container_runtime`'s constructor (server-tools.cpp:1865 @b1b770d90).
     fn create(spec_str: []const u8) !*ContainerRuntime {
         const parsed = ContainerSpec.parse(spec_str) orelse
             return throw(error.RuntimeError, "unknown --tools-runtime option: {s}", .{spec_str});
@@ -1968,7 +1971,7 @@ const ContainerRuntime = struct {
         return self;
     }
 
-    /// Ports `server_tools_container_runtime`'s destructor (server-tools.cpp:1894 @cd959bae9): closing stdin signals
+    /// Ports `server_tools_container_runtime`'s destructor (server-tools.cpp:1879 @b1b770d90): closing stdin signals
     /// the container's shell to exit; `--rm` then removes it.
     fn destroy(self: *ContainerRuntime) void {
         self.proc.closeStdin();
@@ -1979,7 +1982,7 @@ const ContainerRuntime = struct {
         gpa.destroy(self);
     }
 
-    /// Ports `server_tools_container_runtime`'s `spec` (server-tools.cpp:1901 @cd959bae9):
+    /// Ports `server_tools_container_runtime`'s `spec` (server-tools.cpp:1886 @b1b770d90):
     /// respawns a container that died on its own.
     fn spec(self: *ContainerRuntime, a: Allocator) ![]const u8 {
         self.mutex.lock();
@@ -1995,7 +1998,7 @@ const ContainerRuntime = struct {
         return std.mem.concat(a, u8, &.{ self.bin, "-container:", self.container_id });
     }
 
-    /// Ports `server_tools_container_runtime`'s `spawn` (server-tools.cpp:1919 @cd959bae9):
+    /// Ports `server_tools_container_runtime`'s `spawn` (server-tools.cpp:1904 @b1b770d90):
     /// `<engine> run --rm -i --cidfile <tmp> <image> sh`, its stdin kept
     /// open so the shell blocks and the container stays up.
     fn spawn(self: *ContainerRuntime) !void {
@@ -2047,7 +2050,7 @@ fn tempDirectoryPath() []const u8 {
     return p;
 }
 
-/// Ports `make_tools_runtime` (server-tools.cpp:2004 @cd959bae9): the
+/// Ports `make_tools_runtime` (server-tools.cpp:1989 @b1b770d90): the
 /// `"<engine>:<image>"` form owns a container; anything else names an
 /// existing target, validated now.
 fn makeToolsRuntime(spec_str: []const u8) !Runtime {
@@ -2065,7 +2068,7 @@ fn makeToolsRuntime(spec_str: []const u8) !Runtime {
 // -----------------------------------------------------------------------------
 // server_tools
 
-/// Ports `find_tool` (server-tools.cpp:1951 @cd959bae9).
+/// Ports `find_tool` (server-tools.cpp:1936 @b1b770d90).
 fn findTool(tools: []const *Tool, name: []const u8, require_stream: bool) !*Tool {
     for (tools) |t| {
         if (std.mem.eql(u8, t.name, name)) {
@@ -2078,14 +2081,14 @@ fn findTool(tools: []const *Tool, name: []const u8, require_stream: bool) !*Tool
     return throw(error.InvalidArgument, "unknown tool \"{s}\"", .{name});
 }
 
-/// Ports `build_tools` (server-tools.cpp:1967 @cd959bae9), with each tool's constructor:
-/// `server_tool_read_file` (server-tools.cpp:886 @cd959bae9),
-/// `server_tool_file_glob_search` (server-tools.cpp:994 @cd959bae9),
-/// `server_tool_grep_search` (server-tools.cpp:1109 @cd959bae9),
-/// `server_tool_exec_shell_command` (server-tools.cpp:1262 @cd959bae9),
-/// `server_tool_write_file` (server-tools.cpp:1341 @cd959bae9),
-/// `server_tool_edit_file` (server-tools.cpp:1384 @cd959bae9),
-/// `server_tool_get_info` (server-tools.cpp:1718 @cd959bae9).
+/// Ports `build_tools` (server-tools.cpp:1952 @b1b770d90), with each tool's constructor:
+/// `server_tool_read_file` (server-tools.cpp:871 @b1b770d90),
+/// `server_tool_file_glob_search` (server-tools.cpp:979 @b1b770d90),
+/// `server_tool_grep_search` (server-tools.cpp:1094 @b1b770d90),
+/// `server_tool_exec_shell_command` (server-tools.cpp:1247 @b1b770d90),
+/// `server_tool_write_file` (server-tools.cpp:1326 @b1b770d90),
+/// `server_tool_edit_file` (server-tools.cpp:1369 @b1b770d90),
+/// `server_tool_get_info` (server-tools.cpp:1703 @b1b770d90).
 fn buildTools() ![7]*Tool {
     const all = [7]Tool{
         .{ .name = "read_file", .display_name = "Read file", .uses_cwd = true, .kind = .read_file },
@@ -2104,8 +2107,8 @@ fn buildTools() ![7]*Tool {
     return out;
 }
 
-/// Ports `get_header` (server-tools.cpp:1989 @cd959bae9) over `str_to_lower`
-/// (server-tools.cpp:1983 @cd959bae9): the first header whose name matches
+/// Ports `get_header` (server-tools.cpp:1974 @b1b770d90) over `str_to_lower`
+/// (server-tools.cpp:1968 @b1b770d90): the first header whose name matches
 /// without case, in the map's order.
 fn getHeader(headers: *const http.StringMap, key: []const u8) []const u8 {
     for (headers.entries.items) |h| {
@@ -2114,7 +2117,7 @@ fn getHeader(headers: *const http.StringMap, key: []const u8) []const u8 {
     return "";
 }
 
-/// Ports `server_tools` (server-tools.h:36 @cd959bae9): the enabled tools,
+/// Ports `server_tools` (server-tools.h:37 @b1b770d90): the enabled tools,
 /// the queue their streams go through, and the `--tools-runtime` isolate
 /// every call is routed through.
 pub const Tools = struct {
@@ -2127,12 +2130,12 @@ pub const Tools = struct {
     // set when --tools-runtime is configured; routes every tool call through an isolate
     runtime: ?Runtime = null,
 
-    /// Ports `server_tools`'s constructor (server-tools.cpp:1999 @cd959bae9).
+    /// Ports `server_tools`'s constructor (server-tools.cpp:1984 @b1b770d90).
     pub fn init() !Tools {
         return .{ .queue_res = try ResultQueue.init(gpa) };
     }
 
-    /// Ports `server_tools`'s destructor (server-tools.cpp:2000 @cd959bae9): the runtime's
+    /// Ports `server_tools`'s destructor (server-tools.cpp:1985 @b1b770d90): the runtime's
     /// container stopped.
     pub fn deinit(self: *Tools) void {
         if (self.runtime) |r| r.deinit();
@@ -2148,7 +2151,7 @@ pub const Tools = struct {
         self.queue_res.deinit();
     }
 
-    /// Ports `server_tools`'s `setup` (server-tools.cpp:2013 @cd959bae9): the runtime,
+    /// Ports `server_tools`'s `setup` (server-tools.cpp:1998 @b1b770d90): the runtime,
     /// the enabled built-in tools (`all` for every one), then the MCP
     /// servers' tools, skipping a name already taken.
     pub fn setup(self: *Tools, enabled_tools: []const []const u8, mcp_mgr: *mcp.Mcp, tools_runtime: []const u8) !void {
@@ -2211,7 +2214,7 @@ pub const Tools = struct {
                     continue;
                 }
                 try seen_names.put(gpa, mcp_name, {});
-                // Ports `server_mcp_tool`'s constructor (server-tools.cpp:1824 @cd959bae9).
+                // Ports `server_mcp_tool`'s constructor (server-tools.cpp:1809 @b1b770d90).
                 const t = try gpa.create(Tool);
                 t.* = .{
                     .name = mcp_name,
@@ -2239,7 +2242,7 @@ pub const Tools = struct {
         return .{ .ctx = self, .func = handlePostImpl };
     }
 
-    /// Ports the `handle_get` lambda (server-tools.cpp:2077 @cd959bae9): every tool's
+    /// Ports the `handle_get` lambda (server-tools.cpp:2062 @b1b770d90): every tool's
     /// `to_json`.
     fn handleGetImpl(ctx: ?*anyopaque, _: *const http.Req) anyerror!*http.Res {
         const self: *Tools = @ptrCast(@alignCast(ctx.?));
@@ -2271,7 +2274,7 @@ pub const Tools = struct {
         try res.setData(try common.safeJsonToStr(a, &v));
     }
 
-    /// Ports the `handle_post` lambda (server-tools.cpp:2093 @cd959bae9): one tool call,
+    /// Ports the `handle_post` lambda (server-tools.cpp:2078 @b1b770d90): one tool call,
     /// its `cwd`, `runtime` and `resp_type` taken from the `x-tool-cwd`,
     /// `x-tool-runtime` and `x-resp-type` headers and never from the body;
     /// streamed through `queue_res` when asked.
@@ -2309,13 +2312,19 @@ pub const Tools = struct {
         if (cwd.len != 0) try params.set(a, "cwd", try Value.initString(a, cwd));
 
         // accept x-tool-runtime header to route tool I/O through an isolate, e.g. "docker-container:<id>";
-        // falls back to the --tools-runtime isolate, if configured
+        // --tools-runtime wins: it is the sandbox, the client must not move tools out of it
         if (params.contains("runtime")) try params.erase(a, "runtime");
         const runtime_header = getHeader(&req.headers, "x-tool-runtime");
-        if (runtime_header.len != 0) {
-            try params.set(a, "runtime", try Value.initString(a, runtime_header));
-        } else if (self.runtime) |r| {
+        if (self.runtime) |r| {
+            if (runtime_header.len != 0) {
+                res.base.status = 403;
+                var v = try common.formatErrorResponse(a, "x-tool-runtime is not allowed when --tools-runtime is set", .permission);
+                try res.base.setData(try common.safeJsonToStr(a, &v));
+                return;
+            }
             try params.set(a, "runtime", try Value.initString(a, try r.spec(a)));
+        } else if (runtime_header.len != 0) {
+            try params.set(a, "runtime", try Value.initString(a, runtime_header));
         }
 
         // x-resp-type header is only used by read_file for now
@@ -2344,10 +2353,16 @@ pub const Tools = struct {
             next.* = .{ .tools = self, .id = id };
             res.base.next = .{ .ctx = next, .func = Next.call };
         } else {
-            const result = try tool.invoke(a, &params, null);
+            const result = try tool.invoke(a, &params, null, .{ .ctx = @constCast(req), .f = reqShouldStop });
             res.base.status = 200;
             try res.base.setData(try common.safeJsonToStr(a, &result));
         }
+    }
+
+    /// `req.should_stop`, as the `std::function<bool()>` `invoke` takes.
+    fn reqShouldStop(ctx: ?*anyopaque) bool {
+        const req: *const http.Req = @ptrCast(@alignCast(ctx.?));
+        return req.should_stop.call();
     }
 
     /// The streaming worker's lambda: invokes the tool, then sends the
@@ -2368,7 +2383,7 @@ pub const Tools = struct {
         fn run(self: *Worker) void {
             const st: Stream = .{ .qr = &self.tools.queue_res, .id = self.id, .alive = .{ .ctx = @constCast(self.req), .f = alive } };
             const done = StreamResult.create() catch return;
-            _ = self.tool.invoke(self.arena, &self.params, &st) catch |e| {
+            _ = self.tool.invoke(self.arena, &self.params, &st, .{ .ctx = @constCast(self.req), .f = reqShouldStop }) catch |e| {
                 done.error_msg = gpa.dupe(u8, if (e == error.JsonError or e == error.RuntimeError or e == error.InvalidArgument or e == error.OutOfMemory)
                     common.exception.what(e)
                 else

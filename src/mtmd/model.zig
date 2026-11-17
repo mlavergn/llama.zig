@@ -1,9 +1,9 @@
-//! The clip model's hyperparameters and weights.
+//! An mtmd model's hyperparameters and weights.
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/clip-model.h` at v0.9.0 (`cd959bae9`), field
-//! for field. The tensor-pointer fields were extracted from the header
+//! Ports `llama.cpp/tools/mtmd/mtmd-model.h` at v1.0.0 (`b1b770d90`) --
+//! `clip-model.h` until v0.9.0 -- field for field. The tensor-pointer fields were extracted from the header
 //! mechanically, in the header's order, so a struct here reads against the
 //! C++ line by line; the rest is written by hand. Each declaration names
 //! what it ports and the line it began at.
@@ -14,16 +14,16 @@ const names = @import("names.zig");
 const c = impl.c;
 const gpa = impl.gpa;
 
-/// Ports `ffn_op_type` (clip-model.h:15 @cd959bae9).
+/// Ports `ffn_op_type` (mtmd-model.h:34 @b1b770d90).
 pub const FfnOpType = enum(c_int) { gelu, gelu_erf, silu, gelu_quick, relu_sqr };
 
-/// Ports `norm_type` (clip-model.h:23 @cd959bae9).
+/// Ports `norm_type` (mtmd-model.h:42 @b1b770d90).
 pub const NormType = enum(c_int) { normal, rms };
 
-/// Ports `patch_merge_type` (clip-model.h:28 @cd959bae9).
+/// Ports `patch_merge_type` (mtmd-model.h:47 @b1b770d90).
 pub const PatchMergeType = enum(c_int) { flat, spatial_unpad };
 
-/// Ports `resize_algo` (clip-model.h:35 @cd959bae9): the low bits
+/// Ports `resize_algo` (mtmd-model.h:54 @b1b770d90): the low bits
 /// select the algorithm, Pillow-compatible (matching `PIL.Image.resize`);
 /// `flag_torch` matches torchvision's antialiased resize of `uint8` images on
 /// the CPU (int16 weights), bilinear and bicubic only. Non-exhaustive, because
@@ -48,7 +48,7 @@ pub const ResizeAlgo = enum(c_int) {
     }
 };
 
-/// Ports `pad_style` (clip-model.h:47 @cd959bae9): how `img_tool::resize`
+/// Ports `pad_style` (mtmd-model.h:66 @b1b770d90): how `img_tool::resize`
 /// pads.
 pub const PadStyle = enum(c_int) {
     /// no padding; direct resize to target dimensions
@@ -62,7 +62,7 @@ pub const PadStyle = enum(c_int) {
 /// `std::unordered_set<int32_t>`, as far as the C++ uses it: membership.
 pub const IntSet = std.AutoHashMapUnmanaged(i32, void);
 
-/// Ports `clip_hparams` (clip-model.h:53 @cd959bae9).
+/// Ports `mtmd_hparams` (mtmd-model.h:72 @b1b770d90).
 pub const Hparams = struct {
     image_size: i32 = 0,
     patch_size: i32 = 0,
@@ -228,7 +228,7 @@ pub const Hparams = struct {
     custom_image_min_tokens: i32 = -1,
     custom_image_max_tokens: i32 = -1,
 
-    /// `pockettts_max_spk_seconds` (clip-model.h:192 @cd959bae9), a member of `clip_hparams`.
+    /// `pockettts_max_spk_seconds` (mtmd-model.h:211 @b1b770d90), a member of `mtmd_hparams`.
     pub const pockettts_max_spk_seconds: i32 = 30;
 
     pub fn deinit(self: *Hparams) void {
@@ -246,24 +246,24 @@ pub const Hparams = struct {
         self.audio_depths.deinit(gpa);
     }
 
-    /// Ports `audio_samples_per_token` (clip-model.h:149 @cd959bae9), a member of
-    /// `clip_hparams`: the audio pyramid's fold, every stage multiplied.
+    /// Ports `audio_samples_per_token` (mtmd-model.h:168 @b1b770d90), a member of
+    /// `mtmd_hparams`: the audio pyramid's fold, every stage multiplied.
     pub fn audioSamplesPerToken(self: *const Hparams) i32 {
         var n: i64 = 1;
         for (self.audio_patch_sizes.items) |p| {
             n *= p;
-            impl.ggmlAssert(n >= 1 and n <= (1 << 20), "clip-model.h", 153, "n >= 1 && n <= (1 << 20)");
+            impl.ggmlAssert(n >= 1 and n <= (1 << 20), "mtmd-model.h", 172, "n >= 1 && n <= (1 << 20)");
         }
         return @intCast(n);
     }
 
-    /// Ports `set_image_resize_algo` (clip-model.h:227 @cd959bae9), a member of `clip_hparams`.
+    /// Ports `set_image_resize_algo` (mtmd-model.h:246 @b1b770d90), a member of `mtmd_hparams`.
     pub fn setImageResizeAlgo(self: *Hparams, algo: ResizeAlgo, torch: bool) void {
-        impl.ggmlAssert(!(torch and algo == .lanczos), "clip-model.h", 228, "!(torch && algo == RESIZE_ALGO_LANCZOS) && \"torchvision has no lanczos\"");
+        impl.ggmlAssert(!(torch and algo == .lanczos), "mtmd-model.h", 247, "!(torch && algo == RESIZE_ALGO_LANCZOS) && \"torchvision has no lanczos\"");
         self.image_resize_algo = if (torch) @fromBackingInt(@backingInt(algo) | ResizeAlgo.flag_torch) else algo;
     }
 
-    /// Ports `set_limit_image_tokens` (clip-model.h:232 @cd959bae9), a member of `clip_hparams`.
+    /// Ports `set_limit_image_tokens` (mtmd-model.h:251 @b1b770d90), a member of `mtmd_hparams`.
     pub fn setLimitImageTokens(self: *Hparams, n_tokens_min: c_int, n_tokens_max: c_int) void {
         const patch_area = self.patch_size * self.patch_size * self.n_merge * self.n_merge;
         self.image_min_pixels = (if (self.custom_image_min_tokens > 0) self.custom_image_min_tokens else n_tokens_min) * patch_area;
@@ -271,7 +271,7 @@ pub const Hparams = struct {
         self.warmup_image_size = @intFromFloat(@sqrt(@as(f64, @floatFromInt(self.image_max_pixels))));
     }
 
-    /// Ports `set_limit_image_tokens` (clip-model.h:240 @cd959bae9), a member of `clip_hparams`,
+    /// Ports `set_limit_image_tokens` (mtmd-model.h:259 @b1b770d90), a member of `mtmd_hparams`,
     /// the overload the longest-edge preprocessor uses.
     pub fn setLimitImageTokensCustom(self: *Hparams) void {
         const patch_area = self.patch_size * self.patch_size * self.n_merge * self.n_merge;
@@ -279,11 +279,11 @@ pub const Hparams = struct {
         if (self.custom_image_max_tokens > 0) self.image_max_pixels = self.custom_image_max_tokens * patch_area;
     }
 
-    /// Ports `set_warmup_n_tokens` (clip-model.h:250 @cd959bae9), a member of `clip_hparams`:
+    /// Ports `set_warmup_n_tokens` (mtmd-model.h:269 @b1b770d90), a member of `mtmd_hparams`:
     /// since v0.6.0 never more tokens than `custom_image_max_tokens` allows.
     pub fn setWarmupNTokens(self: *Hparams, n_tokens: c_int) void {
         var n_tok_per_side: c_int = @intFromFloat(@sqrt(@as(f64, @floatFromInt(n_tokens))));
-        impl.ggmlAssert(n_tok_per_side * n_tok_per_side == n_tokens, "clip-model.h", 252, "n_tok_per_side * n_tok_per_side == n_tokens && \"n_tokens must be n*n\"");
+        impl.ggmlAssert(n_tok_per_side * n_tok_per_side == n_tokens, "mtmd-model.h", 271, "n_tok_per_side * n_tok_per_side == n_tokens && \"n_tokens must be n*n\"");
         // do not warmup with more tokens than the max allowed
         if (self.custom_image_max_tokens > 0 and n_tokens > self.custom_image_max_tokens) {
             n_tok_per_side = @max(1, @as(c_int, @intFromFloat(@sqrt(@as(f64, @floatFromInt(self.custom_image_max_tokens))))));
@@ -291,20 +291,20 @@ pub const Hparams = struct {
         self.warmup_image_size = n_tok_per_side * self.patch_size * self.n_merge;
     }
 
-    /// Ports `is_global_attn` (clip-model.h:263 @cd959bae9), a member of `clip_hparams`, over
+    /// Ports `is_global_attn` (mtmd-model.h:282 @b1b770d90), a member of `mtmd_hparams`, over
     /// `global_attn_indices`, the SAM ViT's {2, 5, 8, 11}.
     pub fn isGlobalAttn(self: *const Hparams, layer: i32) bool {
         _ = self;
         return layer == 2 or layer == 5 or layer == 8 or layer == 11;
     }
 
-    /// Ports `is_feature_layer` (clip-model.h:275 @cd959bae9), a member of `clip_hparams`.
+    /// Ports `is_feature_layer` (mtmd-model.h:294 @b1b770d90), a member of `mtmd_hparams`.
     pub fn isFeatureLayer(self: *const Hparams, layer: i32) bool {
         return std.mem.indexOfScalar(i32, self.feature_layers.items, layer) != null;
     }
 };
 
-/// Ports `clip_layer` (clip-model.h:280 @cd959bae9).
+/// Ports `mtmd_layer` (mtmd-model.h:299 @b1b770d90).
 pub const Layer = struct {
     // layernorm 1 (or layer input norm, or pre-attention norm)
     ln_1_w: ?*c.ggml_tensor = null,
@@ -427,7 +427,7 @@ pub const Layer = struct {
     }
 };
 
-/// Ports `mobilenetv5_block` (clip-model.h:417 @cd959bae9): the expanded
+/// Ports `mobilenetv5_block` (mtmd-model.h:436 @b1b770d90): the expanded
 /// MobileNetV5 block of the Gemma3n vision encoder.
 pub const MobilenetV5Block = struct {
     // Stage 0 (Edge Residual)
@@ -459,7 +459,7 @@ pub const MobilenetV5Block = struct {
     attn_norm_w: ?*c.ggml_tensor = null,
 };
 
-/// Ports `yasa2_block` (clip-model.h:455 @cd959bae9).
+/// Ports `yasa2_block` (mtmd-model.h:474 @b1b770d90).
 pub const Yasa2Block = struct {
     dw_w: ?*c.ggml_tensor = null,
     dw_b: ?*c.ggml_tensor = null,
@@ -473,7 +473,7 @@ pub const Yasa2Block = struct {
     pw2_b: ?*c.ggml_tensor = null,
 };
 
-/// Ports `yasa2_stage` (clip-model.h:468 @cd959bae9).
+/// Ports `yasa2_stage` (mtmd-model.h:487 @b1b770d90).
 pub const Yasa2Stage = struct {
     down_ln_w: ?*c.ggml_tensor = null,
     down_ln_b: ?*c.ggml_tensor = null,
@@ -482,7 +482,7 @@ pub const Yasa2Stage = struct {
     blocks: std.ArrayList(Yasa2Block) = .empty,
 };
 
-/// Ports `qf_block` (clip-model.h:478 @cd959bae9): a QFormer projector block
+/// Ports `qf_block` (mtmd-model.h:497 @b1b770d90): a QFormer projector block
 /// (Granite Speech, Granite4 Vision).
 pub const QfBlock = struct {
     qf_proj_query: ?*c.ggml_tensor = null,
@@ -496,10 +496,10 @@ pub const QfBlock = struct {
     qf_proj_layers: std.ArrayList(Layer) = .empty,
 };
 
-/// Ports `clip_seanet` (clip-model.h:493 @cd959bae9): the pocket-tts SEANet
+/// Ports `mtmd_seanet` (mtmd-model.h:512 @b1b770d90): the pocket-tts SEANet
 /// stack, used in both directions.
 pub const Seanet = struct {
-    /// Ports `stage` (clip-model.h:495 @cd959bae9), a member of `clip_seanet`.
+    /// Ports `stage` (mtmd-model.h:514 @b1b770d90), a member of `mtmd_seanet`.
     pub const Stage = struct {
         res_conv1_w: ?*c.ggml_tensor = null,
         res_conv1_b: ?*c.ggml_tensor = null,
@@ -516,10 +516,10 @@ pub const Seanet = struct {
     stages: std.ArrayList(Stage) = .empty,
 };
 
-/// Ports `clip_flow_net` (clip-model.h:512 @cd959bae9): the pocket-tts
+/// Ports `mtmd_flow_net` (mtmd-model.h:531 @b1b770d90): the pocket-tts
 /// flow-matching decoder (SimpleMLPAdaLN).
 pub const FlowNet = struct {
-    /// Ports `block` (clip-model.h:514 @cd959bae9), a member of `clip_flow_net`.
+    /// Ports `block` (mtmd-model.h:533 @b1b770d90), a member of `mtmd_flow_net`.
     pub const Block = struct {
         norm_w: ?*c.ggml_tensor = null,
         norm_b: ?*c.ggml_tensor = null,
@@ -531,7 +531,7 @@ pub const FlowNet = struct {
         ada_b: ?*c.ggml_tensor = null,
     };
 
-    /// Ports `time_embd` (clip-model.h:526 @cd959bae9), a member of `clip_flow_net`.
+    /// Ports `time_embd` (mtmd-model.h:545 @b1b770d90), a member of `mtmd_flow_net`.
     pub const TimeEmbd = struct {
         freqs: ?*c.ggml_tensor = null,
         up_w: ?*c.ggml_tensor = null,
@@ -553,10 +553,10 @@ pub const FlowNet = struct {
     blocks: std.ArrayList(Block) = .empty,
 };
 
-/// Ports `clip_code2wav` (clip-model.h:548 @cd959bae9): qwen3tts RVQ codes
+/// Ports `mtmd_code2wav` (mtmd-model.h:567 @b1b770d90): qwen3tts RVQ codes
 /// to raw PCM.
 pub const Code2Wav = struct {
-    /// Ports `upsample_block` (clip-model.h:550 @cd959bae9), a member of `clip_code2wav`.
+    /// Ports `upsample_block` (mtmd-model.h:569 @b1b770d90), a member of `mtmd_code2wav`.
     pub const UpsampleBlock = struct {
         conv_w: ?*c.ggml_tensor = null, // causal ConvTranspose1d, 2x
         conv_b: ?*c.ggml_tensor = null,
@@ -571,7 +571,7 @@ pub const Code2Wav = struct {
         gamma: ?*c.ggml_tensor = null, // layer scale
     };
 
-    /// Ports `dac_res` (clip-model.h:565 @cd959bae9), a member of `clip_code2wav`.
+    /// Ports `dac_res` (mtmd-model.h:584 @b1b770d90), a member of `mtmd_code2wav`.
     pub const DacRes = struct {
         act1_alpha: ?*c.ggml_tensor = null,
         act1_beta: ?*c.ggml_tensor = null,
@@ -583,7 +583,7 @@ pub const Code2Wav = struct {
         conv2_b: ?*c.ggml_tensor = null,
     };
 
-    /// Ports `dac_block` (clip-model.h:577 @cd959bae9), a member of `clip_code2wav`.
+    /// Ports `dac_block` (mtmd-model.h:596 @b1b770d90), a member of `mtmd_code2wav`.
     pub const DacBlock = struct {
         snake_alpha: ?*c.ggml_tensor = null,
         snake_beta: ?*c.ggml_tensor = null,
@@ -622,11 +622,11 @@ pub const Code2Wav = struct {
     dac_post_conv_b: ?*c.ggml_tensor = null,
 };
 
-/// Ports `clip_chatterbox` (clip-model.h:615 @cd959bae9): chatterbox's
+/// Ports `mtmd_chatterbox` (mtmd-model.h:634 @b1b770d90): chatterbox's
 /// flow encoder, CFM estimator, HiFT vocoder, S3 tokenizer and CAMPPlus
 /// speaker encoder.
 pub const Chatterbox = struct {
-    /// Ports `enc_layer` (clip-model.h:617 @cd959bae9), a member of `clip_chatterbox`:
+    /// Ports `enc_layer` (mtmd-model.h:636 @b1b770d90), a member of `mtmd_chatterbox`:
     /// an espnet rel-pos conformer layer of the flow encoder.
     pub const EncLayer = struct {
         norm_mha_w: ?*c.ggml_tensor = null,
@@ -650,7 +650,7 @@ pub const Chatterbox = struct {
         ffn_2_b: ?*c.ggml_tensor = null,
     };
 
-    /// Ports `causal_block` (clip-model.h:640 @cd959bae9), a member of `clip_chatterbox`:
+    /// Ports `causal_block` (mtmd-model.h:659 @b1b770d90), a member of `mtmd_chatterbox`:
     /// conv k3 left padded + layer norm.
     pub const CausalBlock = struct {
         conv_w: ?*c.ggml_tensor = null,
@@ -659,7 +659,7 @@ pub const Chatterbox = struct {
         norm_b: ?*c.ggml_tensor = null,
     };
 
-    /// Ports `resnet` (clip-model.h:648 @cd959bae9), a member of `clip_chatterbox`:
+    /// Ports `resnet` (mtmd-model.h:667 @b1b770d90), a member of `mtmd_chatterbox`:
     /// a time conditioned resnet of the estimator.
     pub const Resnet = struct {
         block1: CausalBlock = .{},
@@ -670,7 +670,7 @@ pub const Chatterbox = struct {
         res_conv_b: ?*c.ggml_tensor = null,
     };
 
-    /// Ports `tfm_block` (clip-model.h:658 @cd959bae9), a member of `clip_chatterbox`:
+    /// Ports `tfm_block` (mtmd-model.h:677 @b1b770d90), a member of `mtmd_chatterbox`:
     /// a diffusers style transformer block of the estimator.
     pub const TfmBlock = struct {
         norm1_w: ?*c.ggml_tensor = null,
@@ -688,7 +688,7 @@ pub const Chatterbox = struct {
         ff_out_b: ?*c.ggml_tensor = null,
     };
 
-    /// Ports `est_stage` (clip-model.h:675 @cd959bae9), a member of `clip_chatterbox`:
+    /// Ports `est_stage` (mtmd-model.h:694 @b1b770d90), a member of `mtmd_chatterbox`:
     /// resnet, transformer stack, boundary causal conv (null on mid stages).
     pub const EstStage = struct {
         res: Resnet = .{},
@@ -697,7 +697,7 @@ pub const Chatterbox = struct {
         conv_b: ?*c.ggml_tensor = null,
     };
 
-    /// Ports `hift_res_unit` (clip-model.h:683 @cd959bae9), a member of `clip_chatterbox`:
+    /// Ports `hift_res_unit` (mtmd-model.h:702 @b1b770d90), a member of `mtmd_chatterbox`:
     /// a snake resblock unit of the hift vocoder.
     pub const HiftResUnit = struct {
         act1_alpha: ?*c.ggml_tensor = null,
@@ -708,12 +708,12 @@ pub const Chatterbox = struct {
         conv2_b: ?*c.ggml_tensor = null,
     };
 
-    /// Ports `hift_res` (clip-model.h:691 @cd959bae9), a member of `clip_chatterbox`.
+    /// Ports `hift_res` (mtmd-model.h:710 @b1b770d90), a member of `mtmd_chatterbox`.
     pub const HiftRes = struct {
         units: std.ArrayList(HiftResUnit) = .empty, // dilations 1/3/5 on conv1
     };
 
-    /// Ports `hift_up` (clip-model.h:696 @cd959bae9), a member of `clip_chatterbox`:
+    /// Ports `hift_up` (mtmd-model.h:715 @b1b770d90), a member of `mtmd_chatterbox`:
     /// conv transpose, source injection, 3 resblocks.
     pub const HiftUp = struct {
         up_w: ?*c.ggml_tensor = null,
@@ -726,13 +726,13 @@ pub const Chatterbox = struct {
         res_2: HiftRes = .{},
     };
 
-    /// Ports `f0_conv` (clip-model.h:708 @cd959bae9), a member of `clip_chatterbox`.
+    /// Ports `f0_conv` (mtmd-model.h:727 @b1b770d90), a member of `mtmd_chatterbox`.
     pub const F0Conv = struct {
         w: ?*c.ggml_tensor = null,
         b: ?*c.ggml_tensor = null,
     };
 
-    /// Ports `s3tok_block` (clip-model.h:714 @cd959bae9), a member of `clip_chatterbox`:
+    /// Ports `s3tok_block` (mtmd-model.h:733 @b1b770d90), a member of `mtmd_chatterbox`:
     /// neox rope on q/k, fsmn memory on v.
     pub const S3tokBlock = struct {
         attn_ln_w: ?*c.ggml_tensor = null,
@@ -753,7 +753,7 @@ pub const Chatterbox = struct {
         mlp_out_b: ?*c.ggml_tensor = null,
     };
 
-    /// Ports `bn` (clip-model.h:734 @cd959bae9), a member of `clip_chatterbox`: a folded
+    /// Ports `bn` (mtmd-model.h:753 @b1b770d90), a member of `mtmd_chatterbox`: a folded
     /// batchnorm (w/b stay null on the affine free variant).
     pub const Bn = struct {
         mean: ?*c.ggml_tensor = null,
@@ -762,7 +762,7 @@ pub const Chatterbox = struct {
         b: ?*c.ggml_tensor = null,
     };
 
-    /// Ports `spk_res2d` (clip-model.h:742 @cd959bae9), a member of `clip_chatterbox`: the
+    /// Ports `spk_res2d` (mtmd-model.h:761 @b1b770d90), a member of `mtmd_chatterbox`: the
     /// shortcut is null on stride 1 blocks.
     pub const SpkRes2d = struct {
         conv1_w: ?*c.ggml_tensor = null,
@@ -773,7 +773,7 @@ pub const Chatterbox = struct {
         shortcut_bn: Bn = .{},
     };
 
-    /// Ports `spk_cam_layer` (clip-model.h:752 @cd959bae9), a member of `clip_chatterbox`.
+    /// Ports `spk_cam_layer` (mtmd-model.h:771 @b1b770d90), a member of `mtmd_chatterbox`.
     pub const SpkCamLayer = struct {
         nl1_bn: Bn = .{},
         linear1_w: ?*c.ggml_tensor = null,
@@ -785,7 +785,7 @@ pub const Chatterbox = struct {
         ctx2_b: ?*c.ggml_tensor = null,
     };
 
-    /// Ports `spk_cam_block` (clip-model.h:762 @cd959bae9), a member of `clip_chatterbox`.
+    /// Ports `spk_cam_block` (mtmd-model.h:781 @b1b770d90), a member of `mtmd_chatterbox`.
     pub const SpkCamBlock = struct {
         layers: std.ArrayList(SpkCamLayer) = .empty,
         transit_bn: Bn = .{},
@@ -868,7 +868,7 @@ pub const Chatterbox = struct {
     spk_affine_b: ?*c.ggml_tensor = null,
 };
 
-/// Ports `clip_vocos` (clip-model.h:844 @cd959bae9): soprano's Vocos decoder.
+/// Ports `mtmd_vocos` (mtmd-model.h:872 @b1b770d90): soprano's Vocos decoder.
 pub const Vocos = struct {
     input_w: ?*c.ggml_tensor = null,
     input_b: ?*c.ggml_tensor = null,
@@ -881,7 +881,7 @@ pub const Vocos = struct {
     blocks: std.ArrayList(Code2Wav.UpsampleBlock) = .empty,
 };
 
-/// Ports `clamp_info` (clip-model.h:1208 @cd959bae9), a member of `clip_model`: the clamp
+/// Ports `clamp_info` (mtmd-model.h:1248 @b1b770d90), a member of `mtmd_model`: the clamp
 /// bounds of a Gemma4ClippableLinear.
 pub const ClampInfo = struct {
     inp_max: f32,
@@ -890,7 +890,7 @@ pub const ClampInfo = struct {
     out_min: f32,
 };
 
-/// Ports `audio_patch` (clip-model.h:884 @cd959bae9), a member of `clip_model`:
+/// Ports `audio_patch` (mtmd-model.h:923 @b1b770d90), a member of `mtmd_model`:
 /// one patch embedder per audio pyramid stage (muse-spark).
 pub const AudioPatch = struct {
     proj_w: ?*c.ggml_tensor = null,
@@ -898,18 +898,66 @@ pub const AudioPatch = struct {
     norm_w: ?*c.ggml_tensor = null,
 };
 
-/// Ports `clip_model` (clip-model.h:856 @cd959bae9).
+/// A `std::map<ggml_backend_dev_t, size_t>`: by device pointer, ascending.
+pub const DevSizeMap = struct {
+    items: std.ArrayList(struct { dev: c.ggml_backend_dev_t, size: usize }) = .empty,
+
+    pub fn add(self: *DevSizeMap, dev: c.ggml_backend_dev_t, n: usize) !void {
+        const key = @intFromPtr(dev);
+        var i: usize = 0;
+        while (i < self.items.items.len) : (i += 1) {
+            const k = @intFromPtr(self.items.items[i].dev);
+            if (k == key) {
+                self.items.items[i].size += n;
+                return;
+            }
+            if (k > key) break;
+        }
+        try self.items.insert(impl.gpa, i, .{ .dev = dev, .size = n });
+    }
+
+    pub fn clear(self: *DevSizeMap) void {
+        self.items.clearRetainingCapacity();
+    }
+
+    pub fn deinit(self: *DevSizeMap) void {
+        self.items.deinit(impl.gpa);
+    }
+};
+
+/// Ports `mtmd_drama3_layer` (mtmd-model.h:864 @b1b770d90): the drama3
+/// tower's extra tensors around the generic block.
+pub const Drama3Layer = struct {
+    enorm_w: ?*c.ggml_tensor = null,
+    hnorm_w: ?*c.ggml_tensor = null,
+    eh_proj_w: ?*c.ggml_tensor = null, // [code embd; hidden] -> hidden
+    embd_w: ?*c.ggml_tensor = null,
+    out_norm_w: ?*c.ggml_tensor = null,
+};
+
+/// Ports `mtmd_model` (mtmd-model.h:885 @b1b770d90): the weights and hparams
+/// of one modality of an mmproj file, read-only once loaded. Since v1.0.0 it
+/// owns its weights, which `clip_ctx` held until v0.9.0.
 pub const Model = struct {
     modality: impl.Modality = .vision,
     proj_type: names.ProjectorType = .mlp,
     hparams: Hparams = .{},
+
+    // runtime requirements declared by the model, applied by mtmd_subcontext
+    max_nodes: c_int = 8192,
+    flash_attn_auto: bool = true, // false: MTMD_FLASH_ATTN_TYPE_AUTO resolves to disabled
+
+    // weights
+    ctx_data: ?*c.ggml_context = null,
+    buf: c.ggml_backend_buffer_t = null,
+    mem_weights: DevSizeMap = .{},
 
     layers: std.ArrayList(Layer) = .empty,
 
     // one patch embedder per audio pyramid stage (muse-spark)
     a_patches: std.ArrayList(AudioPatch) = .empty,
 
-    n_deepstack_layers: i32 = 0, // used by Qwen3-VL, calculated from clip_layer
+    n_deepstack_layers: i32 = 0, // used by Qwen3-VL, calculated from mtmd_layer
 
     mobilenet_blocks: std.ArrayList(MobilenetV5Block) = .empty,
     mobilenet_stage_ends: std.ArrayList(c_int) = .empty,
@@ -918,6 +966,7 @@ pub const Model = struct {
 
     // qwen3tts code2wav: RVQ codes -> raw PCM
     c2w: Code2Wav = .{},
+    drama3_layers: std.ArrayList(Drama3Layer) = .empty,
     // pocket-tts: SEANet stack, shared by the encoder (speaker path) and the decoder (gen path)
     seanet: Seanet = .{},
     // pocket-tts: flow-matching decoder, backbone hidden state -> next latent
@@ -927,7 +976,7 @@ pub const Model = struct {
     // chatterbox flow encoder, cfm estimator, hift vocoder, s3 tokenizer and CAMPPlus speaker encoder
     cbx: Chatterbox = .{},
 
-    // chatterbox tensors read on the host, see clip_cbx_read_tensor(); keys owned
+    // chatterbox tensors read on the host, see cbx_read_tensor(); keys owned
     cbx_tensors: std.StringHashMapUnmanaged(?*c.ggml_tensor) = .empty,
     // predefined voices, no rows if the voice is named in the prompt (lfm3a)
     gen_voices: impl.GenVoiceMap = .{},
@@ -980,6 +1029,7 @@ pub const Model = struct {
     patch_embeddings_1: ?*c.ggml_tensor = null, // additional patch kernel; interpretation is model-specific (Qwen2VL, Nemotron Omni)
     patch_bias: ?*c.ggml_tensor = null,
     position_embeddings: ?*c.ggml_tensor = null,
+    rope_freqs: ?*c.ggml_tensor = null,
     norm_embd_w: ?*c.ggml_tensor = null,
     norm_embd_b: ?*c.ggml_tensor = null,
     // "indexed" patch embedding norms
@@ -1238,12 +1288,29 @@ pub const Model = struct {
     ctc_out_mid_b: ?*c.ggml_tensor = null,
     // qformer projector(s)
 
-    /// Ports `audio_has_avgpool` (clip-model.h:1235 @cd959bae9), a member of `clip_model`.
+    /// The C++'s destructor, as far as the port owns heap memory: the weights
+    /// buffer before its context, then the maps and lists.
+    pub fn deinit(self: *Model) void {
+        if (self.buf != null) c.ggml_backend_buffer_free(self.buf);
+        self.buf = null;
+        if (self.ctx_data != null) c.ggml_free(self.ctx_data);
+        self.ctx_data = null;
+        self.mem_weights.deinit();
+        self.hparams.deinit();
+        self.gen_voices.deinit();
+        var it = self.cbx_tensors.keyIterator();
+        while (it.next()) |k| impl.gpa.free(k.*);
+        self.cbx_tensors.deinit(impl.gpa);
+        self.spk_sil_emb.deinit(impl.gpa);
+        self.drama3_layers.deinit(impl.gpa);
+    }
+
+    /// Ports `audio_has_avgpool` (mtmd-model.h:1275 @b1b770d90), a member of `mtmd_model`.
     pub fn audioHasAvgpool(self: *const Model) bool {
         return self.proj_type == .qwen2a or self.proj_type == .voxtral or self.proj_type == .music_flamingo;
     }
 
-    /// Ports `audio_has_stack_frames` (clip-model.h:1241 @cd959bae9), a member of `clip_model`.
+    /// Ports `audio_has_stack_frames` (mtmd-model.h:1281 @b1b770d90), a member of `mtmd_model`.
     pub fn audioHasStackFrames(self: *const Model) bool {
         return self.proj_type == .ultravox or self.proj_type == .voxtral or self.proj_type == .meralion;
     }

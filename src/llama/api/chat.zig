@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-chat.cpp` (v0.9.0, `cd959bae9`):
+//! Ported from `llama.cpp/src/llama-chat.cpp` (v1.0.0, `b1b770d90`):
 //! `llama_chat_builtin_templates`, its one unmangled export. The template
 //! table is `chat.zig`'s. `llama_chat_apply_template` is defined in
 //! `llama.cpp/src/llama.cpp`, so it is in `api/llama.zig`.
@@ -14,7 +14,7 @@
 const std = @import("std");
 const chat = @import("../chat.zig");
 
-/// Ports `llama_chat_builtin_templates` (llama-chat.cpp:950 @cd959bae9).
+/// Ports `llama_chat_builtin_templates` (llama-chat.cpp:950 @b1b770d90).
 pub fn llama_chat_builtin_templates(output: [*c][*c]const u8, len: usize) callconv(.c) i32 {
     return chat.builtinTemplates(@ptrCast(output), len);
 }

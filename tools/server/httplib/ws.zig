@@ -6,8 +6,8 @@
 //! Ports `ws::WebSocket`, `ws::WebSocketClient`, `ws::impl`,
 //! `detail::write_websocket_frame` and the handshake helpers from
 //! `llama.cpp/vendor/cpp-httplib/httplib.cpp` and
-//! `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib 0.64.0, vendored at
-//! v0.9.0, `cd959bae9`). Each declaration names what it ports and the line it
+//! `llama.cpp/vendor/cpp-httplib/httplib.h` (cpp-httplib 0.66.0, vendored at
+//! v1.0.0, `b1b770d90`). Each declaration names what it ports and the line it
 //! began at.
 //!
 //! # What is not here
@@ -28,16 +28,16 @@ const message = @import("message.zig");
 const SocketStream = socket.SocketStream;
 const Headers = detail.Headers;
 
-/// `CPPHTTPLIB_WEBSOCKET_MAX_PAYLOAD_LENGTH` (httplib.h:247 @cd959bae9).
+/// `CPPHTTPLIB_WEBSOCKET_MAX_PAYLOAD_LENGTH` (httplib.h:247 @b1b770d90).
 const max_payload_length: usize = 16777216;
-/// `CPPHTTPLIB_WEBSOCKET_SERVER_READ_TIMEOUT_SECOND` (httplib.h:279 @cd959bae9).
+/// `CPPHTTPLIB_WEBSOCKET_SERVER_READ_TIMEOUT_SECOND` (httplib.h:279 @b1b770d90).
 pub const server_read_timeout_second: i64 = 300;
-/// `CPPHTTPLIB_WEBSOCKET_CLOSE_TIMEOUT_SECOND` (httplib.h:283 @cd959bae9).
+/// `CPPHTTPLIB_WEBSOCKET_CLOSE_TIMEOUT_SECOND` (httplib.h:283 @b1b770d90).
 const close_timeout_second: i64 = 5;
-/// `CPPHTTPLIB_WEBSOCKET_PING_INTERVAL_SECOND` (httplib.h:287 @cd959bae9).
+/// `CPPHTTPLIB_WEBSOCKET_PING_INTERVAL_SECOND` (httplib.h:287 @b1b770d90).
 const ping_interval_second: i64 = 30;
 
-/// Ports `Opcode` (httplib.h:4572 @cd959bae9). Any four bits are read off
+/// Ports `Opcode` (httplib.h:4585 @b1b770d90). Any four bits are read off
 /// the wire, as the C's cast takes them.
 pub const Opcode = enum(u8) {
     continuation = 0x0,
@@ -49,7 +49,7 @@ pub const Opcode = enum(u8) {
     _,
 };
 
-/// Ports `CloseStatus` (httplib.h:4581 @cd959bae9), the codes used here.
+/// Ports `CloseStatus` (httplib.h:4594 @b1b770d90), the codes used here.
 pub const CloseStatus = enum(u16) {
     normal = 1000,
     going_away = 1001,
@@ -57,14 +57,14 @@ pub const CloseStatus = enum(u16) {
     invalid_payload = 1007,
 };
 
-/// Ports `ReadResult` (httplib.h:4599 @cd959bae9). `Timeout` is out of reach:
+/// Ports `ReadResult` (httplib.h:4612 @b1b770d90). `Timeout` is out of reach:
 /// nothing here asks for a read timeout.
 pub const ReadResult = enum(c_int) { fail = 0, text = 1, binary = 2 };
 
-/// Ports `FrameRead` (httplib.h:4914 @cd959bae9).
+/// Ports `FrameRead` (httplib.h:4927 @b1b770d90).
 const FrameRead = enum { ok, fail, timeout };
 
-/// Ports `fill_random_bytes` (httplib.cpp:915 @cd959bae9): unpredictable
+/// Ports `fill_random_bytes` (httplib.cpp:915 @b1b770d90): unpredictable
 /// bytes for masking keys (RFC 6455 Section 5.3) and nonces.
 pub fn fillRandomBytes(out: []u8) void {
     if (comptime builtin.os.tag.isDarwin()) {
@@ -78,7 +78,7 @@ pub fn fillRandomBytes(out: []u8) void {
     }
 }
 
-/// Ports `is_valid_utf8` (httplib.cpp:709 @cd959bae9).
+/// Ports `is_valid_utf8` (httplib.cpp:709 @b1b770d90).
 fn isValidUtf8(s: []const u8) bool {
     var i: usize = 0;
     const n = s.len;
@@ -119,7 +119,7 @@ fn isValidUtf8(s: []const u8) bool {
     return true;
 }
 
-/// Ports `is_valid_close_payload` (httplib.cpp:1105 @cd959bae9): RFC 6455
+/// Ports `is_valid_close_payload` (httplib.cpp:1105 @b1b770d90): RFC 6455
 /// §5.5.1, §7.4: a Close payload is empty, or a status code that may be sent
 /// followed by a UTF-8 reason.
 fn isValidClosePayload(payload: []const u8) bool {
@@ -132,7 +132,7 @@ fn isValidClosePayload(payload: []const u8) bool {
     return may_be_sent and isValidUtf8(payload[2..]);
 }
 
-/// Ports `read_exact` (httplib.cpp:1007 @cd959bae9): exactly `buf.len`
+/// Ports `read_exact` (httplib.cpp:1007 @b1b770d90): exactly `buf.len`
 /// bytes. A timeout is reported only when nothing at all was consumed: once a
 /// byte has been taken the stream sits mid-field and cannot be resumed.
 fn readExact(strm: *SocketStream, buf: []u8) FrameRead {
@@ -148,7 +148,7 @@ fn readExact(strm: *SocketStream, buf: []u8) FrameRead {
     return .ok;
 }
 
-/// Ports `read_websocket_frame` (httplib.cpp:1021 @cd959bae9): one frame into
+/// Ports `read_websocket_frame` (httplib.cpp:1021 @b1b770d90): one frame into
 /// `payload`, cleared first and left unmasked.
 fn readWebsocketFrame(a: std.mem.Allocator, strm: *SocketStream, opcode: *Opcode, payload: *std.ArrayList(u8), fin: *bool, expect_masked: bool, max_len: usize) error{OutOfMemory}!FrameRead {
     // Read first 2 bytes. This is the only read that may report a timeout: it
@@ -219,7 +219,7 @@ fn readWebsocketFrame(a: std.mem.Allocator, strm: *SocketStream, opcode: *Opcode
     return .ok;
 }
 
-/// Ports `write_websocket_frame` (httplib.cpp:926 @cd959bae9): the header,
+/// Ports `write_websocket_frame` (httplib.cpp:926 @b1b770d90): the header,
 /// and the payload, masked in chunks when `mask` is set, each piece written
 /// whole (`write_data`), however many writes it takes.
 fn writeWebsocketFrame(strm: *SocketStream, opcode: Opcode, data: []const u8, fin: bool, mask: bool) bool {
@@ -270,7 +270,7 @@ fn writeWebsocketFrame(strm: *SocketStream, opcode: Opcode, data: []const u8, fi
     return true;
 }
 
-/// Ports `websocket_accept_key` (httplib.cpp:878 @cd959bae9).
+/// Ports `websocket_accept_key` (httplib.cpp:878 @b1b770d90).
 ///
 /// Return: the Base64 of the SHA-1, in `out`.
 pub fn websocketAcceptKey(client_key: []const u8, out: *[28]u8) []const u8 {
@@ -285,7 +285,7 @@ pub fn websocketAcceptKey(client_key: []const u8, out: *[28]u8) []const u8 {
 /// `pthread_mutex_trylock`, which `std.c` does not name: 0 when taken.
 extern "c" fn pthread_mutex_trylock(mutex: *std.c.pthread_mutex_t) c_int;
 
-/// Ports `WebSocket` (httplib.h:4646 @cd959bae9).
+/// Ports `WebSocket` (httplib.h:4659 @b1b770d90).
 pub const WebSocket = struct {
     a: std.mem.Allocator,
     strm: *SocketStream,
@@ -301,14 +301,14 @@ pub const WebSocket = struct {
     ping_mutex: std.c.pthread_mutex_t = .{},
     ping_cv: std.c.pthread_cond_t = .{},
 
-    /// Ports `WebSocket` (httplib.h:4676 @cd959bae9), the constructor,
+    /// Ports `WebSocket` (httplib.h:4689 @b1b770d90), the constructor,
     /// into `self`, which its ping thread points at.
     pub fn init(self: *WebSocket, a: std.mem.Allocator, strm: *SocketStream, is_server: bool) void {
         self.* = .{ .a = a, .strm = strm, .is_server = is_server };
         self.startHeartbeat();
     }
 
-    /// Ports the destructor of `WebSocket` (httplib.cpp:18843 @cd959bae9).
+    /// Ports the destructor of `WebSocket` (httplib.cpp:18892 @b1b770d90).
     pub fn deinit(self: *WebSocket) void {
         {
             _ = std.c.pthread_mutex_lock(&self.ping_mutex);
@@ -322,7 +322,7 @@ pub const WebSocket = struct {
         self.strm.setReadInterrupt(null);
     }
 
-    /// Ports `send_frame` (httplib.cpp:18663 @cd959bae9), a member of
+    /// Ports `send_frame` (httplib.cpp:18712 @b1b770d90), a member of
     /// `WebSocket`.
     fn sendFrame(self: *WebSocket, op: Opcode, data: []const u8) bool {
         _ = std.c.pthread_mutex_lock(&self.write_mutex);
@@ -364,7 +364,7 @@ pub const WebSocket = struct {
         }
     }
 
-    /// Ports `read` (httplib.cpp:18670 @cd959bae9), a member of `WebSocket`:
+    /// Ports `read` (httplib.cpp:18719 @b1b770d90), a member of `WebSocket`:
     /// the next whole message into `msg`, answering the control frames in
     /// between.
     pub fn read(self: *WebSocket, a: std.mem.Allocator, msg: *std.ArrayList(u8)) error{OutOfMemory}!ReadResult {
@@ -445,19 +445,19 @@ pub const WebSocket = struct {
         return .fail;
     }
 
-    /// Ports `send` (httplib.cpp:18790 @cd959bae9), a member of `WebSocket`:
+    /// Ports `send` (httplib.cpp:18839 @b1b770d90), a member of `WebSocket`:
     /// a text frame.
     pub fn send(self: *WebSocket, data: []const u8) bool {
         return self.sendFrame(.text, data);
     }
 
-    /// Ports `send` (httplib.cpp:18794 @cd959bae9), the overload taking a
+    /// Ports `send` (httplib.cpp:18843 @b1b770d90), the overload taking a
     /// pointer and a length, a member of `WebSocket`: a binary frame.
     pub fn sendBinary(self: *WebSocket, data: []const u8) bool {
         return self.sendFrame(.binary, data);
     }
 
-    /// Ports `close` (httplib.cpp:18798 @cd959bae9), a member of `WebSocket`.
+    /// Ports `close` (httplib.cpp:18847 @b1b770d90), a member of `WebSocket`.
     pub fn close(self: *WebSocket, status: CloseStatus, reason: []const u8) void {
         if (self.closed.swap(true, .seq_cst)) return;
         _ = std.c.pthread_cond_broadcast(&self.ping_cv);
@@ -502,13 +502,13 @@ pub const WebSocket = struct {
         }
     }
 
-    /// Ports `is_open` (httplib.cpp:18888 @cd959bae9), a member of
+    /// Ports `is_open` (httplib.cpp:18937 @b1b770d90), a member of
     /// `WebSocket`.
     pub fn isOpen(self: *const WebSocket) bool {
         return !self.closed.load(.seq_cst);
     }
 
-    /// Ports `start_heartbeat` (httplib.cpp:18854 @cd959bae9), a member of
+    /// Ports `start_heartbeat` (httplib.cpp:18903 @b1b770d90), a member of
     /// `WebSocket`: a ping every interval until the connection closes.
     fn startHeartbeat(self: *WebSocket) void {
         if (self.ping_interval_sec <= 0) return;
@@ -538,7 +538,7 @@ pub const WebSocket = struct {
     }
 };
 
-/// Ports `WebSocketClient` (httplib.h:4724 @cd959bae9) over a `ws://` URL.
+/// Ports `WebSocketClient` (httplib.h:4737 @b1b770d90) over a `ws://` URL.
 /// The router sets no credentials, address maps or proxy on it, so 0.64.0's
 /// `set_basic_auth`, `set_bearer_token_auth` and the direct and tunnel
 /// hostname maps are not members.
@@ -555,7 +555,7 @@ pub const WebSocketClient = struct {
 
     const client = @import("client.zig");
 
-    /// Ports `WebSocketClient` (httplib.cpp:18900 @cd959bae9), the
+    /// Ports `WebSocketClient` (httplib.cpp:18949 @b1b770d90), the
     /// constructor: a scheme other than `ws` throws in the C, which no
     /// caller here reaches; this leaves the client invalid.
     pub fn init(a: std.mem.Allocator, scheme_host_port_path: []const u8, headers: Headers) WebSocketClient {
@@ -575,13 +575,13 @@ pub const WebSocketClient = struct {
         return self;
     }
 
-    /// Ports the destructor of `WebSocketClient` (httplib.cpp:18968
-    /// @cd959bae9).
+    /// Ports the destructor of `WebSocketClient` (httplib.cpp:19017
+    /// @b1b770d90).
     pub fn deinit(self: *WebSocketClient) void {
         self.shutdownAndClose();
     }
 
-    /// Ports `shutdown_and_close` (httplib.cpp:18980 @cd959bae9), a member
+    /// Ports `shutdown_and_close` (httplib.cpp:19029 @b1b770d90), a member
     /// of `WebSocketClient`.
     fn shutdownAndClose(self: *WebSocketClient) void {
         if (self.ws) |ws| {
@@ -601,7 +601,7 @@ pub const WebSocketClient = struct {
         }
     }
 
-    /// Ports `connect` (httplib.cpp:19083 @cd959bae9), a member of
+    /// Ports `connect` (httplib.cpp:19132 @b1b770d90), a member of
     /// `WebSocketClient`: a socket, the upgrade request, and its answer
     /// checked. `create_stream`'s stream waits without bound, the read
     /// timeout being unset.
@@ -633,7 +633,7 @@ pub const WebSocketClient = struct {
 
         // The handshakes belong to establishing the connection, so an unset read
         // timeout leaves them bounded by the connection timeout instead of forever
-        // (`handshake_timeout`, httplib.cpp:19004 @cd959bae9): the C's stream
+        // (`handshake_timeout`, httplib.cpp:19053 @b1b770d90): the C's stream
         // waits unbounded for these reads all the same.
         if (!try self.performHandshake(strm)) {
             self.shutdownAndClose();
@@ -646,9 +646,9 @@ pub const WebSocketClient = struct {
         return true;
     }
 
-    /// Ports `perform_websocket_handshake` (httplib.cpp:5772 @cd959bae9) and
-    /// `read_websocket_upgrade_response` (httplib.cpp:3705 @cd959bae9), with
-    /// `prepare_default_headers` (httplib.cpp:19065 @cd959bae9) before them,
+    /// Ports `perform_websocket_handshake` (httplib.cpp:5777 @b1b770d90) and
+    /// `read_websocket_upgrade_response` (httplib.cpp:3709 @b1b770d90), with
+    /// `prepare_default_headers` (httplib.cpp:19114 @b1b770d90) before them,
     /// whose `add_authorization_header` adds nothing with no credentials set.
     fn performHandshake(self: *WebSocketClient, strm: *SocketStream) error{OutOfMemory}!bool {
         const a = self.a;
@@ -676,7 +676,7 @@ pub const WebSocketClient = struct {
         _ = try headers.emplace(ar, "Sec-WebSocket-Key", client_key);
         _ = try headers.emplace(ar, "Sec-WebSocket-Version", "13");
 
-        // `write_request_head` (httplib.cpp:5755 @cd959bae9): built in memory
+        // `write_request_head` (httplib.cpp:5760 @b1b770d90): built in memory
         // first, so a rejected header never leaves a partial request on the wire
         var bstrm: socket.BufferStream = .{ .a = ar };
         if (!detail.isRequestTarget(self.path)) return false;
@@ -691,7 +691,7 @@ pub const WebSocketClient = struct {
         var accept_buf: [28]u8 = undefined;
         const expected_accept = websocketAcceptKey(client_key, &accept_buf);
 
-        // `read_response_head` (httplib.cpp:3690 @cd959bae9)
+        // `read_response_head` (httplib.cpp:3694 @b1b770d90)
         var buf: [2048]u8 = undefined;
         var lr = socket.LineReader.init(ar, strm, &buf);
         if (!try lr.getline()) return false;
@@ -715,28 +715,28 @@ pub const WebSocketClient = struct {
         return true;
     }
 
-    /// Ports `read` (httplib.cpp:19135 @cd959bae9), a member of
+    /// Ports `read` (httplib.cpp:19184 @b1b770d90), a member of
     /// `WebSocketClient`.
     pub fn read(self: *WebSocketClient, a: std.mem.Allocator, msg: *std.ArrayList(u8)) error{OutOfMemory}!ReadResult {
         const ws = self.ws orelse return .fail;
         return ws.read(a, msg);
     }
 
-    /// Ports `send` (httplib.cpp:19140 @cd959bae9), a member of
+    /// Ports `send` (httplib.cpp:19189 @b1b770d90), a member of
     /// `WebSocketClient`.
     pub fn send(self: *WebSocketClient, data: []const u8) bool {
         const ws = self.ws orelse return false;
         return ws.send(data);
     }
 
-    /// Ports `send` (httplib.cpp:19145 @cd959bae9), the overload taking a
+    /// Ports `send` (httplib.cpp:19194 @b1b770d90), the overload taking a
     /// pointer and a length, a member of `WebSocketClient`.
     pub fn sendBinary(self: *WebSocketClient, data: []const u8) bool {
         const ws = self.ws orelse return false;
         return ws.sendBinary(data);
     }
 
-    /// Ports `close` (httplib.cpp:19150 @cd959bae9), a member of
+    /// Ports `close` (httplib.cpp:19199 @b1b770d90), a member of
     /// `WebSocketClient`.
     pub fn close(self: *WebSocketClient) void {
         if (self.ws) |ws| ws.close(.normal, "");

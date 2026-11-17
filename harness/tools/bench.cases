@@ -27,6 +27,8 @@
 -m $PLAIN -p 8,16 -n 0 -b 8 -ub 4 -t 2 -r 1
 -m $PLAIN -p 0 -n 0 -pg 8,4 -d 8,16 -r 2
 -m $PLAIN -p 16 -n 2 -r 1 -ngl 0,99 -fa 1 -ctk q8_0 -ctv q8_0,f16
+# v1.0.0: f8_e4m3 is a KV cache type
+-m $PLAIN -p 16 -n 2 -r 1 -ngl 0 -fa 1 -ctk f8_e4m3 -ctv f8_e4m3,f16
 !fail -m $PLAIN -p 16 -n 2 -r 1 -ngl 99 -fa 1,0 -ctk q8_0 -ctv q8_0
 -m $PLAIN -p 16 -n 2 -r 1 -embd 1 -nopo 1 --no-host 1 -nkvo 1
 -m $PLAIN -p 16 -n 0 -r 1 --repack 0,1

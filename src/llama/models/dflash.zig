@@ -13,7 +13,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/dflash.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/dflash.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_dflash`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `graph<is_enc>` with `build_inp_embd_enc`,
 //! `build_dspark_markov_head`, and `graph_dsv4` and `graph_dsv41`, which
@@ -40,7 +40,7 @@ fn oom() noreturn {
     impl.abort("models/dflash.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_model_dflash`'s `load_arch_hparams` (models/dflash.cpp:7 @cd959bae9).
+/// Ports `llama_model_dflash`'s `load_arch_hparams` (models/dflash.cpp:7 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -217,7 +217,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     self.type = .unknown;
 }
 
-/// Ports `llama_model_dflash`'s `load_arch_tensors` (models/dflash.cpp:155 @cd959bae9).
+/// Ports `llama_model_dflash`'s `load_arch_tensors` (models/dflash.cpp:155 @b1b770d90).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -487,7 +487,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports `llama_model_dflash`'s `build_arch_graph` (models/dflash.cpp:1832 @cd959bae9).
+/// Ports `llama_model_dflash`'s `build_arch_graph` (models/dflash.cpp:1832 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     switch (params.gtype) {
         .encoder => buildGraphEnc(model, b),
@@ -520,7 +520,7 @@ fn otherModel(b: *const graph.Builder) *const Model {
 }
 
 /// Ports `llama_model_dflash`'s `graph<true>`'s `build_inp_embd_enc`
-/// (models/dflash.cpp:405 @cd959bae9): the target model's features, its
+/// (models/dflash.cpp:405 @b1b770d90): the target model's features, its
 /// chosen layers concatenated, given as the batch's embeddings.
 fn buildInpEmbdEnc(b: *const graph.Builder) *Tensor {
     const hp = b.hparams;
@@ -541,7 +541,7 @@ fn buildInpEmbdEnc(b: *const graph.Builder) *Tensor {
 }
 
 /// Ports the constructor of `llama_model_dflash`'s `graph<true>`
-/// (models/dflash.cpp:422 @cd959bae9): the encoder, the target model's
+/// (models/dflash.cpp:422 @b1b770d90): the encoder, the target model's
 /// features through the fusion layer and its norm.
 fn buildGraphEnc(model: *const Model, b: *const graph.Builder) void {
     var cur = buildInpEmbdEnc(b);
@@ -576,7 +576,7 @@ fn stoi(s: [:0]const u8) i64 {
 
 extern "c" fn strtol(s: [*:0]const u8, end: *[*c]u8, base: c_int) c_long;
 
-/// Ports `build_inp_target_features` (models/dflash.cpp:438 @cd959bae9): the
+/// Ports `build_inp_target_features` (models/dflash.cpp:438 @b1b770d90): the
 /// target features of an injection batch, the batch's host embeddings or
 /// rows of the target's layer-input device buffer.
 fn buildInpTargetFeatures(b: *const graph.Builder, inp: *graph.InpEmbd, n_embd_inp: i64) *Tensor {
@@ -596,12 +596,12 @@ fn buildInpTargetFeatures(b: *const graph.Builder, inp: *graph.InpEmbd, n_embd_i
 }
 
 /// `chunk`, a lambda of `build_dspark_markov_head` (models/dflash.cpp:455
-/// @cd959bae9): the `k`-th rank-wide third of the joint projection.
+/// @b1b770d90): the `k`-th rank-wide third of the joint projection.
 fn jointChunk(ctx: *c.ggml_context, joint: *Tensor, rank: i64, n_blocks: i64, k: i64) *Tensor {
     return c.ggml_cont(ctx, c.ggml_view_2d(ctx, joint, rank, n_blocks, joint.nb[1], @as(usize, @intCast(k * rank)) * c.ggml_element_size(joint)));
 }
 
-/// Ports `build_dspark_markov_head` (models/dflash.cpp:455 @cd959bae9):
+/// Ports `build_dspark_markov_head` (models/dflash.cpp:455 @b1b770d90):
 /// DSpark's Markov bias on the draft logits, chained through each block's
 /// positions, and the confidence head beside it, which is optional. With a
 /// joint projection the head is a gated RNN whose state is carried across
@@ -758,7 +758,7 @@ fn buildDsparkMarkovHead(b: *const graph.Builder, model: *const Model, tokens: *
     c.ggml_build_forward_expand(b.gf, out);
 }
 
-/// Ports `build_dflash2_conv` (models/dflash.cpp:598 @cd959bae9): DFlash2's
+/// Ports `build_dflash2_conv` (models/dflash.cpp:598 @b1b770d90): DFlash2's
 /// causal convolution within each block, its `kernel_size` taps weighted by
 /// a static base plus the token's own dynamic coefficients, one weight per
 /// group of `group_size` channels. `side` picks the input (0) or output (1)
@@ -824,7 +824,7 @@ fn buildDflash2Conv(b: *const graph.Builder, hidden_: *Tensor, dynamic_: ?*Tenso
     return result.?;
 }
 
-/// Ports `build_dflash2_selector` (models/dflash.cpp:665 @cd959bae9):
+/// Ports `build_dflash2_selector` (models/dflash.cpp:665 @b1b770d90):
 /// DFlash2's selector, the top-k candidates at every block position and
 /// the pairwise transition scores between neighbouring positions' sets,
 /// packed into the nextn output slot for the walk on the CPU.
@@ -902,7 +902,7 @@ const Selector = struct {
     gate_blk: *Tensor,
 
     /// Ports `build_dflash2_selector`'s `score_run` (models/dflash.cpp:700
-    /// @cd959bae9): a position's score reads only the candidate sets at
+    /// @b1b770d90): a position's score reads only the candidate sets at
     /// pos - 1 and pos, so a run of positions has no internal dependency
     /// and scores in one batched matmul.
     fn scoreRun(self: *const Selector, beg_pos: i64, n_pos: i64, pred_ids: *Tensor) *Tensor {
@@ -938,7 +938,7 @@ const Selector = struct {
     }
 };
 
-/// Ports `build_lilicorr_scores` (models/dflash.cpp:756 @cd959bae9):
+/// Ports `build_lilicorr_scores` (models/dflash.cpp:756 @b1b770d90):
 /// LiliCorr's lattice. Every drafted position's top-k candidates, ordered by
 /// logit, become nodes -- their token embeddings, the position's hidden
 /// state, five rank features and a slot and rank embedding -- which a small
@@ -1093,7 +1093,7 @@ fn buildLilicorrScores(b: *const graph.Builder, model: *const Model, tok_embd: *
     c.ggml_build_forward_expand(b.gf, packed_);
 }
 
-/// `graph<false>`'s `build_rope` lambda (models/dflash.cpp:947 @cd959bae9):
+/// `graph<false>`'s `build_rope` lambda (models/dflash.cpp:947 @b1b770d90):
 /// drafts for M-RoPE targets use the degenerate sections, the temporal
 /// dimension only; the others take the first layer's `rope_freqs`, if any.
 fn buildRope(model: *const Model, b: *const graph.Builder, sections: *[4]c_int, cur: *Tensor, pos: *Tensor) *Tensor {
@@ -1105,7 +1105,7 @@ fn buildRope(model: *const Model, b: *const graph.Builder, sections: *[4]c_int, 
 }
 
 /// Ports the constructor of `llama_model_dflash`'s `graph<false>`
-/// (models/dflash.cpp:922 @cd959bae9): the decoder, in one of two modes by
+/// (models/dflash.cpp:922 @b1b770d90): the decoder, in one of two modes by
 /// the batch's type. An embedding batch is fused target features, projected
 /// and written into the K/V cache; a token batch is a noise block, diffused
 /// by attending over the committed tokens and the block's masks to draft
@@ -1397,8 +1397,8 @@ fn buildGraphDec(comptime iswa: bool, model: *const Model, b: *const graph.Build
 }
 
 /// `graph<false>`'s LiliCorr condition, tested where it sets `inp_anchor`
-/// (models/dflash.cpp:1044 @cd959bae9) and again before calling
-/// `build_lilicorr_scores` (models/dflash.cpp:1216 @cd959bae9): a LiliCorr
+/// (models/dflash.cpp:1044 @b1b770d90) and again before calling
+/// `build_lilicorr_scores` (models/dflash.cpp:1216 @b1b770d90): a LiliCorr
 /// draft, a token batch carrying state embeddings, and exactly one block
 /// per sequence.
 fn isLilicorrBlock(model: *const Model, b: *const graph.Builder) bool {
@@ -1418,7 +1418,7 @@ fn dsv4TokEmbd(model: *const Model, b: *const graph.Builder) *Tensor {
 }
 
 /// Ports the constructor of `llama_model_dflash`'s `graph_dsv4`
-/// (models/dflash.cpp:1223 @cd959bae9): the DeepSeek-V4 DSpark decoder, in
+/// (models/dflash.cpp:1223 @b1b770d90): the DeepSeek-V4 DSpark decoder, in
 /// the same two modes as the DFlash one. An embedding batch is the
 /// encoder's fused target features: each stage projects them through its
 /// `wkv` and writes K into the draft's ring cache. A token batch is a noise
@@ -1592,7 +1592,7 @@ fn dsv41Rope(b: *const graph.Builder, t_: *Tensor, inp_pos: *Tensor, n_embd_head
 }
 
 /// Ports the constructor of `llama_model_dflash`'s `graph_dsv41`
-/// (models/dflash.cpp:1395 @cd959bae9): the DeepSeek-V4.1 DSpark decoder, in
+/// (models/dflash.cpp:1395 @b1b770d90): the DeepSeek-V4.1 DSpark decoder, in
 /// two modes by batch type as `graph_dsv4` has. An embedding batch writes
 /// every stage's `kv_norm(wkv(main_proj(target features)))` into its window
 /// ring; a token batch runs `[anchor, noise...]` through the stages with
@@ -1814,13 +1814,13 @@ fn buildGraphDsv41(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// `rope`, a lambda of `graph_mistral_large4`'s constructor
-/// (models/dflash.cpp:1622 @cd959bae9): plain RoPE, no LeRoPE in the draft.
+/// (models/dflash.cpp:1622 @b1b770d90): plain RoPE, no LeRoPE in the draft.
 fn ml4Rope(b: *const graph.Builder, t: *Tensor, inp_pos: *Tensor) *Tensor {
     return c.ggml_rope_ext(b.ctx0, t, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
 }
 
 /// `build_kv`, a lambda of `graph_mistral_large4`'s constructor
-/// (models/dflash.cpp:1622 @cd959bae9): the latent K of `x` with its roped
+/// (models/dflash.cpp:1622 @b1b770d90): the latent K of `x` with its roped
 /// part, and the normalized latent alone.
 fn ml4BuildKv(model: *const Model, b: *const graph.Builder, x: *Tensor, inp_pos: *Tensor, il: c_int) struct { *Tensor, *Tensor } {
     const ctx = b.ctx0;
@@ -1844,7 +1844,7 @@ fn ml4BuildKv(model: *const Model, b: *const graph.Builder, x: *Tensor, inp_pos:
 }
 
 /// Ports the constructor of `llama_model_dflash`'s `graph_mistral_large4`
-/// (models/dflash.cpp:1622 @cd959bae9): the Mistral Large 4 DSpark, dense MLA
+/// (models/dflash.cpp:1622 @b1b770d90): the Mistral Large 4 DSpark, dense MLA
 /// stages in two modes like `graph_dsv41` -- an embeddings batch writes the
 /// latent K of `target_norm(fc(features))` to the cache, with no attention
 /// norm; a token batch decodes the `[anchor, mask_1, ...]` block, non-causal.

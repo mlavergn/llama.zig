@@ -96,6 +96,7 @@ struct ref_ext_token {
     int32_t      has_state;
     uint64_t     state_off;
     int32_t      embd_row;
+    int32_t      state_row;
     int32_t      output;
     int32_t      decision_order;
     llama_pos    pos[4];
@@ -186,6 +187,7 @@ void ref_ext_token(const llama_batch_ext * b, size_t i, ref_ext_token * out) {
     out->has_state = t.has_state;
     out->state_off = t.state_off;
     out->embd_row = t.embd_row;
+    out->state_row = t.state_row;
     out->output = t.output;
     out->decision_order = t.decision_order;
     for (int j = 0; j < 4; ++j) out->pos[j] = t.pos[j];
@@ -250,6 +252,13 @@ void ref_ubatch_free(ref_ubatch * u) {
 // A ubatch the holder keeps alive: true when its data is the shared_ptr's.
 int ref_ubatch_owned(const ref_ubatch * u) {
     return ((llama_ubatch *) u->holder)->data != nullptr;
+}
+
+// The state rows of each token, `data->embd_state_row` (v1.0.0), empty if none.
+size_t ref_ubatch_state_rows(const ref_ubatch * u, const int32_t ** rows) {
+    const auto & d = ((llama_ubatch *) u->holder)->data;
+    *rows = d ? d->embd_state_row.data() : nullptr;
+    return d ? d->embd_state_row.size() : 0;
 }
 
 // The original batch index of each token, `data->batch_idxs`.

@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/set-rows.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/set-rows.cuh` at v0.9.0 (`cd959bae9`). The
+//! `llama.cpp/ggml/src/ggml-cuda/set-rows.cuh` at v1.0.0 (`b1b770d90`). The
 //! kernels, `k_set_rows` and `k_set_rows_quant`, stay CUDA.
 //!
 //! The fused `ROPE -> VIEW -> SET_ROWS` path is not here: upstream writes
@@ -27,7 +27,7 @@ const Tensor = c.ggml_tensor;
 const half = kernels.half;
 const bf16 = kernels.bf16;
 
-/// Ports `CUDA_SET_ROWS_BLOCK_SIZE` (set-rows.cuh:5 @cd959bae9).
+/// Ports `CUDA_SET_ROWS_BLOCK_SIZE` (set-rows.cuh:5 @b1b770d90).
 const block_size = 256;
 
 /// The sizes and byte strides both launchers take, in the C's order.
@@ -61,7 +61,7 @@ fn strideOf(nb: usize, comptime size: usize) i64 {
     return @bitCast(@as(u64, nb / size));
 }
 
-/// Ports the quantized `set_rows_cuda_quant` (set-rows.cu:75 @cd959bae9).
+/// Ports the quantized `set_rows_cuda_quant` (set-rows.cu:75 @b1b770d90).
 /// `block` and `quantize` name the template's `block_type` and
 /// `quantize_func`.
 fn setRowsCudaQuant(comptime I: type, comptime block: []const u8, comptime qk: comptime_int, comptime quantize: []const u8, src0_d: ?*const anyopaque, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: cu.cudaStream_t) void {
@@ -101,7 +101,7 @@ fn setRowsCudaQuant(comptime I: type, comptime block: []const u8, comptime qk: c
     }
 }
 
-/// Ports the element-wise `set_rows_cuda` (set-rows.cu:180 @cd959bae9).
+/// Ports the element-wise `set_rows_cuda` (set-rows.cu:180 @b1b770d90).
 fn setRowsCudaLaunch(comptime S: type, comptime I: type, comptime D: type, src0_d: ?*const anyopaque, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: cu.cudaStream_t) void {
     const ne_total: i64 = a.ne00 * a.ne01 * a.ne02 * a.ne03;
     const num_blocks: c_int = @truncate(@divTrunc(ne_total + block_size - 1, block_size));
@@ -138,9 +138,9 @@ fn setRowsCudaLaunch(comptime S: type, comptime I: type, comptime D: type, src0_
     }
 }
 
-/// Ports the per-tensor `set_rows_cuda` (set-rows.cu:221 @cd959bae9), as
+/// Ports the per-tensor `set_rows_cuda` (set-rows.cu:221 @b1b770d90), as
 /// `set_rows_cuda<src_t, idx_t>`, and its two `half` specialisations, for
-/// `int32_t` and `int64_t` indices (set-rows.cu:326, 351 @cd959bae9), which accept only an `F16` destination.
+/// `int32_t` and `int64_t` indices (set-rows.cu:336, 361 @b1b770d90), which accept only an `F16` destination.
 fn setRowsCuda(comptime S: type, comptime I: type, ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     const src0_d: ?*const anyopaque = src0.data;
     const src1_d: ?*const anyopaque = src1.data;
@@ -181,6 +181,7 @@ fn setRowsCuda(comptime S: type, comptime I: type, ctx: *common.Context, src0: *
         c.GGML_TYPE_F32 => setRowsCudaLaunch(S, I, f32, src0_d, src1_d, d, a, stream),
         c.GGML_TYPE_F16 => setRowsCudaLaunch(S, I, half, src0_d, src1_d, d, a, stream),
         c.GGML_TYPE_BF16 => setRowsCudaLaunch(S, I, bf16, src0_d, src1_d, d, a, stream),
+        c.GGML_TYPE_F8_E4M3 => setRowsCudaLaunch(S, I, kernels.fp8_e4m3, src0_d, src1_d, d, a, stream),
         c.GGML_TYPE_Q4_0 => setRowsCudaQuant(I, "block_q4_0", 32, "quantize_f32_q4_0_block", src0_d, src1_d, d, a, stream),
         c.GGML_TYPE_Q4_1 => setRowsCudaQuant(I, "block_q4_1", 32, "quantize_f32_q4_1_block", src0_d, src1_d, d, a, stream),
         c.GGML_TYPE_Q5_0 => setRowsCudaQuant(I, "block_q5_0", 32, "quantize_f32_q5_0_block", src0_d, src1_d, d, a, stream),
@@ -191,7 +192,7 @@ fn setRowsCuda(comptime S: type, comptime I: type, ctx: *common.Context, src0: *
     }
 }
 
-/// Ports `ggml_cuda_op_set_rows` (set-rows.cu:376 @cd959bae9).
+/// Ports `ggml_cuda_op_set_rows` (set-rows.cu:386 @b1b770d90).
 pub fn opSetRows(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);

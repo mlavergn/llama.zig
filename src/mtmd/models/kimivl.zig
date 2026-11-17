@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/kimivl.cpp` at v0.9.0 (`cd959bae9`).
+//! Ports `llama.cpp/tools/mtmd/models/kimivl.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -12,7 +12,7 @@ const graph = @import("../graph.zig");
 const model_mod = @import("../model.zig");
 const c = impl.c;
 
-/// The `add_pos` lambda of a 2D RoPE (kimivl.cpp:16 @cd959bae9):
+/// The `add_pos` lambda of a 2D RoPE (kimivl.cpp:16 @b1b770d90):
 /// `build_rope_2d(ctx0, cur, pos_a, pos_b, freq_base, interleave_freq)`,
 /// `pos_a` on the first half of each head and `pos_b` on the second.
 pub const Rope2d = struct {
@@ -28,7 +28,7 @@ pub const Rope2d = struct {
     }
 };
 
-/// Ports `build` (kimivl.cpp:3 @cd959bae9), a member of `clip_graph_kimivl`.
+/// Ports `build` (kimivl.cpp:3 @b1b770d90), a member of `mtmd_graph_kimivl`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

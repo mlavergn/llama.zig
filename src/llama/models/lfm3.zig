@@ -9,7 +9,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/lfm3.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/lfm3.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_lfm3`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph<decision>` with the lambda inside it.
 
@@ -28,7 +28,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_lfm3`'s `load_arch_hparams` (models/lfm3.cpp:4 @cd959bae9).
+/// Ports `llama_model_lfm3`'s `load_arch_hparams` (models/lfm3.cpp:4 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -63,7 +63,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_lfm3`'s `load_arch_tensors` (models/lfm3.cpp:33 @cd959bae9).
+/// Ports `llama_model_lfm3`'s `load_arch_tensors` (models/lfm3.cpp:33 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -127,7 +127,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_lfm3`'s `build_arch_graph` (models/lfm3.cpp:91 @cd959bae9).
+/// Ports `llama_model_lfm3`'s `build_arch_graph` (models/lfm3.cpp:91 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     if (!model.hparams.causal_attn) {
         return buildGraph(true, model, b);
@@ -136,7 +136,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// The constructor's `build_attn_block` lambda (models/lfm3.cpp:101
-/// @cd959bae9): Q/K norms, RoPE on the full layers through `rope_freqs`,
+/// @b1b770d90): Q/K norms, RoPE on the full layers through `rope_freqs`,
 /// attention, and a per-head sigmoid gate before the output projection.
 fn buildAttnBlock(model: *const Model, b: *const graph.Builder, cur_in: *Tensor, inp_pos: *Tensor, inp_attn: anytype, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -148,12 +148,6 @@ fn buildAttnBlock(model: *const Model, b: *const graph.Builder, cur_in: *Tensor,
     const n_head_il: i64 = hp.nHead(uil);
     const n_head_kv: i64 = hp.nHeadKv(uil);
 
-    const n_rot_l: c_int = @intCast(hp.nRot(uil));
-    const freq_base_l = model.getRopeFreqBase(b.cparams, uil);
-    const freq_scale_l = model.getRopeFreqScale(b.cparams, uil);
-
-    const rope_factors: ?*Tensor = if (hp.isSwa(uil)) null else layer.rope_freqs;
-
     const qkv = b.buildQkv(layer, cur_in, n_embd_head, n_head_il, n_head_kv, il);
     var q = qkv.q;
     var k = qkv.k;
@@ -164,8 +158,8 @@ fn buildAttnBlock(model: *const Model, b: *const graph.Builder, cur_in: *Tensor,
     k = b.buildNorm(k, layer.attn_k_norm, null, .rms, il);
     b.cb(k, "model.layers.{}.self_attn.k_layernorm", il);
 
-    q = c.ggml_rope_ext(ctx, q, inp_pos, rope_factors, n_rot_l, b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-    k = c.ggml_rope_ext(ctx, k, inp_pos, rope_factors, n_rot_l, b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+    q = b.buildRope(q, inp_pos, il);
+    k = b.buildRope(k, inp_pos, il);
 
     var attn_out = b.buildAttn(inp_attn, null, null, null, q, k, v, null, null, null, 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)), il);
     b.cb(attn_out, "attn_out", il);
@@ -186,7 +180,7 @@ fn buildAttnBlock(model: *const Model, b: *const graph.Builder, cur_in: *Tensor,
 }
 
 /// Ports the constructor of `llama_model_lfm3`'s `graph<decision>`
-/// (models/lfm3.cpp:99 @cd959bae9).
+/// (models/lfm3.cpp:99 @b1b770d90).
 fn buildGraph(comptime decision: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

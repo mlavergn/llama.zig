@@ -3,8 +3,8 @@
 //!
 //! **Not a port.** Upstream gives each architecture a class deriving from
 //! `llama_model_base` and overriding three virtuals -- `load_arch_hparams`,
-//! `load_arch_tensors` and `build_arch_graph` (llama-model.h:986, 987, 988
-//! @cd959bae9) -- and `llama_model_mapping` (llama-model.cpp:43 @cd959bae9) picks the
+//! `load_arch_tensors` and `build_arch_graph` (llama-model.h:1014, 1015, 1016
+//! @b1b770d90) -- and `llama_model_mapping` (llama-model.cpp:43 @b1b770d90) picks the
 //! class. Here a class is a file exporting those three functions, and
 //! `forArch` is the mapping. An architecture with no entry is one the port
 //! has not reached: loading it stops at `error.Unported`, which
@@ -16,8 +16,11 @@ const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
 const graph = @import("../graph.zig");
 const arch_mod = @import("../arch.zig");
+const cparams_mod = @import("../cparams.zig");
 
 const Model = model_mod.Model;
+const Cparams = cparams_mod.Cparams;
+const RopeParams = model_mod.RopeParams;
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 
@@ -102,6 +105,7 @@ pub const jina_bert_v2 = @import("jina_bert_v2.zig");
 pub const jina_bert_v3 = @import("jina_bert_v3.zig");
 pub const k2_horizon = @import("k2_horizon.zig");
 pub const kimi_k3 = @import("kimi_k3.zig");
+pub const kimi_k31 = @import("kimi_k31.zig");
 pub const kimi_linear = @import("kimi_linear.zig");
 pub const kolibri1 = @import("kolibri1.zig");
 pub const laguna = @import("laguna.zig");
@@ -171,6 +175,7 @@ pub const qwen3vl = @import("qwen3vl.zig");
 pub const qwen3vlmoe = @import("qwen3vlmoe.zig");
 pub const qwen4exp = @import("qwen4exp.zig");
 pub const refact = @import("refact.zig");
+pub const ricursive = @import("ricursive.zig");
 pub const rnd1 = @import("rnd1.zig");
 pub const rwkv6 = @import("rwkv6.zig");
 pub const rwkv6_base = @import("rwkv6_base.zig");
@@ -191,20 +196,32 @@ pub const t5encoder = @import("t5encoder.zig");
 pub const talkie = @import("talkie.zig");
 pub const vllm_decision2 = @import("vllm_decision2.zig");
 pub const wavtokenizer_dec = @import("wavtokenizer_dec.zig");
+pub const xing4_0 = @import("xing4_0.zig");
 pub const xverse = @import("xverse.zig");
 
-/// An architecture's three overrides.
+/// The type of `get_rope_params` and `get_rope_params_indexer`.
+pub const RopeParamsFn = *const fn (model: *const Model, cparams: *const Cparams, il: u32) RopeParams;
+
+/// An architecture's three overrides, and the two optional ones,
+/// `get_rope_params` and `get_rope_params_indexer` (llama-model.h:994, 997
+/// @b1b770d90): a null one is `llama_model`'s own.
 pub const Entry = struct {
     loadArchHparams: *const fn (self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void,
     loadArchTensors: *const fn (self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void,
     buildArchGraph: *const fn (model: *const Model, b: *const graph.Builder, params: *const graph.Params) void,
+    getRopeParams: ?RopeParamsFn = null,
+    getRopeParamsIndexer: ?RopeParamsFn = null,
 };
 
+/// An entry from a file's declarations: the three overrides, and
+/// `getRopeParams` or `getRopeParamsIndexer` where the class overrides one.
 fn entryOf(comptime M: type) Entry {
     return .{
         .loadArchHparams = M.loadArchHparams,
         .loadArchTensors = M.loadArchTensors,
         .buildArchGraph = M.buildArchGraph,
+        .getRopeParams = if (@hasDecl(M, "getRopeParams")) M.getRopeParams else null,
+        .getRopeParamsIndexer = if (@hasDecl(M, "getRopeParamsIndexer")) M.getRopeParamsIndexer else null,
     };
 }
 
@@ -283,7 +300,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .grok => entryOf(grok),
         .grovemoe => entryOf(grovemoe),
         .hrm_text => entryOf(hrm_text),
-        .hunyuan_dense => .{ .loadArchHparams = hunyuan_vl.loadArchHparams, .loadArchTensors = hunyuan_vl.loadArchTensors, .buildArchGraph = hunyuan_dense.buildArchGraph },
+        .hunyuan_dense => .{ .loadArchHparams = hunyuan_vl.loadArchHparams, .loadArchTensors = hunyuan_vl.loadArchTensors, .buildArchGraph = hunyuan_dense.buildArchGraph, .getRopeParams = hunyuan_dense.getRopeParams },
         .hunyuan_moe => entryOf(hunyuan_moe),
         .hunyuan_vl => entryOf(hunyuan_vl),
         .hy_v3 => entryOf(hy_v3),
@@ -296,6 +313,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .jina_bert_v3 => entryOf(jina_bert_v3),
         .k2_horizon => entryOf(k2_horizon),
         .kimi_k3 => entryOf(kimi_k3),
+        .kimi_k31 => entryOf(kimi_k31),
         .kimi_linear => entryOf(kimi_linear),
         .kolibri1 => entryOf(kolibri1),
         .laguna => entryOf(laguna),
@@ -365,6 +383,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .qwen3vlmoe => entryOf(qwen3vlmoe),
         .qwen4exp => entryOf(qwen4exp),
         .refact => entryOf(refact),
+        .ricursive => entryOf(ricursive),
         .rnd1 => entryOf(rnd1),
         .rwkv6 => entryOf(rwkv6),
         .rwkv6qwen2 => entryOf(rwkv6qwen2),
@@ -383,6 +402,7 @@ pub fn forArch(arch: arch_mod.Arch) ?Entry {
         .talkie => entryOf(talkie),
         .vllm_decision2 => entryOf(vllm_decision2),
         .wavtokenizer_dec => entryOf(wavtokenizer_dec),
+        .xing4_0 => entryOf(xing4_0),
         .xverse => entryOf(xverse),
         else => null,
     };

@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/lfm-base.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/lfm-base.cpp` at v1.0.0 (`b1b770d90`):
 //! every member of `llm_build_lfm_base`. The C++ makes them members of a
 //! subclass of `llm_graph_context`; here they are functions over the
 //! builder.
@@ -18,8 +18,8 @@ const c = impl.c;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llm_build_lfm_base`'s `build_lfm_shortconv` (lfm-base.cpp:9
-/// @cd959bae9), the overload over a recurrent state: a gated depthwise
+/// Ports `llm_build_lfm_base`'s `build_lfm_shortconv` (lfm-base.cpp:7
+/// @b1b770d90), the overload over a recurrent state: a gated depthwise
 /// convolution over the last `n_shortconv_l_cache` tokens, whose state is
 /// the recurrent memory.
 ///
@@ -36,14 +36,13 @@ pub fn buildLfmShortconv(model: *const Model, b: *const graph.Builder, mctx_recr
     const ctx = b.ctx0;
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
-    const kv_head: u32 = mctx_recr.getHead();
     const n_seq_tokens: i64 = b.ubatch.n_seq_tokens;
     const n_seqs: i64 = b.ubatch.n_seqs;
-    impl.assert(n_seqs != 0, "models/lfm-base.cpp", 17, "n_seqs != 0");
-    impl.assert(b.ubatch.equalSeqs(), "models/lfm-base.cpp", 18, "ubatch.equal_seqs()");
-    impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "models/lfm-base.cpp", 19, "ubatch.n_tokens == n_seq_tokens * n_seqs");
+    impl.assert(n_seqs != 0, "models/lfm-base.cpp", 13, "n_seqs != 0");
+    impl.assert(b.ubatch.equalSeqs(), "models/lfm-base.cpp", 14, "ubatch.equal_seqs()");
+    impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "models/lfm-base.cpp", 15, "ubatch.n_tokens == n_seq_tokens * n_seqs");
 
-    impl.assert(hp.n_shortconv_l_cache > 1, "models/lfm-base.cpp", 21, "hparams.n_shortconv_l_cache > 1");
+    impl.assert(hp.n_shortconv_l_cache > 1, "models/lfm-base.cpp", 17, "hparams.n_shortconv_l_cache > 1");
     const d_conv: u32 = hp.n_shortconv_l_cache - 1;
     const n_embd: i64 = hp.n_embd;
 
@@ -53,7 +52,7 @@ pub fn buildLfmShortconv(model: *const Model, b: *const graph.Builder, mctx_recr
     bcx = c.ggml_reshape_3d(ctx, bcx, bcx.ne[0], n_seq_tokens, n_seqs);
 
     const n_chunks = 3;
-    impl.assert(@rem(bcx.ne[0], n_chunks) == 0, "models/lfm-base.cpp", 31, "bcx->ne[0] % n_chunks == 0");
+    impl.assert(@rem(bcx.ne[0], n_chunks) == 0, "models/lfm-base.cpp", 27, "bcx->ne[0] % n_chunks == 0");
     const chunk_size = @divTrunc(bcx.ne[0], n_chunks);
     const es = c.ggml_element_size(bcx);
     const chunk_bytes: usize = @intCast(chunk_size);
@@ -77,20 +76,9 @@ pub fn buildLfmShortconv(model: *const Model, b: *const graph.Builder, mctx_recr
         const left: *Tensor = c.ggml_cont(ctx, c.ggml_view_3d(ctx, conv, pad, n_embd, n_seqs, conv.nb[1], conv.nb[2], @as(usize, @intCast(@as(i64, d_conv) - pad)) * conv.nb[0]));
         bx = c.ggml_pad_ext(ctx, c.ggml_concat(ctx, left, bx, 0), 0, @intCast(pad), 0, 0, 0, 0, 0, 0);
     }
-    impl.assert(bx.ne[0] > conv.ne[0], "models/lfm-base.cpp", 56, "bx->ne[0] > conv->ne[0]");
+    impl.assert(bx.ne[0] > conv.ne[0], "models/lfm-base.cpp", 52, "bx->ne[0] > conv->ne[0]");
 
-    // Write the conv states: slot 0 is the final state, slot s the state s
-    // tokens back (for a partial rollback).
-    const K: i64 = if (hp.causal_attn and b.cparams.n_rs_seq > 0) @as(i64, b.cparams.n_rs_seq) + 1 else 1;
-    const n_written: i64 = @min(n_seq_tokens, K);
-    const mem_size: usize = mctx_recr.getSize();
-    const row_size: usize = c.ggml_row_size(conv_state.type, @as(i64, d_conv) * n_embd);
-
-    var slot: i64 = 0;
-    while (slot < n_written) : (slot += 1) {
-        const conv_snap: *Tensor = c.ggml_view_3d(ctx, bx, d_conv, bx.ne[1], bx.ne[2], bx.nb[1], bx.nb[2], @as(usize, @intCast(bx.ne[0] - d_conv - slot)) * c.ggml_element_size(bx));
-        c.ggml_build_forward_expand(b.gf, c.ggml_cpy(ctx, conv_snap, c.ggml_view_2d(ctx, conv_state, @as(i64, d_conv) * n_embd, n_seqs, conv_state.nb[1], (@as(usize, @intCast(slot)) * mem_size + kv_head) * row_size)));
-    }
+    b.buildConvStateStore(inp_recr, conv_state, bx, d_conv, 0);
 
     const conv_kernel = layer.shortconv.conv;
     const conv_out: *Tensor = c.ggml_ssm_conv(ctx, bx, conv_kernel);
@@ -105,8 +93,8 @@ pub fn buildLfmShortconv(model: *const Model, b: *const graph.Builder, mctx_recr
     return y;
 }
 
-/// Ports `llm_build_lfm_base`'s `build_lfm_shortconv` (lfm-base.cpp:86
-/// @cd959bae9), the overload with no recurrent state, for the decision
+/// Ports `llm_build_lfm_base`'s `build_lfm_shortconv` (lfm-base.cpp:69
+/// @b1b770d90), the overload with no recurrent state, for the decision
 /// graphs: causal over the ubatch from a zero state.
 ///
 /// Parameters:
@@ -145,8 +133,8 @@ pub fn buildLfmShortconvNoState(model: *const Model, b: *const graph.Builder, cu
     return y;
 }
 
-/// Ports `llm_build_lfm_base`'s `build_lfm_dense_ffn` (lfm-base.cpp:113
-/// @cd959bae9).
+/// Ports `llm_build_lfm_base`'s `build_lfm_dense_ffn` (lfm-base.cpp:95
+/// @b1b770d90).
 ///
 /// Parameters:
 /// - `model`: the model.
@@ -157,14 +145,14 @@ pub fn buildLfmShortconvNoState(model: *const Model, b: *const graph.Builder, cu
 /// Return: the feed-forward's output.
 pub fn buildLfmDenseFfn(model: *const Model, b: *const graph.Builder, cur: *Tensor, il: c_int) *Tensor {
     const layer = &model.layers[@intCast(il)];
-    impl.assert(layer.ffn_up_b == null, "models/lfm-base.cpp", 116, "!model.layers[il].ffn_up_b");
-    impl.assert(layer.ffn_gate_b == null, "models/lfm-base.cpp", 117, "!model.layers[il].ffn_gate_b");
-    impl.assert(layer.ffn_down_b == null, "models/lfm-base.cpp", 118, "!model.layers[il].ffn_down_b");
+    impl.assert(layer.ffn_up_b == null, "models/lfm-base.cpp", 97, "!model.layers[il].ffn_up_b");
+    impl.assert(layer.ffn_gate_b == null, "models/lfm-base.cpp", 98, "!model.layers[il].ffn_gate_b");
+    impl.assert(layer.ffn_down_b == null, "models/lfm-base.cpp", 99, "!model.layers[il].ffn_down_b");
     return b.buildFfn(cur, layer.ffn_up, null, layer.ffn_up_s, layer.ffn_gate, null, layer.ffn_gate_s, layer.ffn_down, null, layer.ffn_down_s, null, .silu, .par, il);
 }
 
-/// Ports `llm_build_lfm_base`'s `build_lfm_moe_ffn` (lfm-base.cpp:126
-/// @cd959bae9).
+/// Ports `llm_build_lfm_base`'s `build_lfm_moe_ffn` (lfm-base.cpp:107
+/// @b1b770d90).
 ///
 /// Parameters:
 /// - `model`: the model.

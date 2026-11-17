@@ -249,7 +249,10 @@ class Server:
         self.port = free_port()
         self.log_path = os.path.join(self.workdir, f"server{self.n}.log")
         log = open(self.log_path, "wb")
-        argv = [self.binary] + args + ["--host", "127.0.0.1", "--port", str(self.port)]
+        # a case that names its own --host (v1.0.0: tools refused on a non-loopback
+        # address) keeps it; requests still go to 127.0.0.1, which 0.0.0.0 covers
+        host = [] if "--host" in args else ["--host", "127.0.0.1"]
+        argv = [self.binary] + args + host + ["--port", str(self.port)]
         self.proc = subprocess.Popen(argv, stdout=log, stderr=subprocess.STDOUT,
                                      stdin=subprocess.DEVNULL, cwd=self.workdir,
                                      env={**os.environ, "GGML_NO_BACKTRACE": "1", **(extra_env or {})})
@@ -485,7 +488,7 @@ def interleaves(text, lines):
     """Whether `text` is some interleaving of the writes `lines` were made
     of: each common_log line as its three fprintf calls, the masked
     timestamp, the level and the message (log.cpp:128, 138, 155
-    @cd959bae9), and each other line as one write, both sequences kept in
+    @b1b770d90), and each other line as one write, both sequences kept in
     order."""
     log, direct = [], []
     for l in lines:

@@ -7,7 +7,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/phi3.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/phi3.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_phi3`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph<iswa>`.
 
@@ -24,7 +24,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_phi3`'s `load_arch_hparams` (models/phi3.cpp:3 @cd959bae9).
+/// Ports `llama_model_phi3`'s `load_arch_hparams` (models/phi3.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -56,7 +56,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     }
 }
 
-/// Ports `llama_model_phi3`'s `load_arch_tensors` (models/phi3.cpp:27 @cd959bae9).
+/// Ports `llama_model_phi3`'s `load_arch_tensors` (models/phi3.cpp:27 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -92,7 +92,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_phi3`'s `build_arch_graph` (models/phi3.cpp:59 @cd959bae9).
+/// Ports `llama_model_phi3`'s `build_arch_graph` (models/phi3.cpp:59 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     if (b.hparams.swa_type != @backingInt(hparams_mod.SwaType.none)) {
         buildGraph(true, model, b);
@@ -102,7 +102,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_phi3`'s `graph<iswa>`
-/// (models/phi3.cpp:68 @cd959bae9).
+/// (models/phi3.cpp:68 @b1b770d90).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -127,9 +127,6 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
 
         // Self-attention.
         {
-            // RoPE frequency factors for the 128k context.
-            const rope_factors = model.getRopeFactors(b.cparams, @intCast(il));
-
             const attn_norm_output = b.buildNorm(inpL, layer.attn_norm, layer.attn_norm_b, .rms, il);
             b.cb(attn_norm_output, "attn_norm", il);
 
@@ -138,8 +135,8 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
             var Kcur = qkv.k;
             const Vcur = qkv.v;
 
-            Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
 
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);

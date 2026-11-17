@@ -688,6 +688,67 @@ static void mxfp4_cases(void) {
     }
 }
 
+/* v1.0.0's GROUP_NORM (#31852): one threadgroup row per ne03 and the
+ * `_strided` kernel for a source whose rows are contiguous but whose planes
+ * are not, beside the flat case the encoder had. */
+static void group_norm_cases(void) {
+    char label[128];
+    uint64_t seed = 9000;
+    for (int strided = 0; strided < 2; strided++) {
+        for (int ne3 = 1; ne3 <= 3; ne3 += 2) {
+            begin(seed++);
+            struct ggml_tensor * x = strided
+                ? ggml_permute(ctx, ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 40, 12, 8, ne3), 0, 2, 1, 3)
+                : ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 40, 8, 12, ne3);
+            struct ggml_tensor * out = ggml_group_norm(ctx, x, 4, 1e-6f);
+            alloc_all();
+            fill_floats(strided ? x->view_src : x, 2.0f);
+            snprintf(label, sizeof label, "GROUP_NORM %s ne3=%d", strided ? "strided" : "flat", ne3);
+            finish(label, out);
+        }
+    }
+}
+
+/* v1.0.0's unary-gated MoE routing (#31615), fused into one kernel: the
+ * sigmoid (GLM) and sqrt(softplus) (DeepSeek-V4) gates, ranked with a
+ * selection bias, the weights renormalised by a sum offset by a SCALE's
+ * bias or clamped, optionally scaled; and the softmax chain with the new
+ * SCALE-bias norm. The weights are hashed; the ids are the fused kernel's
+ * other output. */
+static void topk_moe_gate_cases(void) {
+    char label[128];
+    uint64_t seed = 9100;
+    for (int gate = 0; gate < 3; gate++) {
+        for (int norm = 0; norm < 3; norm++) {
+            for (int scale = 0; scale < 2; scale++) {
+                if (gate == 0 && norm != 2) continue;
+                begin(seed++);
+                const int64_t n_expert = 64, n_tokens = 5, k = 6;
+                struct ggml_tensor * logits = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_expert, n_tokens);
+                struct ggml_tensor * bias   = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_expert);
+                struct ggml_tensor * probs  = gate == 0 ? ggml_soft_max(ctx, logits)
+                                            : gate == 1 ? ggml_sqrt(ctx, ggml_softplus(ctx, logits))
+                                            :             ggml_sigmoid(ctx, logits);
+                struct ggml_tensor * scores = gate == 0 ? probs : ggml_add(ctx, probs, bias);
+                struct ggml_tensor * sel    = ggml_argsort_top_k(ctx, scores, k);
+                struct ggml_tensor * w      = ggml_get_rows(ctx, ggml_reshape_3d(ctx, probs, 1, n_expert, n_tokens), sel);
+                if (norm) {
+                    struct ggml_tensor * wr  = ggml_reshape_2d(ctx, w, k, n_tokens);
+                    struct ggml_tensor * sum = ggml_sum_rows(ctx, wr);
+                    sum = norm == 1 ? ggml_clamp(ctx, sum, 6.103515625e-5f, INFINITY) : ggml_scale_bias(ctx, sum, 1.0f, 1e-20f);
+                    w = ggml_reshape_3d(ctx, ggml_div(ctx, wr, sum), 1, k, n_tokens);
+                }
+                if (scale) w = ggml_scale(ctx, w, 2.5f);
+                alloc_all();
+                fill_floats(logits, 3.0f);
+                fill_floats(bias, 0.5f);
+                snprintf(label, sizeof label, "TOPK_MOE gate=%d norm=%d scale=%d", gate, norm, scale);
+                finish(label, w);
+            }
+        }
+    }
+}
+
 int main(void) {
     backend = ggml_backend_metal_init();
     if (!backend) { fprintf(stderr, "no Metal backend\n"); return 1; }
@@ -700,6 +761,8 @@ int main(void) {
     fa_rows_cases();
     elementwise_cases();
     mxfp4_cases();
+    group_norm_cases();
+    topk_moe_gate_cases();
 
     ggml_backend_free(backend);
     return 0;

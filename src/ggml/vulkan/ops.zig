@@ -5,8 +5,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` and
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-push-constants.h` at v0.9.0
-//! (`cd959bae9`). Upstream split `ggml-vulkan.cpp` into those files at
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-push-constants.h` at v1.0.0
+//! (`b1b770d90`). Upstream split `ggml-vulkan.cpp` into those files at
 //! v0.5.0. The C++ specialises two templates per push-constant struct --
 //! `init_pushconst_fastdiv` and `init_pushconst_tensor_offsets` -- and the
 //! port switches on the struct's type at comptime.
@@ -47,7 +47,7 @@ pub fn typeSize(t: *const Tensor) u32 {
 // -----------------------------------------------------------------------------
 // Fast division
 
-/// Ports `init_fastdiv_values` (ggml-vulkan-push-constants.h:355 @cd959bae9): `mp` and
+/// Ports `init_fastdiv_values` (ggml-vulkan-push-constants.h:363 @b1b770d90): `mp` and
 /// `L` with `n / d == (mulhi(n, mp) + n) >> L`.
 pub fn initFastdivValues(d: u32, mp: *u32, L: *u32) void {
     // compute L = ceil(log2(d));
@@ -57,7 +57,7 @@ pub fn initFastdivValues(d: u32, mp: *u32, L: *u32) void {
     mp.* = @truncate(((@as(u64, 1) << 32) *% ((@as(u64, 1) << @intCast(L.*)) - d)) / d + 1);
 }
 
-/// Ports `pack_fastdiv_L` (ggml-vulkan-push-constants.h:366 @cd959bae9).
+/// Ports `pack_fastdiv_L` (ggml-vulkan-push-constants.h:374 @b1b770d90).
 pub fn packFastdivL(L0: u32, L1: u32, L2: u32) u32 {
     return L0 | (L1 << 8) | (L2 << 16);
 }
@@ -66,7 +66,7 @@ pub fn packFastdivL(L0: u32, L1: u32, L2: u32) u32 {
 /// `vk_op_unary_push_constants`, `vk_op_glu_push_constants`,
 /// `vk_op_count_experts_push_constants`, `vk_op_conv2d_push_constants`,
 /// `vk_op_conv3d_push_constants` and `vk_op_sum_rows_push_constants`
-/// (ggml-vulkan-push-constants.h:370, 375, 395, 402, 757, 796, 857 @cd959bae9).
+/// (ggml-vulkan-push-constants.h:378, 383, 403, 410, 759, 798, 860 @b1b770d90).
 pub fn initPushconstFastdiv(p: anytype) void {
     const T = @TypeOf(p.*);
     if (T == push.Unary) {
@@ -102,7 +102,7 @@ pub fn initPushconstFastdiv(p: anytype) void {
 // -----------------------------------------------------------------------------
 // Push-constant initialisers
 
-/// Ports `vk_op_unary_push_constants_init` (ggml-vulkan-push-constants.h:271 @cd959bae9).
+/// Ports `vk_op_unary_push_constants_init` (ggml-vulkan-push-constants.h:279 @b1b770d90).
 /// `ne` 0 means the destination's element count.
 pub fn unaryPushConstantsInit(src0: *const Tensor, dst: *const Tensor, ne_in: i64) push.Unary {
     impl.assert(ne_in != 0 or c.ggml_nelements(src0) == c.ggml_nelements(dst), "ne != 0 || (ggml_nelements(src0) == ggml_nelements(dst))");
@@ -132,7 +132,7 @@ pub fn unaryPushConstantsInit(src0: *const Tensor, dst: *const Tensor, ne_in: i6
     return p; // offsets are initialized later in ggml_vk_op
 }
 
-/// Ports `vk_op_pad_push_constants_init` (ggml-vulkan-push-constants.h:315 @cd959bae9).
+/// Ports `vk_op_pad_push_constants_init` (ggml-vulkan-push-constants.h:323 @b1b770d90).
 pub fn padPushConstantsInit(src0: *const Tensor, dst: *const Tensor) push.Pad {
     const ne = c.ggml_nelements(dst);
     impl.assert(ne <= std.math.maxInt(u32), "ne <= (int64_t)std::numeric_limits<uint32_t>::max()");
@@ -169,13 +169,14 @@ pub fn padPushConstantsInit(src0: *const Tensor, dst: *const Tensor) push.Pad {
     return p; // fastdiv values and offsets are initialized later in ggml_vk_op
 }
 
-/// Ports `vk_op_sum_rows_push_constants_init` (ggml-vulkan-push-constants.h:841 @cd959bae9).
+/// Ports `vk_op_sum_rows_push_constants_init` (ggml-vulkan-push-constants.h:843 @b1b770d90).
 pub fn sumRowsPushConstantsInit(src: *const Tensor, dst: *const Tensor, n_cols: i64) push.SumRows {
     const type_size: u32 = @sizeOf(f32);
     var p: push.SumRows = .{};
     p.n_cols = u32Of(n_cols);
     p.ne01 = u32Of(src.ne[1]);
     p.ne02 = u32Of(src.ne[2]);
+    p.ne03 = u32Of(src.ne[3]);
     p.nb01 = strideIn(src.nb[1], type_size);
     p.nb02 = strideIn(src.nb[2], type_size);
     p.nb03 = strideIn(src.nb[3], type_size);
@@ -232,7 +233,7 @@ fn misalignIn(ctx: *const BackendCtx, t: *const Tensor, unit: u32) u32 {
     return m.context.getMisalignBytes(ctx, t) / unit;
 }
 
-/// Ports `init_pushconst_tensor_offsets` (ggml-vulkan-push-constants.h:898 @cd959bae9), the
+/// Ports `init_pushconst_tensor_offsets` (ggml-vulkan-push-constants.h:901 @b1b770d90), the
 /// primary template, and its specialisations for the MatVecP021, MatVecNc,
 /// Fwht, Dsv4HcComb, Dsv4HcPre, Dsv4HcPost, Unary, Glu, SumRows, Pad,
 /// Conv2d, Conv3d, Im2col3d, Binary, Concat, Upscale and Rope structs
@@ -245,7 +246,7 @@ fn misalignIn(ctx: *const BackendCtx, t: *const Tensor, unit: u32) u32 {
 /// `init_pushconst_tensor_offsets`, `init_pushconst_tensor_offsets`,
 /// `init_pushconst_tensor_offsets`, `init_pushconst_tensor_offsets`,
 /// `init_pushconst_tensor_offsets`
-/// (ggml-vulkan-push-constants.h:913, 925, 937, 946, 955, 964, 1001, 1012, 1027, 1038, 1049, 1058, 1067, 1078, 1093, 1105, 1117 @cd959bae9)):
+/// (ggml-vulkan-push-constants.h:916, 928, 940, 949, 958, 967, 1004, 1015, 1030, 1041, 1052, 1061, 1070, 1081, 1096, 1108, 1120 @b1b770d90)):
 /// the elements by which each binding's start was rounded down, packed
 /// as the struct's shader expects; for a struct without them, the
 /// assertion that nothing was misaligned.
@@ -325,7 +326,7 @@ pub fn split512(ne: u32) [3]u32 {
     return .{ ne, 1, 1 };
 }
 
-/// Ports `ggml_vk_op_f32` (ggml-vulkan.cpp:9540 @cd959bae9): picks the
+/// Ports `ggml_vk_op_f32` (ggml-vulkan.cpp:9873 @b1b770d90): picks the
 /// op's pipeline, finishes the push constants, sizes the dispatch for the
 /// op, and binds the sources and destination as the op's shader expects.
 pub fn opF32(ctx: *BackendCtx, subctx: *Context, src0: ?*const Tensor, src1: ?*const Tensor, src2: ?*const Tensor, src3: ?*const Tensor, dst: *Tensor, op: c.enum_ggml_op, pc_in: anytype) void {
@@ -393,10 +394,14 @@ pub fn opF32Override(ctx: *BackendCtx, subctx: *Context, src0: ?*const Tensor, s
         // We use GGML_OP_SUM_ROWS with 1 row.
         c.GGML_OP_SUM => elements = .{ 1, 1, 1 },
         c.GGML_OP_GROUP_NORM => {
-            const num_groups: u32 = @bitCast(dst.op_params[0]);
-            elements = .{ num_groups *% u32Of(s0.ne[3]), 1, 1 };
+            const total_workgroups: u32 = @as(u32, @bitCast(dst.op_params[0])) *% u32Of(s0.ne[3]);
+            const groups_x = @min(total_workgroups, limits.maxComputeWorkGroupCount[0]);
+            const groups_y_needed = ceilDiv(@as(u64, total_workgroups), groups_x);
+            const groups_y: u32 = @intCast(@min(groups_y_needed, limits.maxComputeWorkGroupCount[1]));
+            const groups_xy = @as(u64, groups_x) * groups_y;
+            elements = .{ groups_x, groups_y, @truncate(ceilDiv(@as(u64, total_workgroups), groups_xy)) };
+            impl.assert(elements[2] <= limits.maxComputeWorkGroupCount[2], "elements[2] <= ctx->device->properties.limits.maxComputeWorkGroupCount[2]");
         },
-        c.GGML_OP_DIAG_MASK_INF => elements = .{ u32Of(c.ggml_nrows(s0)), @truncate(ne00), 1 },
         c.GGML_OP_ROPE, c.GGML_OP_ROPE_BACK => {
             var nrows = u32Of(c.ggml_nrows(s0));
             var z: u32 = 1;
@@ -486,7 +491,18 @@ pub fn opF32Override(ctx: *BackendCtx, subctx: *Context, src0: ?*const Tensor, s
                 elements[1] = 512;
             }
         },
-        c.GGML_OP_ADD, c.GGML_OP_SUB, c.GGML_OP_DIV, c.GGML_OP_MUL, c.GGML_OP_ADD1, c.GGML_OP_OUT_PROD, c.GGML_OP_ARANGE, c.GGML_OP_FILL, c.GGML_OP_SCALE, c.GGML_OP_SQR, c.GGML_OP_SQRT, c.GGML_OP_SIN, c.GGML_OP_COS, c.GGML_OP_LOG, c.GGML_OP_TRI, c.GGML_OP_DIAG, c.GGML_OP_CLAMP, c.GGML_OP_LEAKY_RELU, c.GGML_OP_PAD, c.GGML_OP_PAD_REFLECT_1D, c.GGML_OP_ROLL, c.GGML_OP_REPEAT, c.GGML_OP_REPEAT_BACK, c.GGML_OP_CPY, c.GGML_OP_CONCAT, c.GGML_OP_UPSCALE, c.GGML_OP_UNARY, c.GGML_OP_GLU, c.GGML_OP_CONV_2D_DW => {
+        c.GGML_OP_ADD, c.GGML_OP_SUB, c.GGML_OP_DIV, c.GGML_OP_MUL, c.GGML_OP_OUT_PROD, c.GGML_OP_ARANGE, c.GGML_OP_FILL, c.GGML_OP_SCALE, c.GGML_OP_SQR, c.GGML_OP_SQRT, c.GGML_OP_SIN, c.GGML_OP_COS, c.GGML_OP_LOG, c.GGML_OP_TRI, c.GGML_OP_DIAG, c.GGML_OP_CLAMP, c.GGML_OP_LEAKY_RELU, c.GGML_OP_PAD, c.GGML_OP_PAD_REFLECT_1D, c.GGML_OP_ROLL, c.GGML_OP_REPEAT, c.GGML_OP_REPEAT_BACK, c.GGML_OP_CPY, c.GGML_OP_CONCAT, c.GGML_OP_UPSCALE, c.GGML_OP_UNARY, c.GGML_OP_GLU, c.GGML_OP_CONV_2D_DW => blk: {
+            // dispatched per 32x32 tile, not per element
+            if (op == c.GGML_OP_CONCAT and
+                (pipeline == ctx.device.pipeline_concat_transpose_i8 or
+                    pipeline == ctx.device.pipeline_concat_transpose_i16 or
+                    pipeline == ctx.device.pipeline_concat_transpose_i32))
+            {
+                const tiles_y: u32 = @truncate(ceilDiv(@as(u64, @bitCast(dst.ne[0])), 32));
+                const groups_y = @min(tiles_y, limits.maxComputeWorkGroupCount[1]);
+                elements = .{ u32Of(src1.?.ne[1]), groups_y * 32, ceilDiv(tiles_y, groups_y) };
+                break :blk;
+            }
             var ne = u32Of(c.ggml_nelements(dst));
             if (op == c.GGML_OP_CPY and c.ggml_is_quantized(s0.type) and c.ggml_is_quantized(dst.type)) {
                 // Convert from number of logical elements to 2- or 4-byte units.
@@ -580,26 +596,26 @@ pub fn opF32Override(ctx: *BackendCtx, subctx: *Context, src0: ?*const Tensor, s
 // Shared helpers
 
 /// Ports the tensor overload of `ggml_vk_use_mul_mat_vec_id`
-/// (ggml-vulkan.cpp:8024 @cd959bae9).
+/// (ggml-vulkan.cpp:8290 @b1b770d90).
 pub fn useMulMatVecIdTensor(dst: *const Tensor) bool {
     const src0 = dst.src[0].*;
     const ids = dst.src[2].*;
     return ids.ne[1] <= 8 and (src0.type == c.GGML_TYPE_F32 or src0.type == c.GGML_TYPE_F16 or c.ggml_is_quantized(src0.type));
 }
 
-/// Ports `ggml_vk_use_mul_mat_vec_id` (ggml-vulkan.cpp:8030 @cd959bae9).
+/// Ports `ggml_vk_use_mul_mat_vec_id` (ggml-vulkan.cpp:8296 @b1b770d90).
 pub fn useMulMatVecId(cgraph: *const CGraph, node_idx: c_int) bool {
     return useMulMatVecIdTensor(cgraph.nodes[@intCast(node_idx)].?);
 }
 
-/// Ports `ggml_vk_rms_num_partials` (ggml-vulkan.cpp:10874 @cd959bae9).
+/// Ports `ggml_vk_rms_num_partials` (ggml-vulkan.cpp:11204 @b1b770d90).
 pub fn rmsNumPartials(ctx: *const BackendCtx, node: *const Tensor) u32 {
     const ne = u32Of(node.ne[0]);
     const denom = ctx.device.pipeline_add_rms[0][0][0].?.wg_denoms[0];
     return ceilDiv(ne, denom);
 }
 
-/// Ports `ggml_vk_rms_partials_size` (ggml-vulkan.cpp:10881 @cd959bae9).
+/// Ports `ggml_vk_rms_partials_size` (ggml-vulkan.cpp:11211 @b1b770d90).
 pub fn rmsPartialsSize(ctx: *const BackendCtx, node: *const Tensor) u32 {
     const num_partials = rmsNumPartials(ctx, node);
     const a = ctx.device.partials_binding_alignment;
@@ -610,7 +626,7 @@ pub fn rmsPartialsSize(ctx: *const BackendCtx, node: *const Tensor) u32 {
 // -----------------------------------------------------------------------------
 // The node switch
 
-/// The `switch (node->op)` of `ggml_vk_build_graph` (ggml-vulkan.cpp:12387 @cd959bae9).
+/// The `switch (node->op)` of `ggml_vk_build_graph` (ggml-vulkan.cpp:12698 @b1b770d90).
 ///
 /// Return: false where the C++ returns false, for an op it has no
 /// dispatch for.
@@ -628,7 +644,7 @@ pub fn dispatchNode(ctx: *BackendCtx, compute_ctx: *Context, cgraph: *CGraph, no
         c.GGML_OP_GET_ROWS_BACK => B.getRowsBack(ctx, compute_ctx, src0.?, src1.?, node),
         c.GGML_OP_ADD => if (ctx.num_additional_fused_ops != 0) B.multiAdd(ctx, compute_ctx, cgraph, node_idx) else B.add(ctx, compute_ctx, src0.?, src1.?, node),
         c.GGML_OP_OUT_PROD => B.outProd(ctx, compute_ctx, src0.?, src1.?, node),
-        c.GGML_OP_SUB, c.GGML_OP_DIV, c.GGML_OP_ADD1 => B.binary(ctx, compute_ctx, src0.?, src1.?, node, node.op),
+        c.GGML_OP_SUB, c.GGML_OP_DIV => B.binary(ctx, compute_ctx, src0.?, src1.?, node, node.op),
         c.GGML_OP_MUL => if (ctx.num_additional_fused_ops != 0) B.snakeFused(ctx, compute_ctx, cgraph, node_idx) else B.binary(ctx, compute_ctx, src0.?, src1.?, node, c.GGML_OP_MUL),
         c.GGML_OP_ADD_ID => B.addId(ctx, compute_ctx, src0.?, src1.?, src2_.?, node),
         c.GGML_OP_CONCAT => B.concat(ctx, compute_ctx, src0.?, src1.?, node),
@@ -692,7 +708,6 @@ pub fn dispatchNode(ctx: *BackendCtx, compute_ctx: *Context, cgraph: *CGraph, no
             c.GGML_GLU_OP_GEGLU, c.GGML_GLU_OP_REGLU, c.GGML_GLU_OP_SWIGLU, c.GGML_GLU_OP_SWIGLU_OAI, c.GGML_GLU_OP_GEGLU_ERF, c.GGML_GLU_OP_GEGLU_QUICK, c.GGML_GLU_OP_SWIGLU_CLAMP => B.glu(ctx, compute_ctx, src0.?, src1, node),
             else => return false,
         },
-        c.GGML_OP_DIAG_MASK_INF => B.diagMaskInf(ctx, compute_ctx, src0.?, node),
         c.GGML_OP_SOFT_MAX => if (ctx.fused_topk_moe_mode != .count) R.topkMoe(ctx, compute_ctx, cgraph, node_idx) else R.softMax(ctx, compute_ctx, src0.?, src1, src2_, node),
         c.GGML_OP_SOFT_MAX_BACK => R.softMaxBack(ctx, compute_ctx, src0.?, src1.?, node),
         c.GGML_OP_ROPE => R.rope(ctx, compute_ctx, cgraph, node_idx, false),

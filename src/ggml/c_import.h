@@ -41,3 +41,13 @@
  * and `ggml-backend.h`, so it imports cleanly.
  */
 #include "ggml-opt.h"
+/*
+ * Two declarations from ggml-impl.h, which is not importable (see above):
+ * since v1.0.0 `ggml_rope_yarn_corr_dims` lives there, with a `truncate`
+ * argument, beside `ggml_rope_get_truncate`. The CPU, CUDA and Vulkan RoPE
+ * call both. Copied from ggml-impl.h:112, 115 @b1b770d90.
+ */
+GGML_API void ggml_rope_yarn_corr_dims(
+    int n_dims, int n_ctx_orig, float freq_base, float beta_fast, float beta_slow, bool truncate, float dims[2]);
+
+GGML_API bool ggml_rope_get_truncate(const struct ggml_tensor * a);

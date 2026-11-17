@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/cross-entropy-loss.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/cross-entropy-loss.cuh` at v0.9.0
-//! (`cd959bae9`). The kernels -- `cross_entropy_loss_f32` and
+//! `llama.cpp/ggml/src/ggml-cuda/cross-entropy-loss.cuh` at v1.0.0
+//! (`b1b770d90`). The kernels -- `cross_entropy_loss_f32` and
 //! `cross_entropy_loss_back_f32` -- stay CUDA.
 //!
 //! # The forward op is not wired
@@ -24,11 +24,11 @@ const Tensor = c.ggml_tensor;
 
 const warp_size = common.warp_size;
 
-/// Ports `CUDA_CROSS_ENTROPY_LOSS_BLOCK_SIZE` (cross-entropy-loss.cuh:3 @cd959bae9).
+/// Ports `CUDA_CROSS_ENTROPY_LOSS_BLOCK_SIZE` (cross-entropy-loss.cuh:3 @b1b770d90).
 /// Unused by the C's host code too.
 const block_size = 256;
 
-/// Ports `ggml_cuda_cross_entropy_loss` (cross-entropy-loss.cu:94 @cd959bae9).
+/// Ports `ggml_cuda_cross_entropy_loss` (cross-entropy-loss.cu:94 @b1b770d90).
 pub fn opCrossEntropyLoss(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -72,7 +72,7 @@ pub fn opCrossEntropyLoss(ctx: *common.Context, dst: *Tensor) void {
     sum.sumF32Cuda(pool, @ptrCast(dst_tmp.ptr), @ptrCast(@alignCast(dst.data)), blocks_num.x, stream);
 }
 
-/// Ports `ggml_cuda_cross_entropy_loss_back` (cross-entropy-loss.cu:137 @cd959bae9).
+/// Ports `ggml_cuda_cross_entropy_loss_back` (cross-entropy-loss.cu:137 @b1b770d90).
 pub fn opCrossEntropyLossBack(ctx: *common.Context, dst: *Tensor) void {
     const grad = impl.one(Tensor, dst.src[0]);
     const src0f = impl.one(Tensor, dst.src[1]);

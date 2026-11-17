@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/server/server-cors-proxy.h` (llama.cpp v0.9.0,
-//! `cd959bae9`) -- `proxy_header_to_lower`, `proxy_request` and the two
+//! Ports `llama.cpp/tools/server/server-cors-proxy.h` (llama.cpp v1.0.0,
+//! `b1b770d90`) -- `proxy_header_to_lower`, `proxy_request` and the two
 //! handlers -- and `common_http_parse_url` from `llama.cpp/common/http.h`.
 //! Each declaration names what it ports and the line it began at. The
 //! forwarding itself is `proxy.zig`'s `server_http_proxy`.
@@ -15,12 +15,15 @@ const tc = @import("tools_common");
 const http = @import("http.zig");
 const common = @import("common.zig");
 const proxy = @import("proxy.zig");
+const oaicompat = @import("oaicompat.zig");
+const download = @import("download.zig");
+const httplib = @import("httplib/module.zig");
 
 const Allocator = std.mem.Allocator;
 const srv = common.srv;
 const throw = common.throw;
 
-/// Ports `common_http_url` (common/http.h:17 @cd959bae9).
+/// Ports `common_http_url` (common/http.h:17 @b1b770d90).
 pub const HttpUrl = struct {
     scheme: []const u8 = "",
     user: []const u8 = "",
@@ -41,7 +44,7 @@ fn stoi(a: Allocator, s: []const u8) !c_int {
     };
 }
 
-/// Ports `common_http_parse_url` (common/http.h:31 @cd959bae9): scheme, user and
+/// Ports `common_http_parse_url` (common/http.h:31 @b1b770d90): scheme, user and
 /// password, host (an IPv6 literal unbracketed), port and path.
 pub fn parseUrl(a: Allocator, url: []const u8) !HttpUrl {
     var parts: HttpUrl = .{};
@@ -95,14 +98,17 @@ pub fn parseUrl(a: Allocator, url: []const u8) !HttpUrl {
     return parts;
 }
 
-/// Ports `proxy_header_to_lower` (server-cors-proxy.h:15 @cd959bae9).
+/// Ports `proxy_header_to_lower` (server-cors-proxy.h:16 @b1b770d90).
 fn proxyHeaderToLower(a: Allocator, header: []const u8) ![]u8 {
     return std.ascii.allocLowerString(a, header);
 }
 
-/// Ports `proxy_request` (server-cors-proxy.h:22 @cd959bae9): the `url`
+/// Ports `proxy_request` (server-cors-proxy.h:23 @b1b770d90): the `url`
 /// parameter's target, and the request's `x-llama-server-proxy-header-*`
-/// headers with that prefix removed, forwarded.
+/// headers with that prefix removed, forwarded. The target must resolve to
+/// public addresses (unless `LLAMA_SERVER_DEBUG_PROXY_ALLOW_PRIVATE`, a
+/// test-only escape hatch), the client connects to the checked one, and a
+/// redirect comes back through the proxy so that each hop is checked.
 fn proxyRequest(req: *const http.Req, method: []const u8) !*http.Res {
     var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
     defer arena.deinit();
@@ -136,7 +142,10 @@ fn proxyRequest(req: *const http.Req, method: []const u8) !*http.Res {
         try headers.put(a, new_key, e.value);
     }
 
-    return proxy.Proxy.create(
+    // test-only escape hatch
+    const allow_private = if (std.c.getenv("LLAMA_SERVER_DEBUG_PROXY_ALLOW_PRIVATE")) |v| v[0] != 0 else false;
+    const resolved = try oaicompat.serverResolvePublicAddr(a, parsed_url.host, allow_private);
+    const res = try proxy.Proxy.create(
         method,
         parsed_url.scheme,
         parsed_url.host,
@@ -148,12 +157,27 @@ fn proxyRequest(req: *const http.Req, method: []const u8) !*http.Res {
         req.should_stop,
         600, // timeout_read (default to 10 minutes)
         600, // timeout_write (default to 10 minutes)
+        resolved,
     );
+    errdefer res.vtable.destroy(res);
+
+    // route redirects back through the proxy, so each hop is checked
+    if (res.status >= 300 and res.status < 400) {
+        const ra = res.allocator();
+        for (res.headers.entries.items) |*e| {
+            if (std.ascii.eqlIgnoreCase(e.key, "location")) {
+                const target = try download.commonHttpResolveLocation(a, target_url, e.value);
+                e.value = try std.mem.concat(ra, u8, &.{ "?url=", try httplib.encodeUriComponent(a, target) });
+            }
+        }
+    }
+
+    return res;
 }
 
-/// Ports `proxy_handler_post` (server-cors-proxy.h:77 @cd959bae9).
+/// Ports `proxy_handler_post` (server-cors-proxy.h:89 @b1b770d90).
 pub const handler_post: http.Handler = .{ .ctx = null, .func = post };
-/// Ports `proxy_handler_get` (server-cors-proxy.h:81 @cd959bae9).
+/// Ports `proxy_handler_get` (server-cors-proxy.h:93 @b1b770d90).
 pub const handler_get: http.Handler = .{ .ctx = null, .func = get };
 
 fn post(_: ?*anyopaque, req: *const http.Req) anyerror!*http.Res {

@@ -27,6 +27,9 @@
 //!   [--case-exact <name>] [--skip-case <name>] [--list-cases]
 //!   [--hadamard | --hadamard-tied] [--section-order <tyxz|zyxt>] [--target <model.gguf>]
 //!
+//! v1.0.0: `moe-cache-cpu`, `moe-cache` with `moe_cache_cpu_share`
+//! (`MOE_CACHE_CPU_SHARE`, default 0.5), explicit like `moe-cache`.
+//!
 //! v0.7.0 additions: the `moe-cache` and `host-experts` configurations run
 //! only when named with `--model` (they need a MoE model; deepseek2-moe's
 //! 64 experts exercise the LRU, `MOE_CACHE_SIZE` sets the budget);
@@ -63,15 +66,8 @@ extern fn _Z24llama_model_set_attn_rotP11llama_modelb(model: ?*c.struct_llama_mo
 const StdVector = extern struct { begin: [*c]c.ggml_backend_buffer_t, end: [*c]c.ggml_backend_buffer_t, cap: [*c]c.ggml_backend_buffer_t };
 extern fn _Z24llama_memory_get_buffersP14llama_memory_i(mem: c.llama_memory_t) StdVector;
 extern fn _ZdlPv(p: ?*anyopaque) void;
-extern fn _Z26llama_set_embeddings_nextnP13llama_contextbb(ctx: ?*c.struct_llama_context, value: bool, masked: bool) void;
-extern fn _Z26llama_get_embeddings_nextnP13llama_context(ctx: ?*c.struct_llama_context) [*c]f32;
-extern fn _Z30llama_set_embeddings_layer_inpP13llama_contextjb(ctx: ?*c.struct_llama_context, lid: u32, value: bool) void;
-extern fn _Z30llama_get_embeddings_layer_inpP13llama_contextj(ctx: ?*c.struct_llama_context, lid: u32) [*c]f32;
-/// v0.9.0's layer input device buffer and embedding rows, `llama-ext.h`'s
-/// too: the names are `nm`'s.
-extern fn _Z34llama_set_embeddings_layer_inp_devP13llama_contextb(ctx: ?*c.struct_llama_context, value: bool) void;
-extern fn _Z23llama_supports_embd_rowPK13llama_context(ctx: ?*const c.struct_llama_context) bool;
-extern fn _Z28llama_batch_ext_add_embd_rowP15llama_batch_extii(b: ?*c.struct_llama_batch_ext, seq_id: c.llama_seq_id, row: i32) i32;
+// The NextN, layer input and embedding row entry points moved from
+// `llama-ext.h` to `llama.h` at v1.0.0, so the reference's are `c.*`.
 
 /// The architectures whose graph records its layers' inputs, the ones a
 /// `llama_set_embeddings_layer_inp` request does not abort on: every
@@ -163,6 +159,20 @@ var scratch: std.ArrayList(u8) = .empty;
 /// Only the written prefix is hashed.
 fn writtenBytes(t: *const c.ggml_tensor) usize {
     const n = c.ggml_nbytes(t);
+    // SSM_SCAN's result is `y` then K state snapshots, snapshot-major
+    // (ggml.c:5677 @b1b770d90), of which a ubatch shorter than K writes only
+    // the first min(n_seq_tokens, K) -- mamba-base.cpp:255's `n_written`.
+    // The rest is unwritten, so on the CPU it differs run to run.
+    if (t.op == c.GGML_OP_SSM_SCAN) {
+        const k: i64 = t.op_params[0];
+        const s: *const c.ggml_tensor = t.src[0];
+        const x: *const c.ggml_tensor = t.src[1];
+        const ids: *const c.ggml_tensor = t.src[6];
+        const n_seq_tokens = x.ne[2];
+        if (k <= 1 or n_seq_tokens >= k) return n;
+        const elems = c.ggml_nelements(x) + n_seq_tokens * s.ne[0] * s.ne[1] * s.ne[2] * ids.ne[0];
+        return @intCast(elems * @sizeOf(f32));
+    }
     if (t.op != c.GGML_OP_GATED_DELTA_NET) return n;
     const k: i64 = t.op_params[0];
     const v: *const c.ggml_tensor = t.src[2];
@@ -635,10 +645,10 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
     const n_layer_inp: u32 = if (cs.layer_inp) @min(cs.layer_inp_max, @as(u32, @intCast(MAl.llama_model_n_layer(@ptrCast(model))))) else 0;
     const n_embd_row: usize = @intCast(MAl.llama_model_n_embd(@ptrCast(model)));
     for (0..n_layer_inp) |lid| {
-        if (A == c) _Z30llama_set_embeddings_layer_inpP13llama_contextjb(ctx, @intCast(lid), true) else harness_root.api.context.llama_set_embeddings_layer_inp(ctx, @intCast(lid), true);
+        if (A == c) c.llama_set_embeddings_layer_inp(ctx, @intCast(lid), true) else harness_root.api.context.llama_set_embeddings_layer_inp(ctx, @intCast(lid), true);
     }
     if (cs.layer_inp_dev) {
-        if (A == c) _Z34llama_set_embeddings_layer_inp_devP13llama_contextb(ctx, true) else harness_root.api.context.llama_set_embeddings_layer_inp_dev(ctx, true);
+        if (A == c) c.llama_set_embeddings_layer_inp_dev(ctx, true) else harness_root.api.context.llama_set_embeddings_layer_inp_dev(ctx, true);
     }
 
     const embeddings = params.embeddings;
@@ -718,7 +728,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
         // On the device, the rows are not copied out: the C++ asserts on a
         // read.
         for (0..if (cs.layer_inp_dev) 0 else n_layer_inp) |lid| {
-            const row: [*c]f32 = if (A == c) _Z30llama_get_embeddings_layer_inpP13llama_contextj(ctx, @intCast(lid)) else harness_root.api.context.llama_get_embeddings_layer_inp(ctx, @intCast(lid));
+            const row: [*c]f32 = if (A == c) c.llama_get_embeddings_layer_inp(ctx, @intCast(lid)) else harness_root.api.context.llama_get_embeddings_layer_inp(ctx, @intCast(lid));
             Out.row("layer_inp", row, tokens.len * n_embd_row, @intCast(lid));
         }
         // v0.7.0's `llama_memory_get_buffers`, on a memory holding the
@@ -861,11 +871,11 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
             // target with that buffer reads; everywhere else decode and
             // encode refuse the batch before touching the memory.
             {
-                const supports = if (A == c) _Z23llama_supports_embd_rowPK13llama_context(ctx) else harness_root.api.context.llama_supports_embd_row(ctx);
+                const supports = if (A == c) c.llama_supports_embd_row(ctx) else harness_root.api.context.llama_supports_embd_row(ctx);
                 note("supports embd row: {}", .{supports});
                 AB.llama_batch_ext_clear(eb);
                 for (0..3) |k| {
-                    const idx = if (A == c) _Z28llama_batch_ext_add_embd_rowP15llama_batch_extii(eb, 0, @intCast(k)) else harness_root.api.batch.llama_batch_ext_add_embd_row(eb, 0, @intCast(k));
+                    const idx = if (A == c) c.llama_batch_ext_add_embd_row(eb, 0, @intCast(k)) else harness_root.api.batch.llama_batch_ext_add_embd_row(eb, 0, @intCast(k));
                     note("add embd row {d}: {d}", .{ k, idx });
                     if (idx < 0) continue;
                     const pk = pos + @as(i32, @intCast(k));
@@ -1041,22 +1051,22 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
                 const n_li = draft.n_enc / t_embd;
                 if (draft.n_enc % t_embd == 0 and n_li >= 1 and n_li <= t_layer + 1) {
                     for (0..n_li) |lid| {
-                        if (A == c) _Z30llama_set_embeddings_layer_inpP13llama_contextjb(tc, @intCast(lid), true) else harness_root.api.context.llama_set_embeddings_layer_inp(tc, @intCast(lid), true);
+                        if (A == c) c.llama_set_embeddings_layer_inp(tc, @intCast(lid), true) else harness_root.api.context.llama_set_embeddings_layer_inp(tc, @intCast(lid), true);
                     }
-                    if (A == c) _Z34llama_set_embeddings_layer_inp_devP13llama_contextb(tc, true) else harness_root.api.context.llama_set_embeddings_layer_inp_dev(tc, true);
+                    if (A == c) c.llama_set_embeddings_layer_inp_dev(tc, true) else harness_root.api.context.llama_set_embeddings_layer_inp_dev(tc, true);
                     A.llama_memory_clear(A.llama_get_memory(tc), true);
                     var tb = c.llama_batch_init(8, 0, 1);
                     defer c.llama_batch_free(tb);
                     for (0..4) |k| batchAdd(&tb, tokens[k], @intCast(k), &.{0}, k == 3);
                     note("target decode, layer inputs on the device: {d}", .{A.llama_decode(tc, tb)});
-                    const supports = if (A == c) _Z23llama_supports_embd_rowPK13llama_context(ctx) else harness_root.api.context.llama_supports_embd_row(ctx);
+                    const supports = if (A == c) c.llama_supports_embd_row(ctx) else harness_root.api.context.llama_supports_embd_row(ctx);
                     note("draft supports embd row: {}", .{supports});
                     const AB = if (A == c) c else harness_root.api.batch;
                     if (AB.llama_batch_ext_init(ctx)) |rb| {
                         defer AB.llama_batch_ext_free(rb);
                         const q0: i32 = A.llama_memory_seq_pos_max(mem, 0) + 1;
                         for (0..4) |k| {
-                            const idx = if (A == c) _Z28llama_batch_ext_add_embd_rowP15llama_batch_extii(rb, 0, @intCast(k)) else harness_root.api.batch.llama_batch_ext_add_embd_row(rb, 0, @intCast(k));
+                            const idx = if (A == c) c.llama_batch_ext_add_embd_row(rb, 0, @intCast(k)) else harness_root.api.batch.llama_batch_ext_add_embd_row(rb, 0, @intCast(k));
                             const p = [_]i32{ q0 + @as(i32, @intCast(k)), 0, 0, 0 };
                             _ = AB.llama_batch_ext_set_pos(rb, idx, &p);
                             _ = AB.llama_batch_ext_set_output_logits(rb, idx, false);
@@ -1069,7 +1079,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
                         note("decode over injected rows: {d}", .{ret_r});
                         if (ret_r == 0) Out.row("logits", A.llama_get_logits_ith(ctx, 0), n_vocab, 0);
                     }
-                    if (A == c) _Z34llama_set_embeddings_layer_inp_devP13llama_contextb(tc, false) else harness_root.api.context.llama_set_embeddings_layer_inp_dev(tc, false);
+                    if (A == c) c.llama_set_embeddings_layer_inp_dev(tc, false) else harness_root.api.context.llama_set_embeddings_layer_inp_dev(tc, false);
                 } else {
                     note("draft features {d} are not a whole number of target layers of {d}", .{ draft.n_enc, t_embd });
                 }
@@ -1084,7 +1094,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
                 const block_size = std.fmt.parseInt(usize, metaStr(MA, model, "dflash.block_size", &vb), 10) catch 0;
                 const n_state: usize = @intCast(MA.llama_model_n_embd_inp(@ptrCast(model)));
                 const AB = if (A == c) c else harness_root.api.batch;
-                if (A == c) _Z26llama_set_embeddings_nextnP13llama_contextbb(ctx, true, false) else harness_root.api.context.llama_set_embeddings_nextn(ctx, true, false);
+                if (A == c) c.llama_set_embeddings_nextn(ctx, true, false) else harness_root.api.context.llama_set_embeddings_nextn(ctx, true, false);
                 const state = gpa.alloc(f32, @max(block_size, 1) * n_state) catch unreachable;
                 defer gpa.free(state);
                 fillFeatures(state, 17 + round);
@@ -1103,11 +1113,11 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
                     const rc = A.llama_process(ctx, c.LLAMA_PROCESS_TYPE_DECODE, lb);
                     note("lilicorr process: {d}", .{rc});
                     if (rc == 0) {
-                        const e = if (A == c) _Z26llama_get_embeddings_nextnP13llama_context(ctx) else harness_root.api.context.llama_get_embeddings_nextn(ctx);
+                        const e = if (A == c) c.llama_get_embeddings_nextn(ctx) else harness_root.api.context.llama_get_embeddings_nextn(ctx);
                         if (e) |r| note("lilicorr lattice: {x}", .{hashBytes(@ptrCast(r), block_size * n_embd * @sizeOf(f32))}) else note("lilicorr lattice: null", .{});
                     }
                 }
-                if (A == c) _Z26llama_set_embeddings_nextnP13llama_contextbb(ctx, false, true) else harness_root.api.context.llama_set_embeddings_nextn(ctx, false, true);
+                if (A == c) c.llama_set_embeddings_nextn(ctx, false, true) else harness_root.api.context.llama_set_embeddings_nextn(ctx, false, true);
                 State.positions(mem, n_seq);
             }
         }
@@ -1147,6 +1157,60 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
                 A.llama_set_causal_attn(ctx, true);
                 State.positions(mem, n_seq);
             }
+        }
+
+        // v1.0.0's h_nextn device buffer (a8fad21e9), as common/speculative.cpp
+        // drives it on a target: refused while the extraction is off or
+        // masked, then the unmasked rows of a decode written to the device
+        // (build_h_nextn_dev) and read back, a host-set row read back, and
+        // the state source refused by a context that is not MTP.
+        if (round == 1 and draft.kind == .none and !enc_dec and !embeddings) {
+            const AB = if (A == c) c else harness_root.api.batch;
+            const AC = if (A == c) c else harness_root.api.context;
+            note("nextn_dev off: {}", .{AC.llama_set_embeddings_nextn_dev(ctx, true)});
+            AC.llama_set_embeddings_nextn(ctx, true, true);
+            note("nextn_dev masked: {}", .{AC.llama_set_embeddings_nextn_dev(ctx, true)});
+            AC.llama_set_embeddings_nextn(ctx, true, false);
+            const dev = AC.llama_set_embeddings_nextn_dev(ctx, true);
+            note("nextn_dev unmasked: {}", .{dev});
+            note("state src self: {}", .{AC.llama_set_ctx_state_src(ctx, ctx)});
+            note("state src null: {}", .{AC.llama_set_ctx_state_src(ctx, null)});
+            const n_out: usize = @intCast(MA.llama_model_n_embd_out(@ptrCast(model)));
+            const rows = gpa.alloc(f32, 4 * @max(n_out, 1)) catch unreachable;
+            defer gpa.free(rows);
+            note("nextn rows out of range: {}", .{AC.llama_get_embeddings_nextn_rows(ctx, -1, 1, rows.ptr)});
+            // the rows a graph without an h_nextn tensor never writes would
+            // otherwise be whatever the allocation held
+            if (dev) {
+                fillFeatures(rows, 29);
+                note("nextn rows preset: {}", .{AC.llama_set_embeddings_nextn_rows(ctx, 0, 4, rows.ptr)});
+            }
+            var hpos: i32 = A.llama_memory_seq_pos_max(mem, 0) + 1;
+            const nt: usize = @intCast(@min(@as(i32, 3), @as(i32, @intCast(A.llama_n_ctx(ctx))) - hpos));
+            if (AB.llama_batch_ext_init(ctx)) |hb| {
+                defer AB.llama_batch_ext_free(hb);
+                for (0..nt) |k| {
+                    const idx = AB.llama_batch_ext_add_token(hb, 0, tokens[(k + 2) % tokens.len]);
+                    const p = [_]i32{ hpos, 0, 0, 0 };
+                    hpos += 1;
+                    _ = AB.llama_batch_ext_set_pos(hb, idx, &p);
+                    _ = AB.llama_batch_ext_set_output_logits(hb, idx, k + 1 == nt);
+                }
+                const rc = if (nt > 0) A.llama_process(ctx, c.LLAMA_PROCESS_TYPE_DECODE, hb) else -99;
+                note("process nextn_dev: {d}", .{rc});
+                if (rc == 0 and dev) {
+                    const ok = AC.llama_get_embeddings_nextn_rows(ctx, 0, @intCast(nt), rows.ptr);
+                    note("nextn rows: {} {x}", .{ ok, hashBytes(@ptrCast(rows.ptr), nt * n_out * @sizeOf(f32)) });
+                    fillFeatures(rows[0..n_out], 23);
+                    const row_host: i64 = @intCast(n_batch);
+                    note("nextn host row set: {}", .{AC.llama_set_embeddings_nextn_rows(ctx, row_host, 1, rows.ptr)});
+                    @memset(rows, 0);
+                    note("nextn host row get: {} {x}", .{ AC.llama_get_embeddings_nextn_rows(ctx, row_host, 1, rows.ptr), hashBytes(@ptrCast(rows.ptr), n_out * @sizeOf(f32)) });
+                }
+            }
+            note("nextn_dev off again: {}", .{AC.llama_set_embeddings_nextn_dev(ctx, false)});
+            AC.llama_set_embeddings_nextn(ctx, false, true);
+            State.positions(mem, n_seq);
         }
 
         // Since v0.6.0 a failed sequence restore zeroes the K/V and
@@ -1198,6 +1262,14 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
     // its shift graph ran only with nothing pending. On a model with no RoPE
     // layer it builds no graph (`--model no-rope`).
     if (mem != null and A.llama_memory_can_shift(mem) and draft.kind == .none and !enc_dec) {
+        // the sequence restores above can leave it short (v1.0.0: the shift
+        // had stopped running on every model), so give it the positions
+        if (A.llama_memory_seq_pos_max(mem, 0) <= 4) {
+            b.n_tokens = 0;
+            const p0 = A.llama_memory_seq_pos_max(mem, 0) + 1;
+            for (0..6) |k| batchAdd(&b, tokens[k % tokens.len], p0 + @as(i32, @intCast(k)), &.{0}, k == 5);
+            note("decode before the shift: {d}", .{A.llama_decode(ctx, b)});
+        }
         const pos_end = A.llama_memory_seq_pos_max(mem, 0);
         if (pos_end > 4) {
             const removed = A.llama_memory_seq_rm(mem, 0, 1, 3);
@@ -1602,6 +1674,17 @@ const ModelEdits = struct {
     }
     /// The budget: `MOE_CACHE_SIZE` bytes, or 1 MiB.
     var moe_cache_size: usize = 1 << 20;
+    /// `moeCacheCtx` with part of the misses computed on the CPU (v1.0.0,
+    /// e95426f16): `MOE_CACHE_CPU_SHARE`, or one half.
+    /// The zero slots the CPU part keeps beside the cached ones need room:
+    /// at least 2 MiB, so deepseek2-moe's cache still holds a token's
+    /// experts.
+    fn moeCacheCpuCtx(p: *c.llama_context_params) void {
+        moeCacheCtx(p);
+        p.moe_cache_size = @max(moe_cache_size, 2 << 20);
+        p.moe_cache_cpu_share = moe_cache_cpu_share;
+    }
+    var moe_cache_cpu_share: f32 = 0.5;
 
     var proxy_devices: [2]c.ggml_backend_dev_t = .{ null, null };
     /// Every layer on harness/proxy_dev.c's device, which declines the
@@ -1706,6 +1789,7 @@ const model_cfgs = [_]ModelCfg{
     .{ .name = "tensor", .edit = ModelEdits.tensorSplit, .nodes = false },
     .{ .name = "tensor-uneven", .edit = ModelEdits.tensorSplitUneven, .nodes = false },
     .{ .name = "moe-cache", .edit = ModelEdits.hostExperts, .ctx_edit = ModelEdits.moeCacheCtx, .explicit = true },
+    .{ .name = "moe-cache-cpu", .edit = ModelEdits.hostExperts, .ctx_edit = ModelEdits.moeCacheCpuCtx, .explicit = true },
     .{ .name = "host-experts", .edit = ModelEdits.hostExperts, .explicit = true },
     .{ .name = "partial-2", .edit = ModelEdits.partial2, .explicit = true },
     .{ .name = "no-rope", .edit = ModelEdits.noRope, .explicit = true },
@@ -1793,6 +1877,7 @@ pub fn main(init: std.process.Init) !void {
     const port_first = std.c.getenv("CONTEXT_DIFF_PORT_FIRST") != null;
 
     if (std.c.getenv("MOE_CACHE_SIZE")) |v| ModelEdits.moe_cache_size = std.fmt.parseInt(usize, std.mem.span(v), 10) catch ModelEdits.moe_cache_size;
+    if (std.c.getenv("MOE_CACHE_CPU_SHARE")) |v| ModelEdits.moe_cache_cpu_share = std.fmt.parseFloat(f32, std.mem.span(v)) catch ModelEdits.moe_cache_cpu_share;
 
     c.llama_log_set(logCb, null);
 

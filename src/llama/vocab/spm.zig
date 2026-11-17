@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.9.0 (`cd959bae9`).
+//! Ported from `llama.cpp/src/llama-vocab.cpp` at v1.0.0 (`b1b770d90`).
 //!
 //! The work queue is a `std::priority_queue` with a float comparator, so
 //! among equal scores -- and around a NaN score, where the comparator is no
@@ -25,7 +25,7 @@ fn oom() noreturn {
     impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
-/// Ports `llm_symbol` (llama-vocab.cpp:75 @cd959bae9), with the text as an
+/// Ports `llm_symbol` (llama-vocab.cpp:75 @b1b770d90), with the text as an
 /// offset into the string being tokenized.
 pub const Symbol = struct {
     prev: i32,
@@ -34,7 +34,7 @@ pub const Symbol = struct {
     n: usize,
 };
 
-/// Ports `llm_bigram_spm` (llama-vocab.cpp:91 @cd959bae9).
+/// Ports `llm_bigram_spm` (llama-vocab.cpp:91 @b1b770d90).
 const Bigram = struct {
     left: i32,
     right: i32,
@@ -47,7 +47,7 @@ fn bigramLess(_: void, l: Bigram, r: Bigram) bool {
     return (l.score < r.score) or (l.score == r.score and l.left > r.left);
 }
 
-/// Ports `llm_tokenizer_spm_session` (llama-vocab.cpp:109 @cd959bae9).
+/// Ports `llm_tokenizer_spm_session` (llama-vocab.cpp:109 @b1b770d90).
 const Session = struct {
     vocab: *const Vocab,
     text: []const u8,
@@ -92,7 +92,7 @@ const Session = struct {
     }
 
     /// Ports `llm_tokenizer_spm_session`'s `resegment` (llama-vocab.cpp:172
-    /// @cd959bae9). No recursion: the merges of a long token can be deep.
+    /// @b1b770d90). No recursion: the merges of a long token can be deep.
     fn resegment(self: *Session, symbol: Symbol, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
         var todo: std.ArrayList(Symbol) = .empty;
         defer todo.deinit(allocator);
@@ -117,7 +117,7 @@ const Session = struct {
 };
 
 /// Ports `llm_tokenizer_spm_session`'s `tokenize` (llama-vocab.cpp:112
-/// @cd959bae9).
+/// @b1b770d90).
 ///
 /// Parameters:
 /// - `vocab`: the vocabulary.

@@ -2,15 +2,18 @@
 //! (speech tokens to mel, TTS), the HiFT vocoder (mel and source STFT to a
 //! spectrum, TTS_VOCODE) and the S3 tokenizer (log-mel to FSQ codes,
 //! TOKENIZE). This file's convention is `[C, T]`: channels on `ne0`, time
-//! on `ne1`. The host side of each stage is in `clip.zig`'s `encode`.
+//! on `ne1`. The host side of each stage, `mtmd_subcontext::encode`'s, is
+//! here too, below the builders.
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/chatterbox-gen.cpp` at v0.9.0
-//! (`cd959bae9`) but its `clip_graph_chatterbox_base` members, which are
-//! `chatterbox_base.zig`; and the `PROJECTOR_TYPE_CHATTERBOX` arm of
-//! `clip_get_graph_builder` (`llama.cpp/tools/mtmd/clip.cpp`). Each
-//! declaration names what it ports and the line it began at.
+//! Ports `llama.cpp/tools/mtmd/models/chatterbox-gen.cpp` at v1.0.0
+//! (`b1b770d90`) but its `mtmd_graph_chatterbox_base` members, which are
+//! `chatterbox_base.zig`; the `PROJECTOR_TYPE_CHATTERBOX` arm of
+//! `mtmd_get_graph_builder` (`llama.cpp/tools/mtmd/mtmd-graph.cpp`); and
+//! the chatterbox arms of `mtmd_subcontext::encode`
+//! (`llama.cpp/tools/mtmd/mtmd-subcontext.cpp`). Each declaration names what
+//! it ports and the line it began at.
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -29,7 +32,7 @@ extern fn cosf(f32) f32;
 /// `M_PI`.
 const m_pi: f64 = 3.14159265358979323846;
 
-/// Ports `cbx_rel_shift` (chatterbox-gen.cpp:51 @cd959bae9): the
+/// Ports `cbx_rel_shift` (chatterbox-gen.cpp:50 @b1b770d90): the
 /// Transformer-XL relative shift, bd `[2T-1, T, H]` to `[T, T, H]` with
 /// `out[j, i, h] = bd[(T-1) - i + j, i, h]`; the same buffer walk as the
 /// espnet rel_shift: pad one column, drop the first row, keep the first T
@@ -47,13 +50,13 @@ fn cbxRelShift(ctx0: ?*c.ggml_context, bd: T, t_len: c_int) T {
     return c.ggml_cont(ctx0, p);
 }
 
-/// Ports `cbx_mish` (chatterbox-gen.cpp:120 @cd959bae9): mish = x *
+/// Ports `cbx_mish` (chatterbox-gen.cpp:119 @b1b770d90): mish = x *
 /// tanh(softplus(x)).
 fn cbxMish(ctx0: ?*c.ggml_context, x: T) T {
     return c.ggml_mul(ctx0, x, c.ggml_tanh(ctx0, c.ggml_softplus(ctx0, x)));
 }
 
-/// Ports `cbx_snake` (chatterbox-gen.cpp:450 @cd959bae9): snake activation
+/// Ports `cbx_snake` (chatterbox-gen.cpp:449 @b1b770d90): snake activation
 /// with per-channel alpha, x + sin^2(alpha x) / alpha.
 fn cbxSnake(ctx0: ?*c.ggml_context, x: T, alpha: T) T {
     var sx = c.ggml_sin(ctx0, c.ggml_mul(ctx0, x, alpha));
@@ -62,7 +65,7 @@ fn cbxSnake(ctx0: ?*c.ggml_context, x: T, alpha: T) T {
     return c.ggml_add(ctx0, x, sx);
 }
 
-/// Ports `clip_graph_chatterbox` (mtmd/models/models.h:232 @cd959bae9):
+/// Ports `mtmd_graph_chatterbox` (mtmd/models/models.h:237 @b1b770d90):
 /// the builder's parameters beside the parent graph.
 const Gen = struct {
     g: *graph.Graph,
@@ -88,8 +91,8 @@ const Gen = struct {
         return self.g.buildNorm(x, w, b, .normal, 1e-5, -1);
     }
 
-    /// Ports `enc_layer` (chatterbox-gen.cpp:65 @cd959bae9), a member of
-    /// `clip_graph_chatterbox`: espnet rel-pos self attention block,
+    /// Ports `enc_layer` (chatterbox-gen.cpp:64 @b1b770d90), a member of
+    /// `mtmd_graph_chatterbox`: espnet rel-pos self attention block,
     /// pre-norm, x `[512, T]`, pos `[512, 2T-1]`.
     fn encLayer(self: *const Gen, l: *const Cbx.EncLayer, x_in: T, pos: T, t_len: c_int) T {
         const ctx0 = self.g.ctx0;
@@ -146,8 +149,8 @@ const Gen = struct {
         return x;
     }
 
-    /// Ports `causal_block` (chatterbox-gen.cpp:125 @cd959bae9), a member of
-    /// `clip_graph_chatterbox`: conv k3 left-padded, layer norm over
+    /// Ports `causal_block` (chatterbox-gen.cpp:124 @b1b770d90), a member of
+    /// `mtmd_graph_chatterbox`: conv k3 left-padded, layer norm over
     /// channels, mish; x `[C, T]`.
     fn causalBlock(self: *const Gen, b: *const Cbx.CausalBlock, x_in: T) T {
         var x = self.conv1d(b.conv_w, b.conv_b, x_in, 1, @as(c_int, @intCast(ne(b.conv_w, 0))) - 1, 0);
@@ -155,8 +158,8 @@ const Gen = struct {
         return cbxMish(self.g.ctx0, x);
     }
 
-    /// Ports `resnet` (chatterbox-gen.cpp:132 @cd959bae9), a member of
-    /// `clip_graph_chatterbox`: resnet block with time conditioning; x
+    /// Ports `resnet` (chatterbox-gen.cpp:131 @b1b770d90), a member of
+    /// `mtmd_graph_chatterbox`: resnet block with time conditioning; x
     /// `[C, T]`, temb `[1024]`.
     fn resnet(self: *const Gen, r: *const Cbx.Resnet, x: T, temb: T) T {
         const ctx0 = self.g.ctx0;
@@ -168,8 +171,8 @@ const Gen = struct {
         return c.ggml_add(ctx0, h, res);
     }
 
-    /// Ports `tfm_block` (chatterbox-gen.cpp:142 @cd959bae9), a member of
-    /// `clip_graph_chatterbox`: diffusers-style transformer block, full
+    /// Ports `tfm_block` (chatterbox-gen.cpp:141 @b1b770d90), a member of
+    /// `mtmd_graph_chatterbox`: diffusers-style transformer block, full
     /// attention; x `[256, T]`.
     fn tfmBlock(self: *const Gen, b: *const Cbx.TfmBlock, x_in: T) T {
         const ctx0 = self.g.ctx0;
@@ -190,8 +193,8 @@ const Gen = struct {
         return c.ggml_add(ctx0, x, cur);
     }
 
-    /// Ports `estimator` (chatterbox-gen.cpp:161 @cd959bae9), a member of
-    /// `clip_graph_chatterbox`: one estimator evaluation; x_noise, mu, cond
+    /// Ports `estimator` (chatterbox-gen.cpp:160 @b1b770d90), a member of
+    /// `mtmd_graph_chatterbox`: one estimator evaluation; x_noise, mu, cond
     /// `[80, T]`, spks `[80]`, temb `[1024]`.
     fn estimator(self: *const Gen, x_noise: T, mu: T, spks: T, cond: T, temb: T, t_len: c_int) T {
         const ctx0 = self.g.ctx0;
@@ -227,8 +230,8 @@ const Gen = struct {
         return x;
     }
 
-    /// Ports `build_s3tok` (chatterbox-gen.cpp:203 @cd959bae9), a member of
-    /// `clip_graph_chatterbox`: s3 tokenizer encoder, log-mel `[T, 128]` to
+    /// Ports `build_s3tok` (chatterbox-gen.cpp:202 @b1b770d90), a member of
+    /// `mtmd_graph_chatterbox`: s3 tokenizer encoder, log-mel `[T, 128]` to
     /// fsq code `[8, T / 4]`, rounded to base 3 tokens on the host.
     fn buildS3tok(self: *const Gen, t_len: c_int) T {
         const g = self.g;
@@ -294,7 +297,7 @@ const Gen = struct {
         return x;
     }
 
-    /// The `time_mlp` lambda (chatterbox-gen.cpp:374 @cd959bae9) of build.
+    /// The `time_mlp` lambda (chatterbox-gen.cpp:373 @b1b770d90) of build.
     fn timeMlp(self: *const Gen, e_in: T) T {
         const cbx = &self.g.model.cbx;
         var e = self.linear(cbx.time_mlp_1_w, cbx.time_mlp_1_b, e_in);
@@ -303,8 +306,8 @@ const Gen = struct {
         return e;
     }
 
-    /// Ports `hift_resblock` (chatterbox-gen.cpp:458 @cd959bae9), a member
-    /// of `clip_graph_chatterbox`: hifigan-snake resblock; kernels with
+    /// Ports `hift_resblock` (chatterbox-gen.cpp:457 @b1b770d90), a member
+    /// of `mtmd_graph_chatterbox`: hifigan-snake resblock; kernels with
     /// dilations 1/3/5 on convs1, 1 on convs2.
     fn hiftResblock(self: *const Gen, r: *const Cbx.HiftRes, x_in: T) T {
         const ctx0 = self.g.ctx0;
@@ -323,8 +326,8 @@ const Gen = struct {
         return x;
     }
 
-    /// Ports `build_vocoder` (chatterbox-gen.cpp:475 @cd959bae9), a member
-    /// of `clip_graph_chatterbox`: mel `[80, T]` + source stft `[18,
+    /// Ports `build_vocoder` (chatterbox-gen.cpp:474 @b1b770d90), a member
+    /// of `mtmd_graph_chatterbox`: mel `[80, T]` + source stft `[18,
     /// T_stft]` to the conv_post output `[18, T_stft2]`.
     fn buildVocoder(self: *const Gen, n_mel: c_int, n_stft: c_int) void {
         const g = self.g;
@@ -395,8 +398,8 @@ const Gen = struct {
         c.ggml_build_forward_expand(g.gf, x);
     }
 
-    /// Ports `build` (chatterbox-gen.cpp:265 @cd959bae9), a member of
-    /// `clip_graph_chatterbox`.
+    /// Ports `build` (chatterbox-gen.cpp:264 @b1b770d90), a member of
+    /// `mtmd_graph_chatterbox`.
     fn build(self: *const Gen) void {
         const g = self.g;
         const ctx0 = g.ctx0;
@@ -496,7 +499,7 @@ const Gen = struct {
         const meanflow = cbx.time_embed_mixer_w != null;
         const n_steps: c_int = if (meanflow) 2 else 10;
 
-        // span points, same schedule as the host side sinusoid fill in clip.cpp
+        // span points, same schedule as the host side sinusoid fill in mtmd-subcontext.cpp
         var span: [11]f32 = undefined;
         {
             var i: c_int = 0;
@@ -574,8 +577,8 @@ const Gen = struct {
         }
     }
 
-    /// The `span_emb` and `step_temb` lambdas (chatterbox-gen.cpp:380, 383
-    /// @cd959bae9) of build: the time embedding of solver step `i`.
+    /// The `span_emb` and `step_temb` lambdas (chatterbox-gen.cpp:379, 382
+    /// @b1b770d90) of build: the time embedding of solver step `i`.
     fn stepTemb(self: *const Gen, temb_sin: T, meanflow: bool, i: c_int) T {
         const ctx0 = self.g.ctx0;
         const span_emb = struct {
@@ -592,15 +595,15 @@ const Gen = struct {
     }
 };
 
-/// Ports the `PROJECTOR_TYPE_CHATTERBOX` arm (mtmd/clip.cpp:1208 @cd959bae9)
-/// of clip_get_graph_builder, which derives the builder's parameters,
+/// Ports the `PROJECTOR_TYPE_CHATTERBOX` arm (mtmd-graph.cpp:982 @b1b770d90)
+/// of mtmd_get_graph_builder, which derives the builder's parameters,
 /// and the builder's `build`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     const gen_process: impl.GenProcessType = if (params) |p| p.gen_process else .gen_code;
     var n_tokens: c_int = if (params) |p| (if (p.codes) |cd| @intCast(cd.items.len) else 0) else 0;
     var n_prompt_mel: c_int = 0;
     if (n_tokens > 0) {
-        impl.ggmlAssert(params.?.ref != null, "clip.cpp", 1214, "params->ref");
+        impl.ggmlAssert(params.?.ref != null, "mtmd-graph.cpp", 988, "params->ref");
         n_tokens += @intCast(params.?.ref.?.tokens.items.len);
         n_prompt_mel = @intCast(params.?.ref.?.feat.items.len / 80);
     }
@@ -619,8 +622,8 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
 }
 
 // -----------------------------------------------------------------------------
-// clip_encode's host side: the input arm and the three stages after compute.
-// clip.cpp is compiled with `-ffp-contract=on`: a same-type `a*b + c` is one
+// mtmd_subcontext::encode's host side: the input arm and the three stages
+// after compute. mtmd-subcontext.cpp is compiled with `-ffp-contract=on`: a same-type `a*b + c` is one
 // `llvm.fmuladd` (`@mulAdd` here, the left product fused), `x += a*b` too,
 // and in `a*b - c*d` only the left product fuses. On Darwin clang folds a
 // `sin`/`cos` pair on one argument into `__sincos_stret` (`sinCosF64`).
@@ -658,8 +661,8 @@ fn usz(x: anytype) usize {
     return @intCast(x);
 }
 
-/// The `fill_pos` lambda of the CHATTERBOX input arm (mtmd/clip.cpp:6784
-/// @cd959bae9): espnet relative positional encoding, entry k holds the
+/// The `fill_pos` lambda of the CHATTERBOX input arm (mtmd-subcontext.cpp:1607
+/// @b1b770d90): espnet relative positional encoding, entry k holds the
 /// sinusoid of relative position (T-1) - k.
 fn fillPos(st: *const clip.EncodeState, name: [*:0]const u8, t_len: c_int) clip.Error!void {
     const d = 512;
@@ -679,15 +682,15 @@ fn fillPos(st: *const clip.EncodeState, name: [*:0]const u8, t_len: c_int) clip.
     st.setInputF32(name, pos);
 }
 
-/// Ports the `PROJECTOR_TYPE_CHATTERBOX` arm (mtmd/clip.cpp:6742 @cd959bae9)
-/// of clip_encode's input switch.
+/// Ports the `PROJECTOR_TYPE_CHATTERBOX` arm (mtmd-subcontext.cpp:1565
+/// @b1b770d90) of `mtmd_subcontext::encode`'s input switch.
 ///
-/// Return: false where the C++ `return false`s out of `clip_encode` (a
+/// Return: false where the C++ `return false`s out of `encode` (a
 /// speech token out of range), having logged why.
 pub fn setInputs(st: *clip.EncodeState) clip.Error!bool {
-    const func = "clip_encode";
+    const func = "encode";
     const params = st.params;
-    const model = &st.ctx.model;
+    const model = st.ctx.model;
     if (params.gen_process == .tts_vocode) {
         st.setInputF32("inp_mel", params.mel_in.?.items);
         st.setInputF32("inp_sstft", params.sstft_in.?.items);
@@ -705,7 +708,7 @@ pub fn setInputs(st: *clip.EncodeState) clip.Error!bool {
     if (params.gen_process != .tts) return true;
 
     const n_gen: c_int = @intCast(params.codes.?.items.len);
-    impl.ggmlAssert(params.ref != null, "clip.cpp", 6763, "params->ref");
+    impl.ggmlAssert(params.ref != null, "mtmd-subcontext.cpp", 1586, "params->ref");
     const ref = params.ref.?;
     const n_prompt: c_int = @intCast(ref.tokens.items.len);
     const tokens = try gpa.alloc(i32, usz(n_prompt + n_gen));
@@ -759,13 +762,13 @@ pub fn setInputs(st: *clip.EncodeState) clip.Error!bool {
     return true;
 }
 
-/// Ports clip_encode's `CLIP_GEN_PROCESS_TOKENIZE` branch after compute
-/// (mtmd/clip.cpp:7459 @cd959bae9): the FSQ codes, and the speech table rows
+/// Ports `mtmd_subcontext::encode`'s `MTMD_SUBCTX_GEN_PROCESS_TOKENIZE`
+/// branch after compute (mtmd-subcontext.cpp:2312 @b1b770d90): the FSQ codes, and the speech table rows
 /// of the codes.
 pub fn encodeTokenizeOut(ctx: *clip.Ctx, params: *clip.EncodeParams, gf: ?*c.ggml_cgraph) clip.Error!bool {
-    const func = "clip_encode";
+    const func = "encode";
     const fsq = c.ggml_graph_get_tensor(gf, "out_fsq");
-    impl.ggmlAssert(fsq != null and params.out_codes != null, "clip.cpp", 7461, "fsq != nullptr && params->out_codes");
+    impl.ggmlAssert(fsq != null and params.out_codes != null, "mtmd-subcontext.cpp", 2314, "fsq != nullptr && params->out_codes");
     const n_tok: usize = @intCast(ne(fsq, 1));
     const h = try gpa.alloc(f32, 8 * n_tok);
     defer gpa.free(h);
@@ -789,7 +792,7 @@ pub fn encodeTokenizeOut(ctx: *clip.Ctx, params: *clip.EncodeParams, gf: ?*c.ggm
     if (params.out_code_embd) |out_code_embd| {
         const tensors = &ctx.model.cbx_tensors;
         const tab_it = tensors.get("a.gen.code.out_embd.weight");
-        impl.ggmlAssert(tab_it != null, "clip.cpp", 7481, "tab_it != tensors.end()");
+        impl.ggmlAssert(tab_it != null, "mtmd-subcontext.cpp", 2334, "tab_it != tensors.end()");
         const tab: *c.ggml_tensor = tab_it.?.?;
         const n_e: usize = @intCast(tab.ne[0]);
         const pos: ?*c.ggml_tensor = if (tensors.get("a.gen.t3.speech_pos_emb")) |p| p else null;
@@ -827,25 +830,26 @@ pub fn encodeTokenizeOut(ctx: *clip.Ctx, params: *clip.EncodeParams, gf: ?*c.ggm
     return true;
 }
 
-/// Ports clip_encode's `CLIP_GEN_PROCESS_TTS_VOCODE` branch after compute
-/// (mtmd/clip.cpp:7521 @cd959bae9).
+/// Ports `mtmd_subcontext::encode`'s `MTMD_SUBCTX_GEN_PROCESS_TTS_VOCODE`
+/// branch after compute (mtmd-subcontext.cpp:2374 @b1b770d90).
 pub fn encodeVocodeOut(params: *clip.EncodeParams, gf: ?*c.ggml_cgraph) clip.Error!bool {
     const sp = c.ggml_graph_get_tensor(gf, "out_spec");
-    impl.ggmlAssert(sp != null and params.out_spec != null, "clip.cpp", 7523, "sp != nullptr && params->out_spec");
+    impl.ggmlAssert(sp != null and params.out_spec != null, "mtmd-subcontext.cpp", 2376, "sp != nullptr && params->out_spec");
     const out = params.out_spec.?;
     try out.resize(gpa, @intCast(c.ggml_nelements(sp)));
     c.ggml_backend_tensor_get(sp, out.items.ptr, 0, c.ggml_nbytes(sp));
     return true;
 }
 
-/// Ports clip_encode's chatterbox `CLIP_GEN_PROCESS_TTS` branch after compute
-/// (mtmd/clip.cpp:7529 @cd959bae9): f0 to the harmonic source and its STFT on
-/// the host, the vocoder graph through a nested `clip_encode`, then the
+/// Ports `mtmd_subcontext::encode`'s chatterbox `MTMD_SUBCTX_GEN_PROCESS_TTS`
+/// branch after compute (mtmd-subcontext.cpp:2382 @b1b770d90): f0 to the
+/// harmonic source and its STFT on the host, the vocoder graph through a
+/// nested `encode`, then the
 /// iSTFT overlap-add and the reference's trim_fade.
 pub fn encodeTtsOut(ctx: *clip.Ctx, params: *clip.EncodeParams, gf: ?*c.ggml_cgraph) clip.Error!bool {
-    const func = "clip_encode";
+    const func = "encode";
     const mel = c.ggml_graph_get_tensor(gf, "out_mel");
-    impl.ggmlAssert(mel != null, "clip.cpp", 7531, "mel != nullptr");
+    impl.ggmlAssert(mel != null, "mtmd-subcontext.cpp", 2384, "mel != nullptr");
     var mel_data: std.ArrayList(f32) = .empty;
     defer mel_data.deinit(gpa);
     try mel_data.resize(gpa, @intCast(c.ggml_nelements(mel)));
@@ -853,7 +857,7 @@ pub fn encodeTtsOut(ctx: *clip.Ctx, params: *clip.EncodeParams, gf: ?*c.ggml_cgr
 
     // hift: f0 -> harmonic source -> source stft on the host, then the vocoder graph and the istft
     const f0_t = c.ggml_graph_get_tensor(gf, "out_f0");
-    impl.ggmlAssert(f0_t != null, "clip.cpp", 7537, "f0_t != nullptr");
+    impl.ggmlAssert(f0_t != null, "mtmd-subcontext.cpp", 2390, "f0_t != nullptr");
     const n_mel_out: c_int = @intCast(c.ggml_nelements(f0_t));
     const f0 = try gpa.alloc(f32, usz(n_mel_out));
     defer gpa.free(f0);
@@ -865,8 +869,8 @@ pub fn encodeTtsOut(ctx: *clip.Ctx, params: *clip.EncodeParams, gf: ?*c.ggml_cgr
     const n_wav: i64 = @as(i64, n_mel_out) * ups_total;
     var lw: [9]f32 = @splat(0.0);
     var lb: f32 = 0.0;
-    if (clip.cbxReadTensor(ctx, "a.gen.hift.m_source.l_linear.weight", &lw, lw.len) != 9 or
-        clip.cbxReadTensor(ctx, "a.gen.hift.m_source.l_linear.bias", @ptrCast(&lb), 1) != 1)
+    if (clip.cbxReadTensor(ctx.model, "a.gen.hift.m_source.l_linear.weight", &lw, lw.len) != 9 or
+        clip.cbxReadTensor(ctx.model, "a.gen.hift.m_source.l_linear.bias", @ptrCast(&lb), 1) != 1)
     {
         impl.logErr("%s: unexpected hift source module\n", .{func});
         return false;
@@ -977,7 +981,7 @@ pub fn encodeTtsOut(ctx: *clip.Ctx, params: *clip.EncodeParams, gf: ?*c.ggml_cgr
             wsum[o + i] = @mulAdd(f64, win[i], win[i], wsum[o + i]);
         }
     }
-    impl.ggmlAssert(params.out_audio != null, "clip.cpp", 7644, "params->out_audio");
+    impl.ggmlAssert(params.out_audio != null, "mtmd-subcontext.cpp", 2497, "params->out_audio");
     const out_audio = params.out_audio.?;
     try out_audio.resize(gpa, @intCast(@min(n_out - n_fft / 2, n_wav)));
     for (out_audio.items, 0..) |*o, i| {

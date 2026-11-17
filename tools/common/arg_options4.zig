@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports that stretch of `common_params_parser_init` (arg.cpp:1344 @cd959bae9)
-//! from `llama.cpp/common/arg.cpp` (v0.9.0, `cd959bae9`), as
+//! Ports that stretch of `common_params_parser_init` (arg.cpp:1365 @b1b770d90)
+//! from `llama.cpp/common/arg.cpp` (v1.0.0, `b1b770d90`), as
 //! `arg_options.zig` describes, with `arg_removed` from the same file and
 //! the speculative type names from `llama.cpp/common/speculative.cpp`:
 //! `common_speculative_type_from_name_map`,
@@ -42,12 +42,12 @@ fn tf(b: bool) [*:0]const u8 {
     return if (b) "true" else "false";
 }
 
-/// Ports `arg_removed` (arg.cpp:319 @cd959bae9).
+/// Ports `arg_removed` (arg.cpp:321 @b1b770d90).
 fn argRemoved(comptime msg: []const u8) error{Throw} {
     return throwStr("the argument has been removed. " ++ msg);
 }
 
-/// Ports `common_speculative_type_from_name_map` (speculative.cpp:74 @cd959bae9),
+/// Ports `common_speculative_type_from_name_map` (speculative.cpp:72 @b1b770d90),
 /// in the `std::map`'s key order.
 const type_from_name_map = [_]struct { []const u8, SpeculativeType }{
     .{ "draft-dflash", .draft_dflash }, .{ "draft-dspark", .draft_dspark },
@@ -58,7 +58,7 @@ const type_from_name_map = [_]struct { []const u8, SpeculativeType }{
     .{ "none", .none },
 };
 
-/// Ports `common_speculative_type_name_str` (speculative.cpp:2461 @cd959bae9).
+/// Ports `common_speculative_type_name_str` (speculative.cpp:2512 @b1b770d90).
 fn typeNameStr(a: std.mem.Allocator, types: []const SpeculativeType) ![:0]const u8 {
     var result: std.ArrayList(u8) = .empty;
     for (types, 0..) |t, i| {
@@ -68,14 +68,14 @@ fn typeNameStr(a: std.mem.Allocator, types: []const SpeculativeType) ![:0]const 
     return result.toOwnedSliceSentinel(a, 0);
 }
 
-/// Ports `common_speculative_all_types_str` (speculative.cpp:2473 @cd959bae9).
+/// Ports `common_speculative_all_types_str` (speculative.cpp:2524 @b1b770d90).
 fn allTypesStr(a: std.mem.Allocator) ![:0]const u8 {
     var types: [@backingInt(SpeculativeType.count)]SpeculativeType = undefined;
     for (&types, 0..) |*t, i| t.* = @fromBackingInt(@intCast(i));
     return typeNameStr(a, &types);
 }
 
-/// Ports `common_speculative_types_from_names` (speculative.cpp:2502 @cd959bae9).
+/// Ports `common_speculative_types_from_names` (speculative.cpp:2553 @b1b770d90).
 fn typesFromNames(a: std.mem.Allocator, names: []const []const u8) !std.ArrayList(SpeculativeType) {
     var types: std.ArrayList(SpeculativeType) = .empty;
     for (names) |name| {
@@ -245,7 +245,7 @@ pub fn add(ctx: *Context) !void {
         .handler = .{
             .void_ = struct {
                 fn f(q: *Params) !void {
-                    // `llm_ffn_exps_cpu_override` (common/common.h:1270 @cd959bae9)
+                    // `llm_ffn_exps_cpu_override` (common/common.h:1287 @b1b770d90)
                     try q.speculative.draft.tensor_buft_overrides.append(q.arena, .{ .pattern = options2.llm_ffn_exps_regex, .buft = c.ggml_backend_cpu_buffer_type() });
                 }
             }.f,
@@ -500,13 +500,13 @@ pub fn add(ctx: *Context) !void {
         fn f(q: *Params, value: S) !void {
             q.tts_lang = try arg.dupe(q, value);
         }
-    }.f } }).setExamples(&.{.tts}));
+    }.f } }).setExamples(&.{ .tts, .server }));
     // arg.cpp:4515
     try ctx.add((Arg{ .args = &.{"--tts-voice"}, .value_hint = "VOICE", .help = "voice for audio generation (model-dependent)\nsee tts/README.md for per-model usage notes", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.tts_voice = try arg.dupe(q, value);
         }
-    }.f } }).setExamples(&.{.tts}));
+    }.f } }).setExamples(&.{ .tts, .server }));
     // arg.cpp:4523
     try ctx.add((Arg{ .args = &.{"--tts-speaker-file"}, .value_hint = "FNAME", .help = "speaker file path for audio generation", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {

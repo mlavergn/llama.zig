@@ -516,7 +516,7 @@ static struct ggml_tensor * build_mmid_q4_k_8(struct ggml_context * c, struct gg
 static struct ggml_tensor * build_mmid_q4_k_9(struct ggml_context * c, struct ggml_tensor ** t) { return build_mmid(c, t, GGML_TYPE_Q4_K, 9); }
 
 /* MUL_MAT at one column (MMVQ) at the K where `get_vdr_mmvq`'s value
- * decides `should_halve_iters` (mmvq.cu:1180 @cd959bae9) and the doubled
+ * decides `should_halve_iters` (mmvq.cu:1177 @b1b770d90) and the doubled
  * block has real work: on the GB10 (`MMVQ_PARAMETERS_GB10`, four warps)
  * that doubles the warps per row, which splits the K sum differently. The
  * other choice `vdr` feeds, `should_use_small_k`, only moves rows between
@@ -540,6 +540,39 @@ MMVQ_K(q4_K, GGML_TYPE_Q4_K, 2304)
 MMVQ_K(q5_K, GGML_TYPE_Q5_K, 2304)
 MMVQ_K(q6_K, GGML_TYPE_Q6_K, 2304)
 MMVQ_K(iq4_nl, GGML_TYPE_IQ4_NL, 2080)
+
+/* v1.0.0's per-tensor weight-scale fusions (`ggml_cuda_get_mul_mat_scale`):
+ * a MUL_MAT whose output a one-element F32 tensor scales. Upstream's
+ * MUL_MAT_FUSION lane scales are per row, which that pattern never
+ * matches, and its scaled gate/up cases force GGML_PREC_Q8 (W4A8), so
+ * none reaches MMVF's FP8 scale, cuBLASLt's FP8 A-scale, the scale-only
+ * NVFP4 MMQ or the scaled NVFP4 gate/up MMQ at Blackwell's native FP4
+ * activations. */
+static struct ggml_tensor * build_scaled_mm(struct ggml_context * ctx, struct ggml_tensor ** cmp, enum ggml_type type, int64_t n) {
+    struct ggml_tensor * a = ggml_new_tensor_2d(ctx, type, 256, 128);
+    struct ggml_tensor * b = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 256, n);
+    struct ggml_tensor * s = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1);
+    return *cmp = ggml_mul(ctx, ggml_mul_mat(ctx, a, b), s);
+}
+static struct ggml_tensor * build_scaled_mm_f8_1(struct ggml_context * c, struct ggml_tensor ** t) { return build_scaled_mm(c, t, GGML_TYPE_F8_E4M3, 1); }
+static struct ggml_tensor * build_scaled_mm_f8_64(struct ggml_context * c, struct ggml_tensor ** t) { return build_scaled_mm(c, t, GGML_TYPE_F8_E4M3, 64); }
+static struct ggml_tensor * build_scaled_mm_nvfp4_64(struct ggml_context * c, struct ggml_tensor ** t) { return build_scaled_mm(c, t, GGML_TYPE_NVFP4, 64); }
+/* The fused gate/up MMQ runs only where one block per tile is efficient
+ * (`ggml_cuda_mmq_fusion_is_efficient`): 3072 rows are 48 tiles of 64
+ * output rows, a whole wave of the GB10's 48 SMs. */
+static struct ggml_tensor * build_scaled_glu(struct ggml_context * ctx, struct ggml_tensor ** cmp, enum ggml_type type, int64_t n) {
+    const int64_t rows = n == 1 ? 128 : 3072;
+    struct ggml_tensor * wg = ggml_new_tensor_2d(ctx, type, 256, rows);
+    struct ggml_tensor * wu = ggml_new_tensor_2d(ctx, type, 256, rows);
+    struct ggml_tensor * b  = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 256, n);
+    struct ggml_tensor * sg = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1);
+    struct ggml_tensor * su = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1);
+    struct ggml_tensor * gate = ggml_mul(ctx, ggml_mul_mat(ctx, wg, b), sg);
+    struct ggml_tensor * up   = ggml_mul(ctx, ggml_mul_mat(ctx, wu, b), su);
+    return *cmp = ggml_swiglu_split(ctx, gate, up);
+}
+static struct ggml_tensor * build_scaled_glu_f8_1(struct ggml_context * c, struct ggml_tensor ** t) { return build_scaled_glu(c, t, GGML_TYPE_F8_E4M3, 1); }
+static struct ggml_tensor * build_scaled_glu_nvfp4_64(struct ggml_context * c, struct ggml_tensor ** t) { return build_scaled_glu(c, t, GGML_TYPE_NVFP4, 64); }
 
 /* LIGHTNING_INDEXER with four heads (v0.6.0) on both sides of the tile
  * kernel's eight-token threshold (`LIGHTNING_INDEXER_TILE_TOKENS`):
@@ -662,7 +695,8 @@ static bool extra_case(const char * name, extra_build build) {
  * gated-delta-net kernel writing the snapshot cache, TOP_K's radix arm for
  * more rows than SMs at a width bitonic would otherwise take, and the F32
  * cuBLAS chunks. Since v0.8.0 one-column MUL_MAT at the K where MMVQ's
- * `vdr` chooses the kernel. */
+ * `vdr` chooses the kernel. Since v1.0.0 the per-tensor weight-scale
+ * fusions (see `build_scaled_mm`). */
 static int extra_cases(const char * filter) {
     static const struct { const char * op; const char * name; extra_build build; } cases[] = {
         { "MEAN", "MEAN(ne=[65536,1,1,1])", build_mean_65536 },
@@ -681,6 +715,11 @@ static int extra_cases(const char * filter) {
         { "MUL_MAT", "MUL_MAT(q5_K,n=1,k=2304,mmvq)", build_mmvq_q5_K_2304 },
         { "MUL_MAT", "MUL_MAT(q6_K,n=1,k=2304,mmvq)", build_mmvq_q6_K_2304 },
         { "MUL_MAT", "MUL_MAT(iq4_nl,n=1,k=2080,mmvq)", build_mmvq_iq4_nl_2080 },
+        { "MUL_MAT", "MUL_MAT*scale(f8_e4m3,n=1,mmvf scale)", build_scaled_mm_f8_1 },
+        { "MUL_MAT", "MUL_MAT*scale(f8_e4m3,n=64,cublasLt A scale)", build_scaled_mm_f8_64 },
+        { "MUL_MAT", "MUL_MAT*scale(nvfp4,n=64,mmq scale)", build_scaled_mm_nvfp4_64 },
+        { "MUL_MAT", "SWIGLU(MUL_MAT*scale,MUL_MAT*scale)(f8_e4m3,n=1,mmvf)", build_scaled_glu_f8_1 },
+        { "MUL_MAT", "SWIGLU(MUL_MAT*scale,MUL_MAT*scale)(nvfp4,n=64,mmq)", build_scaled_glu_nvfp4_64 },
         { "MUL_MAT_ID", "MUL_MAT_ID(q4_0,n_tokens=8)", build_mmid_q4_0_8 },
         { "MUL_MAT_ID", "MUL_MAT_ID(q4_0,n_tokens=9)", build_mmid_q4_0_9 },
         { "MUL_MAT_ID", "MUL_MAT_ID(q4_K,n_tokens=8)", build_mmid_q4_k_8 },

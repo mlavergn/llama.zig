@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/parsers/parsers.h` and
-//! `llama.cpp/common/parsers/parsers.cpp` (llama.cpp v0.9.0, `cd959bae9`):
+//! `llama.cpp/common/parsers/parsers.cpp` (llama.cpp v1.0.0, `b1b770d90`):
 //! `foreach_function` and `foreach_parameter`. Each per-model file names its
 //! own source; `common_chat_try_specialized_template` in `../templates.zig`
 //! chooses between them.
@@ -51,7 +51,7 @@ pub const muse_spark = @import("muse_spark.zig");
 pub const qwen3_coder = @import("qwen3_coder.zig");
 pub const translate_gemma = @import("translate_gemma.zig");
 
-/// Ports `foreach_function` (parsers.cpp:5 @cd959bae9): `f` over each
+/// Ports `foreach_function` (parsers.cpp:5 @b1b770d90): `f` over each
 /// function tool of an OpenAI-style `tools`, with its index in the array,
 /// logging and skipping the rest. Indexes as the C++ loop does,
 /// `tools[i]` for `i < tools.size()` through `common_json`'s const
@@ -79,7 +79,7 @@ pub fn foreachFunction(tools: *const Value, ctx: anytype, comptime f: fn (@TypeO
     }
 }
 
-/// Ports `foreach_parameter` (parsers.cpp:16 @cd959bae9): `f` over each
+/// Ports `foreach_parameter` (parsers.cpp:16 @b1b770d90): `f` over each
 /// property of a function tool's parameters schema, in schema order, with
 /// its index and the document that owns them -- nothing when the schema is
 /// not an object.

@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/src/llama-grammar.cpp` and `llama-grammar.h`
-//! (v0.9.0, `cd959bae9`). Each declaration below names the C++ it replaces
+//! (v1.0.0, `b1b770d90`). Each declaration below names the C++ it replaces
 //! and the line it began at.
 //!
 //! # Exceptions
@@ -28,7 +28,7 @@ const impl = @import("../impl.zig");
 const c = impl.c;
 const src = "llama-grammar.cpp";
 
-/// Ports `llama_gretype` (llama-grammar.h:13 @cd959bae9).
+/// Ports `llama_gretype` (llama-grammar.h:13 @b1b770d90).
 pub const GreType = enum(c_uint) {
     end = 0,
     alt = 1,
@@ -42,25 +42,25 @@ pub const GreType = enum(c_uint) {
     token_not = 9,
 };
 
-/// Ports `llama_grammar_element` (llama-grammar.h:47 @cd959bae9).
+/// Ports `llama_grammar_element` (llama-grammar.h:47 @b1b770d90).
 pub const Element = extern struct {
     type: GreType,
     /// A code point, rule id or token id, by `type`.
     value: u32,
 };
 
-/// Ports `llama_grammar_rule` (llama-grammar.h:64 @cd959bae9).
+/// Ports `llama_grammar_rule` (llama-grammar.h:64 @b1b770d90).
 pub const Rule = std.ArrayList(Element);
 
-/// Ports `MAX_REPETITION_THRESHOLD` (llama-grammar.cpp:14 @cd959bae9).
+/// Ports `MAX_REPETITION_THRESHOLD` (llama-grammar.cpp:14 @b1b770d90).
 const MAX_REPETITION_THRESHOLD: u64 = 2000;
 
-/// Ports `GRAMMAR_RECURSIVE_LIMIT` (llama-grammar.cpp:15 @cd959bae9).
+/// Ports `GRAMMAR_RECURSIVE_LIMIT` (llama-grammar.cpp:15 @b1b770d90).
 pub const GRAMMAR_RECURSIVE_LIMIT: u32 = 256;
 
 const ParseError = error{Parse};
 
-/// Ports the `const char *` overload of `decode_utf8` (llama-grammar.cpp:21 @cd959bae9).
+/// Ports the `const char *` overload of `decode_utf8` (llama-grammar.cpp:21 @b1b770d90).
 ///
 /// Assumes valid UTF-8 but stops at a NUL.
 ///
@@ -84,17 +84,17 @@ pub fn decodeUtf8At(s: [*:0]const u8, pos: usize) struct { u32, usize } {
     return .{ value, p };
 }
 
-/// Ports `is_digit_char` (llama-grammar.cpp:96 @cd959bae9).
+/// Ports `is_digit_char` (llama-grammar.cpp:96 @b1b770d90).
 fn isDigitChar(ch: u8) bool {
     return '0' <= ch and ch <= '9';
 }
 
-/// Ports `is_word_char` (llama-grammar.cpp:100 @cd959bae9).
+/// Ports `is_word_char` (llama-grammar.cpp:100 @b1b770d90).
 fn isWordChar(ch: u8) bool {
     return ('a' <= ch and ch <= 'z') or ('A' <= ch and ch <= 'Z') or ch == '-' or isDigitChar(ch);
 }
 
-/// Ports `parse_space` (llama-grammar.cpp:127 @cd959bae9).
+/// Ports `parse_space` (llama-grammar.cpp:127 @b1b770d90).
 fn parseSpace(s: [*:0]const u8, start: usize, newline_ok: bool) usize {
     var pos = start;
     while (s[pos] == ' ' or s[pos] == '\t' or s[pos] == '#' or
@@ -109,7 +109,7 @@ fn parseSpace(s: [*:0]const u8, start: usize, newline_ok: bool) usize {
     return pos;
 }
 
-/// Ports `llama_grammar_parser` (llama-grammar.h:86 @cd959bae9).
+/// Ports `llama_grammar_parser` (llama-grammar.h:86 @b1b770d90).
 pub const Parser = struct {
     vocab: ?*const c.struct_llama_vocab,
     /// Owned keys.
@@ -119,7 +119,7 @@ pub const Parser = struct {
     /// The text of the exception a failed step would have thrown.
     err: std.ArrayList(u8) = .empty,
 
-    /// Ports the constructor of `llama_grammar_parser` (llama-grammar.h:92 @cd959bae9).
+    /// Ports the constructor of `llama_grammar_parser` (llama-grammar.h:92 @b1b770d90).
     ///
     /// Parameters:
     /// - `vocab`: needed only for `<token>` references; may be null.
@@ -157,7 +157,7 @@ pub const Parser = struct {
         impl.abort(src, 0, "out of memory");
     }
 
-    /// Ports `llama_grammar_parser`'s `get_symbol_id` (llama-grammar.cpp:422 @cd959bae9).
+    /// Ports `llama_grammar_parser`'s `get_symbol_id` (llama-grammar.cpp:422 @b1b770d90).
     ///
     /// Return: the name's id, assigning the next one when it is new.
     fn getSymbolId(self: *Parser, name: []const u8) u32 {
@@ -168,7 +168,7 @@ pub const Parser = struct {
         return next_id;
     }
 
-    /// Ports `llama_grammar_parser`'s `generate_symbol_id` (llama-grammar.cpp:428 @cd959bae9).
+    /// Ports `llama_grammar_parser`'s `generate_symbol_id` (llama-grammar.cpp:428 @b1b770d90).
     ///
     /// Return: the map's size before the call, which `operator[]` assigns to
     /// `base_name + '_' + id` -- overwriting, not growing, if that name
@@ -184,7 +184,7 @@ pub const Parser = struct {
         return next_id;
     }
 
-    /// Ports `llama_grammar_parser`'s `add_rule` (llama-grammar.cpp:434 @cd959bae9).
+    /// Ports `llama_grammar_parser`'s `add_rule` (llama-grammar.cpp:434 @b1b770d90).
     fn addRule(self: *Parser, rule_id: u32, rule: []const Element) void {
         while (self.rules.items.len <= rule_id) {
             self.rules.append(impl.allocator, .empty) catch oom();
@@ -194,7 +194,7 @@ pub const Parser = struct {
         r.appendSlice(impl.allocator, rule) catch oom();
     }
 
-    /// Ports `parse_hex` (llama-grammar.cpp:104 @cd959bae9).
+    /// Ports `parse_hex` (llama-grammar.cpp:104 @b1b770d90).
     fn parseHex(self: *Parser, s: [*:0]const u8, start: usize, size: usize) ParseError!struct { u32, usize } {
         var pos = start;
         const end = start + size;
@@ -218,7 +218,7 @@ pub const Parser = struct {
         return .{ value, pos };
     }
 
-    /// Ports `parse_name` (llama-grammar.cpp:142 @cd959bae9).
+    /// Ports `parse_name` (llama-grammar.cpp:142 @b1b770d90).
     fn parseName(self: *Parser, s: [*:0]const u8, start: usize) ParseError!usize {
         var pos = start;
         while (isWordChar(s[pos])) pos += 1;
@@ -228,7 +228,7 @@ pub const Parser = struct {
         return pos;
     }
 
-    /// Ports `parse_int` (llama-grammar.cpp:153 @cd959bae9).
+    /// Ports `parse_int` (llama-grammar.cpp:153 @b1b770d90).
     fn parseInt(self: *Parser, s: [*:0]const u8, start: usize) ParseError!usize {
         var pos = start;
         while (isDigitChar(s[pos])) pos += 1;
@@ -238,7 +238,7 @@ pub const Parser = struct {
         return pos;
     }
 
-    /// Ports `parse_char` (llama-grammar.cpp:164 @cd959bae9).
+    /// Ports `parse_char` (llama-grammar.cpp:164 @b1b770d90).
     fn parseChar(self: *Parser, s: [*:0]const u8, pos: usize) ParseError!struct { u32, usize } {
         if (s[pos] == '\\') {
             switch (s[pos + 1]) {
@@ -262,7 +262,7 @@ pub const Parser = struct {
         return std.fmt.parseInt(u64, digits, 10) catch self.fail(what ++ ": out of range", .{});
     }
 
-    /// Ports `parse_token` (llama-grammar.cpp:188 @cd959bae9).
+    /// Ports `parse_token` (llama-grammar.cpp:188 @b1b770d90).
     ///
     /// `<[id]>` names a token by id; `<text>` tokenizes `<text>` with special
     /// tokens parsed and requires exactly one token.
@@ -312,7 +312,7 @@ pub const Parser = struct {
         return .{ @bitCast(tokens[0]), pos };
     }
 
-    /// Ports `llama_grammar_parser`'s `parse_alternates` (llama-grammar.cpp:441 @cd959bae9).
+    /// Ports `llama_grammar_parser`'s `parse_alternates` (llama-grammar.cpp:441 @b1b770d90).
     fn parseAlternates(self: *Parser, s: [*:0]const u8, start: usize, rule_name: []const u8, rule_id: u32, is_nested: bool, depth: u32) ParseError!usize {
         var rule: Rule = .empty;
         defer rule.deinit(impl.allocator);
@@ -328,7 +328,7 @@ pub const Parser = struct {
     }
 
     /// Ports the `handle_repetitions` lambda in
-    /// `llama_grammar_parser::parse_sequence` (llama-grammar.cpp:471 @cd959bae9).
+    /// `llama_grammar_parser::parse_sequence` (llama-grammar.cpp:471 @b1b770d90).
     ///
     /// Rewrites the last symbol into its `m` required copies and `n - m`
     /// nested optional rules, or one recursive rule for no maximum.
@@ -397,7 +397,7 @@ pub const Parser = struct {
         impl.assert(n_prev_rules.* >= 1, src, 535, "n_prev_rules >= 1");
     }
 
-    /// Ports `llama_grammar_parser`'s `parse_sequence` (llama-grammar.cpp:459 @cd959bae9).
+    /// Ports `llama_grammar_parser`'s `parse_sequence` (llama-grammar.cpp:459 @b1b770d90).
     fn parseSequence(self: *Parser, s: [*:0]const u8, start: usize, rule_name: []const u8, rule: *Rule, is_nested: bool, depth: u32) ParseError!usize {
         var last_sym_start = rule.items.len;
         var pos = start;
@@ -539,7 +539,7 @@ pub const Parser = struct {
         return pos;
     }
 
-    /// Ports `llama_grammar_parser`'s `parse_rule` (llama-grammar.cpp:677 @cd959bae9).
+    /// Ports `llama_grammar_parser`'s `parse_rule` (llama-grammar.cpp:677 @b1b770d90).
     fn parseRule(self: *Parser, s: [*:0]const u8, start: usize) ParseError!usize {
         const name_end = try self.parseName(s, start);
         var pos = parseSpace(s, name_end, false);
@@ -588,7 +588,7 @@ pub const Parser = struct {
         }
     }
 
-    /// Ports `llama_grammar_parser`'s `parse` (llama-grammar.cpp:701 @cd959bae9).
+    /// Ports `llama_grammar_parser`'s `parse` (llama-grammar.cpp:701 @b1b770d90).
     ///
     /// Parameters:
     /// - `s`: the grammar text.

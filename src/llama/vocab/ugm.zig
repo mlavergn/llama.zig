@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.9.0 (`cd959bae9`).
+//! Ported from `llama.cpp/src/llama-vocab.cpp` at v1.0.0 (`b1b770d90`).
 //!
 //! Scores are summed in `double`, as there -- "to make tokenization results
 //! exactly the same as in the HF tokenizer". Nothing is multiplied, so no
@@ -25,7 +25,7 @@ fn oom() noreturn {
     impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
-/// Ports `llm_tokenizer_ugm` (llama-vocab.cpp:988 @cd959bae9).
+/// Ports `llm_tokenizer_ugm` (llama-vocab.cpp:988 @b1b770d90).
 pub const Tokenizer = struct {
     /// U+2581, the escaped space.
     pub const escaped_space = "\xE2\x96\x81";
@@ -92,7 +92,7 @@ pub const Tokenizer = struct {
     }
 };
 
-/// Ports `xcda_array_view` (llama-vocab.cpp:1231 @cd959bae9).
+/// Ports `xcda_array_view` (llama-vocab.cpp:1231 @b1b770d90).
 const XcdaView = struct {
     xcda: []const u8,
 
@@ -137,7 +137,7 @@ const NormalizationResult = struct {
 };
 
 /// Ports `llm_tokenizer_ugm_session`'s `tokenize` (llama-vocab.cpp:1068
-/// @cd959bae9).
+/// @b1b770d90).
 ///
 /// Since v0.7.0 a vocabulary with `tokenizer.ggml.normalizer.nfc` set has
 /// its text NFC-normalized before the charsmap sees it. The C++ catches
@@ -264,7 +264,7 @@ pub fn tokenize(vocab: *const Vocab, tokenizer: *const Tokenizer, text: []const 
 }
 
 /// Ports `llm_tokenizer_ugm_session`'s `normalize` (llama-vocab.cpp:1176
-/// @cd959bae9).
+/// @b1b770d90).
 fn normalize(vocab: *const Vocab, tokenizer: *const Tokenizer, input: []const u8, normalized: *std.ArrayList(u8), exc: *impl.Exception) impl.Thrown!void {
     normalized.clearRetainingCapacity();
     normalized.ensureTotalCapacity(allocator, input.len * 3) catch oom();
@@ -303,7 +303,7 @@ fn normalize(vocab: *const Vocab, tokenizer: *const Tokenizer, input: []const u8
 }
 
 /// Ports `llm_tokenizer_ugm_session`'s `normalize_prefix` (llama-vocab.cpp:1269
-/// @cd959bae9): a user-defined token passes through whole; else the
+/// @b1b770d90): a user-defined token passes through whole; else the
 /// longest XCDA match is replaced; else one code point passes through, or
 /// an invalid byte becomes U+FFFD.
 fn normalizePrefix(tokenizer: *const Tokenizer, input: []const u8, input_offset: usize, exc: *impl.Exception) impl.Thrown!NormalizationResult {

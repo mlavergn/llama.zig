@@ -310,9 +310,12 @@ GET /models
 GET /models
 DELETE /models?model=test/slowside&sidecar=mmproj
 GET /models
+# v1.0.0: other clients hear that the paused download is gone (model_remove)
+!sse /models/sse
 DELETE /models?model=test/slowside
 GET /models
 DELETE /models?model=test/slowside
+!sseend
 !tree $CWD/cache/models--test--slowside
 !mocklog
 
@@ -370,3 +373,14 @@ GET /models
 POST /models/unload {"model":"byurl"}
 !waitfor /models "id":"byurl"[^{]*\{"value":"unloaded"
 GET /models
+
+# --- v1.0.0 (bbc2e4b65): a -mu, -mmu or draft URL gets the token only when it
+# is an hf_ token and the URL is on the model endpoint (here the mock hub)
+!server -m $CWD/dl/tk1.gguf -mu $MOCK/files/tk1.gguf -hft hf_secret -c 256 -np 1 -lv 4
+!mocklog
+!server -m $CWD/dl/tk2.gguf -mu $MOCK/files/tk2.gguf -hft notanhftoken -c 256 -np 1 -lv 4
+!mocklog
+!env MODEL_ENDPOINT=http://example.invalid/
+!server -m $CWD/dl/tk3.gguf -mu $MOCK/files/tk3.gguf -hft hf_secret -c 256 -np 1 -lv 4
+!mocklog
+!env MODEL_ENDPOINT=$MOCK

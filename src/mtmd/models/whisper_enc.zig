@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/whisper-enc.cpp` at v0.9.0
-//! (`cd959bae9`). Each declaration names what it ports and the line it
+//! Ports `llama.cpp/tools/mtmd/models/whisper-enc.cpp` at v1.0.0
+//! (`b1b770d90`). Each declaration names what it ports and the line it
 //! began at.
 
 const std = @import("std");
@@ -15,8 +15,8 @@ const c = impl.c;
 const ne = graph.ne;
 const nb = graph.nb;
 
-/// Ports `build` (whisper-enc.cpp:3 @cd959bae9), a member of
-/// `clip_graph_whisper_enc`.
+/// Ports `build` (whisper-enc.cpp:3 @b1b770d90), a member of
+/// `mtmd_graph_whisper_enc`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

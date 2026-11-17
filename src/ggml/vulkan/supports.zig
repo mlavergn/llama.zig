@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.9.0
-//! (`cd959bae9`): `ggml_backend_vk_device_supports_op`. The device vtable
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v1.0.0
+//! (`b1b770d90`): `ggml_backend_vk_device_supports_op`. The device vtable
 //! answers this AND-ed with `ops.ported`, so the scheduler sends nothing to
 //! host code the port does not have yet.
 
@@ -38,7 +38,7 @@ const quant_types = [_]c.ggml_type{
 /// The types a CPY converts f32 to and from.
 const cpy_types = [_]c.ggml_type{ c.GGML_TYPE_Q1_0, c.GGML_TYPE_Q2_0, c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q4_1, c.GGML_TYPE_Q5_0, c.GGML_TYPE_Q5_1, c.GGML_TYPE_Q8_0, c.GGML_TYPE_IQ4_NL };
 
-/// Ports `ggml_backend_vk_device_supports_op` (ggml-vulkan.cpp:15533 @cd959bae9).
+/// Ports `ggml_backend_vk_device_supports_op` (ggml-vulkan.cpp:15895 @b1b770d90).
 pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
     const device = m.device.getDevice(dev_idx);
 
@@ -104,7 +104,7 @@ pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
                 // Not enough shared memory for row_ids and the result tile: fall back to CPU
                 if (!device.mul_mat_id_s[ti] and !device.mul_mat_id_m[ti] and !device.mul_mat_id_l[ti]) return false;
             }
-            if (c.ggml_prec_get_src(op, 1) == c.GGML_PREC_F32) return false;
+            if (c.ggml_prec_get_src(op, 1) == c.GGML_PREC_BF16 or c.ggml_prec_get_src(op, 1) == c.GGML_PREC_F32) return false;
             if (!(isAny(t0, &.{ F32, F16, BF16 }) or isAny(t0, &quant_types))) return false;
             // MUL_MAT broadcasts src0 over dim 3 like dim 2, MUL_MAT_ID needs the ids to match src1
             if (op.op == c.GGML_OP_MUL_MAT_ID and s(op, 2).ne[3] != s(op, 1).ne[3]) return false;
@@ -189,16 +189,10 @@ pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
         c.GGML_OP_ACC => return s(op, 0).type == F32 and s(op, 1).type == F32 and op.type == F32,
         c.GGML_OP_SET => return s(op, 0).type == s(op, 1).type and s(op, 0).type == op.type and (s(op, 0).type == F32 or s(op, 0).type == I32),
         c.GGML_OP_CONCAT => return m.op_pipeline.concatSupported(s(op, 0), s(op, 1), op),
-        c.GGML_OP_ADD1 => {
-            const t0 = s(op, 0).type;
-            const t1 = s(op, 1).type;
-            return (t0 == F32 and t1 == F32) or (t0 == F16 and t1 == F32) or (t0 == F16 and t1 == F16);
-        },
         c.GGML_OP_ARANGE => return op.type == F32,
         c.GGML_OP_FILL => return op.type == F32 or op.type == F16,
         c.GGML_OP_SCALE => return c.ggml_is_contiguous(s(op, 0)) and s(op, 0).type == F32,
         c.GGML_OP_PAD, c.GGML_OP_PAD_REFLECT_1D, c.GGML_OP_ROLL => return s(op, 0).type == F32,
-        c.GGML_OP_DIAG_MASK_INF => return c.ggml_is_contiguous(s(op, 0)) and s(op, 0).type == F32,
         c.GGML_OP_SOFT_MAX => return c.ggml_is_contiguous(s(op, 0)) and s(op, 0).type == F32 and (op.src[1] == null or s(op, 1).type == F32 or s(op, 1).type == F16),
         c.GGML_OP_SOFT_MAX_BACK => return c.ggml_is_contiguous(s(op, 0)) and s(op, 0).type == F32 and c.ggml_is_contiguous(s(op, 1)) and s(op, 1).type == F32,
         c.GGML_OP_SUM => return s(op, 0).type == F32 and c.ggml_is_contiguously_allocated(s(op, 0)),

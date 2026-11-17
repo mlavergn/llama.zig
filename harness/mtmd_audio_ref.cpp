@@ -2,15 +2,26 @@
 // `tools/mtmd/mtmd-audio.cpp`, which is compiled unmodified beside this
 // file with the flags `libmtmd-ref` uses (`build/mtmd_audio_diff.zig`).
 //
-// mtmd-audio.cpp reaches two things in clip.cpp: `clip_get_hparams`, which
-// its preprocessors bind their hparams through, and `g_logger_state`, its
-// logger. Both are defined here instead, so clip.cpp -- and the rest of
-// libmtmd -- stays out of the link: the "clip_ctx" a preprocessor is built
-// from is this file's `clip_hparams`, cast.
+// mtmd-audio.cpp reaches three things outside itself: `g_logger_state`, its
+// logger (mtmd.cpp), `mtmd_audio_log_mel`, the log-mel graph
+// (mtmd-subcontext.cpp), and the `mtmd_model` its preprocessors read their
+// hparams from (mtmd-model.h, a struct whose constructor is inline). The
+// logger is defined here; `mtmd_audio_log_mel` is upstream's own text,
+// cut out of mtmd-subcontext.cpp at build time by
+// `build/mtmd_audio_diff.zig`, so the rest of libmtmd stays out of the link.
+// The hparams handle the harness fills is a `new mtmd_model()`.
+//
+// Since v1.0.0 a preprocessor's public face is `preprocess` -- the entries'
+// shapes, placeholders when it defers to the log-mel graph -- and `compute`,
+// which runs the graph on `mel_config.sched`. The harness runs both and
+// reports each stage, on a CPU scheduler of its own.
 //
 // **Not a port.**
 
 #include "mtmd-audio.h"
+
+#include "ggml-backend.h"
+#include "ggml-cpu.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -18,21 +29,18 @@
 #include <string>
 #include <vector>
 
-struct clip_logger_state g_logger_state = {clip_log_callback_default, NULL};
-
-const clip_hparams * clip_get_hparams(const struct clip_ctx * ctx) {
-    return reinterpret_cast<const clip_hparams *>(ctx);
-}
+struct mtmd_logger_state g_logger_state = {mtmd_log_callback_default, NULL};
 
 extern "C" {
 
-// hparams the harness fills field by field
-void * ref_audio_hparams_new(void) { return new clip_hparams(); }
-void ref_audio_hparams_free(void * hp) { delete (clip_hparams *) hp; }
+// hparams the harness fills field by field, held in the model the
+// preprocessors' constructors read them from
+void * ref_audio_hparams_new(void) { return new mtmd_model(); }
+void ref_audio_hparams_free(void * m) { delete (mtmd_model *) m; }
 
 void ref_audio_hparams_set(void * p, int n_mel_bins, int n_fft, int window_len, int hop_len,
                            int sample_rate, int chunk_len, int mimi_downsample) {
-    auto * hp = (clip_hparams *) p;
+    auto * hp = &((mtmd_model *) p)->hparams;
     hp->n_mel_bins        = n_mel_bins;
     hp->audio_n_fft       = n_fft;
     hp->audio_window_len  = window_len;
@@ -44,13 +52,13 @@ void ref_audio_hparams_set(void * p, int n_mel_bins, int n_fft, int window_len, 
 
 void ref_audio_hparams_set_parakeet(void * p, const float * mel_filters, size_t n_filters,
                                     const float * window, size_t n_window) {
-    auto * hp = (clip_hparams *) p;
+    auto * hp = &((mtmd_model *) p)->hparams;
     hp->mel_filters.assign(mel_filters, mel_filters + n_filters);
     hp->window.assign(window, window + n_window);
 }
 
 void ref_audio_hparams_set_patches(void * p, const int32_t * sizes, size_t n) {
-    ((clip_hparams *) p)->audio_patch_sizes.assign(sizes, sizes + n);
+    ((mtmd_model *) p)->hparams.audio_patch_sizes.assign(sizes, sizes + n);
 }
 
 void ref_audio_set_log(ggml_log_callback cb, void * ud) {
@@ -60,7 +68,7 @@ void ref_audio_set_log(ggml_log_callback cb, void * ud) {
 
 // the fourteen preprocessors, in mtmd-audio.h's order -- d1omni (v0.7.0) and
 // the two of v0.8.0 last, as the Zig `audio.Kind` keeps it
-static mtmd_audio_preprocessor * make(int kind, const clip_ctx * ctx) {
+static mtmd_audio_preprocessor * make(int kind, const mtmd_model * ctx) {
     switch (kind) {
         case 0:  return new mtmd_audio_preprocessor_whisper(ctx);
         case 1:  return new mtmd_audio_preprocessor_conformer(ctx);
@@ -72,60 +80,92 @@ static mtmd_audio_preprocessor * make(int kind, const clip_ctx * ctx) {
         case 7:  return new mtmd_audio_preprocessor_mimo_audio(ctx);
         case 8:  return new mtmd_audio_preprocessor_qwen3tts_spk(ctx);
         case 9:  return new mtmd_audio_preprocessor_pockettts(ctx);
-        case 10: return new mtmd_audio_preprocessor_parakeet((clip_ctx *) ctx);
+        case 10: return new mtmd_audio_preprocessor_parakeet(ctx);
         case 11: return new mtmd_audio_preprocessor_d1omni(ctx);
         case 12: return new mtmd_audio_preprocessor_lfm3a(ctx);
         case 13: return new mtmd_audio_preprocessor_muse_spark_audio(ctx);
-        case 14: return new mtmd_audio_preprocessor_nemotron_transcribe((clip_ctx *) ctx);
+        case 14: return new mtmd_audio_preprocessor_nemotron_transcribe(ctx);
         default: return nullptr;
     }
+}
+
+// one CPU scheduler for the whole run, as mtmd_backends builds one for a
+// context with no accelerator
+static ggml_backend_t        g_cpu   = nullptr;
+static ggml_backend_sched_t  g_sched = nullptr;
+
+static ggml_backend_sched_t sched_get(void) {
+    if (!g_sched) {
+        g_cpu = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+        ggml_backend_buffer_type_t buft = ggml_backend_get_default_buffer_type(g_cpu);
+        g_sched = ggml_backend_sched_new(&g_cpu, &buft, 1, 8192, false, true);
+    }
+    return g_sched;
 }
 
 struct ref_proc {
     std::unique_ptr<mtmd_audio_preprocessor> p;
 };
 
-void * ref_audio_proc_new(int kind, void * hp) {
+static void * proc_init(mtmd_audio_preprocessor * p, int n_threads) {
     auto * r = new ref_proc();
-    r->p.reset(make(kind, (const clip_ctx *) hp));
+    r->p.reset(p);
+    r->p->mel_config.n_threads = n_threads;
+    r->p->mel_config.sched     = sched_get();
     r->p->initialize();
     return r;
+}
+
+void * ref_audio_proc_new(int kind, void * m, int n_threads) {
+    return proc_init(make(kind, (const mtmd_model *) m), n_threads);
 }
 
 void ref_audio_proc_free(void * r) { delete (ref_proc *) r; }
 
 // v0.9.0's chatterbox front-end, `audio.Kind.chatterbox_ref` (15), takes a
 // variant flag (`is_mtl`) the other preprocessors do not
-void * ref_audio_proc_new_flag(int kind, void * hp, int flag) {
+void * ref_audio_proc_new_flag(int kind, void * m, int flag, int n_threads) {
     if (kind != 15) {
         return nullptr;
     }
-    auto * r = new ref_proc();
-    r->p.reset(new mtmd_audio_preprocessor_chatterbox_ref((const clip_ctx *) hp, flag != 0));
-    r->p->initialize();
-    return r;
+    return proc_init(new mtmd_audio_preprocessor_chatterbox_ref((const mtmd_model *) m, flag != 0), n_threads);
 }
 
-// Runs one preprocess. Returns ok, and through `out` a malloc'd blob the
-// caller frees: n_mels, then per mel n_len, n_len_org, n_mel (as int64) and
-// n_mel*n_len floats.
-int ref_audio_proc_run(void * r, const float * samples, size_t n_samples, void ** out, size_t * out_len) {
-    std::vector<mtmd_audio_mel> mels;
-    bool ok = ((ref_proc *) r)->p->preprocess(samples, n_samples, mels);
-    std::vector<unsigned char> blob;
+// The blob both stages report: the number of entries, then per entry nx,
+// ny, whether it is a placeholder and its float count (as int64), then the
+// floats; then the kept samples' count and the samples, and needs_compute.
+static void put_out(std::vector<unsigned char> & blob, const mtmd_audio_preproc_out & o) {
     auto put = [&](const void * d, size_t n) {
         blob.insert(blob.end(), (const unsigned char *) d, (const unsigned char *) d + n);
     };
-    int64_t n = (int64_t) mels.size();
-    put(&n, 8);
-    for (auto & m : mels) {
-        put(&m.n_len, 8);
-        put(&m.n_len_org, 8);
-        put(&m.n_mel, 8);
-        int64_t nd = (int64_t) m.data.size();
-        put(&nd, 8);
-        put(m.data.data(), m.data.size() * sizeof(float));
+    auto put64 = [&](int64_t v) { put(&v, 8); };
+    put64((int64_t) o.entries.size());
+    for (auto & e : o.entries) {
+        put64(e.nx());
+        put64(e.ny());
+        put64(e.is_placeholder() ? 1 : 0);
+        if (e.is_placeholder()) {
+            put64(0);
+        } else {
+            const auto & b = e.get_ro_buf();
+            put64((int64_t) b.size());
+            put(b.data(), b.size() * sizeof(float));
+        }
     }
+    put64((int64_t) o.samples.size());
+    put(o.samples.data(), o.samples.size() * sizeof(float));
+    put64(o.needs_compute() ? 1 : 0);
+}
+
+// Runs one preprocess, then one compute. Returns the compute's ok, and
+// through `out` a malloc'd blob the caller frees: both stages' reports.
+int ref_audio_proc_run(void * r, const float * samples, size_t n_samples, void ** out, size_t * out_len) {
+    auto & p = *((ref_proc *) r)->p;
+    mtmd_audio_preproc_out o = p.preprocess(samples, n_samples);
+    std::vector<unsigned char> blob;
+    put_out(blob, o);
+    bool ok = p.compute(o);
+    put_out(blob, o);
     *out = malloc(blob.size());
     memcpy(*out, blob.data(), blob.size());
     *out_len = blob.size();

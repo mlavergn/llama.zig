@@ -840,13 +840,133 @@ def unix_cases():
     return c
 
 
+def rehost(cases_fn, host=b"localhost"):
+    """`cases_fn` with every standard `Host: x` line naming `host` instead.
+
+    v1.0.0's DNS rebinding guard refuses a loopback request whose Host is
+    neither loopback nor an allowed origin's host whenever --cors-origins is
+    not "*"; the configs that test the API key and a CORS list send a Host
+    the guard lets through, so they keep testing what they were written for.
+    """
+    def wrapped():
+        out = []
+        for name, steps in cases_fn():
+            out.append((name, [(st[0], st[1].replace(H, b"Host: " + host + b"\r\n")) + tuple(st[2:])
+                               if st[0] == "send" else st for st in steps]))
+        return out
+    return wrapped
+
+
+def hreq(line, host, *headers, body=b""):
+    """A request with its own Host line (or none, for `host` None)."""
+    h = b"" if host is None else b"Host: " + host.encode() + b"\r\n"
+    return line.encode() + b"\r\n" + h + b"".join(x.encode() + b"\r\n" for x in headers) + b"\r\n" + body
+
+
+# server-http.cpp v1.0.0: the DNS rebinding guard (`request_host_is_allowed`)
+# and the CSRF guard (`request_origin_is_allowed`) under --cors-origins
+# localhost; the reply carries no Access-Control-Allow-Origin
+def corslocal_cases():
+    c = []
+    for i, host in enumerate(["x", "localhost", "LOCALHOST:8080", "localhost.", "127.0.0.1:1", "127.5.6.7", "127.0.0.256",
+                              "128.0.0.1", " 127.0.0.1", "127. 0.0.1", "127.0.0.\t1", "+127.0.0.1", "127.-0.0.1", "4294967423.0.0.1", "127.0.0.1x",
+                              "[::1]:80", "[::1", "::1", "[::ffff:127.0.0.1]", "[::ffff:10.0.0.1]", "0.0.0.0:8080", "[::]", "",
+                              "evil.example:8080", "localhost:8080@evil"]):
+        c.append(simple("host-%d" % i, hreq("GET /echo HTTP/1.1", host)))
+    c.append(simple("host-none-http10", hreq("GET /echo HTTP/1.0", None)))
+    c.append(simple("host-bad-options", hreq("OPTIONS /echo HTTP/1.1", "evil.example", "Origin: http://evil.example")))
+    lh = "localhost:8080"
+    for i, origin in enumerate(["http://localhost:8080", "http://LOCALHOST:8080", "https://localhost:8080", "http://localhost:9",
+                                "http://localhost", "null", "localhost:8080", "http://127.0.0.1:8080", ""]):
+        c.append(simple("origin-%d" % i, hreq("GET /echo HTTP/1.1", lh, "Origin: " + origin)))
+    c.append(simple("origin-post-cross", hreq("POST /echo HTTP/1.1", lh, "Origin: http://evil.example", "Content-Type: text/plain",
+                                              "Content-Length: 2", body=b"hi")))
+    for i, (method, path, site, mode) in enumerate([("GET", "/", "cross-site", "navigate"), ("GET", "/echo", "cross-site", "navigate"),
+                                                    ("GET", "/", "cross-site", "no-cors"), ("GET", "/", "same-site", "navigate"),
+                                                    ("GET", "/echo", "same-site", "cors"), ("GET", "/echo", "same-origin", "cors"),
+                                                    ("GET", "/echo", "none", "navigate"), ("GET", "/echo", "Cross-Site", "navigate"),
+                                                    ("HEAD", "/", "cross-site", "navigate"), ("DELETE", "/echo", "cross-site", "")]):
+        hs = ["Sec-Fetch-Site: " + site] + (["Sec-Fetch-Mode: " + mode] if mode else [])
+        data = hreq("%s %s HTTP/1.1" % (method, path), lh, *hs)
+        c.append(("fetch-%d" % i, [("send", data), ("head",) if method == "HEAD" else ("resp",)]))
+    c.append(simple("fetch-cross-badhost", hreq("GET / HTTP/1.1", "evil.example", "Sec-Fetch-Site: cross-site", "Sec-Fetch-Mode: navigate")))
+    return c
+
+
+# --cors-origins as a list: each entry stripped, the Host check against the
+# part after "://" ignoring case, the Origin check exact
+def corslist_cases():
+    c = []
+    for i, host in enumerate(["good.example:8080", "GOOD.example:8080", "good.example", "other.example", "Other.Example:443", "bad",
+                              "localhost", "x"]):
+        c.append(simple("host-%d" % i, hreq("GET /echo HTTP/1.1", host)))
+    for i, origin in enumerate(["http://good.example:8080", "HTTPS://Other.Example", "https://other.example", "http://evil.example",
+                                " http://good.example:8080", "bad", "http://localhost"]):
+        c.append(simple("origin-%d" % i, hreq("GET /echo HTTP/1.1", "localhost", "Origin: " + origin)))
+    c.append(simple("origin-same", hreq("GET /echo HTTP/1.1", "Evil.Example", "Origin: http://evil.example")))
+    c.append(simple("fetch-cross", hreq("GET /echo HTTP/1.1", "localhost", "Sec-Fetch-Site: cross-site")))
+    c.append(simple("fetch-cross-ui", hreq("GET / HTTP/1.1", "localhost", "Sec-Fetch-Site: cross-site", "Sec-Fetch-Mode: navigate")))
+    c.append(simple("options", hreq("OPTIONS /echo HTTP/1.1", "x", "Origin: http://evil.example")))
+    return c
+
+
+# "*" never rejects; with credentials the Origin is echoed. And cpp-httplib
+# 0.66: a Range whose unit is not "bytes" is ignored (RFC 9110 14.2)
+def v066_cases():
+    c = []
+    for i, hs in enumerate([["Origin: http://evil.example"], ["Sec-Fetch-Site: cross-site", "Sec-Fetch-Mode: cors"], []]):
+        c.append(simple("star-%d" % i, hreq("POST /echo HTTP/1.1", "evil.example", *hs, "Content-Length: 1", body=b"z")))
+    for i, rng in enumerate(["items=0-1", "Bytes=0-1", "bytes=0-1", "foo", "bytes", "=0-1", "bytes =0-1", "bytes=9-1", "items=9-1",
+                             "BYTES=1-2,4-5", "bytes=x"]):
+        c.append(simple("range-%d" % i, req("GET /health HTTP/1.1", "Range: " + rng)))
+    c.append(("range-head-items", [("send", req("HEAD /health HTTP/1.1", "Range: items=9-1")), ("head",)]))
+    return c
+
+
+# server-http.cpp v1.0.0: a router's child refuses what only a browser sends
+def child_cases():
+    c = []
+    c.append(simple("plain", hreq("GET /echo HTTP/1.1", "localhost")))
+    c.append(simple("plain-hostx", hreq("GET /echo HTTP/1.1", "x")))
+    for i, h in enumerate(["Origin: http://localhost", "Origin:", "Sec-Fetch-Site: none", "Sec-Fetch-Mode: navigate",
+                           "sec-fetch-site: same-origin", "Sec-Fetch-Dest: document", "X-Origin: y"]):
+        c.append(simple("browser-%d" % i, hreq("GET /echo HTTP/1.1", "localhost", h)))
+    c.append(simple("browser-options", hreq("OPTIONS /echo HTTP/1.1", "localhost", "Origin: http://localhost")))
+    c.append(simple("browser-health", hreq("GET /health HTTP/1.1", "localhost", "Origin: http://localhost")))
+    return c
+
+
+def lan_address():
+    """A non-loopback address of this machine, or None; no packet is sent."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("192.0.2.1", 9))
+        addr = s.getsockname()[0]
+        s.close()
+        return None if addr.startswith("127.") else addr
+    except OSError:
+        return None
+
+
+# a loopback connection is guarded, one to another address of this machine
+# is not ("lan-" cases go to that address, when there is one)
+def lan_cases():
+    c = []
+    for pre in ("", "lan-"):
+        c.append(simple(pre + "hostx", hreq("GET /echo HTTP/1.1", "x")))
+        c.append(simple(pre + "host-evil-origin", hreq("GET /echo HTTP/1.1", "evil.example", "Origin: http://evil.example")))
+        c.append(simple(pre + "host-other-origin", hreq("GET /echo HTTP/1.1", "evil.example", "Origin: http://other.example")))
+        c.append(simple(pre + "fetch-cross", hreq("GET /echo HTTP/1.1", "evil.example", "Sec-Fetch-Site: cross-site")))
+    return c
+
+
 # name -> (environment, cases, how it stops)
 CONFIGS = [
     ("default", {}, base_cases),
     ("v062", {}, v062_cases),
     ("v064", {}, v064_cases),
-    ("apikey", {}, key_cases),
-    ("prefix", {}, prefix_cases),
+    ("apikey", {}, rehost(key_cases)),
+    ("prefix", {}, rehost(prefix_cases)),
     ("auto", {}, small_cases),
     ("reuse", {}, small_cases),
     ("notready", {}, notready_cases),
@@ -859,6 +979,11 @@ CONFIGS = [
     ("multitcp", {"HTTP_DIFF_PORT": "FREE"}, multitcp_cases),
     ("multiport0", {}, None),
     ("multibad", {"HTTP_DIFF_PORT": "FREE"}, None),
+    ("v066", {}, v066_cases),
+    ("corslocal", {}, corslocal_cases),
+    ("corslist", {}, corslist_cases),
+    ("child", {"LLAMA_SERVER_ROUTER_PORT": "1"}, child_cases),
+    ("lan", {"HTTP_DIFF_PORT": "FREE"}, lan_cases),
 ]
 
 # -----------------------------------------------------------------------------
@@ -900,6 +1025,12 @@ def run_side(binary, config, env_extra, cases, tmp, side, only_case):
                 conn = Conn(sock_path)
             elif name.startswith("v6-"):
                 conn = Conn(("::1", port))
+            elif name.startswith("lan-"):
+                lan = lan_address()
+                if lan is None:
+                    results.append((name, b"<<no non-loopback address: skipped>>"))
+                    continue
+                conn = Conn((lan, port))
             else:
                 conn = Conn(target)
             conn.run(steps)
@@ -920,6 +1051,7 @@ def run_side(binary, config, env_extra, cases, tmp, side, only_case):
     for stream in ("out", "err"):
         text = open(os.path.join(tmp, "%s-%s.%s" % (config, side, stream)), "rb").read()
         text = re.sub(rb"(http://127\.0\.0\.1:)\d+", rb"\1PORT", text)
+        text = re.sub(rb"(http://0\.0\.0\.0:)\d+", rb"\1PORT", text)
         text = text.replace(sock_path.encode(), b"SOCK")
         logs.append(text)
     return results, logs, rc

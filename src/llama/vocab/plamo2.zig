@@ -6,7 +6,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` at v0.9.0 (`cd959bae9`).
+//! Ported from `llama.cpp/src/llama-vocab.cpp` at v1.0.0 (`b1b770d90`).
 //!
 //! The C++ builds its table from `std::unordered_map`s, but iterates only
 //! one of them, and only to collect its keys, which it then sorts by their
@@ -40,7 +40,7 @@ const path_num_tokens = 2;
 const invalid_score: i32 = -20000000;
 const unknown_score: i32 = -10000000;
 
-/// Ports `llm_tokenizer_plamo2` (llama-vocab.cpp:1465 @cd959bae9).
+/// Ports `llm_tokenizer_plamo2` (llama-vocab.cpp:1465 @b1b770d90).
 pub const Tokenizer = struct {
     /// `pre_segment_`: true for PLaMo-3.
     pre_segment: bool,
@@ -189,7 +189,7 @@ pub const Tokenizer = struct {
     }
 
     /// Ports `llm_tokenizer_plamo2`'s `encode` (llama-vocab.cpp:1607
-    /// @cd959bae9), appending to `output` as the session does.
+    /// @b1b770d90), appending to `output` as the session does.
     ///
     /// Return: nothing; `error.Thrown` is not raised but kept for the
     /// tokenizers' common shape.
@@ -271,7 +271,7 @@ pub const Tokenizer = struct {
     }
 
     /// Ports `llm_tokenizer_plamo2`'s `encode_cpts` (llama-vocab.cpp:1689
-    /// @cd959bae9): the dynamic program over one run of code points,
+    /// @b1b770d90): the dynamic program over one run of code points,
     /// appending to `output`.
     fn encodeCpts(self: *const Tokenizer, unicode_data: []const u32, output: *std.ArrayList(Token)) void {
         if (unicode_data.len == 0) return;

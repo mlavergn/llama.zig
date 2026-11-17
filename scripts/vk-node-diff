@@ -20,7 +20,11 @@
 #
 # Both passes run on every arm the GB10 has (`ARMS`): coopmat2, KHR
 # coopmat, no matrix cores, and no matrix cores without integer dot --
-# each selects different shaders and different host paths.
+# each selects different shaders and different host paths -- and, since
+# v1.0.0, `xefa`: the KHR arm with `GGML_VK_FORCE_XE_FA`, which puts flash
+# attention on the Intel Xe prefill and two-phase decode kernels. The GB10
+# has the subgroup size, the 16x16x16 coopmat and the explicit workgroup
+# memory layout they need, so the vendor arm runs here.
 # `make vk-repro` measured the reference exact on all four.
 #
 # `VK_REF_DIR` and `VK_PORT_DIR` override the two library directories; the
@@ -44,7 +48,7 @@ cd "$ROOT" || exit 2
 MODEL="${1:?usage: scripts/vk-node-diff <model.gguf> [prompt]}"
 PROMPT="${2:-Explain gravity in one sentence, then give an example from daily life:}"
 STEPS=${STEPS:-32}
-ARMS=${ARMS:-coopmat2 coopmat none nodot}
+ARMS=${ARMS:-coopmat2 coopmat none nodot xefa}
 
 REF=${VK_REF_DIR:-zig-out/vk-upstream/lib}
 PORT=${VK_PORT_DIR:-zig-out/vk-port/lib}
@@ -83,6 +87,7 @@ arm_env() {
         coopmat)  echo "GGML_VK_DISABLE_COOPMAT2=1" ;;
         none)     echo "GGML_VK_DISABLE_COOPMAT2=1 GGML_VK_DISABLE_COOPMAT=1" ;;
         nodot)    echo "GGML_VK_DISABLE_COOPMAT2=1 GGML_VK_DISABLE_COOPMAT=1 GGML_VK_DISABLE_INTEGER_DOT_PRODUCT=1" ;;
+        xefa)     echo "GGML_VK_DISABLE_COOPMAT2=1 GGML_VK_FORCE_XE_FA=1" ;;
         *) echo "unknown arm $1" >&2; exit 2 ;;
     esac
 }

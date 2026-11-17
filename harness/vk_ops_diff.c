@@ -248,7 +248,7 @@ static bool no_callback(int i, struct ggml_tensor * t1, struct ggml_tensor * t2,
     return true;
 }
 
-/* `graph_copy_dup_tensor` (ggml-backend.cpp:2523 @cd959bae9) records a
+/* `graph_copy_dup_tensor` (ggml-backend.cpp:2617 @b1b770d90) records a
  * node's copy only after copying its sources, so `ggml_cast`'s `src[1]`,
  * the node itself, comes back NULL in the copy. Put it back; see the file
  * comment. */
@@ -887,6 +887,58 @@ static struct ggml_tensor * build_fa_acc_bf16(struct ggml_context * ctx, struct 
     return out;
 }
 
+/* v1.0.0: a MUL_MAT hinted GGML_HINT_SRC0_IS_HADAMARD runs as a fast
+ * Walsh-Hadamard transform of src1, now up to 8192 wide -- above 512 on
+ * the shared-memory shader, one row per workgroup -- and over an f16 src1.
+ * Upstream's cases stop at 512 and jump to 16384, which is refused. */
+static struct ggml_tensor * build_hadamard(struct ggml_context * ctx, struct ggml_tensor ** cmp, enum ggml_type tb, int64_t k, int64_t n) {
+    struct ggml_tensor * a = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, k, k);
+    struct ggml_tensor * b = ggml_new_tensor_2d(ctx, tb, k, n);
+    struct ggml_tensor * out = ggml_mul_mat(ctx, a, b);
+    ggml_mul_mat_set_hint(out, GGML_HINT_SRC0_IS_HADAMARD);
+    *cmp = out;
+    return out;
+}
+static struct ggml_tensor * build_had_1024_f32(struct ggml_context * c, struct ggml_tensor ** t) { return build_hadamard(c, t, GGML_TYPE_F32, 1024, 3); }
+static struct ggml_tensor * build_had_2048_f16(struct ggml_context * c, struct ggml_tensor ** t) { return build_hadamard(c, t, GGML_TYPE_F16, 2048, 7); }
+static struct ggml_tensor * build_had_4096_f32(struct ggml_context * c, struct ggml_tensor ** t) { return build_hadamard(c, t, GGML_TYPE_F32, 4096, 5); }
+static struct ggml_tensor * build_had_8192_f16(struct ggml_context * c, struct ggml_tensor ** t) { return build_hadamard(c, t, GGML_TYPE_F16, 8192, 2); }
+
+/* v1.0.0 lets coopmat2 flash attention dequantize a quantized K/V once
+ * into fp16 scratch when the query reuse pays for it (KV >= 4096, enough
+ * queries times the GQA ratio), and stops requiring quantized K/V strides
+ * to be multiples of eight blocks on that path. A dense KV cache over one
+ * head, q8_0: at KV 4096 with 1024 queries and GQA 8 (dequantized), and
+ * at KV 512 with 64 queries (decoded in place, its 4-block rows now
+ * "aligned"). Upstream's cases keep KV small. */
+static struct ggml_tensor * build_fa_q8_0_dense(struct ggml_context * ctx, struct ggml_tensor ** cmp, int64_t kv, int64_t nq, int64_t nh) {
+    const int64_t hs = 128;
+    struct ggml_tensor * q = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, hs, nq, nh, 1);
+    struct ggml_tensor * ks = ggml_new_tensor_3d(ctx, GGML_TYPE_Q8_0, hs, 1, kv);
+    struct ggml_tensor * vs = ggml_new_tensor_3d(ctx, GGML_TYPE_Q8_0, hs, 1, kv);
+    struct ggml_tensor * k = ggml_permute(ctx, ks, 0, 2, 1, 3);
+    struct ggml_tensor * v = ggml_permute(ctx, vs, 0, 2, 1, 3);
+    struct ggml_tensor * out = ggml_flash_attn_ext(ctx, q, k, v, NULL, 1.0f / sqrtf((float) hs), 0.0f, 0.0f);
+    *cmp = out;
+    return out;
+}
+static struct ggml_tensor * build_fa_cm2_dequant(struct ggml_context * c, struct ggml_tensor ** t) { return build_fa_q8_0_dense(c, t, 4096, 1024, 8); }
+static struct ggml_tensor * build_fa_cm2_decode(struct ggml_context * c, struct ggml_tensor ** t) { return build_fa_q8_0_dense(c, t, 512, 64, 2); }
+
+/* v1.0.0's tiled-transpose concat: a dim-0 concat of a contiguous src0
+ * and a transposed src1, 2-d, as Qwen's attention builds one -- f32, f16
+ * and i8, and a src1 row count that is not a multiple of the 32x32 tile. */
+static struct ggml_tensor * build_concat_t(struct ggml_context * ctx, struct ggml_tensor ** cmp, enum ggml_type type, int64_t n0, int64_t n1, int64_t rows) {
+    struct ggml_tensor * a = ggml_new_tensor_2d(ctx, type, n0, rows);
+    struct ggml_tensor * bs = ggml_new_tensor_2d(ctx, type, rows, n1);
+    struct ggml_tensor * b = ggml_transpose(ctx, bs);
+    struct ggml_tensor * out = ggml_concat(ctx, a, b, 0);
+    *cmp = out;
+    return out;
+}
+static struct ggml_tensor * build_concat_t_f32(struct ggml_context * c, struct ggml_tensor ** t) { return build_concat_t(c, t, GGML_TYPE_F32, 64, 48, 77); }
+static struct ggml_tensor * build_concat_t_f16(struct ggml_context * c, struct ggml_tensor ** t) { return build_concat_t(c, t, GGML_TYPE_F16, 3, 100, 1000); }
+
 /* v0.8.0 lets MUL_MAT broadcast src0 over dim 3, and the non-contiguous
  * vector kernel cannot: `ggml_vk_mul_mat` now keeps such a node off it,
  * where supports_op used to. Upstream's broadcast cases are contiguous. */
@@ -1076,6 +1128,14 @@ static int extra_cases(const char * filter) {
         { "RMS_NORM_MUL_ROPE", "rms_norm+view+set_rows, 256 columns, f32",          build_rms_sr_256_f32 },
         { "RMS_NORM_MUL_ROPE", "rms_norm+view+set_rows, 200 columns, f32",          build_rms_sr_200_f32 },
         { "RMS_NORM_MUL_ROPE", "rms_norm+view+set_rows, 256 columns, f16",          build_rms_sr_256_f16 },
+        { "MUL_MAT_HADAMARD",  "fwht f32, 1024 wide, 3 rows",                     build_had_1024_f32 },
+        { "MUL_MAT_HADAMARD",  "fwht f16, 2048 wide, 7 rows",                     build_had_2048_f16 },
+        { "MUL_MAT_HADAMARD",  "fwht f32, 4096 wide, 5 rows",                     build_had_4096_f32 },
+        { "MUL_MAT_HADAMARD",  "fwht f16, 8192 wide, 2 rows",                     build_had_8192_f16 },
+        { "FLASH_ATTN_EXT",    "q8_0 dense KV 4096, 1024 queries, GQA 8",         build_fa_cm2_dequant },
+        { "FLASH_ATTN_EXT",    "q8_0 dense KV 512, 64 queries, GQA 2",            build_fa_cm2_decode },
+        { "CONCAT",            "f32 64+48 x 77, src1 transposed",                 build_concat_t_f32 },
+        { "CONCAT",            "f16 3+100 x 1000, src1 transposed",               build_concat_t_f16 },
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {

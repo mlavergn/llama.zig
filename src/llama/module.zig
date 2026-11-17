@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! **Not a port.** Everything under `src/llama/` is a port of C++ in the
-//! pinned reference checkout, v0.9.0 (`cd959bae9`), or of the libc++ it was
+//! pinned reference checkout, v1.0.0 (`b1b770d90`), or of the libc++ it was
 //! compiled against; each file states its sources.
 //!
 //! # The swap

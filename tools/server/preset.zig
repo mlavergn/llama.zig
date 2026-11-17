@@ -6,7 +6,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/preset.cpp` and `llama.cpp/common/preset.h`
-//! (v0.9.0, `cd959bae9`) whole, with what they need from
+//! (v1.0.0, `b1b770d90`) whole, with what they need from
 //! `llama.cpp/common/arg.cpp` -- `common_params_to_map`,
 //! `common_params_add_preset_options`, `common_arg::get_args` and
 //! `get_env`. Each
@@ -36,11 +36,11 @@ const Arg = arg.Arg;
 const Params = tc.params.Params;
 const Allocator = std.mem.Allocator;
 
-/// Ports `COMMON_PRESET_DEFAULT_NAME` (preset.h:15 @cd959bae9).
+/// Ports `COMMON_PRESET_DEFAULT_NAME` (preset.h:15 @b1b770d90).
 pub const default_name = "default";
 
 /// Ports `COMMON_ARG_PRESET_LOAD_ON_STARTUP`, `COMMON_ARG_PRESET_STOP_TIMEOUT`
-/// and `COMMON_ARG_PRESET_DEDUP_CACHE_MODELS` (arg.h:14, 15, 16 @cd959bae9).
+/// and `COMMON_ARG_PRESET_DEDUP_CACHE_MODELS` (arg.h:14, 15, 16 @b1b770d90).
 pub const env_load_on_startup = "__PRESET_LOAD_ON_STARTUP";
 pub const env_stop_timeout = "__PRESET_STOP_TIMEOUT";
 pub const env_dedup_cache_models = "__PRESET_DEDUP_CACHE_MODELS";
@@ -52,7 +52,7 @@ pub const Error = error{ Throw, OutOfMemory };
 // -----------------------------------------------------------------------------
 // helpers
 
-/// Ports `rm_leading_dashes` (preset.cpp:12 @cd959bae9).
+/// Ports `rm_leading_dashes` (preset.cpp:12 @b1b770d90).
 fn rmLeadingDashes(str: []const u8) []const u8 {
     var pos: usize = 0;
     while (pos < str.len and str[pos] == '-') pos += 1;
@@ -63,7 +63,7 @@ fn upperInPlace(s: []u8) void {
     for (s) |*ch| ch.* = std.ascii.toUpper(ch.*);
 }
 
-/// Ports `canonical_tag` (preset.cpp:20 @cd959bae9): a quant tag in upper
+/// Ports `canonical_tag` (preset.cpp:20 @b1b770d90): a quant tag in upper
 /// case, the part after the last `-` or `.` when that part is a tag.
 fn canonicalTag(a: Allocator, tag: []const u8) Error![]u8 {
     var re = regex.Regex.compileWith("[-.]([A-Z0-9_]+)$", .{ .icase = true }) catch |err| switch (err) {
@@ -82,7 +82,7 @@ fn canonicalTag(a: Allocator, tag: []const u8) Error![]u8 {
     return upper;
 }
 
-/// Ports `operator`< (arg.h:91 @cd959bae9), a member of `common_arg`:
+/// Ports `operator`< (arg.h:91 @b1b770d90), a member of `common_arg`:
 /// `strcmp` of the first spellings. An option with no spellings is never
 /// less.
 fn argLess(x: *const Arg, y: *const Arg) bool {
@@ -90,13 +90,13 @@ fn argLess(x: *const Arg, y: *const Arg) bool {
     return std.mem.order(u8, x.args[0], y.args[0]) == .lt;
 }
 
-/// Ports `operator`== (arg.h:97 @cd959bae9), a member of `common_arg`,
+/// Ports `operator`== (arg.h:97 @b1b770d90), a member of `common_arg`,
 /// which `std::map` reaches as neither being less.
 fn argEql(x: *const Arg, y: *const Arg) bool {
     return !argLess(x, y) and !argLess(y, x);
 }
 
-/// Ports `get_env` (arg.cpp:209 @cd959bae9), a member of `common_arg`: the
+/// Ports `get_env` (arg.cpp:210 @b1b770d90), a member of `common_arg`: the
 /// variable and, for an option with a negative spelling, its
 /// `LLAMA_ARG_NO_` twin. `string_replace_all` replaces every occurrence.
 fn getEnvs(a: Allocator, opt: *const Arg) Error![]const []const u8 {
@@ -121,7 +121,7 @@ pub const Option = struct {
     value: []const u8,
 };
 
-/// Ports `common_preset` (preset.h:19 @cd959bae9).
+/// Ports `common_preset` (preset.h:19 @b1b770d90).
 pub const Preset = struct {
     name: []const u8 = "",
     // options are stored as common_arg to string mapping, representing CLI arg and its value
@@ -179,7 +179,7 @@ pub const Preset = struct {
         return null;
     }
 
-    /// Ports `to_args` (preset.cpp:37 @cd959bae9), a member of
+    /// Ports `to_args` (preset.cpp:37 @b1b770d90), a member of
     /// `common_preset`: the preset as a command line.
     ///
     /// Parameters:
@@ -228,7 +228,7 @@ pub const Preset = struct {
         return args;
     }
 
-    /// Ports `to_ini` (preset.cpp:81 @cd959bae9), a member of
+    /// Ports `to_ini` (preset.cpp:81 @b1b770d90), a member of
     /// `common_preset`.
     ///
     /// Return: the INI text, owned by `a`.
@@ -248,7 +248,7 @@ pub const Preset = struct {
         return ss.items;
     }
 
-    /// Ports `set_option` (preset.cpp:96 @cd959bae9), a member of
+    /// Ports `set_option` (preset.cpp:96 @b1b770d90), a member of
     /// `common_preset`: the option whose variable is `env` takes `value`.
     pub fn setOption(self: *Preset, gpa: Allocator, ctx: *const Context, env: []const u8, value: []const u8) Error!void {
         // try if option exists, update it
@@ -269,7 +269,7 @@ pub const Preset = struct {
         try self.put(gpa, opt, value);
     }
 
-    /// Ports `unset_option` (preset.cpp:114 @cd959bae9), a member of
+    /// Ports `unset_option` (preset.cpp:114 @b1b770d90), a member of
     /// `common_preset`: the first option whose variable is `env` goes.
     pub fn unsetOption(self: *Preset, gpa: Allocator, env: []const u8) void {
         for (self.options.items, 0..) |o, i| {
@@ -281,7 +281,7 @@ pub const Preset = struct {
         }
     }
 
-    /// Ports `get_option` (preset.cpp:126 @cd959bae9), a member of
+    /// Ports `get_option` (preset.cpp:126 @b1b770d90), a member of
     /// `common_preset`.
     ///
     /// Return: the value, borrowed, or null.
@@ -292,7 +292,7 @@ pub const Preset = struct {
         return null;
     }
 
-    /// Ports `merge` (preset.cpp:136 @cd959bae9), a member of
+    /// Ports `merge` (preset.cpp:136 @b1b770d90), a member of
     /// `common_preset`: `other`'s options overwrite.
     pub fn merge(self: *Preset, gpa: Allocator, other: *const Preset) Error!void {
         for (other.options.items) |*o| {
@@ -300,7 +300,7 @@ pub const Preset = struct {
         }
     }
 
-    /// Ports `apply_to_params` (preset.cpp:142 @cd959bae9), a member of
+    /// Ports `apply_to_params` (preset.cpp:142 @b1b770d90), a member of
     /// `common_preset`: each option's handler on `params`, or only those
     /// whose variable is in `handled_keys` when it is not empty.
     pub fn applyToParams(self: *const Preset, params: *Params, handled_keys: []const []const u8) anyerror!void {
@@ -328,7 +328,7 @@ pub const Preset = struct {
     }
 };
 
-/// Ports `common_presets` (preset.h:51 @cd959bae9): a
+/// Ports `common_presets` (preset.h:51 @b1b770d90): a
 /// `std::map<std::string, common_preset>`, in name order.
 pub const Presets = struct {
     entries: std.ArrayList(Preset) = .empty,
@@ -423,7 +423,7 @@ const Ini = struct {
 };
 
 /// The grammar `parse_ini_from_file` gives `build_peg_parser` (preset.cpp:184
-/// @cd959bae9).
+/// @b1b770d90).
 fn buildIni(_: void, p: *peg.Builder) peg.Error!peg.ParserId {
     // newline ::= "\r\n" / "\n" / "\r"
     const newline = try p.rule("newline", try p.choice(&.{ try p.literal("\r\n"), try p.literal("\n"), try p.literal("\r") }), false);
@@ -537,7 +537,7 @@ pub fn fsIsRegularFile(path: []const u8) bool {
     return st.mode & tc.fs_stat.IFMT == tc.fs_stat.IFREG;
 }
 
-/// Ports `parse_ini_from_file` (preset.cpp:170 @cd959bae9): sections in
+/// Ports `parse_ini_from_file` (preset.cpp:170 @b1b770d90): sections in
 /// name order, each its keys in key order. A section named twice keeps
 /// only what follows its last header.
 fn parseIniFromFile(a: Allocator, path: []const u8) Error!Ini {
@@ -617,7 +617,7 @@ fn directoryEntries(a: Allocator, dir_path: []const u8) Error![]DirEntry {
 // -----------------------------------------------------------------------------
 // common_preset_context
 
-/// Ports `common_preset_context` (preset.h:54 @cd959bae9).
+/// Ports `common_preset_context` (preset.h:54 @b1b770d90).
 pub const Context = struct {
     gpa: Allocator,
     /// Backs the parser context's tables, the options' help text and
@@ -634,7 +634,7 @@ pub const Context = struct {
     // used for config files shared by all binaries, where each binary only knows a subset of options
     ignore_unknown_keys: bool = false,
 
-    /// Ports `common_preset_context` (preset.cpp:279 @cd959bae9), the
+    /// Ports `common_preset_context` (preset.cpp:279 @b1b770d90), the
     /// constructor.
     ///
     /// Parameters:
@@ -674,7 +674,7 @@ pub const Context = struct {
         gpa.destroy(arena);
     }
 
-    /// Ports `load_from_ini` (preset.cpp:285 @cd959bae9): every section but
+    /// Ports `load_from_ini` (preset.cpp:285 @b1b770d90): every section but
     /// `*`, which goes to `global`, and an empty `default`.
     pub fn loadFromIni(self: *const Context, path: []const u8, global: *Preset) Error!Presets {
         const gpa = self.gpa;
@@ -753,7 +753,7 @@ pub const Context = struct {
         return out;
     }
 
-    /// Ports `load_from_cache` (preset.cpp:350 @cd959bae9): one preset per
+    /// Ports `load_from_cache` (preset.cpp:350 @b1b770d90): one preset per
     /// cached model, `repo:tag`, naming its repository.
     pub fn loadFromCache(self: *const Context) Error!Presets {
         const gpa = self.gpa;
@@ -779,7 +779,7 @@ pub const Context = struct {
         return out;
     }
 
-    /// Ports `load_from_models_dir` (preset.cpp:387 @cd959bae9): one preset
+    /// Ports `load_from_models_dir` (preset.cpp:387 @b1b770d90): one preset
     /// per model file, and per sub-directory holding one, with its mmproj
     /// and draft sidecars.
     pub fn loadFromModelsDir(self: *const Context, models_dir: []const u8) Error!Presets {
@@ -835,7 +835,7 @@ pub const Context = struct {
         return out;
     }
 
-    /// Ports `load_from_args` (preset.cpp:477 @cd959bae9): the command line
+    /// Ports `load_from_args` (preset.cpp:477 @b1b770d90): the command line
     /// as one preset named `default`.
     pub fn loadFromArgs(self: *const Context, argv: []const [:0]const u8) Error!Preset {
         var preset: Preset = .{};
@@ -847,7 +847,7 @@ pub const Context = struct {
         return preset;
     }
 
-    /// Ports `cascade` (preset.cpp:489 @cd959bae9), the overload taking two
+    /// Ports `cascade` (preset.cpp:489 @b1b770d90), the overload taking two
     /// sets: `added` merged into a copy of `base`, name by name.
     pub fn cascadeSets(self: *const Context, base: *const Presets, added: *const Presets) Error!Presets {
         const gpa = self.gpa;
@@ -865,7 +865,7 @@ pub const Context = struct {
         return out;
     }
 
-    /// Ports `cascade` (preset.cpp:504 @cd959bae9), the overload taking a
+    /// Ports `cascade` (preset.cpp:504 @b1b770d90), the overload taking a
     /// base preset: each preset over a copy of `base`, under its own name.
     pub fn cascade(self: *const Context, base: *const Preset, presets: *const Presets) Error!Presets {
         const gpa = self.gpa;
@@ -889,8 +889,8 @@ fn mapErr(e: anyerror) Error {
     };
 }
 
-/// Ports `get_map_key_opt` (preset.cpp:251 @cd959bae9), over `get_args`
-/// (arg.cpp:198 @cd959bae9): every option by each of its variables and each
+/// Ports `get_map_key_opt` (preset.cpp:251 @b1b770d90), over `get_args`
+/// (arg.cpp:199 @b1b770d90): every option by each of its variables and each
 /// spelling without its dashes; a later option takes a key an earlier one
 /// had.
 fn getMapKeyOpt(a: Allocator, ctx_params: *const arg.Context, mapping: *std.StringHashMapUnmanaged(Arg)) Error!void {
@@ -904,12 +904,12 @@ fn getMapKeyOpt(a: Allocator, ctx_params: *const arg.Context, mapping: *std.Stri
     }
 }
 
-/// Ports `is_bool_arg` (preset.cpp:264 @cd959bae9).
+/// Ports `is_bool_arg` (preset.cpp:264 @b1b770d90).
 fn isBoolArg(opt: *const Arg) bool {
     return opt.args_neg.len != 0;
 }
 
-/// Ports `parse_bool_arg` (preset.cpp:268 @cd959bae9): a negative spelling
+/// Ports `parse_bool_arg` (preset.cpp:268 @b1b770d90): a negative spelling
 /// reverses the value.
 fn parseBoolArg(opt: *const Arg, key: []const u8, value: []const u8) []const u8 {
     // if this is a negated arg, we need to reverse the value
@@ -922,7 +922,7 @@ fn parseBoolArg(opt: *const Arg, key: []const u8, value: []const u8) []const u8 
     return value;
 }
 
-/// Ports `local_model` (preset.cpp:364 @cd959bae9).
+/// Ports `local_model` (preset.cpp:364 @b1b770d90).
 const LocalModel = struct {
     name: []const u8,
     path: []const u8,
@@ -930,16 +930,16 @@ const LocalModel = struct {
     path_draft: []const u8,
 };
 
-/// Ports `draft_prefixes` (preset.cpp:372 @cd959bae9).
+/// Ports `draft_prefixes` (preset.cpp:372 @b1b770d90).
 // TODO @ngxson: handle "eagle3-" when it's supported by common_speculative_types_from_gguf()
 const draft_prefixes = [_][]const u8{ "mtp-", "dspark-", "dflash-" };
 
-/// Ports `is_mmproj_file` (preset.cpp:374 @cd959bae9).
+/// Ports `is_mmproj_file` (preset.cpp:374 @b1b770d90).
 fn isMmprojFile(fname: []const u8) bool {
     return std.mem.indexOf(u8, fname, "mmproj") != null;
 }
 
-/// Ports `is_draft_file` (preset.cpp:378 @cd959bae9).
+/// Ports `is_draft_file` (preset.cpp:378 @b1b770d90).
 fn isDraftFile(fname: []const u8) bool {
     for (draft_prefixes) |prefix| {
         if (std.mem.startsWith(u8, fname, prefix)) return true;
@@ -947,7 +947,7 @@ fn isDraftFile(fname: []const u8) bool {
     return false;
 }
 
-/// The `scan_subdir` (preset.cpp:394 @cd959bae9) lambda of
+/// The `scan_subdir` (preset.cpp:394 @b1b770d90) lambda of
 /// `load_from_models_dir`: a sub-directory's model, its first shard if it
 /// is split, and its sidecars.
 fn scanSubdir(a: Allocator, models: *std.ArrayList(LocalModel), subdir_path: []const u8, name: []const u8) Error!void {
@@ -990,7 +990,7 @@ fn scanSubdir(a: Allocator, models: *std.ArrayList(LocalModel), subdir_path: []c
 // -----------------------------------------------------------------------------
 // From arg.cpp
 
-/// Ports `common_params_add_preset_options` (arg.cpp:4770 @cd959bae9): the
+/// Ports `common_params_add_preset_options` (arg.cpp:4818 @b1b770d90): the
 /// options only a preset can set.
 pub fn addPresetOptions(ctx: *arg.Context) Error!void {
     const a = ctx.params.arena;
@@ -1021,7 +1021,7 @@ pub fn addPresetOptions(ctx: *arg.Context) Error!void {
     }).setEnv(env_dedup_cache_models).setPresetOnly());
 }
 
-/// Ports `common_params_to_map` (arg.cpp:1174 @cd959bae9): the command
+/// Ports `common_params_to_map` (arg.cpp:1195 @b1b770d90): the command
 /// line into `out_map` -- each option's value, `"1"` or `"0"` for a flag
 /// by the spelling used -- without running any handler.
 ///

@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/exaone4.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/exaone4.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_exaone4`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph<iswa>`.
 
@@ -20,9 +20,11 @@ const c = impl.c;
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
+const Cparams = @import("../cparams.zig").Cparams;
+const RopeParams = model_mod.RopeParams;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_exaone4`'s `load_arch_hparams` (models/exaone4.cpp:3 @cd959bae9).
+/// Ports `llama_model_exaone4`'s `load_arch_hparams` (models/exaone4.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -31,6 +33,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
         hp.n_swa = 4096;
         try self.loadSwaPattern(ml, 4, false, exc);
+        hp.rope_pattern = hp.is_swa_impl;
 
         hp.rope_freq_base_train_swa = hp.rope_freq_base_train;
         hp.rope_freq_scale_train_swa = hp.rope_freq_scale_train;
@@ -47,7 +50,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_exaone4`'s `load_arch_tensors` (models/exaone4.cpp:24 @cd959bae9).
+/// Ports `llama_model_exaone4`'s `load_arch_tensors` (models/exaone4.cpp:25 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -100,7 +103,26 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_exaone4`'s `build_arch_graph` (models/exaone4.cpp:73 @cd959bae9).
+/// Ports `llama_model_exaone4`'s `get_rope_params` (models/exaone4.cpp:74 @b1b770d90):
+/// the RoPE of a layer, for the graph and the K-shift alike.
+///
+/// Parameters:
+/// - `model`: the model.
+/// - `cparams`: the context's parameters.
+/// - `il`: the layer.
+///
+/// Return: the layer's RoPE parameters.
+pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+    var res = model.getRopeParamsBase(cparams, il);
+
+    // The SWA layers use the global base and scale.
+    res.freq_base = cparams.rope_freq_base;
+    res.freq_scale = cparams.rope_freq_scale;
+
+    return res;
+}
+
+/// Ports `llama_model_exaone4`'s `build_arch_graph` (models/exaone4.cpp:84 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     if (b.hparams.swa_type == @backingInt(hparams_mod.SwaType.standard)) {
         buildGraph(true, model, b);
@@ -110,14 +132,14 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_exaone4`'s `graph<iswa>`
-/// (models/exaone4.cpp:82 @cd959bae9).
+/// (models/exaone4.cpp:93 @b1b770d90).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadK(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadV(0), "models/exaone4.cpp", 86, "n_embd_head == hparams.n_embd_head_v()");
-    impl.assert(n_embd_head == b.n_rot, "models/exaone4.cpp", 87, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadV(0), "models/exaone4.cpp", 97, "n_embd_head == hparams.n_embd_head_v()");
+    impl.assert(n_embd_head == b.n_rot, "models/exaone4.cpp", 98, "n_embd_head == n_rot");
 
     var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
 
@@ -133,16 +155,10 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
         const layer = &model.layers[@intCast(il)];
         var inpSA = inpL;
 
-        // RoPE for the sliding-window layers, or for every layer of a model
-        // without them.
-        const use_rope = hp.isSwa(@intCast(il)) or hp.swa_type == @backingInt(hparams_mod.SwaType.none);
-
         var cur = inpL;
 
         // Self-attention.
         {
-            const rope_factors = model.getRopeFactors(b.cparams, @intCast(il));
-
             const qkv = b.buildQkv(layer, cur, n_embd_head, b.n_head, b.n_head_kv, il);
             var Qcur = qkv.q;
             var Kcur = qkv.k;
@@ -153,10 +169,10 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
             b.cb(Qcur, "Qcur_normed", il);
             b.cb(Kcur, "Kcur_normed", il);
 
-            if (use_rope) {
-                Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-                Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            }
+            // RoPE only on the layers `rope_pattern` names: the sliding-window
+            // ones, or every layer of a model without them.
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);
             b.cb(Vcur, "Vcur", il);

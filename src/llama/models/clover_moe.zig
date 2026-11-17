@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/clover-moe.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/clover-moe.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_clover_moe`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -21,7 +21,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_clover_moe`'s `load_arch_hparams` (models/clover-moe.cpp:4 @cd959bae9).
+/// Ports `llama_model_clover_moe`'s `load_arch_hparams` (models/clover-moe.cpp:4 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -77,7 +77,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_clover_moe`'s `load_arch_tensors` (models/clover-moe.cpp:55 @cd959bae9).
+/// Ports `llama_model_clover_moe`'s `load_arch_tensors` (models/clover-moe.cpp:55 @b1b770d90).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     _ = ml;
     const hp = &self.hparams;
@@ -152,13 +152,13 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 // -----------------------------------------------------------------------------
 // The graph
 
-/// Ports `llama_model_clover_moe`'s `build_arch_graph` (models/clover-moe.cpp:115 @cd959bae9).
+/// Ports `llama_model_clover_moe`'s `build_arch_graph` (models/clover-moe.cpp:115 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     _ = params;
     buildGraph(model, b);
 }
 
-/// Ports the constructor of `llama_model_clover_moe`'s `graph` (models/clover-moe.cpp:119 @cd959bae9).
+/// Ports the constructor of `llama_model_clover_moe`'s `graph` (models/clover-moe.cpp:119 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -227,7 +227,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     b.res.t_logits = cur;
 }
 
-/// Ports `llama_model_clover_moe::graph`'s `build_qkvz` (models/clover-moe.cpp:190 @cd959bae9).
+/// Ports `llama_model_clover_moe::graph`'s `build_qkvz` (models/clover-moe.cpp:190 @b1b770d90).
 fn buildQkvz(model: *const Model, b: *const graph.Builder, input: *Tensor, il: c_int) struct { *Tensor, *Tensor } {
     const layer = &model.layers[@intCast(il)];
     const n_seqs: i64 = b.ubatch.n_seqs;
@@ -243,14 +243,14 @@ fn buildQkvz(model: *const Model, b: *const graph.Builder, input: *Tensor, il: c
     return .{ qkv_mixed, z };
 }
 
-/// Ports `llama_model_clover_moe::graph`'s `build_norm_gated` (models/clover-moe.cpp:206 @cd959bae9).
+/// Ports `llama_model_clover_moe::graph`'s `build_norm_gated` (models/clover-moe.cpp:206 @b1b770d90).
 fn buildNormGated(b: *const graph.Builder, input: *Tensor, weights: ?*Tensor, gate: *Tensor, il: c_int) *Tensor {
     const normalized = b.buildNorm(input, weights, null, .rms, il);
     return c.ggml_mul(b.ctx0, normalized, c.ggml_silu(b.ctx0, gate));
 }
 
 /// Ports `llama_model_clover_moe::graph`'s `build_layer_attn` (models/clover-moe.cpp:215
-/// @cd959bae9): a joint Q and gate projection, Q and K norms, RoPE, attention
+/// @b1b770d90): a joint Q and gate projection, Q and K norms, RoPE, attention
 /// and the sigmoid gate.
 fn buildLayerAttn(model: *const Model, b: *const graph.Builder, inp: *graph.InpAttnKv, cur_: *Tensor, inp_pos: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -290,8 +290,8 @@ fn buildLayerAttn(model: *const Model, b: *const graph.Builder, inp: *graph.InpA
 
     Vcur = c.ggml_reshape_3d(ctx, Vcur, n_embd_head, n_head_kv, n_tokens);
 
-    Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-    Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+    Qcur = b.buildRope(Qcur, inp_pos, il);
+    Kcur = b.buildRope(Kcur, inp_pos, il);
 
     b.cb(Qcur, "Qcur", il);
     b.cb(Kcur, "Kcur", il);
@@ -314,8 +314,8 @@ fn buildLayerAttn(model: *const Model, b: *const graph.Builder, inp: *graph.InpA
     return cur;
 }
 
-/// Ports `llama_model_clover_moe::graph`'s `build_layer_attn_linear` (models/clover-moe.cpp:286
-/// @cd959bae9): the gated delta net layer.
+/// Ports `llama_model_clover_moe::graph`'s `build_layer_attn_linear` (models/clover-moe.cpp:281
+/// @b1b770d90): the gated delta net layer.
 fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, inp: *graph.InpRs, cur_: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const layer = &model.layers[@intCast(il)];
@@ -330,9 +330,9 @@ fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, inp: *grap
     const head_v_dim: i64 = @divTrunc(d_inner, num_v_heads);
     const n_seq_tokens: i64 = b.ubatch.n_seq_tokens;
 
-    impl.assert(n_seqs != 0, "models/clover-moe.cpp", 300, "n_seqs != 0");
-    impl.assert(b.ubatch.equalSeqs(), "models/clover-moe.cpp", 301, "ubatch.equal_seqs()");
-    impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "models/clover-moe.cpp", 302, "ubatch.n_tokens == n_seq_tokens * n_seqs");
+    impl.assert(n_seqs != 0, "models/clover-moe.cpp", 295, "n_seqs != 0");
+    impl.assert(b.ubatch.equalSeqs(), "models/clover-moe.cpp", 296, "ubatch.equal_seqs()");
+    impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "models/clover-moe.cpp", 297, "ubatch.n_tokens == n_seq_tokens * n_seqs");
 
     const qkv_mixed, const z = buildQkvz(model, b, cur_, il);
 
@@ -392,11 +392,6 @@ fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, inp: *grap
     q_conv = delta_net.buildGdnL2Norm(ctx, q_conv, 1e-6);
     k_conv = delta_net.buildGdnL2Norm(ctx, k_conv, 1e-6);
 
-    if (num_k_heads != num_v_heads and (!b.cparams.fused_gdn_ar or !b.cparams.fused_gdn_ch)) {
-        q_conv = c.ggml_repeat_4d(ctx, q_conv, head_k_dim, num_v_heads, n_seq_tokens, n_seqs);
-        k_conv = c.ggml_repeat_4d(ctx, k_conv, head_k_dim, num_v_heads, n_seq_tokens, n_seqs);
-    }
-
     const output = delta_net.buildRecurrentAttn(b, inp, ssm_states_all, q_conv, k_conv, v_conv, gate, beta, state, il);
 
     const z_2d = c.ggml_reshape_4d(ctx, z, head_v_dim, num_v_heads, n_seq_tokens, n_seqs);
@@ -412,13 +407,13 @@ fn buildLayerAttnLinear(model: *const Model, b: *const graph.Builder, inp: *grap
     return cur;
 }
 
-/// Ports `llama_model_clover_moe::graph`'s `build_layer_ffn` (models/clover-moe.cpp:397
-/// @cd959bae9): the routed experts, plus the shared expert behind its sigmoid
+/// Ports `llama_model_clover_moe::graph`'s `build_layer_ffn` (models/clover-moe.cpp:387
+/// @b1b770d90): the routed experts, plus the shared expert behind its sigmoid
 /// gate when there is one.
 fn buildLayerFfn(model: *const Model, b: *const graph.Builder, cur_: *Tensor, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const layer = &model.layers[@intCast(il)];
-    impl.assert(layer.ffn_gate_inp != null, "models/clover-moe.cpp", 398, "model.layers[il].ffn_gate_inp != nullptr");
+    impl.assert(layer.ffn_gate_inp != null, "models/clover-moe.cpp", 388, "model.layers[il].ffn_gate_inp != nullptr");
 
     const moe_out = b.buildMoeFfn(cur_, .{
         .gate_inp = layer.ffn_gate_inp,

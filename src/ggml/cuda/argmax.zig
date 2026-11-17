@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/argmax.cu` at v0.9.0
-//! (`cd959bae9`). The kernel, `argmax_f32`, stays CUDA.
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/argmax.cu` at v1.0.0
+//! (`b1b770d90`). The kernel, `argmax_f32`, stays CUDA.
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -13,7 +13,7 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `ggml_cuda_argmax` (argmax.cu:69 @cd959bae9), which launches with
+/// Ports `ggml_cuda_argmax` (argmax.cu:69 @b1b770d90), which launches with
 /// `<<<>>>`.
 pub fn opArgmax(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);

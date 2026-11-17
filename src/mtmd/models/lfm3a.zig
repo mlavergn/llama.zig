@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/lfm3a.cpp` at v0.9.0 (`cd959bae9`).
+//! Ports `llama.cpp/tools/mtmd/models/lfm3a.cpp` at v1.0.0 (`b1b770d90`).
 //! Each declaration names what it ports and the line it began at.
 //!
 //! `state_in` is a `std::map` read only through `at()`, so a hash map stands
@@ -26,7 +26,7 @@ const nb = graph.nb;
 /// A named `state_out` entry.
 const StateOut = struct { name: [:0]const u8, t: T };
 
-/// Ports `list_lfm3a_state_slots` (lfm3a.cpp:5 @cd959bae9): the streaming
+/// Ports `list_lfm3a_state_slots` (lfm3a.cpp:5 @b1b770d90): the streaming
 /// encoder state: base position, conv left context, short-conv taps and
 /// attention window. A zero state gives the same result as encoding the whole
 /// clip. The caller frees the slice with `module.freeSlots`.
@@ -73,7 +73,7 @@ const Builder = struct {
         try self.state_out.append(self.arena, .{ .name = name, .t = t });
     }
 
-    /// The `conv_down` lambda (lfm3a.cpp:46 @cd959bae9): a stride-2 conv over
+    /// The `conv_down` lambda (lfm3a.cpp:46 @b1b770d90): a stride-2 conv over
     /// [time, freq, ch]; the left column comes from the state and the right
     /// edge is zero-padded.
     fn convDown(self: *Builder, x_in: T, name: [:0]const u8, w: T, b: T, depthwise: bool) clip.Error!T {
@@ -88,7 +88,7 @@ const Builder = struct {
     }
 };
 
-/// Ports `build` (lfm3a.cpp:30 @cd959bae9), a member of `clip_graph_lfm3a`.
+/// Ports `build` (lfm3a.cpp:30 @b1b770d90), a member of `mtmd_graph_lfm3a`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

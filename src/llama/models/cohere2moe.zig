@@ -7,8 +7,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/cohere2moe.cpp` at v0.9.0
-//! (`cd959bae9`): `llama_model_cohere2moe`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/cohere2moe.cpp` at v1.0.0
+//! (`b1b770d90`): `llama_model_cohere2moe`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, its `graph` and its
 //! `graph_mtp`.
 
@@ -24,8 +24,10 @@ const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
+const Cparams = @import("../cparams.zig").Cparams;
+const RopeParams = model_mod.RopeParams;
 
-/// Ports `llama_model_cohere2moe`'s `load_arch_hparams` (models/cohere2moe.cpp:3 @cd959bae9).
+/// Ports `llama_model_cohere2moe`'s `load_arch_hparams` (models/cohere2moe.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -64,6 +66,12 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
     try self.loadSwaPattern(ml, 4, true, exc);
 
+    // The dense prefix and the MTP layers take RoPE even when not SWA.
+    var il: u32 = 0;
+    while (il < hp.n_layer_all) : (il += 1) {
+        hp.rope_pattern[il] = @intFromBool(hp.isSwa(il) or il < hp.n_layer_dense_lead or il >= hp.nLayer());
+    }
+
     hp.rope_freq_base_train_swa = hp.rope_freq_base_train;
     hp.rope_freq_scale_train_swa = hp.rope_freq_scale_train;
     if (try meta.getKey(f32, .rope_freq_base_swa, false, exc)) |v| hp.rope_freq_base_train_swa = v;
@@ -74,7 +82,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_cohere2moe`'s `load_arch_tensors` (models/cohere2moe.cpp:40 @cd959bae9).
+/// Ports `llama_model_cohere2moe`'s `load_arch_tensors` (models/cohere2moe.cpp:45 @b1b770d90).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -113,7 +121,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// Ports `load_arch_tensors`'s `load_block_trunk` lambda
-/// (models/cohere2moe.cpp:65 @cd959bae9).
+/// (models/cohere2moe.cpp:70 @b1b770d90).
 fn loadBlockTrunk(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const layer = &self.layers[@intCast(i)];
@@ -144,7 +152,7 @@ fn loadBlockTrunk(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc:
 }
 
 /// Ports `load_arch_tensors`'s `load_block_mtp` lambda
-/// (models/cohere2moe.cpp:93 @cd959bae9).
+/// (models/cohere2moe.cpp:98 @b1b770d90).
 fn loadBlockMtp(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const nr = loader.tensor_not_required;
@@ -182,8 +190,28 @@ fn loadBlockMtp(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc: *
     layer.nextn.shared_head_norm = try self.createTensor(.{ .tensor = .nextn_shared_head_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, nr, exc);
 }
 
-/// Ports `llama_model_cohere2moe`'s `build_arch_graph` (models/cohere2moe.cpp:136
-/// @cd959bae9): the MTP draft head for that graph type, the main model
+/// Ports `llama_model_cohere2moe`'s `get_rope_params`
+/// (models/cohere2moe.cpp:141 @b1b770d90): the SWA layers take the global
+/// base and scale.
+///
+/// Parameters:
+/// - `model`: the model.
+/// - `cparams`: the context's parameters.
+/// - `il`: the layer.
+///
+/// Return: the layer's RoPE parameters.
+pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+    var res = model.getRopeParamsBase(cparams, il);
+
+    // The SWA layers use the global base and scale.
+    res.freq_base = cparams.rope_freq_base;
+    res.freq_scale = cparams.rope_freq_scale;
+
+    return res;
+}
+
+/// Ports `llama_model_cohere2moe`'s `build_arch_graph` (models/cohere2moe.cpp:151
+/// @b1b770d90): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -191,14 +219,14 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports the constructor of `llama_model_cohere2moe`'s `graph`
-/// (models/cohere2moe.cpp:143 @cd959bae9).
+/// (models/cohere2moe.cpp:158 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/cohere2moe.cpp", 146, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/cohere2moe.cpp", 147, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/cohere2moe.cpp", 161, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/cohere2moe.cpp", 162, "n_embd_head == n_rot");
 
     const cohere2moe_norm_type: graph.NormType = if (hp.f_norm_rms_eps == 0.0) .norm else .rms;
     const f_logit_scale = hp.f_logit_scale;
@@ -212,11 +240,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     // does not run them.
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
-        const is_swa = hp.isSwa(@intCast(il));
-        // The dense-prefix full-attention layers take RoPE; the later ones
-        // follow the SWA pattern.
-        const force_rope = @as(u32, @intCast(il)) < hp.n_layer_dense_lead;
-
         var cur = b.buildNorm(inpL, model.layers[@intCast(il)].attn_norm, null, cohere2moe_norm_type, il);
         b.cb(cur, "attn_norm", il);
 
@@ -230,12 +253,8 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             var Kcur = qkv.k;
             const Vcur = qkv.v;
 
-            if (is_swa or force_rope) {
-                const rope_factors = model.getRopeFactors(b.cparams, @intCast(il));
-
-                Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-                Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            }
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
 
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);
@@ -319,28 +338,28 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_cohere2moe`'s `graph_mtp`
-/// (models/cohere2moe.cpp:280 @cd959bae9).
+/// (models/cohere2moe.cpp:281 @b1b770d90).
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
-    impl.assert(hp.n_layer_nextn > 0, "models/cohere2moe.cpp", 281, "hparams.n_layer_nextn > 0 && \"COHERE2MOE MTP requires n_layer_nextn > 0\"");
-    impl.assert(hp.n_layer_nextn == 1, "models/cohere2moe.cpp", 282, "hparams.n_layer_nextn == 1 && \"COHERE2MOE MTP currently only supports a single MTP block\"");
+    impl.assert(hp.n_layer_nextn > 0, "models/cohere2moe.cpp", 282, "hparams.n_layer_nextn > 0 && \"COHERE2MOE MTP requires n_layer_nextn > 0\"");
+    impl.assert(hp.n_layer_nextn == 1, "models/cohere2moe.cpp", 283, "hparams.n_layer_nextn == 1 && \"COHERE2MOE MTP currently only supports a single MTP block\"");
 
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/cohere2moe.cpp", 285, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/cohere2moe.cpp", 286, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/cohere2moe.cpp", 286, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/cohere2moe.cpp", 287, "n_embd_head == n_rot");
 
     const il: c_int = @intCast(hp.nLayer());
     const layer = &model.layers[@intCast(il)];
-    impl.assert(layer.nextn.eh_proj != null, "models/cohere2moe.cpp", 290, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
-    impl.assert(layer.nextn.enorm != null, "models/cohere2moe.cpp", 291, "layer.nextn.enorm   && \"MTP block missing nextn.enorm\"");
-    impl.assert(layer.nextn.hnorm != null, "models/cohere2moe.cpp", 292, "layer.nextn.hnorm   && \"MTP block missing nextn.hnorm\"");
-    impl.assert(layer.ffn_gate_inp != null, "models/cohere2moe.cpp", 293, "layer.ffn_gate_inp  && \"MTP block missing ffn_gate_inp\"");
+    impl.assert(layer.nextn.eh_proj != null, "models/cohere2moe.cpp", 291, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
+    impl.assert(layer.nextn.enorm != null, "models/cohere2moe.cpp", 292, "layer.nextn.enorm   && \"MTP block missing nextn.enorm\"");
+    impl.assert(layer.nextn.hnorm != null, "models/cohere2moe.cpp", 293, "layer.nextn.hnorm   && \"MTP block missing nextn.hnorm\"");
+    impl.assert(layer.ffn_gate_inp != null, "models/cohere2moe.cpp", 294, "layer.ffn_gate_inp  && \"MTP block missing ffn_gate_inp\"");
 
     const cohere2moe_norm_type: graph.NormType = if (hp.f_norm_rms_eps == 0.0) .norm else .rms;
 
     // The C++'s TODO: extract into a common `build_inp_embd_h`.
-    const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("models/cohere2moe.cpp", 298, "out of memory");
+    const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("models/cohere2moe.cpp", 299, "out of memory");
     inp.* = .{ .n_embd = hp.nEmbdInp(), .n_embd_state = hp.n_embd };
 
     inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens);
@@ -352,7 +371,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     // The C++'s TODO: make this static with `ggml_build_forward_select`,
     // as `build_inp_embd` does.
     var tok_embd: *Tensor = undefined;
-    b.ubatch.assertEmbdOrToken("models/cohere2moe.cpp", 309);
+    b.ubatch.assertEmbdOrToken("models/cohere2moe.cpp", 310);
     if (b.ubatch.token != null) {
         const tok_embd_w = layer.nextn.embed_tokens orelse model.tok_embd.?;
         tok_embd = c.ggml_get_rows(ctx, tok_embd_w, inp.tokens);
@@ -361,9 +380,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     }
     b.cb(tok_embd, "mtp_tok_embd", il);
 
-    inp.h = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, hp.n_embd, b.n_tokens);
-    c.ggml_set_input(inp.h);
-    _ = c.ggml_set_name(inp.h, "mtp_h_input");
+    inp.h = b.buildInpEmbdState(inp, hp.n_embd);
 
     const h_embd = inp.h.?;
 
@@ -395,9 +412,8 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     var Qcur = qkv.q;
     var Kcur = qkv.k;
     const Vcur = qkv.v;
-    const rope_factors = model.getRopeFactors(b.cparams, @intCast(il));
-    Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-    Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+    Qcur = b.buildRope(Qcur, inp_pos, il);
+    Kcur = b.buildRope(Kcur, inp_pos, il);
 
     b.cb(Qcur, "mtp_Qcur", il);
     b.cb(Kcur, "mtp_Kcur", il);
@@ -440,7 +456,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.cb(cur, "mtp_post_ffn", il);
 
     const head_norm_w = layer.nextn.shared_head_norm orelse model.output_norm;
-    impl.assert(head_norm_w != null, "models/cohere2moe.cpp", 408, "head_norm_w && \"COHERE2MOE MTP: missing both nextn.shared_head_norm and output_norm\"");
+    impl.assert(head_norm_w != null, "models/cohere2moe.cpp", 400, "head_norm_w && \"COHERE2MOE MTP: missing both nextn.shared_head_norm and output_norm\"");
     cur = b.buildNorm(cur, head_norm_w, null, cohere2moe_norm_type, -1);
 
     b.cb(cur, "h_nextn", -1);
@@ -450,7 +466,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.cb(cur, "mtp_shared_head_norm", -1);
 
     const head_w = layer.nextn.shared_head_head orelse model.output;
-    impl.assert(head_w != null, "models/cohere2moe.cpp", 418, "head_w && \"COHERE2MOE MTP: missing LM head (nextn.shared_head_head or model.output)\"");
+    impl.assert(head_w != null, "models/cohere2moe.cpp", 410, "head_w && \"COHERE2MOE MTP: missing LM head (nextn.shared_head_head or model.output)\"");
     cur = b.buildLoraMm(head_w.?, cur, if (layer.nextn.shared_head_head != null) layer.nextn.shared_head_head_s else null);
 
     if (hp.f_logit_scale != 0.0) {

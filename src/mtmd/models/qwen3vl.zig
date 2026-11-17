@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/qwen3vl.cpp` at v0.9.0 (`cd959bae9`).
+//! Ports `llama.cpp/tools/mtmd/models/qwen3vl.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -14,7 +14,7 @@ const model_mod = @import("../model.zig");
 const qwen2vl = @import("qwen2vl.zig");
 const c = impl.c;
 
-/// Ports `build` (mtmd/models/qwen3vl.cpp:3 @cd959bae9), a member of `clip_graph_qwen3vl`.
+/// Ports `build` (mtmd/models/qwen3vl.cpp:3 @b1b770d90), a member of `mtmd_graph_qwen3vl`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

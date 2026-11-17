@@ -68,7 +68,6 @@ extern "c" fn unlink(path: [*:0]const u8) c_int;
 extern "c" fn fflush(stream: ?*anyopaque) c_int;
 extern "c" fn open(path: [*:0]const u8, flags: c_int, ...) c_int;
 extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
-extern var __stderrp: *anyopaque;
 
 // -----------------------------------------------------------------------------
 // The two sides
@@ -1252,11 +1251,11 @@ fn captureStderr(r: *Run, comptime body: anytype, args: anytype) []const u8 {
     const fd = mkstemp(&name);
     if (fd < 0) @panic("mkstemp");
     _ = unlink(&name);
-    _ = fflush(__stderrp);
+    _ = fflush(null); // every stream: `stderr` is `__stderrp` on Darwin, `stderr` on glibc
     const saved = dup(2);
     _ = dup2(fd, 2);
     body(r, args);
-    _ = fflush(__stderrp);
+    _ = fflush(null); // every stream: `stderr` is `__stderrp` on Darwin, `stderr` on glibc
     _ = dup2(saved, 2);
     _ = close(saved);
     _ = lseek(fd, 0, 0);

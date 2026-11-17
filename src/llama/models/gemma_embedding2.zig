@@ -7,8 +7,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gemma-embedding2.cpp` at v0.9.0
-//! (`cd959bae9`): `llama_model_gemma_embedding2`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/gemma-embedding2.cpp` at v1.0.0
+//! (`b1b770d90`): `llama_model_gemma_embedding2`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` with
 //! `build_inp_per_layer`.
 
@@ -26,7 +26,7 @@ const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
 /// Ports `llama_model_gemma_embedding2`'s `load_arch_hparams`
-/// (models/gemma-embedding2.cpp:3 @cd959bae9).
+/// (models/gemma-embedding2.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -49,7 +49,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_gemma_embedding2`'s `load_arch_tensors`
-/// (models/gemma-embedding2.cpp:21 @cd959bae9).
+/// (models/gemma-embedding2.cpp:21 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -108,13 +108,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_gemma_embedding2`'s `build_arch_graph`
-/// (models/gemma-embedding2.cpp:75 @cd959bae9).
+/// (models/gemma-embedding2.cpp:75 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_gemma_embedding2`'s `graph`
-/// (models/gemma-embedding2.cpp:79 @cd959bae9). `t_embd` is not expanded
+/// (models/gemma-embedding2.cpp:79 @b1b770d90). `t_embd` is not expanded
 /// here: `build_pooling` expands what it reads.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
@@ -144,10 +144,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         const n_head: i64 = hp.nHead(ilu);
         const n_head_kv: i64 = hp.nHeadKv(ilu);
 
-        const freq_base_l = model.getRopeFreqBase(b.cparams, ilu);
-        const freq_scale_l = model.getRopeFreqScale(b.cparams, ilu);
-        const n_rot_l: c_int = @intCast(hp.nRot(ilu));
-
         // Norm.
         var cur = b.buildNorm(inpL, layer.attn_norm, null, .rms, il);
         b.cb(cur, "attn_norm", il);
@@ -172,8 +168,8 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(Kcur, "Kcur_normed", il);
             b.cb(Vcur, "Vcur_normed", il);
 
-            Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, n_rot_l, b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, n_rot_l, b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
             b.cb(Qcur, "Qcur_pos", il);
             b.cb(Kcur, "Kcur_pos", il);
 
@@ -246,7 +242,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_gemma_embedding2::graph`'s `build_inp_per_layer`
-/// (models/gemma-embedding2.cpp:219 @cd959bae9): the Python code's
+/// (models/gemma-embedding2.cpp:212 @b1b770d90): the Python code's
 /// `EmbeddingGemma2TextPLE`. The model has no per-layer token embeddings;
 /// the per-layer inputs come from the projection alone.
 ///

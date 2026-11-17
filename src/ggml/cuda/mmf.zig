@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/mmf.cu` and the host half of
-//! `llama.cpp/ggml/src/ggml-cuda/mmf.cuh` at v0.9.0 (`cd959bae9`). The
+//! `llama.cpp/ggml/src/ggml-cuda/mmf.cuh` at v1.0.0 (`b1b770d90`). The
 //! kernels, `mul_mat_f` and `mul_mat_f_ids`, stay CUDA, one set per column
 //! count in `template-instances/mmf-instance-ncols_<n>.cu`.
 
@@ -18,35 +18,37 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `MMF_ROWS_PER_BLOCK` (mmf.cuh:9 @cd959bae9).
+/// Ports `MMF_ROWS_PER_BLOCK` (mmf.cuh:10 @b1b770d90).
 const rows_per_block_default = 32;
 
-/// Ports `MMF_ROWS_PER_BLOCK_CDNA` (mmf.cuh:10 @cd959bae9).
+/// Ports `MMF_ROWS_PER_BLOCK_CDNA` (mmf.cuh:11 @b1b770d90).
 const rows_per_block_cdna = 64;
 
-/// Ports `mmf_get_max_block_size` (mmf.cuh:12 @cd959bae9), NVIDIA arm.
+/// Ports `mmf_get_max_block_size` (mmf.cuh:13 @b1b770d90), NVIDIA arm.
 fn getMaxBlockSize(x: c_int) i64 {
     _ = x;
     return 256;
 }
 
-/// Ports `mmf_get_padding` (mmf.cuh:20 @cd959bae9), NVIDIA arm.
+/// Ports `mmf_get_padding` (mmf.cuh:21 @b1b770d90), NVIDIA arm.
 fn getPadding(x: c_int) c_int {
     _ = x;
     return 4;
 }
 
-/// Ports `mmf_get_rows_per_block` (mmf.cu:5 @cd959bae9), NVIDIA arm.
+/// Ports `mmf_get_rows_per_block` (mmf.cu:5 @b1b770d90), NVIDIA arm.
 fn getRowsPerBlock(x: c_int) c_int {
     _ = x;
     return rows_per_block_default;
 }
 
-/// Ports `mmf_ids_data` (mmf.cuh:36 @cd959bae9).
+/// Ports `mmf_ids_data` (mmf.cuh:37 @b1b770d90). Since v1.0.0 the tile
+/// specs of the linearized MoE layout replace each expert's bounds.
 const IdsData = struct {
     ids_src_compact: ?*const i32 = null,
     ids_dst_compact: ?*const i32 = null,
-    expert_bounds_dev: ?*const i32 = null,
+    tile_spec_dev: ?*const mmid.TileSpec = null,
+    max_tiles: c_int = 0,
     n_experts: c_int = 0,
     sis1: c_int = 0,
 };
@@ -88,7 +90,8 @@ const Args = struct {
     stride_sample_dst: i64,
 };
 
-/// Ports `mul_mat_f_switch_ids` (mmf.cuh:592 @cd959bae9).
+/// Ports `mul_mat_f_switch_ids` (mmf.cuh:590 @b1b770d90). Since v1.0.0 the
+/// compact-ids kernel runs one block row per tile spec.
 fn switchIds(comptime T: type, comptime rpb: comptime_int, comptime cpb: comptime_int, comptime nwarps: comptime_int, a: *const Args, block_nums: kernels.Dim3, block_dims: kernels.Dim3, nbytes_shared_total: c_int, stream: cu.cudaStream_t, ids_data: ?*const IdsData) void {
     const has_ids_data = ids_data != null and ids_data.?.ids_src_compact != null;
     const tu = comptime instanceTu(cpb);
@@ -99,9 +102,8 @@ fn switchIds(comptime T: type, comptime rpb: comptime_int, comptime cpb: comptim
     // ncols_dst (< 16) the normal mul_mat_f path with has_ids=true.
     if (has_ids_data and a.ncols_dst > 16) {
         const d = ids_data.?;
-        const max_tiles: c_int = i32Of(@divTrunc(a.ncols_dst + cpb - 1, cpb));
-        if (max_tiles == 0) return;
-        const block_nums_ids: kernels.Dim3 = .{ .x = block_nums.x, .y = @bitCast(d.n_experts), .z = @bitCast(max_tiles) };
+        if (d.max_tiles == 0) return;
+        const block_nums_ids: kernels.Dim3 = .{ .x = block_nums.x, .y = @bitCast(d.max_tiles), .z = 1 };
 
         const sis1_fd: cu.uint3 = if (d.sis1 > 0) common.initFastdivValues(@as(u32, @bitCast(d.sis1))) else .{ .x = 0, .y = 0, .z = 1 };
         const nch_fd = common.initFastdivValues(@as(u32, @truncate(@as(u64, @bitCast(a.nchannels_dst)))));
@@ -113,7 +115,7 @@ fn switchIds(comptime T: type, comptime rpb: comptime_int, comptime cpb: comptim
             .stream = stream,
         }, .{
             a.x,                    a.y,                       d.ids_src_compact,         d.ids_dst_compact,
-            d.expert_bounds_dev,    a.dst,                     i32Of(a.ncols_x),          i32Of(a.ncols_dst),
+            d.tile_spec_dev,        a.dst,                     i32Of(a.ncols_x),          i32Of(a.ncols_dst),
             i32Of(a.nchannels_dst), i32Of(a.stride_row),       i32Of(a.stride_col_y),     i32Of(a.stride_col_dst),
             i32Of(a.channel_ratio), i32Of(a.stride_channel_x), i32Of(a.stride_channel_y), i32Of(a.stride_channel_dst),
             i32Of(a.sample_ratio),  i32Of(a.stride_sample_x),  i32Of(a.stride_sample_y),  i32Of(a.stride_sample_dst),
@@ -152,7 +154,7 @@ fn switchIds(comptime T: type, comptime rpb: comptime_int, comptime cpb: comptim
     }
 }
 
-/// Ports `mul_mat_f_cuda` (mmf.cuh:639 @cd959bae9).
+/// Ports `mul_mat_f_cuda` (mmf.cuh:636 @b1b770d90).
 fn mulMatFCuda(
     comptime T: type,
     comptime rpb: comptime_int,
@@ -254,8 +256,8 @@ fn mulMatFCuda(
     }
 }
 
-/// Ports `mul_mat_f_switch_cols_per_block` (mmf.cuh:752 @cd959bae9) and
-/// `mul_mat_f_switch_rows_per_block` (mmf.cuh:853 @cd959bae9). Only
+/// Ports `mul_mat_f_switch_cols_per_block` (mmf.cuh:749 @b1b770d90) and
+/// `mul_mat_f_switch_rows_per_block` (mmf.cuh:850 @b1b770d90). Only
 /// `MMF_ROWS_PER_BLOCK` is reachable on an NVIDIA device.
 fn switchColsPerBlock(comptime T: type, rows_per_block: c_int, x: ?*const anyopaque, y: ?*const f32, ids: ?*const i32, dst: ?*f32, ncols_x: i64, nrows_x: i64, ncols_dst: i64, stride_row: i64, stride_col_y: i64, stride_col_dst: i64, stride_col_id: i64, stride_row_id: c_int, nchannels_x: i64, nchannels_y: i64, nchannels_dst: i64, stride_channel_x: i64, stride_channel_y: i64, stride_channel_dst: i64, nsamples_x: i64, nsamples_dst: i64, stride_sample_x: i64, stride_sample_y: i64, stride_sample_dst: i64, stream: cu.cudaStream_t, ids_data: ?*const IdsData) void {
     if (rows_per_block != rows_per_block_default) {
@@ -273,7 +275,7 @@ fn switchColsPerBlock(comptime T: type, rows_per_block: c_int, x: ?*const anyopa
     }
 }
 
-/// Ports `ggml_cuda_mul_mat_f` (mmf.cu:13 @cd959bae9).
+/// Ports `ggml_cuda_mul_mat_f` (mmf.cu:13 @b1b770d90).
 pub fn mulMatF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, ids: ?*const Tensor, dst: *Tensor) void {
     impl.assert(src1.type == c.GGML_TYPE_F32, "        src1->type == GGML_TYPE_F32");
     impl.assert(ids == null or ids.?.type == c.GGML_TYPE_I32, "!ids ||  ids->type == GGML_TYPE_I32");
@@ -324,8 +326,8 @@ pub fn mulMatF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, i
     defer ids_src_compact_dev.deinit();
     var ids_dst_compact_dev = common.PoolAlloc(i32){};
     defer ids_dst_compact_dev.deinit();
-    var expert_bounds_dev = common.PoolAlloc(i32){};
-    defer expert_bounds_dev.deinit();
+    var tile_spec_dev = common.PoolAlloc(mmid.TileSpec){};
+    defer tile_spec_dev.deinit();
 
     // For MUL_MAT_ID the memory layout is different than for MUL_MAT:
     const has_ids = ids != null;
@@ -350,23 +352,25 @@ pub fn mulMatF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, i
         const n_experts = ne02;
         const n_tokens = ne12;
         const ne_get_rows = n_tokens * n_expert_used;
+        const max_tiles = @divTrunc(ne_get_rows + 16 - 1, 16) + ne02;
 
         _ = ids_src_compact_dev.allocFrom(ctx.pool(), @intCast(ne_get_rows));
         _ = ids_dst_compact_dev.allocFrom(ctx.pool(), @intCast(ne_get_rows));
-        _ = expert_bounds_dev.allocFrom(ctx.pool(), @intCast(n_experts + 1));
+        _ = tile_spec_dev.allocFrom(ctx.pool(), @intCast(max_tiles));
 
         const si1: c_int = i32Of(ids_s1);
         const sis1: c_int = @intCast(src1.nb[2] / src1.nb[1]);
 
         impl.assert(sis1 > 0, "sis1 > 0");
 
-        mmid.launchMmIdsHelperDispatch(ids_d, &ids_src_compact_dev.ptr.?[0], &ids_dst_compact_dev.ptr.?[0], &expert_bounds_dev.ptr.?[0], i32Of(n_experts), i32Of(n_tokens), i32Of(n_expert_used), i32Of(ne11), si1, sis1, false, ctx.stream());
+        mmid.launchMmIdsHelperDispatch(ids_d, &ids_src_compact_dev.ptr.?[0], &ids_dst_compact_dev.ptr.?[0], &tile_spec_dev.ptr.?[0], i32Of(n_experts), i32Of(n_tokens), i32Of(n_expert_used), i32Of(ne11), 16, si1, sis1, false, ctx.stream());
         common.cudaCheck(cu.cudaGetLastError(), "cudaGetLastError()", @src());
 
         ids_info.ids_src_compact = &ids_src_compact_dev.ptr.?[0];
         ids_info.ids_dst_compact = &ids_dst_compact_dev.ptr.?[0];
-        ids_info.expert_bounds_dev = &expert_bounds_dev.ptr.?[0];
+        ids_info.tile_spec_dev = &tile_spec_dev.ptr.?[0];
         ids_info.n_experts = i32Of(n_experts);
+        ids_info.max_tiles = i32Of(max_tiles);
         ids_info.sis1 = sis1;
         ids_info_ptr = &ids_info;
     }
@@ -396,7 +400,7 @@ pub fn mulMatF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, i
     }
 }
 
-/// Ports `ggml_cuda_should_use_mmf` (mmf.cu:133 @cd959bae9), NVIDIA arms.
+/// Ports `ggml_cuda_should_use_mmf` (mmf.cu:137 @b1b770d90), NVIDIA arms.
 pub fn shouldUseMmf(ty: c.enum_ggml_type, x: c_int, warp_size: c_int, src0_ne: *const [4]i64, src0_nb: *const [4]usize, src1_ncols: c_int, mul_mat_id: bool) bool {
     if (c.ggml_is_quantized(ty)) return false;
 

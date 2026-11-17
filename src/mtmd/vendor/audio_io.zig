@@ -3,8 +3,8 @@
 //! # Provenance
 //!
 //! Ports the memory read, seek and tell callbacks of
-//! `llama.cpp/vendor/miniaudio/miniaudio.h` (miniaudio v0.11.26) at v0.9.0
-//! (`cd959bae9`): `ma_dr_wav__on_read_memory` and friends, the dr_flac and
+//! `llama.cpp/vendor/miniaudio/miniaudio.h` (miniaudio v0.11.26) at v1.0.0
+//! (`b1b770d90`): `ma_dr_wav__on_read_memory` and friends, the dr_flac and
 //! dr_mp3 equivalents, and `ma_decoder__on_read_memory` and friends.
 //!
 //! They are not interchangeable, which is why this is one type with a mode:
@@ -26,20 +26,20 @@ pub const Io = struct {
     mode: Mode,
 
     pub const Mode = enum {
-        /// `ma_dr_wav__on_seek_memory` (miniaudio.h:82927 @cd959bae9):
+        /// `ma_dr_wav__on_seek_memory` (miniaudio.h:82927 @b1b770d90):
         /// fails outside `[0, size]`.
         dr_wav,
         /// `ma_dr_flac__on_seek_memory`: fails past the end.
         dr_flac,
         /// `ma_dr_mp3__on_seek_memory`: fails past the end.
         dr_mp3,
-        /// `ma_decoder__on_seek_memory` (miniaudio.h:66628 @cd959bae9):
+        /// `ma_decoder__on_seek_memory` (miniaudio.h:66628 @b1b770d90):
         /// clamps to `[0, size]` and always succeeds.
         decoder,
     };
 
-    /// Ports `ma_dr_wav__on_read_memory` (miniaudio.h:82911 @cd959bae9)
-    /// and `ma_decoder__on_read_memory` (miniaudio.h:66597 @cd959bae9),
+    /// Ports `ma_dr_wav__on_read_memory` (miniaudio.h:82911 @b1b770d90)
+    /// and `ma_decoder__on_read_memory` (miniaudio.h:66597 @b1b770d90),
     /// which agree on the bytes delivered.
     ///
     /// Return: the bytes copied into `buf`, fewer at the end.
@@ -93,7 +93,7 @@ pub const Io = struct {
         }
     }
 
-    /// Ports `ma_dr_wav__seek_forward` (miniaudio.h:80668 @cd959bae9):
+    /// Ports `ma_dr_wav__seek_forward` (miniaudio.h:80668 @b1b770d90):
     /// forward in steps of at most 0x7FFFFFFF.
     ///
     /// A clamping stream reaches its end on the first step and stays, so
@@ -110,15 +110,15 @@ pub const Io = struct {
         return true;
     }
 
-    /// Ports `ma_dr_wav__seek_from_start` (miniaudio.h:80686 @cd959bae9).
+    /// Ports `ma_dr_wav__seek_from_start` (miniaudio.h:80686 @b1b770d90).
     pub fn seekFromStart(self: *Io, offset: u64) bool {
         if (offset <= 0x7FFFFFFF) return self.seek(@intCast(offset), .set);
         if (!self.seek(0x7FFFFFFF, .set)) return false;
         return self.seekForward(offset - 0x7FFFFFFF);
     }
 
-    /// Ports `ma_dr_wav__on_tell_memory` (miniaudio.h:83005 @cd959bae9)
-    /// and `ma_decoder__on_tell_memory` (miniaudio.h:66671 @cd959bae9).
+    /// Ports `ma_dr_wav__on_tell_memory` (miniaudio.h:83005 @b1b770d90)
+    /// and `ma_decoder__on_tell_memory` (miniaudio.h:66671 @b1b770d90).
     pub fn tell(self: *const Io) i64 {
         return @intCast(self.pos);
     }

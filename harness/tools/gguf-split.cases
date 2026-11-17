@@ -34,9 +34,9 @@ $FIX/qwen3-dense.gguf qd
 $VOCAB/ggml-vocab-llama-spm.gguf vs
 
 # Merge
---merge ld-00001-of-00013.gguf ld-merged.gguf
-!fail --merge ld-00001-of-00013.gguf ld-merged.gguf
---merge gd-00001-of-00010.gguf gd-merged.gguf
+--merge ld-00001-of-00014.gguf ld-merged.gguf
+!fail --merge ld-00001-of-00014.gguf ld-merged.gguf
+--merge gd-00001-of-00011.gguf gd-merged.gguf
 --merge --dry-run pd-00001-of-00002.gguf pd-dry.gguf
 --merge --delete-splits pd-00001-of-00002.gguf pd-merged.gguf
 !fail --merge $FIX/qwen3-dense.gguf notsplit.gguf

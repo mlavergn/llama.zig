@@ -180,8 +180,10 @@ static int backend_deps_seen = 0;
 
 /* Every table entry each side handed out, by table index, as the probes
  * found them: the info object's counters are fed these. */
-static const ggml_metal_fusion * entry_a[32];
-static const ggml_metal_fusion * entry_b[32];
+/* The table has 39 entries since v1.0.0 (#31615 added 12 TOPK_MOE rows). */
+#define MAX_ENTRIES 64
+static const ggml_metal_fusion * entry_a[MAX_ENTRIES];
+static const ggml_metal_fusion * entry_b[MAX_ENTRIES];
 static int n_entry = 0;
 
 
@@ -189,7 +191,7 @@ static int n_entry = 0;
  * often STRUCTURAL matched where FULL refused: every entry must be reached
  * in both modes, or a pattern could be dropped from the table and nothing
  * here would notice. */
-static int fusion_hits[2][32];
+static int fusion_hits[2][MAX_ENTRIES];
 static int fusion_full_refusals = 0;
 
 static ggml_backend_buffer_t fusion_bufs[64];
@@ -223,8 +225,8 @@ static void fusion_probe_graph(const char * name, struct ggml_cgraph * gf) {
             snprintf(lbl, sizeof lbl, "fusion_get_id(%s @%d %s)", name, i, m ? "full" : "struct");
             cmp_i(lbl, fa ? (long) ggml_metal_fusion_get_id(fa) : -1, fb ? (long) ref_ggml_metal_fusion_get_id(fb) : -1);
             const int ib = table_index(1, fb);
-            if (ib >= 0 && ib < 32 && ib == table_index(0, fa)) { entry_a[ib] = fa; entry_b[ib] = fb; }
-            if (ib >= 0 && ib < 32) fusion_hits[m][ib]++;
+            if (ib >= 0 && ib < MAX_ENTRIES && ib == table_index(0, fa)) { entry_a[ib] = fa; entry_b[ib] = fb; }
+            if (ib >= 0 && ib < MAX_ENTRIES) fusion_hits[m][ib]++;
             if (m == 1) {
                 int ns = 0;
                 if (ref_ggml_metal_fusion_next(gf, idxs, n_idxs, i, GGML_METAL_FUSION_STRUCTURAL, &ns) != NULL && fb == NULL) {
@@ -353,9 +355,9 @@ static void fusion_info_diff(void) {
                 snprintf(lbl, sizeof lbl, "info label[%d]", i); cmp_s(lbl, ggml_metal_fusion_info_label(a, i), ref_ggml_metal_fusion_info_label(b, i));
                 snprintf(lbl, sizeof lbl, "info count[%d]", i); cmp_i(lbl, (long) ggml_metal_fusion_info_count(a, i), (long) ref_ggml_metal_fusion_info_count(b, i));
             }
-            const char * la[32] = {0}; const char * lb[32] = {0};
-            uint64_t ca[32] = {0}, cb[32] = {0};
-            for (int cap = 0; cap <= nf + 1 && cap <= 32; cap += 5) {
+            const char * la[MAX_ENTRIES] = {0}; const char * lb[MAX_ENTRIES] = {0};
+            uint64_t ca[MAX_ENTRIES] = {0}, cb[MAX_ENTRIES] = {0};
+            for (int cap = 0; cap <= nf + 1 && cap <= MAX_ENTRIES; cap += 5) {
                 const int ra = ggml_metal_fusion_info_stats_get(a, la, ca, cap);
                 const int rb = ref_ggml_metal_fusion_info_stats_get(b, lb, cb, cap);
                 snprintf(lbl, sizeof lbl, "stats_get(cap=%d)", cap); cmp_i(lbl, ra, rb);
@@ -924,6 +926,62 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
         }
     }
 
+    /* The unary-gated MoE routings (v1.0.0, #31615), as llama-graph.cpp's
+     * `build_moe_ffn` builds them for DeepSeek-V4 (`sqrt(softplus)`) and GLM
+     * (sigmoid): the scores ranked after adding a per-expert selection bias,
+     * the unbiased ones gathered, optionally renormalised by a sum that is
+     * clamped (`norm`) or offset by a SCALE's bias (`nbias`), optionally
+     * scaled. The softmax chain gets the `nbias` norm too. Then the refusals:
+     *   r1 a GELU gate (neither softplus nor sigmoid)
+     *   r2 a bias with two rows       r3 an F16 bias
+     *   r4 the denominator's SCALE with a factor != 1
+     *   r5 the argsort ranking the unbiased scores
+     *   r6 softplus without its SQRT feeding the ADD */
+    for (int gate = 0; gate < 3; gate++) {          /* 0 softmax, 1 softplus, 2 sigmoid */
+        for (int variant = 0; variant < 12; variant++) {
+            const int refuse = variant >= 6 ? variant - 5 : 0;   /* r1..r6 */
+            const int norm   = refuse ? 2 : variant % 3;          /* 0 none, 1 clamp, 2 scale bias */
+            const int scale  = refuse ? 0 : variant / 3;
+            if (gate == 0 && (norm != 2 || refuse)) continue;    /* softmax: only the new norm */
+            struct ggml_context * ctx = fusion_ctx();
+            const int64_t n_tokens = 4, n_expert = 16, k = 4;
+            struct ggml_tensor * logits = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_expert, n_tokens);
+            struct ggml_tensor * bias   = refuse == 2 ? ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_expert, 2)
+                                        : ggml_new_tensor_1d(ctx, refuse == 3 ? GGML_TYPE_F16 : GGML_TYPE_F32, n_expert);
+            struct ggml_tensor * probs, * scores;
+            if (gate == 0) {
+                probs  = ggml_soft_max(ctx, logits);
+                scores = probs;
+            } else {
+                struct ggml_tensor * u = refuse == 1 ? ggml_gelu(ctx, logits)
+                                       : gate == 1   ? ggml_softplus(ctx, logits)
+                                       :               ggml_sigmoid(ctx, logits);
+                probs  = gate == 1 && refuse != 6 ? ggml_sqrt(ctx, u) : u;
+                scores = ggml_add(ctx, probs, bias);
+            }
+            struct ggml_tensor * probs_r  = ggml_reshape_3d(ctx, probs, 1, n_expert, n_tokens);
+            struct ggml_tensor * selected = ggml_argsort_top_k(ctx, refuse == 5 ? probs : scores, k);
+            struct ggml_tensor * weights  = ggml_get_rows(ctx, probs_r, selected);
+            if (norm) {
+                struct ggml_tensor * wr  = ggml_reshape_2d(ctx, weights, k, n_tokens);
+                struct ggml_tensor * sum = ggml_sum_rows(ctx, wr);
+                sum = norm == 1 ? ggml_clamp(ctx, sum, 6.103515625e-5f, INFINITY)
+                                : ggml_scale_bias(ctx, sum, refuse == 4 ? 2.0f : 1.0f, 1e-20f);
+                wr = ggml_div(ctx, wr, sum);
+                weights = ggml_reshape_3d(ctx, wr, 1, k, n_tokens);
+            }
+            if (scale) weights = ggml_scale(ctx, weights, 2.5f);
+            struct ggml_cgraph * gf = ggml_new_graph(ctx);
+            if (refuse == 5) ggml_build_forward_expand(gf, scores);
+            ggml_build_forward_expand(gf, weights);
+            ggml_build_forward_expand(gf, ggml_scale(ctx, weights, 1.5f));
+            fusion_alloc(ctx, buft);
+            char name[32]; snprintf(name, sizeof name, "moe-gate g%d v%d", gate, variant);
+            fusion_probe_graph(name, gf);
+            ggml_free(ctx);
+        }
+    }
+
     /* MUL_MAT + ADD (v0.6.0): the residual added in the few-row MMA store.
      * The weight sits in a buffer marked WEIGHTS, as the model loader marks
      * them; STRUCTURAL packs on the operand and types alone, FULL also
@@ -1055,7 +1113,7 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
     for (int i = 0; i < n_fusion_bufs; i++) ggml_backend_buffer_free(fusion_bufs[i]);
 
     for (int m = 0; m < 2; m++) {
-        for (int i = 0; i < n_ref && i < 32; i++) {
+        for (int i = 0; i < n_ref && i < MAX_ENTRIES; i++) {
             checks++;
             if (fusion_hits[m][i] == 0) {
                 printf("  fusion[%d] (%s) never matched in %s mode -- the probes do not reach it\n",
@@ -1080,7 +1138,7 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
         fails++;
     }
 
-    n_entry = n_ref < 32 ? n_ref : 32;
+    n_entry = n_ref < MAX_ENTRIES ? n_ref : MAX_ENTRIES;
     fusion_info_diff();
     checks++;
     if (fusion_full_refusals == 0) {

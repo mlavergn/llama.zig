@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/granite-moe.cpp` at v0.9.0
-//! (`cd959bae9`): `llama_model_granite_moe`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/granite-moe.cpp` at v1.0.0
+//! (`b1b770d90`): `llama_model_granite_moe`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, which builds
 //! `llama_model_granite`'s `graph` (`granite.zig`).
 
@@ -20,7 +20,7 @@ const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 
-/// Ports `llama_model_granite_moe`'s `load_arch_hparams` (models/granite-moe.cpp:3 @cd959bae9).
+/// Ports `llama_model_granite_moe`'s `load_arch_hparams` (models/granite-moe.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -42,7 +42,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (try meta.getKey(u32, .expert_shared_feed_forward_length, false, exc)) |v| hp.n_ff_shexp = v;
 }
 
-/// Ports `llama_model_granite_moe`'s `load_arch_tensors` (models/granite-moe.cpp:21 @cd959bae9).
+/// Ports `llama_model_granite_moe`'s `load_arch_tensors` (models/granite-moe.cpp:21 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -108,7 +108,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_granite_moe`'s `build_arch_graph`
-/// (models/granite-moe.cpp:81 @cd959bae9): Granite's `graph`.
+/// (models/granite-moe.cpp:81 @b1b770d90): Granite's `graph`.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     granite.buildGraph(model, b);
 }

@@ -5,12 +5,12 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/pockettts-seanet.cpp` at v0.9.0
-//! (`cd959bae9`), and the `clip_graph_pockettts_seanet` declaration in
+//! Ports `llama.cpp/tools/mtmd/models/pockettts-seanet.cpp` at v1.0.0
+//! (`b1b770d90`), and the `mtmd_graph_pockettts_seanet` declaration in
 //! `llama.cpp/tools/mtmd/models/models.h`. Each declaration names what it
 //! ports and the line it began at.
 //!
-//! Upstream's class is a `clip_graph` copied from its parent whose `build`
+//! Upstream's class is a `mtmd_graph` copied from its parent whose `build`
 //! aborts; here it is a struct over a `graph.Graph.initChild` of the parent.
 //! `state_in` is a `std::map` read only through `at()` and `empty()`, so a
 //! hash map stands in; `state_out` is a vector the caller iterates in
@@ -29,13 +29,13 @@ const nb = graph.nb;
 /// One `state_out` entry: a slot name and the tensor holding its new state.
 pub const StateOut = struct { name: [:0]const u8, t: T };
 
-/// Ports `div_ceil` (pockettts-seanet.cpp:8 @cd959bae9).
+/// Ports `div_ceil` (pockettts-seanet.cpp:8 @b1b770d90).
 fn divCeil(a: i64, b: i64) i64 {
     return @divTrunc(a, b) + @as(i64, if (@rem(a, b) != 0) 1 else 0);
 }
 
-/// Ports `clip_graph_pockettts_seanet` (mtmd/models/models.h:436
-/// @cd959bae9): stateless
+/// Ports `mtmd_graph_pockettts_seanet` (mtmd/models/models.h:448
+/// @b1b770d90): stateless
 /// unless `state_in` is populated, when the convs carry left context instead
 /// of padding.
 pub const Seanet = struct {
@@ -47,8 +47,8 @@ pub const Seanet = struct {
     state_in: std.StringHashMapUnmanaged(T) = .empty,
     state_out: std.ArrayList(StateOut) = .empty,
 
-    /// Ports the constructor `clip_graph_pockettts_seanet`
-    /// (mtmd/models/models.h:437 @cd959bae9): shares the parent's context and graph.
+    /// Ports the constructor `mtmd_graph_pockettts_seanet`
+    /// (mtmd/models/models.h:449 @b1b770d90): shares the parent's context and graph.
     ///
     /// Parameters:
     ///   - `parent`: the graph builder whose context this one shares.
@@ -91,8 +91,8 @@ pub const Seanet = struct {
         self.state_out.append(self.arena, .{ .name = owned, .t = t }) catch oom();
     }
 
-    /// Ports `conv1d` (pockettts-seanet.cpp:14 @cd959bae9), a member of
-    /// `clip_graph_pockettts_seanet`: x `[T, IC]`, w `[K, IC, OC]` to
+    /// Ports `conv1d` (pockettts-seanet.cpp:14 @b1b770d90), a member of
+    /// `mtmd_graph_pockettts_seanet`: x `[T, IC]`, w `[K, IC, OC]` to
     /// `[T / stride, OC]`. The convs are causal, so the whole `K - stride`
     /// padding goes on the left.
     ///
@@ -137,8 +137,8 @@ pub const Seanet = struct {
         return y;
     }
 
-    /// Ports `conv_transpose1d` (pockettts-seanet.cpp:51 @cd959bae9), a
-    /// member of `clip_graph_pockettts_seanet`: x `[T, IC]`, w `[K, OC/groups,
+    /// Ports `conv_transpose1d` (pockettts-seanet.cpp:51 @b1b770d90), a
+    /// member of `mtmd_graph_pockettts_seanet`: x `[T, IC]`, w `[K, OC/groups,
     /// IC]` to `[T * stride, OC]`. The `K - stride` overlap tail belongs to
     /// the next call: added to its head when streaming, else dropped.
     ///
@@ -196,8 +196,8 @@ pub const Seanet = struct {
         return out;
     }
 
-    /// Ports `res_unit` (pockettts-seanet.cpp:102 @cd959bae9), a member of
-    /// `clip_graph_pockettts_seanet`.
+    /// Ports `res_unit` (pockettts-seanet.cpp:102 @b1b770d90), a member of
+    /// `mtmd_graph_pockettts_seanet`.
     ///
     /// Parameters:
     ///   - `x`: input, `[T, C]`.
@@ -216,8 +216,8 @@ pub const Seanet = struct {
         return c.ggml_add(ctx0, x, h);
     }
 
-    /// Ports `encode` (pockettts-seanet.cpp:112 @cd959bae9), a member of
-    /// `clip_graph_pockettts_seanet`: x `[T, C]` to `[T / hop, dim]`.
+    /// Ports `encode` (pockettts-seanet.cpp:112 @b1b770d90), a member of
+    /// `mtmd_graph_pockettts_seanet`: x `[T, C]` to `[T / hop, dim]`.
     ///
     /// Parameters:
     ///   - `x`: the waveform, `[T, C]`.
@@ -249,8 +249,8 @@ pub const Seanet = struct {
         return cur;
     }
 
-    /// Ports `decode` (pockettts-seanet.cpp:135 @cd959bae9), a member of
-    /// `clip_graph_pockettts_seanet`: x `[T, dim]` to `[T * hop, 1]`,
+    /// Ports `decode` (pockettts-seanet.cpp:135 @b1b770d90), a member of
+    /// `mtmd_graph_pockettts_seanet`: x `[T, dim]` to `[T * hop, 1]`,
     /// streaming when `state_in` is populated.
     ///
     /// Parameters:

@@ -7,7 +7,7 @@
 //! - `llama.cpp/src/llama-arch.h` -- the four enums
 //! - `llama.cpp/src/llama-arch.cpp` -- the four `std::map` initializers
 //!
-//! Both at v0.9.0 (`cd959bae9`). **Do not edit**: regenerate after moving the
+//! Both at v1.0.0 (`b1b770d90`). **Do not edit**: regenerate after moving the
 //! pin, and `make arch-diff` compares every lookup against the C++.
 //!
 //! Each table is indexed by its enum's ordinal, which is the `std::map`'s
@@ -17,7 +17,7 @@
 
 const c = @import("impl.zig").c;
 
-/// Mirrors `llm_arch` (llama-arch.h:13 @cd959bae9).
+/// Mirrors `llm_arch` (llama-arch.h:13 @b1b770d90).
 pub const Arch = enum(c_int) {
     clip,
     llama,
@@ -102,6 +102,7 @@ pub const Arch = enum(c_int) {
     deepseek32,
     deepseek4,
     deepseek41,
+    xing4_0,
     chatglm,
     glm4,
     glm4_moe,
@@ -173,6 +174,7 @@ pub const Arch = enum(c_int) {
     maion_coder,
     kimi_linear,
     kimi_k3,
+    kimi_k31,
     glm5_next,
     talkie,
     mellum,
@@ -188,10 +190,11 @@ pub const Arch = enum(c_int) {
     beam,
     kolibri1,
     limite,
+    ricursive,
     unknown,
 };
 
-/// Mirrors `llm_kv` (llama-arch.h:186 @cd959bae9).
+/// Mirrors `llm_kv` (llama-arch.h:189 @b1b770d90).
 pub const Kv = enum(c_int) {
     general_type,
     general_architecture,
@@ -237,6 +240,7 @@ pub const Kv = enum(c_int) {
     expert_chunk_feed_forward_length,
     swiglu_clamp_exp,
     swiglu_clamp_shexp,
+    swiglu_clamp,
     use_parallel_residual,
     tensor_data_layout,
     expert_count,
@@ -290,6 +294,7 @@ pub const Kv = enum(c_int) {
     metis_route_length,
     metis_continuation_logit_limit,
     realtime_delay_tokens,
+    classifier_free_guidance,
     mudd_feed_forward_length,
     mudd_tap_count,
     mudd_tap_indices,
@@ -497,7 +502,7 @@ pub const Kv = enum(c_int) {
     dense_3_feat_out,
 };
 
-/// Mirrors `llm_tensor` (llama-arch.h:517 @cd959bae9).
+/// Mirrors `llm_tensor` (llama-arch.h:522 @b1b770d90).
 pub const Tensor = enum(c_int) {
     token_embd,
     token_embd_norm,
@@ -595,6 +600,7 @@ pub const Tensor = enum(c_int) {
     attn_k_norm,
     layer_out_norm,
     layer_out_scale,
+    attn_vres_lambda,
     post_attn_norm,
     post_mlp_norm,
     per_layer_token_embd,
@@ -869,20 +875,20 @@ pub const Tensor = enum(c_int) {
     attn_v_exps,
 };
 
-/// Mirrors `llm_tensor_layer` (llama-arch.h:890 @cd959bae9).
+/// Mirrors `llm_tensor_layer` (llama-arch.h:896 @b1b770d90).
 pub const TensorLayer = enum(c_int) {
     input,
     repeating,
     output,
 };
 
-/// Mirrors `llm_tensor_info` (llama-arch.h:953 @cd959bae9).
+/// Mirrors `llm_tensor_info` (llama-arch.h:959 @b1b770d90).
 pub const TensorInfo = struct {
     layer: TensorLayer,
     op: c.enum_ggml_op,
 };
 
-/// Ports `LLM_ARCH_NAMES` (llama-arch.cpp:9 @cd959bae9), by `Arch` ordinal.
+/// Ports `LLM_ARCH_NAMES` (llama-arch.cpp:9 @b1b770d90), by `Arch` ordinal.
 pub const arch_names = [_]?[:0]const u8{
     "clip",
     "llama",
@@ -967,6 +973,7 @@ pub const arch_names = [_]?[:0]const u8{
     "deepseek32",
     "deepseek4",
     "deepseek41",
+    "xing4_0",
     "chatglm",
     "glm4",
     "glm4moe",
@@ -1038,6 +1045,7 @@ pub const arch_names = [_]?[:0]const u8{
     "maion-coder",
     "kimi-linear",
     "kimi-k3",
+    "kimi-k31",
     "glm5-next",
     "talkie",
     "mellum",
@@ -1053,10 +1061,11 @@ pub const arch_names = [_]?[:0]const u8{
     "beam",
     "kolibri1",
     "limite",
+    "ricursive",
     "(unknown)",
 };
 
-/// Ports `LLM_KV_NAMES` (llama-arch.cpp:182 @cd959bae9), by `Kv` ordinal.
+/// Ports `LLM_KV_NAMES` (llama-arch.cpp:185 @b1b770d90), by `Kv` ordinal.
 pub const kv_names = [_]?[:0]const u8{
     "general.type",
     "general.architecture",
@@ -1102,6 +1111,7 @@ pub const kv_names = [_]?[:0]const u8{
     "%s.expert_chunk_feed_forward_length",
     "%s.swiglu_clamp_exp",
     "%s.swiglu_clamp_shexp",
+    "%s.swiglu_clamp",
     "%s.use_parallel_residual",
     "%s.tensor_data_layout",
     "%s.expert_count",
@@ -1155,6 +1165,7 @@ pub const kv_names = [_]?[:0]const u8{
     "%s.metis.route_length",
     "%s.metis.continuation_logit_limit",
     "%s.realtime_delay_tokens",
+    "%s.classifier_free_guidance",
     "%s.mudd.feed_forward_length",
     "%s.mudd.tap_count",
     "%s.mudd.tap_indices",
@@ -1362,7 +1373,7 @@ pub const kv_names = [_]?[:0]const u8{
     "%s.dense_3_feat_out",
 };
 
-/// Ports `LLM_TENSOR_NAMES` (llama-arch.cpp:514 @cd959bae9), by `Tensor` ordinal.
+/// Ports `LLM_TENSOR_NAMES` (llama-arch.cpp:519 @b1b770d90), by `Tensor` ordinal.
 pub const tensor_names = [_]?[:0]const u8{
     "token_embd",
     "token_embd_norm",
@@ -1460,6 +1471,7 @@ pub const tensor_names = [_]?[:0]const u8{
     "blk.%d.attn_k_norm",
     "blk.%d.layer_output_norm",
     "blk.%d.layer_output_scale",
+    "blk.%d.attn_vres_lambda",
     null, // LLM_TENSOR_POST_ATTN_NORM
     null, // LLM_TENSOR_POST_MLP_NORM
     "per_layer_token_embd",
@@ -1734,7 +1746,7 @@ pub const tensor_names = [_]?[:0]const u8{
     "blk.%d.attn_v_exps",
 };
 
-/// Ports `LLM_TENSOR_INFOS` (llama-arch.cpp:894 @cd959bae9), by `Tensor` ordinal.
+/// Ports `LLM_TENSOR_INFOS` (llama-arch.cpp:900 @b1b770d90), by `Tensor` ordinal.
 pub const tensor_infos = [_]?TensorInfo{
     .{ .layer = .input, .op = c.GGML_OP_GET_ROWS },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },
@@ -1824,6 +1836,7 @@ pub const tensor_infos = [_]?TensorInfo{
     .{ .layer = .repeating, .op = c.GGML_OP_MUL_MAT },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },
     .{ .layer = .repeating, .op = c.GGML_OP_GET_ROWS },
+    .{ .layer = .repeating, .op = c.GGML_OP_MUL },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },
     .{ .layer = .repeating, .op = c.GGML_OP_MUL },

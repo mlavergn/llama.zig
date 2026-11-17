@@ -6,11 +6,11 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/nemotron-transcribe.cpp` at v0.9.0
-//! (`cd959bae9`), the `clip_graph_nemotron_transcribe` declaration of
+//! Ports `llama.cpp/tools/mtmd/models/nemotron-transcribe.cpp` at v1.0.0
+//! (`b1b770d90`), the `mtmd_graph_nemotron_transcribe` declaration of
 //! `llama.cpp/tools/mtmd/models/models.h`, and the
-//! `PROJECTOR_TYPE_NEMOTRON_TRANSCRIBE` arm of `clip_get_graph_builder`
-//! (`llama.cpp/tools/mtmd/clip.cpp`). Each declaration names what it ports
+//! `PROJECTOR_TYPE_NEMOTRON_TRANSCRIBE` arm of `mtmd_get_graph_builder`
+//! (`llama.cpp/tools/mtmd/mtmd-graph.cpp`). Each declaration names what it ports
 //! and the line it began at.
 
 const std = @import("std");
@@ -29,48 +29,48 @@ const nb = graph.nb;
 extern fn sqrtf(x: f32) f32;
 extern fn expf(x: f32) f32;
 
-/// `SPK_ACTIVITY_THR` (nemotron-transcribe.cpp:11 @cd959bae9): a speaker is
+/// `SPK_ACTIVITY_THR` (nemotron-transcribe.cpp:11 @b1b770d90): a speaker is
 /// active in an 80 ms frame where its prediction exceeds this.
 const spk_activity_thr: f32 = 0.5;
 
 // NeMo streaming Sortformer: PEE online defaults and the checkpoint's sortformer_modules config
 
-/// `SPK_FIFO_LEN` (nemotron-transcribe.cpp:14 @cd959bae9).
+/// `SPK_FIFO_LEN` (nemotron-transcribe.cpp:14 @b1b770d90).
 const spk_fifo_len: c_int = 40;
-/// `SPK_CACHE_LEN` (nemotron-transcribe.cpp:15 @cd959bae9).
+/// `SPK_CACHE_LEN` (nemotron-transcribe.cpp:15 @b1b770d90).
 const spk_cache_len: c_int = 188;
-/// `SPK_SIL_FRAMES` (nemotron-transcribe.cpp:16 @cd959bae9).
+/// `SPK_SIL_FRAMES` (nemotron-transcribe.cpp:16 @b1b770d90).
 const spk_sil_frames: c_int = 1;
-/// `SPK_PRED_SCORE_THR` (nemotron-transcribe.cpp:17 @cd959bae9).
+/// `SPK_PRED_SCORE_THR` (nemotron-transcribe.cpp:17 @b1b770d90).
 const spk_pred_score_thr: f32 = 0.25;
-/// `SPK_BOOST_LATEST` (nemotron-transcribe.cpp:18 @cd959bae9).
+/// `SPK_BOOST_LATEST` (nemotron-transcribe.cpp:18 @b1b770d90).
 const spk_boost_latest: f32 = 0.05;
-/// `SPK_STRONG_BOOST_RATE` (nemotron-transcribe.cpp:19 @cd959bae9).
+/// `SPK_STRONG_BOOST_RATE` (nemotron-transcribe.cpp:19 @b1b770d90).
 const spk_strong_boost_rate: f32 = 0.75;
-/// `SPK_WEAK_BOOST_RATE` (nemotron-transcribe.cpp:20 @cd959bae9).
+/// `SPK_WEAK_BOOST_RATE` (nemotron-transcribe.cpp:20 @b1b770d90).
 const spk_weak_boost_rate: f32 = 1.5;
-/// `SPK_MIN_POS_RATE` (nemotron-transcribe.cpp:21 @cd959bae9).
+/// `SPK_MIN_POS_RATE` (nemotron-transcribe.cpp:21 @b1b770d90).
 const spk_min_pos_rate: f32 = 0.5;
 
 // _compress_spkcache runs here on exp(score): its additive log terms become factors and -inf becomes 0
 
-/// `SPK_SCORE_OFFSET` (nemotron-transcribe.cpp:24 @cd959bae9): -log(0.5) in _get_log_pred_scores.
+/// `SPK_SCORE_OFFSET` (nemotron-transcribe.cpp:24 @b1b770d90): -log(0.5) in _get_log_pred_scores.
 const spk_score_offset: f32 = 2.0;
-/// `SPK_STRONG_BOOST` (nemotron-transcribe.cpp:25 @cd959bae9): _boost_topk_scores, scale_factor 2.
+/// `SPK_STRONG_BOOST` (nemotron-transcribe.cpp:25 @b1b770d90): _boost_topk_scores, scale_factor 2.
 const spk_strong_boost: f32 = 4.0;
-/// `SPK_WEAK_BOOST` (nemotron-transcribe.cpp:26 @cd959bae9): _boost_topk_scores, scale_factor 1.
+/// `SPK_WEAK_BOOST` (nemotron-transcribe.cpp:26 @b1b770d90): _boost_topk_scores, scale_factor 1.
 const spk_weak_boost: f32 = 2.0;
-/// `SPK_SPEECH_THR` (nemotron-transcribe.cpp:27 @cd959bae9): a speaker's frames at or below it are not cached.
+/// `SPK_SPEECH_THR` (nemotron-transcribe.cpp:27 @b1b770d90): a speaker's frames at or below it are not cached.
 const spk_speech_thr: f32 = 0.5;
 
 // NeMo ParallelExpertEncoder online defaults, in output frames: 40 s windows
 // with 4 s of context on each side
 
-/// `window_core` (mtmd/models/models.h:44 @cd959bae9), a member of `clip_graph_nemotron_transcribe`.
+/// `window_core` (mtmd/models/models.h:44 @b1b770d90), a member of `mtmd_graph_nemotron_transcribe`.
 pub const window_core: c_int = 500;
-/// `window_left` (mtmd/models/models.h:45 @cd959bae9), a member of `clip_graph_nemotron_transcribe`.
+/// `window_left` (mtmd/models/models.h:45 @b1b770d90), a member of `mtmd_graph_nemotron_transcribe`.
 pub const window_left: c_int = 50;
-/// `window_right` (mtmd/models/models.h:46 @cd959bae9), a member of `clip_graph_nemotron_transcribe`.
+/// `window_right` (mtmd/models/models.h:46 @b1b770d90), a member of `mtmd_graph_nemotron_transcribe`.
 pub const window_right: c_int = 50;
 
 // every update has a full window, which overflows the FIFO and the cache (NeMo's update period of 300 never applies)
@@ -83,8 +83,8 @@ inline fn maxF(a: f32, b: f32) f32 {
     return if (a < b) b else a;
 }
 
-/// Ports `build_spk_encoder` (nemotron-transcribe.cpp:30 @cd959bae9), a
-/// member of `clip_graph_nemotron_transcribe`: the speaker expert has its own
+/// Ports `build_spk_encoder` (nemotron-transcribe.cpp:30 @b1b770d90), a
+/// member of `mtmd_graph_nemotron_transcribe`: the speaker expert has its own
 /// layers, width and head count, which build_vit does not take; full rotary.
 fn buildSpkEncoder(g: *graph.Graph, cur_in: T, pos: T) T {
     const ctx0 = g.ctx0;
@@ -121,12 +121,12 @@ fn buildSpkEncoder(g: *graph.Graph, cur_in: T, pos: T) T {
     return g.buildNorm(cur, model.spk_post_ln_w, model.spk_post_ln_b, .normal, eps, -1);
 }
 
-/// The `stack_mel` lambda (nemotron-transcribe.cpp:76 @cd959bae9) of `build`.
+/// The `stack_mel` lambda (nemotron-transcribe.cpp:76 @b1b770d90) of `build`.
 fn stackMel(g: *graph.Graph, mel: T, sub: i32, n_mel: i32) T {
     return g.buildStack(c.ggml_cont(g.ctx0, c.ggml_transpose(g.ctx0, mel)), sub, n_mel);
 }
 
-/// The `add_pos` lambda (nemotron-transcribe.cpp:93 @cd959bae9) of `build`:
+/// The `add_pos` lambda (nemotron-transcribe.cpp:93 @b1b770d90) of `build`:
 /// partial rotary over the ASR expert's positions.
 const AsrPos = struct {
     asr_pos: T,
@@ -139,9 +139,9 @@ const AsrPos = struct {
     }
 };
 
-/// Ports `build` (nemotron-transcribe.cpp:60 @cd959bae9), a member of
-/// `clip_graph_nemotron_transcribe`, with the state `clip_get_graph_builder`
-/// (mtmd/clip.cpp:980 @cd959bae9) passes it: null during warmup.
+/// Ports `build` (nemotron-transcribe.cpp:60 @b1b770d90), a member of
+/// `mtmd_graph_nemotron_transcribe`, with the state `mtmd_get_graph_builder`
+/// (mtmd-graph.cpp:749 @b1b770d90) passes it: null during warmup.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     const state: ?*clip.EncState = if (params) |p| p.enc_state else null;
     const ctx0 = g.ctx0;
@@ -234,7 +234,7 @@ fn topkLess(v: []const f32, a: i32, b: i32) bool {
     return va > vb or (va == vb and a < b);
 }
 
-/// Ports `spk_topk` (nemotron-transcribe.cpp:145 @cd959bae9): the indices
+/// Ports `spk_topk` (nemotron-transcribe.cpp:145 @b1b770d90): the indices
 /// of the k largest of v[0, n), ties to the lower index. The caller frees
 /// the slice.
 fn spkTopk(v: []const f32, n: c_int, k_in: c_int) clip.Error![]i32 {
@@ -250,7 +250,7 @@ fn lessI32(_: void, a: i32, b: i32) bool {
     return a < b;
 }
 
-/// Ports `spk_compress_cache` (nemotron-transcribe.cpp:157 @cd959bae9):
+/// Ports `spk_compress_cache` (nemotron-transcribe.cpp:157 @b1b770d90):
 /// NeMo SortformerModules._compress_spkcache, keeping the SPK_CACHE_LEN
 /// highest-scoring rows, speaker by speaker.
 fn spkCompressCache(emb: *std.ArrayList(f32), preds: *std.ArrayList(f32), n: c_int, d: c_int, n_spk: c_int, sil_emb: []const f32) clip.Error!void {
@@ -335,7 +335,7 @@ fn spkCompressCache(emb: *std.ArrayList(f32), preds: *std.ArrayList(f32), n: c_i
     out_preds.deinit(gpa);
 }
 
-/// Ports `spk_stream` (nemotron-transcribe.cpp:228 @cd959bae9): the
+/// Ports `spk_stream` (nemotron-transcribe.cpp:228 @b1b770d90): the
 /// speaker cache, with its predictions, and FIFO of one recording.
 const SpkStream = struct {
     cache: std.ArrayList(f32) = .empty,
@@ -349,7 +349,7 @@ const SpkStream = struct {
     }
 };
 
-/// Ports `update_spk_state` (nemotron-transcribe.cpp:237 @cd959bae9): NeMo
+/// Ports `update_spk_state` (nemotron-transcribe.cpp:237 @b1b770d90): NeMo
 /// SortformerModules.streaming_update, core rows join the FIFO, its overflow
 /// moves to the cache, which is compressed.
 fn updateSpkState(ss: *SpkStream, st: *const clip.EncState, model: *const model_mod.Model, core_begin: i64, n_core: i64) clip.Error!void {
@@ -375,8 +375,8 @@ fn updateSpkState(ss: *SpkStream, st: *const clip.EncState, model: *const model_
     try spkCompressCache(&ss.cache, &ss.cache_preds, @intCast(@divTrunc(@as(i64, @intCast(ss.cache.items.len)), d)), @intCast(d), @intCast(n_spk), model.spk_sil_emb.items);
 }
 
-/// Ports `encode_windows` (nemotron-transcribe.cpp:260 @cd959bae9), a static
-/// member of `clip_graph_nemotron_transcribe`: NeMo
+/// Ports `encode_windows` (nemotron-transcribe.cpp:260 @b1b770d90), a static
+/// member of `mtmd_graph_nemotron_transcribe`: NeMo
 /// ParallelExpertEncoder._forward_online, one recording encoded in windows
 /// with left/right context, one graph each, the speaker state carried.
 pub fn encodeWindows(ctx: *clip.Ctx, model: *const model_mod.Model, params: *clip.EncodeParams) clip.Error!bool {
@@ -385,7 +385,7 @@ pub fn encodeWindows(ctx: *clip.Ctx, model: *const model_mod.Model, params: *cli
     const buf = rec.roBuf();
     const n_frames: i64 = rec.nx();
     const n_rows: i64 = rec.ny();
-    const n_embd: i64 = clip.nMmprojEmbd(ctx);
+    const n_embd: i64 = clip.nMmprojEmbd(ctx.model);
     const sub: i64 = model.hparams.subsampling_factor;
     const core: i64 = @as(i64, window_core) * sub;
     const left: i64 = @as(i64, window_left) * sub;
@@ -394,7 +394,7 @@ pub fn encodeWindows(ctx: *clip.Ctx, model: *const model_mod.Model, params: *cli
     impl.ggmlAssert(@as(i64, @intCast(buf.len)) == n_frames * n_rows, "nemotron-transcribe.cpp", 272, "(int64_t) buf.size() == n_frames * n_rows");
 
     const out = params.out_embd.?;
-    impl.ggmlAssert(out.items.len == @as(usize, @intCast(n_embd)) *% @as(usize, @bitCast(@as(isize, clip.nOutputTokens(ctx, rec)))), "nemotron-transcribe.cpp", 275, "out.size() == (size_t) n_embd * clip_n_output_tokens(ctx, &rec)");
+    impl.ggmlAssert(out.items.len == @as(usize, @intCast(n_embd)) *% @as(usize, @bitCast(@as(isize, clip.nOutputTokens(ctx.model, rec)))), "nemotron-transcribe.cpp", 275, "out.size() == (size_t) n_embd * ctx->model.n_output_tokens(&rec)");
 
     // the ASR expert's input: per-feature normalization over the whole recording (NeMo normalize_batch, per_feature)
     const nr: usize = @intCast(n_rows);
@@ -451,7 +451,7 @@ pub fn encodeWindows(ctx: *clip.Ctx, model: *const model_mod.Model, params: *cli
 
         var embd: std.ArrayList(f32) = .empty;
         defer embd.deinit(gpa);
-        try embd.appendNTimes(gpa, 0.0, @as(usize, @intCast(n_embd)) * @as(usize, @intCast(clip.nOutputTokens(ctx, &batch.entries.items[0]))));
+        try embd.appendNTimes(gpa, 0.0, @as(usize, @intCast(n_embd)) * @as(usize, @intCast(clip.nOutputTokens(ctx.model, &batch.entries.items[0]))));
         var wp = params.*;
         wp.imgs = &batch;
         wp.out_embd = &embd;

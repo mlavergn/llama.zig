@@ -10,7 +10,7 @@
 //! - `llama.cpp/src/llama-context.cpp` -- the seven `llama_io_*` stream
 //!   classes, and `llama_context`'s `state_*` and `state_seq_*` methods
 //!
-//! All at v0.9.0 (`cd959bae9`).
+//! All at v1.0.0 (`b1b770d90`).
 //!
 //! # Destructors
 //!
@@ -41,7 +41,7 @@ fn endOfBuffer(exc: *Exception) Thrown {
     return exc.throw(.runtime_error, "unexpectedly reached end of buffer", .{});
 }
 
-/// Ports `llama_memory_buffer` (llama-context.h:31 @cd959bae9): one buffer
+/// Ports `llama_memory_buffer` (llama-context.h:31 @b1b770d90): one buffer
 /// type's copies of a sequence's state tensors.
 pub const MemoryBuffer = struct {
     n_tensors: c_int = 0,
@@ -60,7 +60,7 @@ pub const MemoryBuffer = struct {
     }
 };
 
-/// Ports `llama_memory_buffers` (llama-context.h:43 @cd959bae9), a
+/// Ports `llama_memory_buffers` (llama-context.h:43 @b1b770d90), a
 /// `std`'s `map` from buffer type to its buffer: iterated in pointer order.
 pub const MemoryBuffers = struct {
     entries: std.ArrayList(Entry) = .empty,
@@ -90,7 +90,7 @@ pub const MemoryBuffers = struct {
     }
 };
 
-/// `mem_storage` (llama-context.h:449 @cd959bae9): each sequence's
+/// `mem_storage` (llama-context.h:490 @b1b770d90): each sequence's
 /// on-device copy, a `std`'s `map` by sequence.
 pub const MemStorage = struct {
     entries: std.ArrayList(Entry) = .empty,
@@ -162,7 +162,7 @@ fn tensorCopyN(srcs: []const *Tensor, dsts: []const *Tensor) void {
     c.ggml_backend_tensor_copy_n(@ptrCast(srcs.ptr), @ptrCast(dsts.ptr), srcs.len);
 }
 
-/// Ports `llama_io_write_dummy` (llama-context.cpp:3100 @cd959bae9): counts
+/// Ports `llama_io_write_dummy` (llama-context.cpp:3269 @b1b770d90): counts
 /// what would be written.
 const WriteDummy = struct {
     skip_tensors: bool,
@@ -186,7 +186,7 @@ const WriteDummy = struct {
     }
 };
 
-/// Ports `llama_io_write_host` (llama-context.cpp:3126 @cd959bae9): into a
+/// Ports `llama_io_write_host` (llama-context.cpp:3295 @b1b770d90): into a
 /// host buffer, the tensors read back in one batch when the stream
 /// finishes.
 const WriteHost = struct {
@@ -199,7 +199,7 @@ const WriteHost = struct {
         return .{ .ptr = self, .vtable = &.{ .write = write, .writeTensor = writeTensor, .nBytes = nBytes } };
     }
 
-    /// The destructor of `llama_io_write_host` (llama-context.cpp:3131 @cd959bae9).
+    /// The destructor of `llama_io_write_host` (llama-context.cpp:3300 @b1b770d90).
     fn finish(self: *WriteHost) void {
         defer self.winfos.deinit(allocator);
         if (self.winfos.items.len == 0) {
@@ -237,7 +237,7 @@ const WriteHost = struct {
     }
 };
 
-/// Ports `llama_io_read_host` (llama-context.cpp:3198 @cd959bae9): from a
+/// Ports `llama_io_read_host` (llama-context.cpp:3367 @b1b770d90): from a
 /// host buffer, the tensors written in one batch when the stream finishes,
 /// unless a failed restore discarded them.
 const ReadHost = struct {
@@ -250,13 +250,13 @@ const ReadHost = struct {
         return .{ .ptr = self, .vtable = &.{ .read = read, .readTensor = readTensor, .nBytes = nBytes, .discard = discard } };
     }
 
-    /// Ports `llama_io_read_host`'s `discard` (llama-context.cpp:3249 @cd959bae9).
+    /// Ports `llama_io_read_host`'s `discard` (llama-context.cpp:3418 @b1b770d90).
     fn discard(p: *anyopaque) void {
         const self: *ReadHost = @ptrCast(@alignCast(p));
         self.rinfos.clearRetainingCapacity();
     }
 
-    /// The destructor of `llama_io_read_host` (llama-context.cpp:3202 @cd959bae9).
+    /// The destructor of `llama_io_read_host` (llama-context.cpp:3371 @b1b770d90).
     fn finish(self: *ReadHost) void {
         defer self.rinfos.deinit(allocator);
         if (self.rinfos.items.len == 0) {
@@ -294,7 +294,7 @@ const ReadHost = struct {
     }
 };
 
-/// Ports `llama_io_write_file` (llama-context.cpp:3272 @cd959bae9).
+/// Ports `llama_io_write_file` (llama-context.cpp:3441 @b1b770d90).
 const WriteFile = struct {
     file: *mmap.File,
     size_written: usize = 0,
@@ -324,7 +324,7 @@ const WriteFile = struct {
     }
 };
 
-/// Ports `llama_io_read_file` (llama-context.cpp:3297 @cd959bae9).
+/// Ports `llama_io_read_file` (llama-context.cpp:3466 @b1b770d90).
 const ReadFile = struct {
     file: *mmap.File,
     size_read: usize = 0,
@@ -354,7 +354,7 @@ const ReadFile = struct {
     }
 };
 
-/// Ports `llama_io_write_device` (llama-context.cpp:3322 @cd959bae9): the
+/// Ports `llama_io_write_device` (llama-context.cpp:3491 @b1b770d90): the
 /// metadata into a host buffer, the tensors copied into buffers kept on
 /// their own device for the sequence.
 const WriteDevice = struct {
@@ -368,7 +368,7 @@ const WriteDevice = struct {
         return .{ .ptr = self, .vtable = &.{ .write = write, .writeTensor = writeTensor, .nBytes = nBytes } };
     }
 
-    /// The destructor of `llama_io_write_device` (llama-context.cpp:3327 @cd959bae9): lay out one
+    /// The destructor of `llama_io_write_device` (llama-context.cpp:3496 @b1b770d90): lay out one
     /// copy per tensor range, reuse the sequence's buffers where the
     /// layout is unchanged, then copy on the device.
     fn finish(self: *WriteDevice) void {
@@ -390,7 +390,8 @@ const WriteDevice = struct {
         }
         for (self.winfos.items) |w| {
             const buft = c.ggml_backend_buffer_get_type(w.tensor.buffer);
-            const n: i64 = @intCast(w.size / c.ggml_element_size(w.tensor));
+            impl.assert(w.size % c.ggml_type_size(w.tensor.type) == 0, "llama-context.cpp", 3522, "winfo.size % ggml_type_size(winfo.tensor->type) == 0");
+            const n: i64 = @as(i64, @intCast(w.size / c.ggml_type_size(w.tensor.type))) * c.ggml_blck_size(w.tensor.type);
             const mb = mbufs_new.at(buft);
             mb.org.append(allocator, c.ggml_view_1d(mb.ctx, w.tensor, n, w.offset)) catch oom();
             mb.cpy.append(allocator, c.ggml_new_tensor_1d(mb.ctx, w.tensor.type, n)) catch oom();
@@ -467,7 +468,7 @@ const WriteDevice = struct {
     }
 };
 
-/// Ports `llama_io_read_device` (llama-context.cpp:3454 @cd959bae9): the
+/// Ports `llama_io_read_device` (llama-context.cpp:3624 @b1b770d90): the
 /// metadata from a host buffer, the tensors copied back from the
 /// sequence's device buffers.
 const ReadDevice = struct {
@@ -481,14 +482,14 @@ const ReadDevice = struct {
         return .{ .ptr = self, .vtable = &.{ .read = read, .readTensor = readTensor, .nBytes = nBytes, .discard = discard } };
     }
 
-    /// Ports `llama_io_read_device`'s `discard` (llama-context.cpp:3612 @cd959bae9).
+    /// Ports `llama_io_read_device`'s `discard` (llama-context.cpp:3783 @b1b770d90).
     fn discard(p: *anyopaque) void {
         const self: *ReadDevice = @ptrCast(@alignCast(p));
         self.rinfos.clearRetainingCapacity();
         self.buf_size = 0;
     }
 
-    /// The destructor of `llama_io_read_device` (llama-context.cpp:3459 @cd959bae9).
+    /// The destructor of `llama_io_read_device` (llama-context.cpp:3629 @b1b770d90).
     fn finish(self: *ReadDevice) void {
         defer self.rinfos.deinit(allocator);
         var mbufs_new: MemoryBuffers = .{};
@@ -507,7 +508,8 @@ const ReadDevice = struct {
         }
         for (self.rinfos.items) |r| {
             const buft = c.ggml_backend_buffer_get_type(r.tensor.buffer);
-            const n: i64 = @intCast(r.size / c.ggml_element_size(r.tensor));
+            impl.assert(r.size % c.ggml_type_size(r.tensor.type) == 0, "llama-context.cpp", 3654, "rinfo.size % ggml_type_size(rinfo.tensor->type) == 0");
+            const n: i64 = @as(i64, @intCast(r.size / c.ggml_type_size(r.tensor.type))) * c.ggml_blck_size(r.tensor.type);
             const mb = mbufs_new.at(buft);
             const view = c.ggml_view_1d(mb.ctx, r.tensor, n, r.offset);
             mb.org.append(allocator, view) catch oom();
@@ -516,9 +518,9 @@ const ReadDevice = struct {
         for (mbufs_new.entries.items) |*e| {
             // `mbufs.at()` throws out of a destructor where there is no
             // entry, which terminates.
-            const mbuf_cur = self.mbufs.find(e.buft) orelse impl.abort("llama-context.cpp", 3494, "map::at:  key not found");
+            const mbuf_cur = self.mbufs.find(e.buft) orelse impl.abort("llama-context.cpp", 3665, "map::at:  key not found");
             if (mbuf_cur.buf == null or mbuf_cur.total_size != e.mbuf.total_size) {
-                c.ggml_abort("llama-context.cpp", 3497, "%s: memory buffer mismatch\n", "~llama_io_read_device");
+                c.ggml_abort("llama-context.cpp", 3668, "%s: memory buffer mismatch\n", "~llama_io_read_device");
             }
 
             if (mbuf_cur.n_tensors == e.mbuf.n_tensors) {
@@ -574,8 +576,8 @@ const ReadDevice = struct {
 
                 const n_copy = @min(src_size - src_off, dst_size - dst_off);
 
-                const el = c.ggml_element_size(src_t);
-                const n_el: i64 = @intCast(n_copy / el);
+                impl.assert(n_copy % c.ggml_type_size(src_t.type) == 0, "llama-context.cpp", 3727, "n_copy % ggml_type_size(src_t->type) == 0");
+                const n_el: i64 = @as(i64, @intCast(n_copy / c.ggml_type_size(src_t.type))) * c.ggml_blck_size(src_t.type);
 
                 const src_v = c.ggml_view_1d(ctx_scratch, src_t, n_el, src_off);
                 _ = c.ggml_backend_view_init(src_v);
@@ -598,17 +600,17 @@ const ReadDevice = struct {
                 }
             }
 
-            impl.assert(src_pos == total and dst_pos == total, "llama-context.cpp", 3580, "src_pos == total && dst_pos == total");
+            impl.assert(src_pos == total and dst_pos == total, "llama-context.cpp", 3751, "src_pos == total && dst_pos == total");
             // Tensors left unvisited hold no data.
-            for (mbuf_cur.cpy.items[src_j..]) |t| impl.assert(c.ggml_nbytes(t) == 0, "llama-context.cpp", 3583, "ggml_nbytes(mbuf_cur.cpy[i]) == 0");
-            for (e.mbuf.org.items[dst_i..]) |t| impl.assert(c.ggml_nbytes(t) == 0, "llama-context.cpp", 3586, "ggml_nbytes(mbuf.org[i]) == 0");
+            for (mbuf_cur.cpy.items[src_j..]) |t| impl.assert(c.ggml_nbytes(t) == 0, "llama-context.cpp", 3754, "ggml_nbytes(mbuf_cur.cpy[i]) == 0");
+            for (e.mbuf.org.items[dst_i..]) |t| impl.assert(c.ggml_nbytes(t) == 0, "llama-context.cpp", 3757, "ggml_nbytes(mbuf.org[i]) == 0");
 
             tensorCopyN(chunk_srcs.items, chunk_dsts.items);
 
             c.ggml_free(ctx_scratch);
         }
 
-        impl.assert(self.buf_size == 0, "llama-context.cpp", 3594, "buf_size == 0");
+        impl.assert(self.buf_size == 0, "llama-context.cpp", 3765, "buf_size == 0");
     }
 
     fn read(p: *anyopaque, dst: []u8, exc: *Exception) Thrown!void {
@@ -629,10 +631,10 @@ const ReadDevice = struct {
     }
 };
 
-/// Ports `io_magic` (llama-context.cpp:3668 @cd959bae9).
+/// Ports `io_magic` (llama-context.cpp:3839 @b1b770d90).
 const io_magic: u32 = 0xaf143cd8;
 
-/// Ports `llama_context`'s `state_get_size` (llama-context.cpp:3637 @cd959bae9).
+/// Ports `llama_context`'s `state_get_size` (llama-context.cpp:3808 @b1b770d90).
 pub fn stateGetSize(ctx: *Context) usize {
     var dummy: WriteDummy = .{ .skip_tensors = false };
     var exc: Exception = .{};
@@ -642,7 +644,7 @@ pub fn stateGetSize(ctx: *Context) usize {
     };
 }
 
-/// Ports `llama_context`'s `state_get_data` (llama-context.cpp:3647 @cd959bae9).
+/// Ports `llama_context`'s `state_get_data` (llama-context.cpp:3818 @b1b770d90).
 pub fn stateGetData(ctx: *Context, dst: [*]u8, size: usize) usize {
     var host: WriteHost = .{ .ptr = dst, .buf_size = size };
     defer host.finish();
@@ -653,7 +655,7 @@ pub fn stateGetData(ctx: *Context, dst: [*]u8, size: usize) usize {
     };
 }
 
-/// Ports `llama_context`'s `state_set_data` (llama-context.cpp:3657 @cd959bae9):
+/// Ports `llama_context`'s `state_set_data` (llama-context.cpp:3828 @b1b770d90):
 /// a failed restore discards the tensor data read but not yet applied.
 pub fn stateSetData(ctx: *Context, src: [*]const u8, size: usize) usize {
     var host: ReadHost = .{ .ptr = src, .buf_size = size };
@@ -667,7 +669,7 @@ pub fn stateSetData(ctx: *Context, src: [*]const u8, size: usize) usize {
     };
 }
 
-/// Ports `llama_context`'s `state_seq_get_size` (llama-context.cpp:3670 @cd959bae9).
+/// Ports `llama_context`'s `state_seq_get_size` (llama-context.cpp:3841 @b1b770d90).
 pub fn stateSeqGetSize(ctx: *Context, seq_id: i32, flags: u32) usize {
     var dummy: WriteDummy = .{ .skip_tensors = flags & c.LLAMA_STATE_SEQ_FLAGS_ON_DEVICE != 0 };
     const w = dummy.writer();
@@ -684,7 +686,7 @@ fn seqPrelude(ctx: *Context, w: io.Writer, seq_id: i32, flags: u32, exc: *Except
     return stateSeqWriteData(ctx, w, seq_id, flags, exc);
 }
 
-/// Ports `llama_context`'s `state_seq_get_data` (llama-context.cpp:3683 @cd959bae9).
+/// Ports `llama_context`'s `state_seq_get_data` (llama-context.cpp:3854 @b1b770d90).
 pub fn stateSeqGetData(ctx: *Context, seq_id: i32, dst: [*]u8, size: usize, flags: u32) usize {
     var exc: Exception = .{};
     if (flags & c.LLAMA_STATE_SEQ_FLAGS_ON_DEVICE != 0) {
@@ -710,8 +712,8 @@ fn seqReadPrelude(ctx: *Context, r: io.Reader, seq_id: i32, flags: u32, exc: *Ex
     return stateSeqReadData(ctx, r, seq_id, flags, exc);
 }
 
-/// Ports `llama_context`'s `state_seq_set_data` (llama-context.cpp:3702
-/// @cd959bae9): a failed restore discards the tensor data read but not yet
+/// Ports `llama_context`'s `state_seq_set_data` (llama-context.cpp:3873
+/// @b1b770d90): a failed restore discards the tensor data read but not yet
 /// applied.
 pub fn stateSeqSetData(ctx: *Context, seq_id: i32, src: [*]const u8, size: usize, flags: u32) usize {
     var exc: Exception = .{};
@@ -720,14 +722,14 @@ pub fn stateSeqSetData(ctx: *Context, seq_id: i32, src: [*]const u8, size: usize
         // C++'s try: what it throws escapes.
         var probe: ReadHost = .{ .ptr = src, .buf_size = size };
         const pr = probe.reader();
-        const magic_read = pr.readValue(u32, &exc) catch exc.terminate("llama-context.cpp", 3711);
+        const magic_read = pr.readValue(u32, &exc) catch exc.terminate("llama-context.cpp", 3882);
         if (magic_read != io_magic) {
             exc.set(.runtime_error, "wrong sequence state magic", .{});
-            exc.terminate("llama-context.cpp", 3713);
+            exc.terminate("llama-context.cpp", 3884);
         }
-        const seq_id_read = pr.readValue(i32, &exc) catch exc.terminate("llama-context.cpp", 3717);
+        const seq_id_read = pr.readValue(i32, &exc) catch exc.terminate("llama-context.cpp", 3888);
         probe.finish();
-        impl.assert(ctx.mem_storage.contains(seq_id_read), "llama-context.cpp", 3717, "mem_storage.find(seq_id_read) != mem_storage.end()");
+        impl.assert(ctx.mem_storage.contains(seq_id_read), "llama-context.cpp", 3888, "mem_storage.find(seq_id_read) != mem_storage.end()");
 
         var dev: ReadDevice = .{ .ptr = src, .buf_size = size, .mbufs = ctx.mem_storage.at(seq_id_read) };
         defer dev.finish();
@@ -748,7 +750,7 @@ pub fn stateSeqSetData(ctx: *Context, seq_id: i32, src: [*]const u8, size: usize
     };
 }
 
-/// Ports `llama_context`'s `state_load_file` (llama-context.cpp:3742 @cd959bae9).
+/// Ports `llama_context`'s `state_load_file` (llama-context.cpp:3913 @b1b770d90).
 ///
 /// Return: whether it loaded, or `error.Thrown` for the caller to catch.
 pub fn stateLoadFile(ctx: *Context, filepath: [:0]const u8, tokens_out: [*]c.llama_token, n_token_capacity: usize, n_token_count_out: *usize, exc: *Exception) Thrown!bool {
@@ -786,7 +788,7 @@ pub fn stateLoadFile(ctx: *Context, filepath: [:0]const u8, tokens_out: [*]c.lla
     return true;
 }
 
-/// Ports `llama_context`'s `state_save_file` (llama-context.cpp:3785 @cd959bae9).
+/// Ports `llama_context`'s `state_save_file` (llama-context.cpp:3956 @b1b770d90).
 pub fn stateSaveFile(ctx: *Context, filepath: [:0]const u8, tokens: [*]const c.llama_token, n_token_count: usize, exc: *Exception) Thrown!bool {
     var file = try mmap.File.open(filepath, "wb", false, exc);
     defer file.close();
@@ -803,7 +805,7 @@ pub fn stateSaveFile(ctx: *Context, filepath: [:0]const u8, tokens: [*]const c.l
     return true;
 }
 
-/// Ports `llama_context`'s `state_seq_load_file` (llama-context.cpp:3802 @cd959bae9).
+/// Ports `llama_context`'s `state_seq_load_file` (llama-context.cpp:3973 @b1b770d90).
 pub fn stateSeqLoadFile(ctx: *Context, seq_id: i32, filepath: [:0]const u8, tokens_out: ?[*]c.llama_token, n_token_capacity: usize, n_token_count_out: *usize, exc: *Exception) Thrown!usize {
     const func = "state_seq_load_file";
     var file = try mmap.File.open(filepath, "rb", false, exc);
@@ -844,13 +846,13 @@ pub fn stateSeqLoadFile(ctx: *Context, seq_id: i32, filepath: [:0]const u8, toke
             impl.logError("%s: failed to restore sequence state\n", .{func});
             return 0;
         }
-        impl.assert(nread <= state_size, "llama-context.cpp", 3849, "nread <= state_size");
-        impl.assert(nread + @sizeOf(u32) * 3 + @sizeOf(c.llama_token) * n_token_count_out.* == try file.tell(exc), "llama-context.cpp", 3850, "nread + sizeof(uint32_t) * 3 + sizeof(llama_token) * *n_token_count_out == file.tell()");
+        impl.assert(nread <= state_size, "llama-context.cpp", 4020, "nread <= state_size");
+        impl.assert(nread + @sizeOf(u32) * 3 + @sizeOf(c.llama_token) * n_token_count_out.* == try file.tell(exc), "llama-context.cpp", 4021, "nread + sizeof(uint32_t) * 3 + sizeof(llama_token) * *n_token_count_out == file.tell()");
     }
     return file.tell(exc);
 }
 
-/// Ports `llama_context`'s `state_seq_save_file` (llama-context.cpp:3856 @cd959bae9).
+/// Ports `llama_context`'s `state_seq_save_file` (llama-context.cpp:4027 @b1b770d90).
 pub fn stateSeqSaveFile(ctx: *Context, seq_id: i32, filepath: [:0]const u8, tokens: [*]const c.llama_token, n_token_count: usize, exc: *Exception) Thrown!usize {
     var file = try mmap.File.open(filepath, "wb", false, exc);
     defer file.close();
@@ -866,11 +868,11 @@ pub fn stateSeqSaveFile(ctx: *Context, seq_id: i32, filepath: [:0]const u8, toke
     _ = try stateSeqWriteData(ctx, wf.writer(), seq_id, 0, exc);
 
     const res = try file.tell(exc);
-    impl.assert(res == @sizeOf(u32) * 3 + @sizeOf(c.llama_token) * n_token_count + wf.size_written, "llama-context.cpp", 3871, "res == sizeof(uint32_t) * 3 + sizeof(llama_token) * n_token_count + io.n_bytes()");
+    impl.assert(res == @sizeOf(u32) * 3 + @sizeOf(c.llama_token) * n_token_count + wf.size_written, "llama-context.cpp", 4042, "res == sizeof(uint32_t) * 3 + sizeof(llama_token) * n_token_count + io.n_bytes()");
     return res;
 }
 
-/// Ports `llama_context`'s `state_write_data` (llama-context.cpp:3876 @cd959bae9).
+/// Ports `llama_context`'s `state_write_data` (llama-context.cpp:4047 @b1b770d90).
 pub fn stateWriteData(ctx: *Context, w: io.Writer, exc: *Exception) Thrown!usize {
     const func = "state_write_data";
     impl.logDebug("%s: writing state\n", .{func});
@@ -885,7 +887,7 @@ pub fn stateWriteData(ctx: *Context, w: io.Writer, exc: *Exception) Thrown!usize
     return w.nBytes();
 }
 
-/// Ports `llama_context`'s `state_read_data` (llama-context.cpp:3896 @cd959bae9).
+/// Ports `llama_context`'s `state_read_data` (llama-context.cpp:4067 @b1b770d90).
 pub fn stateReadData(ctx: *Context, r: io.Reader, exc: *Exception) Thrown!usize {
     const func = "state_read_data";
     impl.logDebug("%s: reading state\n", .{func});
@@ -906,13 +908,13 @@ pub fn stateReadData(ctx: *Context, r: io.Reader, exc: *Exception) Thrown!usize 
     return r.nBytes();
 }
 
-/// Ports `llama_context`'s `state_seq_write_data` (llama-context.cpp:3922 @cd959bae9).
+/// Ports `llama_context`'s `state_seq_write_data` (llama-context.cpp:4093 @b1b770d90).
 pub fn stateSeqWriteData(ctx: *Context, w: io.Writer, seq_id: i32, flags: u32, exc: *Exception) Thrown!usize {
     if (ctx.mem) |m| try m.stateWrite(w, seq_id, flags, exc);
     return w.nBytes();
 }
 
-/// Ports `llama_context`'s `state_seq_read_data` (llama-context.cpp:3930 @cd959bae9).
+/// Ports `llama_context`'s `state_seq_read_data` (llama-context.cpp:4101 @b1b770d90).
 pub fn stateSeqReadData(ctx: *Context, r: io.Reader, seq_id: i32, flags: u32, exc: *Exception) Thrown!usize {
     if (ctx.mem) |m| try m.stateRead(r, seq_id, flags, exc);
     return r.nBytes();

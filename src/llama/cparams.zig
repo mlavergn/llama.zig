@@ -7,22 +7,22 @@
 //! - `llama.cpp/src/llama-cparams.h` -- `LLAMA_MAX_SEQ` and `llama_cparams`
 //! - `llama.cpp/src/llama-cparams.cpp` -- `llama_max_parallel_sequences`
 //!
-//! All at v0.9.0 (`cd959bae9`).
+//! All at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
 const impl = @import("impl.zig");
 
 const c = impl.c;
 
-/// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @cd959bae9).
+/// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @b1b770d90).
 pub const max_seq: u32 = 256;
 
-/// Ports `llama_max_parallel_sequences` (llama-cparams.cpp:3 @cd959bae9).
+/// Ports `llama_max_parallel_sequences` (llama-cparams.cpp:3 @b1b770d90).
 pub fn maxParallelSequences() usize {
     return max_seq;
 }
 
-/// Mirrors `llama_cparams` (llama-cparams.h:10 @cd959bae9).
+/// Mirrors `llama_cparams` (llama-cparams.h:10 @b1b770d90).
 pub const Cparams = struct {
     /// Context size used during inference.
     n_ctx: u32 = 0,
@@ -59,11 +59,6 @@ pub const Cparams = struct {
     offload_kqv: bool = false,
     flash_attn: bool = false,
     auto_fa: bool = false,
-    /// Fused gated delta net, autoregressive.
-    fused_gdn_ar: bool = false,
-    /// Fused gated delta net, chunked.
-    fused_gdn_ch: bool = false,
-    auto_fgdn: bool = false,
     /// Fused lightning indexer.
     fused_lid: bool = false,
     auto_flid: bool = false,
@@ -79,7 +74,6 @@ pub const Cparams = struct {
     fused_kv_rows: bool = false,
     auto_fkvr: bool = false,
     no_perf: bool = false,
-    warmup: bool = false,
     op_offload: bool = false,
     kv_unified: bool = false,
     pipeline_parallel: bool = false,
@@ -89,6 +83,9 @@ pub const Cparams = struct {
     /// The device cache in bytes for the experts kept in host memory, 0
     /// for none.
     moe_cache_size: usize = 0,
+    /// The share of the MoE cache misses computed on the CPU instead of
+    /// uploaded.
+    moe_cache_cpu_share: f32 = 0,
 
     /// `std::vector<bool>`, `[n_layer()]`: extract each layer's input
     /// embeddings. Shares its storage across copies: the C++ copies the
@@ -98,6 +95,9 @@ pub const Cparams = struct {
     /// Write the enabled layer inputs to a device buffer instead of host
     /// memory.
     embeddings_layer_inp_dev: bool = false,
+    /// Write the unmasked `h_nextn` rows to a device buffer instead of host
+    /// memory, see `llama_set_embeddings_nextn_dev`.
+    embeddings_nextn_dev: bool = false,
 
     ctx_type: c.enum_llama_context_type = 0,
     /// The RoPE scaling the context resolved: the parameter, or the
@@ -110,6 +110,10 @@ pub const Cparams = struct {
 
     /// The other context, `llama_context *`, opaque here.
     ctx_other: ?*anyopaque = null,
+
+    /// The context whose `h_nextn` device buffer holds the state rows of a
+    /// batch, see `llama_set_ctx_state_src`; `llama_context *`, opaque here.
+    ctx_state_src: ?*anyopaque = null,
 };
 
 // -----------------------------------------------------------------------------

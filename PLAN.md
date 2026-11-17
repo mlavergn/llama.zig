@@ -42,7 +42,7 @@ Settled in review. The plan below assumes all of these.
 | 21 | C ABI endgame | **Confirmed:** idiomatic Zig core with a thin `extern "C"` shim on top. |
 | 22 | Unsupported flags | **Reject** with a clear error and a non-zero exit. Never silently ignore. |
 | 23 | Parity mode | **Raw completion.** Greedy, no chat template, prompt passed through verbatim. The gate does not have to hold for chat invocations. |
-| 24 | Refactoring to idiomatic Zig | **Per subsystem**, as each stops being called from C++ — not all at once at the end. **Not started**, and since the swap nothing is called from C++ any more, so it is open for every subsystem (see "What is left"). |
+| 24 | Refactoring to idiomatic Zig | **Moved out of this repository** (Decision 67). Its ggml steps continue in `../zigggml`; this repository takes no rewrite until zigggml is swapped in. Originally: per subsystem, as each stops being called from C++ — not all at once at the end. |
 | 25 | Chat templates | **Full Jinja, via `mlavergn/zigjinja`** (a fork of `gremlin-labs/vibe-jinja`) as a single dependency. Supersedes Decision 10; permitted by the exception in Decision 27. |
 | 26 | CLI timing | **Start building it now**, against the current libllama, rather than after the port completes. |
 | 27 | The dependency rule | **Stands, with one named exception: the Jinja engine, now `zigjinja`.** Not narrowed, not dropped — explicitly excepted. Applied to `cli/`, so `libllamazig` stays dependency-free. |
@@ -84,6 +84,7 @@ Settled in review. The plan below assumes all of these.
 | 64 | Chat parsing, and tool calling | **Port `common/`'s chat parsing stack to Zig, in `cli/`, before tool execution** (asked on 2026-10-29: "we should add tool calling, can we do that prior to calling 0.4.1 done"; answered "parsing stack first", and "commit 0.4.1+1 now, tools next"). Upstream's `llama-cli` has no tool calling at v0.4.1 -- `--tools` is a server flag -- but it does run the chat parser, through its embedded server, to separate reasoning from content. So the stage ports `common_chat_templates_apply_jinja` and `common_chat_parse` with everything under them: the PEG parser, the auto-parser and diff analyzer, the per-model parsers, `json-schema.cpp` and `json-schema-to-grammar.cpp`, over a port of nlohmann's `ordered_json`. `--json-schema` comes with it. Running tools is a later decision. "Stage 9 — Chat parsing". |
 | 65 | `llama-server` | **Ported, as `tools/server/`, a Zig `llama-server` held to upstream's on the wire** (asked on 2026-11-01, after learning that tool calling and MCP live only in the server: "we need to port llama-server ... get started"). Upstream's tool calling is the server's -- `--tools` (seven built-in tools), `--mcp-servers-config`/`--mcp-servers-json`, `--ui-mcp-proxy` are all `LLAMA_EXAMPLE_SERVER` options, and `llama-cli` links the code and never reaches it -- so porting the server is how this project gets tools without designing behaviour of its own. Measured at v0.4.1: 21,852 lines in `tools/server/`, over Stage 9's chat stack, `common/speculative.cpp` and its n-gram helpers (~4,000), `subproc`, `preset`, `download`/`hf-cache` for router mode, and cpp-httplib (`httplib.cpp` 18,209 + `httplib.h` 4,667, of which the server half and a plain-HTTP client are reached: the reference builds without SSL). The web UI is not built by either side -- the reference compiles `llama.cpp.zmake`'s `zig/ui-stub`, so both serve no assets -- and whether to embed upstream's prebuilt bundle is left open. Gated by `server-diff`: both binaries started on the same model, the same request transcript sent to each, status, headers and bodies compared with timings masked. "Stage 10 -- `llama-server`". |
 | 66 | Apple minimum OS | **26.0 on every Apple platform, from v0.9.0** (stated on 2026-11-09: "the ios / macos baseline OS is 26.0 ... that's as low as we need to go"; then "all apple frameworks are pinned at 26.0 and up"). Amends Decision 63: `llama.xcframework`'s seven slices are built at minimum iOS, macOS, tvOS and visionOS 26.0 where upstream's `build-xcframework.sh` says 16.4, 13.3, 16.4 and 1.0, so it is a drop-in only for apps whose deployment target is 26.0 or later. `verify.sh compat` holds each slice's binaries to 26.0 (`COMPAT_MINOS`; on a device binary `vtool` writes the minimum into the SDK field too) and the bundle `Info.plist` to upstream's with that minimum written in (`MinimumOSVersion`, `DTSDKName`); every other byte stays upstream's. The CMake reference builds (`make buildmacos`, `buildios`) and `validate`'s iOS check target 26.0 as well. The device CPUs stay Apple clang's defaults (`apple_a7`, `apple_a12`): 26.0 needs newer cores, but a new CPU target is a new reference, and that is a separate decision. |
+| 67 | What this repository is for | **Keep a Zig port of llama.cpp in sync with upstream's C/C++ sources, release by release, until a working zigggml can be swapped in** (decided on 2026-11-12: the ggml rework "belongs to zigggml", and llama.zig's plan "goes back to being keep a zig port of llama.cpp in sync with the upstream C/C++ sources until we have a working zigggml we can swap in"). The idiomatic rewrite of ggml (Decision 24's ggml steps) moved to `../zigggml`, with the work done here so far: it was developed on branch `ggml-rework` (`d4d1922`, not on `master`) and copied there, where its `PLAN.md` carries it. Here, no idiomatic rewrite: each sync ports upstream's changes into the existing port and gates them, as before. Two constraints follow from the swap. **zigggml stays a drop-in for `src/ggml/`**: same C symbols, same names ("we are not changing the case yet so we can drop zigggml into llama.zig later"). And **the A/B gates run in both repositories** until zigggml's port is confirmed correct ("the checks MUST run in zigggml AND llama.zig, we need to ensure we can A/B test against the original logic"): zigggml's `scripts/ab/` run llama.zig's harnesses against llama.zig's reference, so a sync that changes a harness, `llama.cpp.zmake` or the reference steps (`cuda-ref`, `vk-ref`) changes zigggml's gates too. The gates that need libllama or a model (`node-diff` and kin) stay here, where the swap will be proven. |
 
 ---
 
@@ -713,6 +714,8 @@ and signatures of the translation unit it replaces, because that is what lets a
 half-ported library link at all. By the end of Stage 4 the "Zig core" would
 otherwise be several thousand lines written to a C ABI: out-params, opaque
 pointers, error codes.
+
+**Moved to `../zigggml` (Decision 67).** The idiomatic rewrite of ggml is that repository's work now, and this repository takes no rewrite until a working zigggml can be swapped in for `src/ggml/`. What follows records why the rewrite was planned this way.
 
 **Decision 24: refactor per subsystem, as each stops being called from C++.**
 Once nothing outside ggml calls into it, ggml's internals can be reworked to
@@ -2696,6 +2699,78 @@ to the AVX-512 items it carries.
 
 ---
 
+### Pickup for the v1.0.0 sync
+
+Upstream `v1.0.0` (`b1b770d90`). **This sync was driven from the GB10**
+(`NOTES.md`, "Upstream sync v0.9.0 → v1.0.0"), so the pickups are inverted:
+every Linux gate ran there before the commit, and the Mac is the machine
+that has not seen the port. Move `llama.cpp/` and the zmake checkout to
+`b1b770d90`, zmake to `c2d6b81` (v1.0.0+1; it builds from the release
+tarball now: `zig build` fetches it), and zigjinja to `6efb5e4` (v3.1.11,
+on its `main`), before anything else.
+
+**GB10 (`spark-dbff`)** -- **clear**: the sync ran there. Unreachable on its
+hardware, recorded not deferred: CUDA's cluster re-instantiation (no kernel
+there has cluster dims > 1); Vulkan's `write_n`/`write_2d` staging paths
+and the `!rebar` allocation arm (a discrete GPU without ReBAR), GROUP_NORM's
+2D split (`maxComputeWorkGroupCount[0]` < 65537), the Qualcomm and AMD
+driver arms; fit's skipped NextN layers (no GGUF with NextN layers loads
+without `load_mtp`); MTP device-row indexing on a trained model (the random
+fixture's drafts do not depend on the row).
+
+**Mac (this repository's home)** -- **open**:
+
+1. **Metal, compiled and run for the first time.** It was ported blind and
+   only type-checked for `aarch64-macos` with `use_metal`: the 12 TOPK_MOE
+   fusion rows and `checkTopkMoe` (ggml-metal-fusion.cpp:362-412, 867),
+   `ggml_metal_op_unary`'s TOPK_MOE anchor, `_topk_moe` (gating, bias, the
+   pbias buffer at index 4), `_group_norm` (nb03/nb1-3, the ne03 grid),
+   radix top-k without `smem_out`, `get_pipeline_topk_moe` and
+   `group_norm` (flat against `_strided`, `FC_GROUP_NORM`), `mul_mm` from
+   K >= 32. Then `make struct-layout`, `metal-diff` (its harness gained
+   moe-gate graphs, `MAX_ENTRIES` 64), `metal-ops-diff` (GROUP_NORM and
+   TOPK_MOE cases), `tuning-diff`, `backend-ops` with `--diff`,
+   `node-diff ARGS=--gpu`.
+2. **The goldens**: `make buildmacos`, then `vecdot-golden`, `vec-golden`
+   (it must gain `ggml_vec_dot_f16_f32`) and `quants-golden`, each with its
+   `GOLDEN_CPU=generic` sibling.
+3. **The Apple CPU set**: `ops-diff`, `repack-diff`, `node-diff`,
+   `parity-port`, `parity-port-cpu` at the default `GATE_CPU`, `apple_m3`,
+   `apple_a7` and `apple_a12` (`src/ggml/cpu/` changed: F32 `src1`,
+   `mad_f16_f32`, the conv paths).
+4. **The macOS-only gates**, Mac-shaped as written: `graph-diff` and
+   `sched-diff` against the Apple-clang reference (they ran against zmake's
+   library on the GB10), `abi-check`, `types-golden`, `opt-diff` with its
+   Metal section, `opt-llama-diff`, `adapter-diff`, `meta-diff`, and
+   `sampler-diff` -- the one gate for backend sampling, where `context-diff`
+   let a dropped `t_sampling_all` output through. A Linux copy of
+   `sampler-diff` fails 13 typical-sampler records: its unrolled-entropy
+   shape was measured on Apple clang, so check it on the Mac before reading
+   anything into that.
+5. **Every model and libmtmd gate on Metal**: `context-diff --gpu`,
+   `arch-model-diff`, `mtp-diff`, `gemma4-assistant-diff` (6023692b1 touched
+   132 model files and the RoPE override path has not run on Metal),
+   `mtmd-gates` (the shared scheduler is new; mimovl and qwen3tts_spkenc
+   now ask for BF16), `mtmd-audio-diff` (its 1/ln10 constant assumes clang
+   folds `1.0f/logf(10.0f)` as `(float)log(10.0)`).
+6. **The rest of Step 7 on the Mac**: `vocab-diff`, `loader-diff`,
+   `arch-diff`, `quant-diff`, `unicode-diff` (the Darwin `llama_file` arm
+   changed only in log text and the `posix_memalign` fallback),
+   `xcframework-check` after `make -C xcframework upstream`, `blas-diff`,
+   `blas-node-diff`, `cnv-diff`, `parity-cli`.
+
+**DESKTOP-BR7J5S9 (Windows x86_64)** -- **open**: `make x86-gates` at
+`x86_64_v3` and `win-host-diffs`. New: the AVX/F16C arm of
+`ggml_vec_dot_f16_f32` and the F16×F32 tinyBLAS rows (`x86-ops-diff`,
+`x86-node-diff`); the Windows unbuffered `llama_file` arm (9d340ec34,
+cross-compile-checked only) through a `--direct-io` load. Check that
+`llama-cli.exe` and the tools build.
+
+**JWHLPTOP** -- excluded; v1.0.0 adds the AVX-512 arm of
+`ggml_vec_dot_f16_f32` to the items it carries.
+
+---
+
 ## Risk register
 
 | Risk | Impact | Mitigation |
@@ -3010,7 +3085,7 @@ and what each one is waiting for:
 | **AVX512-BF16 and AVX512-FP16 arms** | a Sapphire Rapids or newer CPU | a compile error until then; Tiger Lake has neither |
 | **Linux x86_64's OS arms** | Linux x86 hardware | its kernels are Windows', gated there; only the `__linux__` threading, affinity and NUMA arms are unrun on x86 |
 | **`set_numa_thread_affinity`** | a multi-socket machine | every machine here has one NUMA node |
-| **Decision 24, idiomatic Zig** | a decision to schedule it | not started; open for every subsystem since the swap |
+| **Swapping in zigggml** (Decisions 24, 67) | a working zigggml whose A/B gates pass | the idiomatic ggml rewrite continues in `../zigggml`; this repository keeps the port in sync until then |
 | **The xcframework's x86_64 slices** (Decision 63) | an Intel Mac, or Rosetta installed here | built, linked and held to upstream's by `compat`; never run. The x86 kernels are gated on Windows; the Darwin x86 OS arms are not |
 | **The xcframework on tvOS and visionOS devices** | running `smoke-device`'s app there | both slices built and gated structurally, and their CPUs (`apple_a7`, `apple_a12`) by the root gates; their simulators pass `smoke-sim` |
 

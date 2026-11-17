@@ -42,6 +42,12 @@
 # precision, SUM over a strided view, TOP_K_MASK. The extras follow `-o`
 # as test-backend-ops does -- a comma list, a regex (`harness/op_filter.h`);
 # before v0.8.0's pickup a list or regex ran none of them.
+# Since v1.0.0: FWHT above 512 wide and over f16 (upstream's cases stop at
+# 512 and jump to a refused 16384), coopmat2 flash attention over a dense
+# q8_0 cache with and without the new dequantized-KV threshold, and the
+# tiled-transpose concat at sizes off its 32x32 tile. With
+# `GGML_VK_FORCE_XE_FA=1` (and coopmat2 off) flash attention takes the
+# Intel Xe prefill and two-phase decode kernels, which the GB10 can run.
 # `test-backend-ops` does not see
 # descriptor-set reuse (v0.6.0): an injection that reused every set whose
 # binding count matched passed ADD and GET_ROWS on llvmpipe -- a case

@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.9.0
-//! (`cd959bae9`).
+//! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v1.0.0
+//! (`b1b770d90`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -28,7 +28,7 @@ fn nodeAt(cgraph: *const CGraph, i: c_int) *c.ggml_tensor {
     return cgraph.nodes[@intCast(i)].?;
 }
 
-/// Ports `ggml_vk_preallocate_buffers` (ggml-vulkan.cpp:12249 @cd959bae9):
+/// Ports `ggml_vk_preallocate_buffers` (ggml-vulkan.cpp:12560 @b1b770d90):
 /// grows the scratch buffers to the sizes the recorded ops asked for,
 /// first submitting and waiting for whatever already uses them.
 pub fn preallocateBuffers(ctx: *BackendCtx, subctx: ?*Context) void {
@@ -62,8 +62,13 @@ pub fn preallocateBuffers(ctx: *BackendCtx, subctx: ?*Context) void {
         ctx.prealloc_split_k = createOrAbort(ctx, ctx.prealloc_size_split_k);
     }
     if (ctx.prealloc_add_rms_partials == null or (ctx.prealloc_size_add_rms_partials > 0 and ctx.prealloc_add_rms_partials.?.size < ctx.prealloc_size_add_rms_partials)) {
-        // The C++ streams the buffer's shared pointer here, not its size.
-        m.buffer.logMemory("ggml_vk_preallocate_buffers(add_partials_size: %p)", .{@as(?*anyopaque, ctx.prealloc_add_rms_partials)});
+        // The C++ streams the buffer's shared pointer here, not its size;
+        // libc++ writes a null one as "0", where printf's %p writes "(nil)".
+        if (ctx.prealloc_add_rms_partials) |p| {
+            m.buffer.logMemory("ggml_vk_preallocate_buffers(add_partials_size: %p)", .{@as(*anyopaque, p)});
+        } else {
+            m.buffer.logMemory("ggml_vk_preallocate_buffers(add_partials_size: 0)", .{});
+        }
         m.buffer.destroyBuffer(&ctx.prealloc_add_rms_partials);
         ctx.prealloc_add_rms_partials = createOrAbort(ctx, ctx.prealloc_size_add_rms_partials);
     }
@@ -90,7 +95,7 @@ fn overlapsUnsynced(node: *const c.ggml_tensor, unsynced: []const *const c.ggml_
     return false;
 }
 
-/// Ports `ggml_vk_build_graph` (ggml-vulkan.cpp:12387 @cd959bae9): records
+/// Ports `ggml_vk_build_graph` (ggml-vulkan.cpp:12698 @b1b770d90): records
 /// one node (or fused run) into the compute context, after a barrier if it
 /// depends on unsynchronised work; submits the batch if asked.
 ///
@@ -113,11 +118,14 @@ pub fn buildGraph(ctx: *BackendCtx, cgraph: *CGraph, node_idx: c_int, node_idx_b
             nodeAt(cgraph, next_node_idx).op == c.GGML_OP_RMS_NORM and
             nodeAt(cgraph, next_node_idx).src[0] == nodeAt(cgraph, next_node_idx - 1) and
             c.ggml_nrows(nodeAt(cgraph, next_node_idx)) == 1 and
-            ctx.device.add_rms_fusion)
+            ctx.device.add_rms_fusion and !ctx.device.disable_fusion)
         {
             const size = ops.rmsPartialsSize(ctx, nodeAt(cgraph, node_idx));
             ctx.do_add_rms_partials_offset_calculation = true;
-            if (ctx.prealloc_size_add_rms_partials_offset + size <= ctx.prealloc_size_add_rms_partials) ctx.do_add_rms_partials = true;
+            if (ctx.prealloc_size_add_rms_partials_offset + size <= ctx.prealloc_size_add_rms_partials) {
+                ctx.do_add_rms_partials = true;
+                m.perf.countFusion(ctx.device, "ADD_RMS_NORM_PARTIALS");
+            }
         }
     }
 
@@ -206,7 +214,7 @@ fn syncLogNodes(ctx: *BackendCtx, cgraph: *const CGraph, node_idx: c_int) void {
     }
 }
 
-/// Ports `ggml_vk_compute_forward` (ggml-vulkan.cpp:12965 @cd959bae9):
+/// Ports `ggml_vk_compute_forward` (ggml-vulkan.cpp:13269 @b1b770d90):
 /// submits the context node `tensor_idx` was recorded into, unless it was
 /// already, and runs the host copies of a finished one.
 pub fn computeForward(ctx: *BackendCtx, cgraph: *const CGraph, tensor_idx: c_int, almost_ready: bool) void {

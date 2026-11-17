@@ -8,8 +8,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/gated-delta-net-mma.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/gated-delta-net-mma.cuh` at v0.9.0
-//! (`cd959bae9`): the host side -- the argument struct, the per-device
+//! `llama.cpp/ggml/src/ggml-cuda/gated-delta-net-mma.cuh` at v1.0.0
+//! (`b1b770d90`): the host side -- the argument struct, the per-device
 //! shared-memory opt-in, the path choice and the launch -- on the CUDA arms
 //! (`GGML_USE_HIP` and `GGML_USE_MUSA` compile out). The kernel stays CUDA.
 //!
@@ -36,7 +36,7 @@ const kernels = @import("kernels.zig");
 
 const cu = common.cu;
 
-/// Ports `ggml_cuda_gdn_mma_args` (gated-delta-net-mma.cuh:7 @cd959bae9).
+/// Ports `ggml_cuda_gdn_mma_args` (gated-delta-net-mma.cuh:7 @b1b770d90).
 /// Passed to the kernel by value, so its size is checked against the
 /// kernel's parameter on the first launch (Decision 46).
 pub const Args = extern struct {
@@ -79,13 +79,13 @@ comptime {
     }
 }
 
-/// Ports `D` (gated-delta-net-mma.cu:8 @cd959bae9): the head size.
+/// Ports `D` (gated-delta-net-mma.cu:8 @b1b770d90): the head size.
 const D = 128;
 
 /// `nv_bfloat16`, for sizes only.
 const Bf16 = u16;
 
-/// Ports `matrix` (gated-delta-net-mma.cu:11 @cd959bae9), `matrix<R, C>`, for
+/// Ports `matrix` (gated-delta-net-mma.cu:11 @b1b770d90), `matrix<R, C>`, for
 /// its size: a high and a residual BF16 plane.
 fn Matrix(comptime R: comptime_int, comptime C: comptime_int) type {
     return extern struct {
@@ -94,7 +94,7 @@ fn Matrix(comptime R: comptime_int, comptime C: comptime_int) type {
     };
 }
 
-/// Ports `shared` (gated-delta-net-mma.cu:44 @cd959bae9), `shared<C, V>`, for
+/// Ports `shared` (gated-delta-net-mma.cu:44 @b1b770d90), `shared<C, V>`, for
 /// its size, which is the launch's dynamic shared memory.
 fn Shared(comptime C: comptime_int, comptime V: comptime_int) type {
     return extern struct {
@@ -124,7 +124,7 @@ fn kernel(comptime C: comptime_int, comptime V: comptime_int, comptime BLOCKS: c
     return kernels.get("gated-delta-net-mma", kernels.tmpl("ggml_cuda_gated_delta_net_mma::gdn_single", &.{ kernels.int(C), kernels.int(V), kernels.int(BLOCKS) }));
 }
 
-/// Ports `init` (gated-delta-net-mma.cu:366 @cd959bae9), `init<C, V, BLOCKS>`:
+/// Ports `init` (gated-delta-net-mma.cu:366 @b1b770d90), `init<C, V, BLOCKS>`:
 /// whether the device can give the kernel `sizeof(shared<C, V>)` bytes of
 /// shared memory, asked once per device. The C's `std::call_once` per
 /// device; a refusal is remembered as well as an acceptance.
@@ -163,10 +163,10 @@ fn Init(comptime C: comptime_int, comptime V: comptime_int, comptime BLOCKS: com
     };
 }
 
-/// Ports `gdn_path` (gated-delta-net-mma.cu:384 @cd959bae9).
+/// Ports `gdn_path` (gated-delta-net-mma.cu:384 @b1b770d90).
 const Path = enum { ar, slice32_one_block, slice32_two_blocks, slice64, whole_head };
 
-/// Ports `select_gdn_mma_path` (gated-delta-net-mma.cu:386 @cd959bae9), the
+/// Ports `select_gdn_mma_path` (gated-delta-net-mma.cu:386 @b1b770d90), the
 /// CUDA arm: only the architectures upstream benchmarked, a value-split
 /// schedule when whole heads would leave half the SMs idle.
 fn selectPath(device: c_int, a: *const Args) Path {
@@ -201,7 +201,7 @@ fn dim(x: i64) u32 {
 }
 
 /// Ports `ggml_cuda_gdn_mma_launch` (gated-delta-net-mma.cu:422
-/// @cd959bae9), which launches with `<<<>>>`.
+/// @b1b770d90), which launches with `<<<>>>`.
 ///
 /// Return: whether the chunked kernel ran; false leaves the op to the
 /// recurrent kernel, with nothing launched.

@@ -36,9 +36,15 @@ extern "C" {
 
 // The metadata half of llama_model_load (llama.cpp:315). Returns the model,
 // or null with what llama_model_load would log after "error loading model: ".
-llama_model * ref_load_metadata(const char * path, const llama_model_kv_override * overrides, int vocab_only, char * what, size_t n) {
+// `split_paths` are the paths a caller of llama_model_load_from_splits gives,
+// the first one `path` itself; none for llama_model_load_from_file.
+llama_model * ref_load_metadata(const char * path, const char * const * split_paths, int n_split_paths,
+        const llama_model_kv_override * overrides, int vocab_only, char * what, size_t n) {
     try {
         std::vector<std::string> splits;
+        for (int i = 0; i < n_split_paths; i++) {
+            splits.push_back(split_paths[i]);
+        }
         llama_model_params params = llama_model_default_params();
         params.vocab_only   = vocab_only != 0;
         params.kv_overrides = overrides;

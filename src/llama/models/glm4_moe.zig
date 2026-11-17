@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/glm4-moe.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/glm4-moe.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_glm4_moe`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph` and `graph_mtp`.
 
@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_glm4_moe`'s `load_arch_hparams` (models/glm4-moe.cpp:3 @cd959bae9).
+/// Ports `llama_model_glm4_moe`'s `load_arch_hparams` (models/glm4-moe.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -51,7 +51,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_glm4_moe`'s `load_arch_tensors` (models/glm4-moe.cpp:28 @cd959bae9).
+/// Ports `llama_model_glm4_moe`'s `load_arch_tensors` (models/glm4-moe.cpp:28 @b1b770d90).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -141,7 +141,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 // The graph
 
 /// Ports `llama_model_glm4_moe`'s `build_arch_graph` (models/glm4-moe.cpp:119
-/// @cd959bae9): the MTP draft head for that graph type, the main model
+/// @b1b770d90): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -149,7 +149,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports the constructor of `llama_model_glm4_moe`'s `graph_mtp`
-/// (models/glm4-moe.cpp:126 @cd959bae9).
+/// (models/glm4-moe.cpp:126 @b1b770d90).
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -188,9 +188,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     }
     b.cb(tok_embd, "mtp_tok_embd", il);
 
-    inp.h = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, hp.n_embd, b.n_tokens);
-    c.ggml_set_input(inp.h);
-    _ = c.ggml_set_name(inp.h, "mtp_h_input");
+    inp.h = b.buildInpEmbdState(inp, hp.n_embd);
 
     const h_embd = inp.h.?;
 
@@ -232,8 +230,8 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
         b.cb(Kcur, "mtp_Kcur_normed", il);
     }
 
-    Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-    Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+    Qcur = b.buildRope(Qcur, inp_pos, il);
+    Kcur = b.buildRope(Kcur, inp_pos, il);
 
     b.cb(Qcur, "mtp_Qcur", il);
     b.cb(Kcur, "mtp_Kcur", il);
@@ -273,7 +271,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.cb(cur, "mtp_post_ffn", il);
 
     const head_norm_w = layer.nextn.shared_head_norm orelse model.output_norm;
-    impl.assert(head_norm_w != null, "models/glm4-moe.cpp", 260, "head_norm_w && \"GLM4_MOE MTP: missing both nextn.shared_head_norm and output_norm\"");
+    impl.assert(head_norm_w != null, "models/glm4-moe.cpp", 253, "head_norm_w && \"GLM4_MOE MTP: missing both nextn.shared_head_norm and output_norm\"");
 
     cur = b.buildNorm(cur, head_norm_w, null, .rms, -1);
     b.cb(cur, "h_nextn", -1);
@@ -284,7 +282,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
 
     const head_w = layer.nextn.shared_head_head orelse model.output;
     const head_s = if (layer.nextn.shared_head_head != null) layer.nextn.shared_head_head_s else model.output_s;
-    impl.assert(head_w != null, "models/glm4-moe.cpp", 277, "head_w && \"GLM4_MOE MTP: missing LM head (nextn.shared_head_head or model.output)\"");
+    impl.assert(head_w != null, "models/glm4-moe.cpp", 270, "head_w && \"GLM4_MOE MTP: missing LM head (nextn.shared_head_head or model.output)\"");
 
     cur = b.buildLoraMm(head_w.?, cur, head_s);
     b.cb(cur, "result_output", -1);
@@ -293,23 +291,20 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_glm4_moe`'s `graph`
-/// (models/glm4-moe.cpp:285 @cd959bae9).
+/// (models/glm4-moe.cpp:278 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/glm4-moe.cpp", 288, "n_embd_head == hparams.n_embd_head_k()");
-
-    var sections: [4]c_int = undefined;
-    @memcpy(&sections, hp.rope_sections[0..4]);
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/glm4-moe.cpp", 281, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
     const use_mrope = hp.useMrope();
     if (b.ubatch.embd != null and !use_mrope) {
         // Stopped here rather than give wrong results.
-        impl.abort("models/glm4-moe.cpp", 301, "This GGUF does not support multimodal. Please reconvert it.");
+        impl.abort("models/glm4-moe.cpp", 291, "This GGUF does not support multimodal. Please reconvert it.");
     }
 
     // The positions.
@@ -346,14 +341,9 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 b.cb(Kcur, "Kcur_normed", il);
             }
 
-            if (use_mrope) {
-                Qcur = c.ggml_rope_multi(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), &sections, b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-                Kcur = c.ggml_rope_multi(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), &sections, b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            } else {
-                // Normal RoPE.
-                Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-                Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            }
+            // Normal RoPE.
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
 
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);

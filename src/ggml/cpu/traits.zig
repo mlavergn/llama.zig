@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.9.0, `cd959bae9`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v1.0.0, `b1b770d90`),
 //! the section beginning at line 218. Each declaration names the C it replaces
 //! and the line it began at.
 //!
@@ -109,7 +109,7 @@ const quants = struct {
 /// them to `ggml_vec_dot_t` when it stores them. That cast is `@ptrCast` here.
 const vec = struct {
     extern fn ggml_vec_dot_f32(n: c_int, s: [*c]f32, bs: usize, x: [*c]const f32, bx: usize, y: [*c]const f32, by: usize, nrc: c_int) void;
-    extern fn ggml_vec_dot_f16(n: c_int, s: [*c]f32, bs: usize, x: [*c]c.ggml_fp16_t, bx: usize, y: [*c]c.ggml_fp16_t, by: usize, nrc: c_int) void;
+    extern fn ggml_vec_dot_f16_f32(n: c_int, s: [*c]f32, bs: usize, x: [*c]const c.ggml_fp16_t, bx: usize, y: [*c]const f32, by: usize, nrc: c_int) void;
     extern fn ggml_vec_dot_bf16(n: c_int, s: [*c]f32, bs: usize, x: [*c]c.ggml_bf16_t, bx: usize, y: [*c]c.ggml_bf16_t, by: usize, nrc: c_int) void;
 };
 
@@ -144,7 +144,7 @@ fn entry(
     };
 }
 
-/// Ports `type_traits_cpu` (ggml-cpu.c:218 @cd959bae9).
+/// Ports `type_traits_cpu` (ggml-cpu.c:218 @b1b770d90).
 ///
 /// Read directly by `mul_mat`, `mul_mat_id` and `ggml_graph_plan` as well as
 /// through `ggml_get_type_traits_cpu`, so it is `pub` rather than file-local.
@@ -154,7 +154,7 @@ pub const table: [c.GGML_TYPE_COUNT]Traits = blk: {
     var t: [c.GGML_TYPE_COUNT]Traits = @splat(entry(null, null, c.GGML_TYPE_F32, 0));
 
     t[c.GGML_TYPE_F32] = entry(&convert.ggml_cpu_fp32_to_fp32, &vec.ggml_vec_dot_f32, c.GGML_TYPE_F32, 1);
-    t[c.GGML_TYPE_F16] = entry(&convert.ggml_cpu_fp32_to_fp16, &vec.ggml_vec_dot_f16, c.GGML_TYPE_F16, 1);
+    t[c.GGML_TYPE_F16] = entry(&convert.ggml_cpu_fp32_to_fp16, &vec.ggml_vec_dot_f16_f32, c.GGML_TYPE_F32, 1);
 
     t[c.GGML_TYPE_Q1_0] = entry(&quants.quantize_row_q1_0, &quants.ggml_vec_dot_q1_0_q8_0, c.GGML_TYPE_Q8_0, 1);
     t[c.GGML_TYPE_Q2_0] = entry(&quants.quantize_row_q2_0, &quants.ggml_vec_dot_q2_0_q8_0, c.GGML_TYPE_Q8_0, 1);
@@ -206,7 +206,7 @@ pub const table: [c.GGML_TYPE_COUNT]Traits = blk: {
     break :blk t;
 };
 
-/// Ports `ggml_get_type_traits_cpu` (ggml-cpu.c:427 @cd959bae9).
+/// Ports `ggml_get_type_traits_cpu` (ggml-cpu.c:427 @b1b770d90).
 ///
 /// Parameters:
 /// - `@"type"`: the tensor type to look up.

@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/rope.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/rope.cuh` at v0.9.0 (`cd959bae9`). The
+//! `llama.cpp/ggml/src/ggml-cuda/rope.cuh` at v1.0.0 (`b1b770d90`). The
 //! kernels -- `rope_norm`, `rope_neox`, `rope_multi`, `rope_vision`,
 //! `rms_norm_mul_rope_f32` -- stay CUDA.
 //!
@@ -27,15 +27,15 @@ const half = kernels.half;
 
 extern fn powf(x: f32, y: f32) f32;
 
-/// Ports `CUDA_ROPE_BLOCK_SIZE` (rope.cuh:3 @cd959bae9).
+/// Ports `CUDA_ROPE_BLOCK_SIZE` (rope.cuh:3 @b1b770d90).
 const block_size = 256;
 
-/// Ports `rope_corr_dims` (rope.cu:6 @cd959bae9).
+/// Ports `rope_corr_dims` (rope.cu:6 @b1b770d90).
 const CorrDims = extern struct {
     v: [2]f32,
 };
 
-/// Ports `mrope_sections` (rope.cu:11 @cd959bae9).
+/// Ports `mrope_sections` (rope.cu:11 @b1b770d90).
 const MropeSections = extern struct {
     v: [4]c_int,
 };
@@ -91,7 +91,7 @@ fn key3(comptime name: []const u8, comptime forward: bool, comptime has_ff: bool
     return kernels.tmpl(name, &.{ kernels.boolean(forward), kernels.boolean(has_ff), kernels.typeName(T) });
 }
 
-/// Ports `rope_norm_cuda` (rope.cu:368 @cd959bae9).
+/// Ports `rope_norm_cuda` (rope.cu:368 @b1b770d90).
 fn ropeNormCuda(comptime forward: bool, comptime T: type, comptime D: type, a: Args, row_indices: CPtr, set_rows_stride: c_int, inplace: bool, stream: cu.cudaStream_t) void {
     const g = grid(&a);
     const theta_scale = thetaScale(&a);
@@ -109,7 +109,7 @@ fn ropeNormCuda(comptime forward: bool, comptime T: type, comptime D: type, a: A
     }
 }
 
-/// Ports `rope_neox_cuda` (rope.cu:412 @cd959bae9).
+/// Ports `rope_neox_cuda` (rope.cu:412 @b1b770d90).
 fn ropeNeoxCuda(comptime forward: bool, comptime T: type, comptime D: type, a: Args, row_indices: CPtr, set_rows_stride: c_int, inplace: bool, stream: cu.cudaStream_t) void {
     const g = grid(&a);
     const theta_scale = thetaScale(&a);
@@ -127,7 +127,7 @@ fn ropeNeoxCuda(comptime forward: bool, comptime T: type, comptime D: type, a: A
     }
 }
 
-/// Ports `rope_multi_cuda` (rope.cu:457 @cd959bae9). Since v0.8.0 it has
+/// Ports `rope_multi_cuda` (rope.cu:457 @b1b770d90). Since v0.8.0 it has
 /// `rope_norm_cuda`'s and `rope_neox_cuda`'s destination type and
 /// `ROPE + VIEW + SET_ROWS` parameters, for qwen's MRoPE.
 fn ropeMultiCuda(comptime forward: bool, comptime T: type, comptime D: type, a: Args, sections: MropeSections, is_imrope: bool, row_indices: CPtr, set_rows_stride: c_int, inplace: bool, stream: cu.cudaStream_t) void {
@@ -147,7 +147,7 @@ fn ropeMultiCuda(comptime forward: bool, comptime T: type, comptime D: type, a: 
     }
 }
 
-/// Ports `rope_vision_cuda` (rope.cu:505 @cd959bae9). Takes no `n_offs`.
+/// Ports `rope_vision_cuda` (rope.cu:505 @b1b770d90). Takes no `n_offs`.
 fn ropeVisionCuda(comptime forward: bool, comptime T: type, a: Args, sections: MropeSections, stream: cu.cudaStream_t) void {
     const g = grid(&a);
     // break down (head_dim, heads, seq) into (CUDA_ROPE_BLOCK_SIZE, x, heads * seq)
@@ -173,7 +173,7 @@ fn int(v: anytype) c_int {
     return @bitCast(@as(u32, @truncate(w)));
 }
 
-/// Ports `ggml_cuda_op_rope_impl` (rope.cu:548 @cd959bae9).
+/// Ports `ggml_cuda_op_rope_impl` (rope.cu:548 @b1b770d90).
 fn opRopeImpl(comptime forward: bool, ctx: *common.Context, dst: *Tensor, set_rows: ?*const Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -256,7 +256,7 @@ fn opRopeImpl(comptime forward: bool, ctx: *common.Context, dst: *Tensor, set_ro
     }
 
     var corr_dims: CorrDims = undefined;
-    c.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, &corr_dims.v);
+    c.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, c.ggml_rope_get_truncate(dst), &corr_dims.v);
 
     const a: Args = .{
         .x = src0.data,
@@ -327,23 +327,23 @@ fn opRopeImpl(comptime forward: bool, ctx: *common.Context, dst: *Tensor, set_ro
     }
 }
 
-/// Ports `ggml_cuda_op_rope` (rope.cu:715 @cd959bae9).
+/// Ports `ggml_cuda_op_rope` (rope.cu:714 @b1b770d90).
 pub fn opRope(ctx: *common.Context, dst: *Tensor) void {
     opRopeImpl(true, ctx, dst, null);
 }
 
-/// Ports `ggml_cuda_op_rope_back` (rope.cu:719 @cd959bae9).
+/// Ports `ggml_cuda_op_rope_back` (rope.cu:718 @b1b770d90).
 pub fn opRopeBack(ctx: *common.Context, dst: *Tensor) void {
     opRopeImpl(false, ctx, dst, null);
 }
 
-/// Ports `ggml_cuda_op_rope_fused` (rope.cu:723 @cd959bae9): `ROPE` written
+/// Ports `ggml_cuda_op_rope_fused` (rope.cu:722 @b1b770d90): `ROPE` written
 /// straight into the rows a following `SET_ROWS` selects.
 pub fn opRopeFused(ctx: *common.Context, rope: *Tensor, set_rows: *Tensor) void {
     opRopeImpl(true, ctx, rope, set_rows);
 }
 
-/// Ports `rms_norm_mul_rope_cuda` (rope.cu:820 @cd959bae9). Since v0.7.0 the
+/// Ports `rms_norm_mul_rope_cuda` (rope.cu:819 @b1b770d90). Since v0.7.0 the
 /// grid's y and z are clamped to `UINT16_MAX` and the kernel loops over the
 /// channels and samples past them, so both counts are arguments.
 fn rmsNormMulRopeCuda(
@@ -423,7 +423,7 @@ fn rmsNormMulRopeCuda(
     }
 }
 
-/// Ports `ggml_cuda_op_rms_norm_mul_rope_fused` (rope.cu:882 @cd959bae9).
+/// Ports `ggml_cuda_op_rms_norm_mul_rope_fused` (rope.cu:881 @b1b770d90).
 /// `set_rows` is null when the chain ends at the `ROPE`.
 pub fn opRmsNormMulRopeFused(ctx: *common.Context, rms_norm: *Tensor, mul: *Tensor, rope: *Tensor, set_rows: ?*Tensor) void {
     const x = impl.one(Tensor, rms_norm.src[0]);
@@ -466,7 +466,7 @@ pub fn opRmsNormMulRopeFused(ctx: *common.Context, rms_norm: *Tensor, mul: *Tens
     const freq_factors: CPtr = if (rope.src[2] != null) impl.one(Tensor, rope.src[2]).data else null;
 
     var corr_dims: CorrDims = undefined;
-    c.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, &corr_dims.v);
+    c.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, c.ggml_rope_get_truncate(rope), &corr_dims.v);
 
     const ts0 = c.ggml_type_size(x.type);
     impl.assert(x.nb[0] == ts0, "x->nb[0] == ts0");

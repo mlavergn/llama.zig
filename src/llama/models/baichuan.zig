@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/baichuan.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/baichuan.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_baichuan`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -20,7 +20,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_baichuan`'s `load_arch_hparams` (models/baichuan.cpp:3 @cd959bae9).
+/// Ports `llama_model_baichuan`'s `load_arch_hparams` (models/baichuan.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
@@ -34,9 +34,14 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         // TODO: become a GGUF KV parameter.
         hp.f_max_alibi_bias = 8.0;
     }
+
+    // Only the 7B uses RoPE.
+    if (self.type != .@"7b") {
+        @memset(&hp.rope_pattern, 0);
+    }
 }
 
-/// Ports `llama_model_baichuan`'s `load_arch_tensors` (models/baichuan.cpp:17 @cd959bae9).
+/// Ports `llama_model_baichuan`'s `load_arch_tensors` (models/baichuan.cpp:22 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
 
@@ -63,16 +68,16 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_baichuan`'s `build_arch_graph` (models/baichuan.cpp:42
-/// @cd959bae9) and the constructor of its `graph` (models/baichuan.cpp:46
-/// @cd959bae9).
+/// Ports `llama_model_baichuan`'s `build_arch_graph` (models/baichuan.cpp:47
+/// @b1b770d90) and the constructor of its `graph` (models/baichuan.cpp:51
+/// @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/baichuan.cpp", 49, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/baichuan.cpp", 50, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/baichuan.cpp", 54, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/baichuan.cpp", 55, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -98,14 +103,8 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
             var Kcur = qkv.k;
             const Vcur = qkv.v;
 
-            switch (model.type) {
-                .@"7b" => {
-                    Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-                    Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-                },
-                .@"13b", .unknown => {},
-                else => impl.abort("models/baichuan.cpp", 94, "fatal error"),
-            }
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
 
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);

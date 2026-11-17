@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/server/server.cpp` at v0.9.0 (`cd959bae9`):
+//! Ports `llama.cpp/tools/server/server.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_server(argc, argv)` and what it runs by role -- the router, an
 //! instance, the download and measure children -- the route table, the 403
 //! handlers, shutdown and the signal handler, `ex_wrapper` and
@@ -62,7 +62,7 @@ const lc_numeric: c_int = if (builtin.os.tag.isDarwin()) 4 else if (builtin.os.t
 // -----------------------------------------------------------------------------
 // shutdown
 
-/// Ports `shutdown_handler` (server.cpp:26 @cd959bae9): what a signal does,
+/// Ports `shutdown_handler` (server.cpp:29 @b1b770d90): what a signal does,
 /// set once the server is up.
 var shutdown_handler: ?*const fn (signal: c_int) void = null;
 /// What `shutdown_handler` acts on.
@@ -70,12 +70,12 @@ var shutdown_ctx_server: ?*context.ServerContext = null;
 /// The `mcp_mgr` `shutdown_handler` and `clean_up` shut down.
 var shutdown_mcp: ?*mcp_mod.Mcp = null;
 
-/// Ports `is_terminating` (server.cpp:27 @cd959bae9).
+/// Ports `is_terminating` (server.cpp:30 @b1b770d90).
 var is_terminating: std.atomic.Value(bool) = .init(false);
 
 extern fn exit(code: c_int) noreturn;
 
-/// Ports `signal_handler` (server.cpp:29 @cd959bae9).
+/// Ports `signal_handler` (server.cpp:32 @b1b770d90).
 fn signalHandler(sig: std.posix.SIG) callconv(.c) void {
     const signal: c_int = @intCast(@backingInt(sig));
     if (is_terminating.swap(true, .seq_cst)) {
@@ -88,7 +88,7 @@ fn signalHandler(sig: std.posix.SIG) callconv(.c) void {
     if (shutdown_handler) |h| h(signal);
 }
 
-/// The single-model `shutdown_handler` lambda (server.cpp:684 @cd959bae9):
+/// The single-model `shutdown_handler` lambda (server.cpp:710 @b1b770d90):
 /// unblocks `start_loop()`.
 fn shutdownSingleModel(_: c_int) void {
     if (shutdown_mcp) |m| m.shutdown();
@@ -100,7 +100,7 @@ fn shutdownSingleModel(_: c_int) void {
 var shutdown_models_routes: ?*models_mod.ModelsRoutes = null;
 var shutdown_ctx_http: ?*http.Context = null;
 
-/// The router's `shutdown_handler` lambda (server.cpp:564 @cd959bae9):
+/// The router's `shutdown_handler` lambda (server.cpp:590 @b1b770d90):
 /// disconnects the SSE clients and stops the HTTP server, which ends the
 /// router's wait on its thread.
 fn shutdownRouter(_: c_int) void {
@@ -112,7 +112,7 @@ fn shutdownRouter(_: c_int) void {
     if (shutdown_ctx_http) |h| h.stop();
 }
 
-/// Ports `llama_server_terminate` (server.cpp:52 @cd959bae9): for the CLI.
+/// Ports `llama_server_terminate` (server.cpp:55 @b1b770d90): for the CLI.
 pub fn terminate() void {
     if (shutdown_handler) |h| h(0);
 }
@@ -120,7 +120,7 @@ pub fn terminate() void {
 // -----------------------------------------------------------------------------
 // ex_wrapper
 
-/// Ports `ex_wrapper` (server.cpp:61 @cd959bae9): a route that never
+/// Ports `ex_wrapper` (server.cpp:64 @b1b770d90): a route that never
 /// throws -- an exception becomes an error response, 400 for
 /// `std::invalid_argument` and `common_json_error`, 500 for anything else.
 const ExWrapper = struct {
@@ -197,7 +197,7 @@ const ExWrapper = struct {
     }
 };
 
-/// The `res_403` handler (server.cpp:241 @cd959bae9): for disabled features.
+/// The `res_403` handler (server.cpp:246 @b1b770d90): for disabled features.
 fn res403(_: ?*anyopaque, _: *const http.Req) anyerror!*http.Res {
     const res = try http.Res.create(gpa);
     errdefer res.destroy();
@@ -216,7 +216,7 @@ fn res403(_: ?*anyopaque, _: *const http.Req) anyerror!*http.Res {
 // -----------------------------------------------------------------------------
 // llama_server
 
-/// Ports `llama_server` (server.cpp:772 @cd959bae9), the overload taking
+/// Ports `llama_server` (server.cpp:798 @b1b770d90), the overload taking
 /// `argc` and `argv`.
 ///
 /// Parameters:
@@ -294,7 +294,7 @@ fn httpParams(p: *const Params) http.Params {
     };
 }
 
-/// Ports `server_run_opts` (server.cpp:41 @cd959bae9): how the server is run;
+/// Ports `server_run_opts` (server.cpp:44 @b1b770d90): how the server is run;
 /// everything is on when it is the llama-server binary.
 const RunOpts = struct {
     install_signal_handlers: bool = true, // off when embedded in llama-cli, which handles them itself
@@ -305,7 +305,7 @@ const RunOpts = struct {
 // shared by every role
 //
 
-/// Ports `server_role_detect` (server.cpp:103 @cd959bae9): a server given no
+/// Ports `server_role_detect` (server.cpp:106 @b1b770d90): a server given no
 /// model is a router.
 fn serverRoleDetect(params: *const Params, role: *const models_mod.Role) models_mod.RoleType {
     if (role.isManagedByRouter()) {
@@ -317,7 +317,7 @@ fn serverRoleDetect(params: *const Params, role: *const models_mod.Role) models_
     return if (has_model) .instance else .router;
 }
 
-/// Ports `server_prepare_params` (server.cpp:115 @cd959bae9): adjust the
+/// Ports `server_prepare_params` (server.cpp:118 @b1b770d90): adjust the
 /// params for the role.
 ///
 /// Return: false on a configuration error.
@@ -380,7 +380,7 @@ fn exw(a: std.mem.Allocator, h: http.Handler) !http.Handler {
     return ExWrapper.wrap(a, h);
 }
 
-/// Ports `server_register_routes` (server.cpp:170 @cd959bae9): the API of
+/// Ports `server_register_routes` (server.cpp:173 @b1b770d90): the API of
 /// every server; a router points the handlers in `routes` at its proxies
 /// before calling this.
 fn serverRegisterRoutes(a: std.mem.Allocator, ctx_http: *http.Context, routes: *routes_mod.Routes) !void {
@@ -402,6 +402,8 @@ fn serverRegisterRoutes(a: std.mem.Allocator, ctx_http: *http.Context, routes: *
     try ctx_http.post("/v1/audio/transcriptions", try exw(a, routes.post_transcriptions_oai));
     try ctx_http.post("/audio/transcriptions", try exw(a, routes.post_transcriptions_oai));
     try ctx_http.post("/tts", try exw(a, routes.post_tts));
+    try ctx_http.post("/v1/audio/speech", try exw(a, routes.post_speech_oai));
+    try ctx_http.post("/audio/speech", try exw(a, routes.post_speech_oai));
     try ctx_http.ws("/v1/realtime", routes.ws_realtime);
     try ctx_http.post("/v1/messages", try exw(a, routes.post_anthropic_messages)); // anthropic messages API
     try ctx_http.post("/infill", try exw(a, routes.post_infill));
@@ -433,7 +435,7 @@ fn serverRegisterRoutes(a: std.mem.Allocator, ctx_http: *http.Context, routes: *
     try ctx_http.registerGcpCompat();
 }
 
-/// Ports `server_register_stream_routes` (server.cpp:222 @cd959bae9):
+/// Ports `server_register_stream_routes` (server.cpp:227 @b1b770d90):
 /// resumable streaming: an instance binds the local session factories, a
 /// router binds proxies that resolve the owning child.
 fn serverRegisterStreamRoutes(a: std.mem.Allocator, ctx_http: *http.Context, stream_get: http.Handler, streams_lookup: http.Handler, stream_delete: http.Handler) !void {
@@ -442,9 +444,11 @@ fn serverRegisterStreamRoutes(a: std.mem.Allocator, ctx_http: *http.Context, str
     try ctx_http.del("/v1/stream", try exw(a, stream_delete));
 }
 
-/// Ports `server_setup_features` (server.cpp:234 @cd959bae9): the features
+/// Ports `server_setup_features` (server.cpp:239 @b1b770d90): the features
 /// behind a flag, and the warning about the ones that must not face untrusted
-/// clients.
+/// clients. Tools can run shell commands, so with tools, MCP servers or the
+/// MCP proxy on a non-loopback address the server needs an API key or
+/// `--allow-unauthenticated-tools`.
 ///
 /// Return: false when one of them fails to start.
 fn serverSetupFeatures(a: std.mem.Allocator, ctx_http: *http.Context, params: *const Params, mcp_mgr: *mcp_mod.Mcp, tools: *tools_mod.Tools, role_type: models_mod.RoleType) !bool {
@@ -454,6 +458,18 @@ fn serverSetupFeatures(a: std.mem.Allocator, ctx_http: *http.Context, params: *c
 
     if (std.mem.eql(u8, params.cors_origins, "*") and params.api_keys.items.len == 0) {
         srv(.wrn, func, "%s", .{@as([*:0]const u8, "security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)\n")});
+    }
+
+    // tools can run shell commands: do not expose them to the network without auth
+    const tools_enabled = params.server_tools.items.len != 0 or params.mcp_servers_config.len != 0 or params.mcp_servers_json.len != 0 or params.ui_mcp_proxy;
+    const loopback_only = for (params.hostnames.items) |h| {
+        const lo = std.mem.endsWith(u8, h, ".sock") or std.mem.eql(u8, h, "localhost") or std.mem.eql(u8, h, "::1") or std.mem.eql(u8, h, "[::1]") or std.mem.startsWith(u8, h, "127.");
+        if (!lo) break false;
+    } else true;
+    if (tools_enabled and !loopback_only and params.api_keys.items.len == 0 and !params.server_tools_allow_unauth) {
+        srv(.err, func, "%s", .{@as([*:0]const u8, "security: server tools, MCP servers or MCP proxy are enabled on a non-loopback address without an API key\n")});
+        srv(.err, func, "%s", .{@as([*:0]const u8, "set --api-key, bind to 127.0.0.1, or pass --allow-unauthenticated-tools on a trusted network\n")});
+        return false;
     }
 
     var warn_names: std.ArrayList([]const u8) = .empty;
@@ -512,7 +528,7 @@ fn serverSetupFeatures(a: std.mem.Allocator, ctx_http: *http.Context, params: *c
     return true;
 }
 
-/// Ports `server_install_signal_handlers` (server.cpp:318 @cd959bae9), its
+/// Ports `server_install_signal_handlers` (server.cpp:334 @b1b770d90), its
 /// POSIX arm.
 fn serverInstallSignalHandlers() void {
     if (comptime builtin.os.tag != .windows) {
@@ -526,7 +542,7 @@ fn serverInstallSignalHandlers() void {
     }
 }
 
-/// Ports `server_on_listening` (server.cpp:336 @cd959bae9): once the HTTP
+/// Ports `server_on_listening` (server.cpp:352 @b1b770d90): once the HTTP
 /// server listens: log the addresses and spawn llama-connect if asked, so the
 /// port is bound and the child startup health check reaches us. The
 /// destructor of `connect_proc` stops it.
@@ -548,19 +564,28 @@ fn serverOnListening(a: std.mem.Allocator, ctx_http: *const http.Context, params
 // download worker: a child of the router that pulls a model into the cache and reports the progress
 //
 
-/// Ports `server_download_state` (server.cpp:352 @cd959bae9): a download
+/// Ports `server_download_state` (server.cpp:368 @b1b770d90): a download
 /// child's progress, reported to the router.
 const DownloadState = struct {
     role: *models_mod.Role,
     cancelled: *std.atomic.Value(bool),
-    last_progress_time: std.atomic.Value(i64) = .init(0), // multiple files downloading in different threads
+    // files download in parallel threads: throttle each file on its own, a shared
+    // timer lets a small, fast file (e.g. a draft) starve the updates of the others
+    progress_mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
+    last_progress_time: std.StringHashMapUnmanaged(i64) = .empty, // keys are `gpa`'s
     is_ok: bool = false,
+
+    fn deinit(dl: *DownloadState) void {
+        var it = dl.last_progress_time.keyIterator();
+        while (it.next()) |k| gpa.free(k.*);
+        dl.last_progress_time.deinit(gpa);
+    }
 
     fn callback(dl: *DownloadState) download.Callback {
         return .{ .ctx = dl, .on_start = onStart, .on_update = onUpdate, .on_done = onDone, .is_cancelled = isCancelled };
     }
 
-    /// Ports `run` (server.cpp:360 @cd959bae9), a member of
+    /// Ports `run` (server.cpp:379 @b1b770d90), a member of
     /// `server_download_state`.
     fn run(dl: *DownloadState, params: *Params) bool {
         var arena = std.heap.ArenaAllocator.init(gpa);
@@ -590,7 +615,7 @@ const DownloadState = struct {
         dl.is_ok = false;
     }
 
-    /// Ports `on_progress` (server.cpp:372 @cd959bae9), a member of
+    /// Ports `on_progress` (server.cpp:391 @b1b770d90), a member of
     /// `server_download_state`.
     fn onProgress(dl: *DownloadState, p: *const download.Progress) void {
         var arena = std.heap.ArenaAllocator.init(gpa);
@@ -608,14 +633,30 @@ const DownloadState = struct {
         dl.onProgress(p);
     }
 
+    /// Ports `on_update` (server.cpp:402 @b1b770d90), a member of
+    /// `server_download_state`.
     fn onUpdate(ctx: *anyopaque, p: *const download.Progress) void {
         const dl: *DownloadState = @ptrCast(@alignCast(ctx));
         const now = c.ggml_time_ms();
-        // throttle progress updates to avoid flooding logs
-        if (now - dl.last_progress_time.load(.monotonic) >= 100) {
-            dl.onProgress(p);
-            dl.last_progress_time.store(now, .monotonic);
+        // throttle progress updates to avoid flooding logs; the first update of a file
+        // always passes, it carries the file's total size
+        {
+            _ = std.c.pthread_mutex_lock(&dl.progress_mutex);
+            defer _ = std.c.pthread_mutex_unlock(&dl.progress_mutex);
+            if (dl.last_progress_time.getPtr(p.url)) |t| {
+                if (now - t.* < 100) {
+                    return;
+                }
+                t.* = now;
+            } else {
+                const key = gpa.dupe(u8, p.url) catch return;
+                dl.last_progress_time.put(gpa, key, now) catch {
+                    gpa.free(key);
+                    return;
+                };
+            }
         }
+        dl.onProgress(p);
     }
 
     fn onDone(ctx: *anyopaque, p: *const download.Progress, _: bool) void {
@@ -629,7 +670,7 @@ const DownloadState = struct {
     }
 };
 
-/// Ports `server_run_download` (server.cpp:399 @cd959bae9): download the
+/// Ports `server_run_download` (server.cpp:424 @b1b770d90): download the
 /// model, report the result, and wait for the router's exit command.
 fn serverRunDownload(params: *Params, role: *models_mod.Role) !u8 {
     const cancelled = try gpa.create(std.atomic.Value(bool));
@@ -644,6 +685,7 @@ fn serverRunDownload(params: *Params, role: *models_mod.Role) !u8 {
     }.f });
 
     var dl: DownloadState = .{ .role = role, .cancelled = cancelled };
+    defer dl.deinit();
 
     const ok = dl.run(params);
 
@@ -669,7 +711,7 @@ fn serverRunDownload(params: *Params, role: *models_mod.Role) !u8 {
 // measure worker: a child of the router, reports the memory a model needs without loading it
 //
 
-/// Ports `server_run_measure` (server.cpp:431 @cd959bae9).
+/// Ports `server_run_measure` (server.cpp:456 @b1b770d90).
 fn serverRunMeasure(a: std.mem.Allocator, params: *Params, role: *models_mod.Role, models_handler: *download.ModelsHandler) !u8 {
     const func = "server_run_measure";
     // the router sets --offline: only resolve the local path, never download
@@ -708,7 +750,7 @@ fn serverRunMeasure(a: std.mem.Allocator, params: *Params, role: *models_mod.Rol
 // router
 //
 
-/// The instance's `clean_up` lambda (server.cpp:648 @cd959bae9).
+/// The instance's `clean_up` lambda (server.cpp:674 @b1b770d90).
 const CleanUp = struct {
     fn run(h: *http.Context, s: *context.ServerContext) void {
         srv(.inf, "operator()", "%s: cleaning up before exit...\n", .{@as([*:0]const u8, "operator()")});
@@ -721,7 +763,7 @@ const CleanUp = struct {
     }
 };
 
-/// The router's `clean_up` lambda (server.cpp:545 @cd959bae9).
+/// The router's `clean_up` lambda (server.cpp:571 @b1b770d90).
 const RouterCleanUp = struct {
     fn run(m: *models_mod.ModelsRoutes) void {
         srv(.inf, "operator()", "%s: cleaning up before exit...\n", .{@as([*:0]const u8, "operator()")});
@@ -734,7 +776,7 @@ const RouterCleanUp = struct {
     }
 };
 
-/// Ports `server_run_router` (server.cpp:470 @cd959bae9).
+/// Ports `server_run_router` (server.cpp:495 @b1b770d90).
 fn serverRunRouter(a: std.mem.Allocator, params: *Params, argv: []const [:0]const u8, opts: RunOpts) !u8 {
     const func = "server_run_router";
     srv(.inf, func, "%s", .{@as([*:0]const u8, "starting server in router mode. models will be automatically loaded on-demand\n")});
@@ -790,6 +832,7 @@ fn serverRunRouter(a: std.mem.Allocator, params: *Params, argv: []const [:0]cons
     routes.post_responses_oai = mr.proxy_post;
     routes.post_transcriptions_oai = mr.proxy_post;
     routes.post_tts = mr.proxy_post;
+    routes.post_speech_oai = mr.proxy_post;
     routes.ws_realtime = mr.proxy_ws;
     routes.post_anthropic_messages = mr.proxy_post;
     routes.post_anthropic_count_tokens = mr.proxy_post;
@@ -875,7 +918,7 @@ fn serverRunRouter(a: std.mem.Allocator, params: *Params, argv: []const [:0]cons
 // instance
 //
 
-/// Ports `server_run_instance` (server.cpp:612 @cd959bae9).
+/// Ports `server_run_instance` (server.cpp:638 @b1b770d90).
 fn serverRunInstance(a: std.mem.Allocator, params: *Params, role: *models_mod.Role, models_handler: *download.ModelsHandler, opts: RunOpts) !u8 {
     const func = "server_run_instance";
     // -hf / docker: download if needed and resolve the local path. a child resolves what the router downloaded
@@ -1000,7 +1043,7 @@ fn serverRunInstance(a: std.mem.Allocator, params: *Params, role: *models_mod.Ro
 // entry points
 //
 
-/// Ports `server_run` (server.cpp:735 @cd959bae9).
+/// Ports `server_run` (server.cpp:761 @b1b770d90).
 fn serverRun(a: std.mem.Allocator, params: *Params, argv: []const [:0]const u8, role: *models_mod.Role, opts: RunOpts) !u8 {
     const func = "server_run";
     var models_handler: download.ModelsHandler = .{};

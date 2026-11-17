@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/granite.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/granite.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_granite`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph` with `build_attention_layer` and
 //! `build_layer_ffn`. `llama_model_granite_moe` and `llama_model_minicpm`
@@ -28,7 +28,7 @@ fn oom() noreturn {
     impl.abort("models/granite.cpp", 0, "out of memory");
 }
 
-/// Ports `llama_model_granite`'s `load_arch_hparams` (models/granite.cpp:5 @cd959bae9).
+/// Ports `llama_model_granite`'s `load_arch_hparams` (models/granite.cpp:5 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -84,7 +84,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (try meta.getKey(u32, .expert_shared_feed_forward_length, false, exc)) |v| hp.n_ff_shexp = v;
 }
 
-/// Ports `llama_model_granite`'s `load_arch_tensors` (models/granite.cpp:59 @cd959bae9).
+/// Ports `llama_model_granite`'s `load_arch_tensors` (models/granite.cpp:59 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -149,13 +149,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_granite`'s `build_arch_graph` (models/granite.cpp:119 @cd959bae9).
+/// Ports `llama_model_granite`'s `build_arch_graph` (models/granite.cpp:119 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_granite`'s `graph`
-/// (models/granite.cpp:123 @cd959bae9), which Granite MoE and MiniCPM
+/// (models/granite.cpp:123 @b1b770d90), which Granite MoE and MiniCPM
 /// build with too.
 ///
 /// Parameters:
@@ -168,8 +168,8 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/granite.cpp", 130, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/granite.cpp", 131, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/granite.cpp", 127, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/granite.cpp", 128, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -233,7 +233,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_granite`'s `graph`'s `build_attention_layer`
-/// (models/granite.cpp:205 @cd959bae9).
+/// (models/granite.cpp:202 @b1b770d90).
 fn buildAttentionLayer(
     b: *const graph.Builder,
     cur_: *Tensor,
@@ -243,7 +243,6 @@ fn buildAttentionLayer(
     n_embd_head: i64,
     il: c_int,
 ) *Tensor {
-    const ctx = b.ctx0;
     const hp = b.hparams;
     const ilu: u32 = @intCast(il);
     const layer = &model.layers[ilu];
@@ -253,11 +252,9 @@ fn buildAttentionLayer(
     var Kcur = qkv.k;
     const Vcur = qkv.v;
 
-    if (hp.hasRope(ilu)) {
-        const rope_factors = model.getRopeFactors(b.cparams, ilu);
-        Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-        Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-    }
+    Qcur = b.buildRope(Qcur, inp_pos, il);
+
+    Kcur = b.buildRope(Kcur, inp_pos, il);
 
     b.cb(Qcur, "Qcur", il);
     b.cb(Kcur, "Kcur", il);
@@ -270,7 +267,7 @@ fn buildAttentionLayer(
 }
 
 /// Ports `llama_model_granite`'s `graph`'s `build_layer_ffn`
-/// (models/granite.cpp:243 @cd959bae9).
+/// (models/granite.cpp:227 @b1b770d90).
 fn buildLayerFfn(b: *const graph.Builder, cur_: *Tensor, inpSA: *Tensor, model: *const Model, il: c_int) *Tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -289,7 +286,7 @@ fn buildLayerFfn(b: *const graph.Builder, cur_: *Tensor, inpSA: *Tensor, model: 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
         b.cb(cur, "ffn_norm", il);
 
-        cur = b.buildFfn(cur, layer.ffn_up, layer.ffn_up_b, null, layer.ffn_gate, layer.ffn_gate_b, null, layer.ffn_down, layer.ffn_down_b, null, null, .silu, .par, il);
+        cur = b.buildFfn(cur, layer.ffn_up, layer.ffn_up_b, layer.ffn_up_s, layer.ffn_gate, layer.ffn_gate_b, layer.ffn_gate_s, layer.ffn_down, layer.ffn_down_b, layer.ffn_down_s, null, .silu, .par, il);
         b.cb(cur, "ffn_out", il);
     } else {
         // The mixture of experts.
@@ -307,12 +304,15 @@ fn buildLayerFfn(b: *const graph.Builder, cur_: *Tensor, inpSA: *Tensor, model: 
             .norm_w = true,
             .w_scale = hp.expert_weights_scale,
             .gating_op = .softmax,
+            .up_exps_s = layer.ffn_up_exps_s,
+            .gate_exps_s = layer.ffn_gate_exps_s,
+            .down_exps_s = layer.ffn_down_exps_s,
         }, il);
         b.cb(moe_out, "ffn_moe_out", il);
 
         // Granite MoE Shared.
         if (hp.n_ff_shexp > 0) {
-            const ffn_shexp = b.buildFfn(cur, layer.ffn_up_shexp, null, null, layer.ffn_gate_shexp, null, null, layer.ffn_down_shexp, null, null, null, .silu, .par, il);
+            const ffn_shexp = b.buildFfn(cur, layer.ffn_up_shexp, null, layer.ffn_up_shexp_s, layer.ffn_gate_shexp, null, layer.ffn_gate_shexp_s, layer.ffn_down_shexp, null, layer.ffn_down_shexp_s, null, .silu, .par, il);
             b.cb(ffn_shexp, "ffn_shexp", il);
 
             cur = c.ggml_add(ctx, moe_out, ffn_shexp);

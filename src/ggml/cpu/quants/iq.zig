@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/quants.c` (v0.9.0, `cd959bae9`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/quants.c` (v1.0.0, `b1b770d90`),
 //! the `_generic` dot products at lines 906-1330. Each function names the C it
 //! replaces and the line it began at.
 //!
@@ -64,7 +64,7 @@ inline fn signOf(signs: u8, j: usize) i32 {
     return if ((signs & c.kmask_iq2xs[j]) != 0) -1 else 1;
 }
 
-/// Ports `ggml_vec_dot_iq2_xxs_q8_K_generic` (ggml-cpu/quants.c:954 @cd959bae9).
+/// Ports `ggml_vec_dot_iq2_xxs_q8_K_generic` (ggml-cpu/quants.c:954 @b1b770d90).
 ///
 /// Each group of 32 packs four 8-bit grid indices and a 28-bit sign field into
 /// two words; the top four bits are the group's scale.
@@ -120,7 +120,7 @@ pub export fn ggml_vec_dot_iq2_xxs_q8_K_generic(
     s[0] = 0.125 * sumf;
 }
 
-/// Ports `ggml_vec_dot_iq2_xs_q8_K_generic` (ggml-cpu/quants.c:996 @cd959bae9).
+/// Ports `ggml_vec_dot_iq2_xs_q8_K_generic` (ggml-cpu/quants.c:996 @b1b770d90).
 ///
 /// Nine-bit grid indices with the sign index in the top seven bits, and two
 /// four-bit scales per group of 32 -- so the group is processed in two halves
@@ -187,7 +187,7 @@ pub export fn ggml_vec_dot_iq2_xs_q8_K_generic(
     s[0] = 0.125 * sumf;
 }
 
-/// Ports `ggml_vec_dot_iq2_s_q8_K_generic` (ggml-cpu/quants.c:1046 @cd959bae9).
+/// Ports `ggml_vec_dot_iq2_s_q8_K_generic` (ggml-cpu/quants.c:1046 @b1b770d90).
 ///
 /// Ten-bit grid indices: eight bits in `qs` and two more taken from `qh` by a
 /// shift that *decreases* with `l` -- `qh[ib32] << (8 - 2*l) & 0x300`. The
@@ -256,7 +256,7 @@ pub export fn ggml_vec_dot_iq2_s_q8_K_generic(
     s[0] = 0.125 * sumf;
 }
 
-/// Ports `ggml_vec_dot_iq3_xxs_q8_K_generic` (ggml-cpu/quants.c:1098 @cd959bae9).
+/// Ports `ggml_vec_dot_iq3_xxs_q8_K_generic` (ggml-cpu/quants.c:1098 @b1b770d90).
 ///
 /// Two 32-bit grid lookups per group of eight, because `iq3xxs_grid` holds
 /// four bytes per entry rather than eight. The sign field and scale come from
@@ -313,7 +313,7 @@ pub export fn ggml_vec_dot_iq3_xxs_q8_K_generic(
     s[0] = 0.25 * sumf;
 }
 
-/// Ports `ggml_vec_dot_iq3_s_q8_K_generic` (ggml-cpu/quants.c:1142 @cd959bae9).
+/// Ports `ggml_vec_dot_iq3_s_q8_K_generic` (ggml-cpu/quants.c:1142 @b1b770d90).
 ///
 /// Nine-bit indices into the 32-bit `iq3s_grid`. The two lookups in a pair use
 /// shifts of `8 - 2*l` and `7 - 2*l`, one apart -- the high bit for the odd
@@ -379,7 +379,7 @@ pub export fn ggml_vec_dot_iq3_s_q8_K_generic(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_iq1_s_q8_K_generic` (ggml-cpu/quants.c:1198 @cd959bae9).
+/// Ports `ggml_vec_dot_iq1_s_q8_K_generic` (ggml-cpu/quants.c:1198 @b1b770d90).
 ///
 /// One-bit weights whose grid values are already signed, so there is no sign
 /// field. Instead each group carries a `delta` of +/-1 applied to the right
@@ -438,7 +438,7 @@ pub export fn ggml_vec_dot_iq1_s_q8_K_generic(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_iq1_m_q8_K_generic` (ggml-cpu/quants.c:1241 @cd959bae9).
+/// Ports `ggml_vec_dot_iq1_m_q8_K_generic` (ggml-cpu/quants.c:1241 @b1b770d90).
 ///
 /// Like `iq1_s`, but the block has no `d` field: the f16 scale is scattered
 /// across four nibbles of `scales` and reassembled by `blocks.iq1mScale`. The
@@ -521,7 +521,7 @@ pub export fn ggml_vec_dot_iq1_m_q8_K_generic(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_iq4_xs_q8_K_generic` (ggml-cpu/quants.c:1331 @cd959bae9).
+/// Ports `ggml_vec_dot_iq4_xs_q8_K_generic` (ggml-cpu/quants.c:1331 @b1b770d90).
 ///
 /// Four-bit indices into `kvalues_iq4nl`, with six-bit scales biased by 32 and
 /// split between `scales_l` and `scales_h`. `h` is consumed four bits at a

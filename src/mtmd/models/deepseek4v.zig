@@ -9,11 +9,11 @@
 //! Each aligner row ends with a NEWLINE, an odd row count is padded with a
 //! full row of PADs, and pairs of adjacent rows are interleaved column-wise
 //! ("N-layout"). The mapping is precomputed on the CPU as the `layout_idx`
-//! input (`arms_inputs.zig`, the `deepseek4v` arm of `clip_encode`).
+//! input (`arms_inputs.zig`, the `deepseek4v` arm of `mtmd_subcontext::encode`).
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/deepseek4v.cpp` at v0.9.0 (`cd959bae9`).
+//! Ports `llama.cpp/tools/mtmd/models/deepseek4v.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -22,7 +22,7 @@ const graph = @import("../graph.zig");
 const model_mod = @import("../model.zig");
 const c = impl.c;
 
-/// The `add_pos` lambda (deepseek4v.cpp:30 @cd959bae9): a two-section
+/// The `add_pos` lambda (deepseek4v.cpp:30 @b1b770d90): a two-section
 /// vision M-RoPE over the `positions` input, rows then columns.
 const Rope = struct {
     positions: graph.T,
@@ -36,13 +36,13 @@ const Rope = struct {
     }
 };
 
-/// `CLIP_ALIGN` (clip-impl.h:485 @cd959bae9), over `int`.
-fn clipAlign(x: c_int, n: c_int) c_int {
+/// `MTMD_ALIGN` (mtmd-impl.h:493 @b1b770d90), over `int`.
+fn mtmdAlign(x: c_int, n: c_int) c_int {
     return @divTrunc(x + n - 1, n) * n;
 }
 
-/// Ports `build` (deepseek4v.cpp:21 @cd959bae9), a member of
-/// `clip_graph_deepseek4v`. DeepSeek-V4.1-Flash (deepseek41v) shares the encoder
+/// Ports `build` (deepseek4v.cpp:21 @b1b770d90), a member of
+/// `mtmd_graph_deepseek4v`. DeepSeek-V4.1-Flash (deepseek41v) shares the encoder
 /// and aligner; its block is plain reading order [START] ([IMAGE]*n_llm_w
 /// [NEWLINE])*n_llm_h [END], no lead pads, no pad row, no IMAGE_PAD tensor.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
@@ -107,8 +107,8 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
             if (tok != null) cur = c.ggml_concat(ctx0, cur, c.ggml_reshape_2d(ctx0, tok, n_embd_out, 1), 1);
         }
 
-        const n_llm_w = @divTrunc(clipAlign(g.n_patches_x, n_merge), n_merge);
-        const n_llm_h = @divTrunc(clipAlign(g.n_patches_y, n_merge), n_merge);
+        const n_llm_w = @divTrunc(mtmdAlign(g.n_patches_x, n_merge), n_merge);
+        const n_llm_h = @divTrunc(mtmdAlign(g.n_patches_y, n_merge), n_merge);
         const n_out = if (is_v41) impl.dsv41NBlockTokens(n_llm_w, n_llm_h) else impl.dsv4GetBlockLayout(n_llm_w, n_llm_h, g.img.lead_pad).n_out;
         impl.ggmlAssert(n_grid == @as(i64, n_llm_w) * n_llm_h, "deepseek4v.cpp", 99, "n_grid == n_llm_w * n_llm_h");
 

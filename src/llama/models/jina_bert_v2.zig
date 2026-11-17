@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/jina-bert-v2.cpp` at v0.9.0
-//! (`cd959bae9`): `llama_model_jina_bert_v2`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/jina-bert-v2.cpp` at v1.0.0
+//! (`b1b770d90`): `llama_model_jina_bert_v2`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`. Its graph is
 //! `llama_model_bert`'s, in `bert.zig`.
 
@@ -20,7 +20,7 @@ const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 
-/// Ports `llama_model_jina_bert_v2`'s `load_arch_hparams` (models/jina-bert-v2.cpp:3 @cd959bae9).
+/// Ports `llama_model_jina_bert_v2`'s `load_arch_hparams` (models/jina-bert-v2.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_eps = (try ml.meta.getKey(f32, .attention_layernorm_eps, true, exc)).?;
@@ -33,7 +33,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_jina_bert_v2`'s `load_arch_tensors` (models/jina-bert-v2.cpp:14 @cd959bae9).
+/// Ports `llama_model_jina_bert_v2`'s `load_arch_tensors` (models/jina-bert-v2.cpp:14 @b1b770d90).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -86,7 +86,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports `llama_model_jina_bert_v2`'s `build_arch_graph` (models/jina-bert-v2.cpp:63 @cd959bae9).
+/// Ports `llama_model_jina_bert_v2`'s `build_arch_graph` (models/jina-bert-v2.cpp:63 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     bert.buildGraph(model, b);
 }

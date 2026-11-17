@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/llama4.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/llama4.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_llama4`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph<iswa>`.
 
@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_llama4`'s `load_arch_hparams` (src/models/llama4.cpp:3 @cd959bae9).
+/// Ports `llama_model_llama4`'s `load_arch_hparams` (src/models/llama4.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -53,6 +53,13 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         if (try meta.getKey(f32, .rope_freq_base_swa, false, exc)) |v| hp.rope_freq_base_train_swa = v;
     }
 
+    // A step of 0 needs a model without layers; the C divides by zero
+    // there, which aarch64 answers with a quotient of 0.
+    for (0..hp.n_layer_all) |il| {
+        const step = hp.n_no_rope_layer_step;
+        hp.rope_pattern[il] = @intFromBool(step == 0 or @rem(@as(u32, @intCast(il + 1)), step) != 0);
+    }
+
     self.type = switch (hp.n_expert) {
         // MobileLLM, without experts.
         0 => switch (hp.n_embd) {
@@ -69,7 +76,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.use_kq_norm = self.type != .@"17b_128e";
 }
 
-/// Ports `llama_model_llama4`'s `load_arch_tensors` (src/models/llama4.cpp:44 @cd959bae9).
+/// Ports `llama_model_llama4`'s `load_arch_tensors` (src/models/llama4.cpp:48 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -127,7 +134,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_llama4`'s `build_arch_graph` (src/models/llama4.cpp:96 @cd959bae9).
+/// Ports `llama_model_llama4`'s `build_arch_graph` (src/models/llama4.cpp:100 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     if (@as(hparams_mod.SwaType, @fromBackingInt(@intCast(model.hparams.swa_type))) == .none) {
         buildGraph(false, model, b);
@@ -137,14 +144,14 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_llama4`'s `graph<iswa>`
-/// (src/models/llama4.cpp:105 @cd959bae9).
+/// (src/models/llama4.cpp:109 @b1b770d90).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/llama4.cpp", 108, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/llama4.cpp", 109, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/llama4.cpp", 112, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/llama4.cpp", 113, "n_embd_head == n_rot");
 
     var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
 
@@ -163,8 +170,6 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
-        const freq_base_l = model.getRopeFreqBase(b.cparams, @intCast(il));
-        const freq_scale_l = model.getRopeFreqScale(b.cparams, @intCast(il));
 
         var inpSA = inpL;
 
@@ -179,9 +184,6 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
 
         // Self-attention.
         {
-            // Llama 3's RoPE frequency factors; null for Llama 2 and others.
-            const rope_factors = model.getRopeFactors(b.cparams, @intCast(il));
-
             // Q, K and V, and RoPE on Q and K.
             const qkv = b.buildQkv(layer, cur, n_embd_head, b.n_head, b.n_head_kv, il);
             var Qcur = qkv.q;
@@ -189,8 +191,8 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
             const Vcur = qkv.v;
 
             if (use_rope) {
-                Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-                Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+                Qcur = b.buildRope(Qcur, inp_pos, il);
+                Kcur = b.buildRope(Kcur, inp_pos, il);
             } else if (inp_attn_scale) |s| {
                 Qcur = c.ggml_mul(ctx, Qcur, s);
             }

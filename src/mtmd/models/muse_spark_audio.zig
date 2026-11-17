@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/muse-spark-audio.cpp` at v0.9.0
-//! (`cd959bae9`). Each declaration names what it ports and the line it
+//! Ports `llama.cpp/tools/mtmd/models/muse-spark-audio.cpp` at v1.0.0
+//! (`b1b770d90`). Each declaration names what it ports and the line it
 //! began at.
 
 const std = @import("std");
@@ -16,8 +16,8 @@ const graph = @import("../graph.zig");
 const c = impl.c;
 const ne = graph.ne;
 
-/// Ports `build` (muse-spark-audio.cpp:5 @cd959bae9), a member of
-/// `clip_graph_muse_spark_audio`.
+/// Ports `build` (muse-spark-audio.cpp:5 @b1b770d90), a member of
+/// `mtmd_graph_muse_spark_audio`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

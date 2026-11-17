@@ -5,7 +5,7 @@
 //!
 //! Ported from, in the reference checkout:
 //!
-//! - `llama.cpp/ggml/src/ggml-cpu/vec.cpp` — the twelve exported symbols
+//! - `llama.cpp/ggml/src/ggml-cpu/vec.cpp` — the thirteen exported symbols
 //! - `llama.cpp/ggml/src/ggml-cpu/vec.h`   — `ggml_v_expf`, `ggml_v_silu`,
 //!                                           `ggml_v_gelu_quick`,
 //!                                           `ggml_silu_f32` and
@@ -13,7 +13,7 @@
 //!                                           `inline static` there and have no
 //!                                           symbols of their own
 //!
-//! Both at v0.9.0 (`cd959bae9`). Each declaration below names the C it
+//! Both at v1.0.0 (`b1b770d90`). Each declaration below names the C it
 //! replaces and the line it began at.
 //!
 //! # Only the NEON arm is ported
@@ -70,7 +70,7 @@ const c = impl.c;
 const F32 = simd.F32;
 const F16 = simd.F16;
 
-/// Mirrors `ggml_float` (vec.h:15 @cd959bae9), the `double` the
+/// Mirrors `ggml_float` (vec.h:15 @b1b770d90), the `double` the
 /// reductions accumulate in. Named rather than written as `f64` so the C's
 /// casts stay readable at each site.
 const GgmlFloat = f64;
@@ -182,20 +182,20 @@ inline fn hsum(v: VF) f32 {
 // The gelu lookup tables
 //
 // Ports `ggml_table_gelu_f16` and `ggml_table_gelu_quick_f16`
-// (vec.cpp:6, 9 @cd959bae9). Definitions, not declarations: `cpu/convert.zig`
+// (vec.cpp:6, 9 @b1b770d90). Definitions, not declarations: `cpu/convert.zig`
 // fills them from `ggml_cpu_init` and until now declared them `extern var`
 // against `vec.o`. 65,536 entries each, one per `f16` bit pattern.
 
-/// Ports `ggml_table_gelu_f16` (vec.cpp:6 @cd959bae9).
+/// Ports `ggml_table_gelu_f16` (vec.cpp:6 @b1b770d90).
 pub export var ggml_table_gelu_f16: [1 << 16]c.ggml_fp16_t = undefined;
 
-/// Ports `ggml_table_gelu_quick_f16` (vec.cpp:9 @cd959bae9).
+/// Ports `ggml_table_gelu_quick_f16` (vec.cpp:9 @b1b770d90).
 pub export var ggml_table_gelu_quick_f16: [1 << 16]c.ggml_fp16_t = undefined;
 
 // -----------------------------------------------------------------------------
 // Dot products
 
-/// Ports `ggml_vec_dot_f32` (vec.cpp:11 @cd959bae9), the `GGML_SIMD` arm
+/// Ports `ggml_vec_dot_f32` (vec.cpp:11 @b1b770d90), the `GGML_SIMD` arm
 /// without SVE or RVV.
 ///
 /// `GGML_F32_ARR` accumulators over steps of `GGML_F32_STEP`, reduced by
@@ -248,7 +248,7 @@ pub export fn ggml_vec_dot_f32(
     s.* = sumf;
 }
 
-/// Ports `ggml_vec_dot_bf16` (vec.cpp:139 @cd959bae9), its `__AVX512F__`
+/// Ports `ggml_vec_dot_bf16` (vec.cpp:139 @b1b770d90), its `__AVX512F__`
 /// and `__AVX2__` arms and the scalar loop.
 ///
 /// On ARM **no SIMD arm compiles**, so this is the plain scalar loop the C
@@ -328,7 +328,7 @@ pub export fn ggml_vec_dot_bf16(
     s.* = @floatCast(sumf);
 }
 
-/// Ports `ggml_vec_dot_f16` (vec.cpp:264 @cd959bae9), the `GGML_SIMD` arm
+/// Ports `ggml_vec_dot_f16` (vec.cpp:264 @b1b770d90), the `GGML_SIMD` arm
 /// without SVE or RVV.
 ///
 /// Since v0.6.0 the C writes this against `GGML_F16_DOT_*`, which differ
@@ -386,10 +386,99 @@ pub export fn ggml_vec_dot_f16(
     s.* = @floatCast(sumf);
 }
 
+/// Ports `ggml_vec_dot_f16_f32` (vec.cpp:380 @b1b770d90), new at v1.0.0
+/// (#31854): the `F16` row of `type_traits_cpu` now dots an `f16` weight row
+/// against an `f32` activation row, where it used to round the activations
+/// to `f16` first.
+///
+/// Three arms, each with its own accumulator shape, all ending in a `double`
+/// scalar tail of rounded `f32` products:
+///
+/// - `__AVX512F__`: four `__m512` over steps of 64, then one over steps of
+///   16, every step `_mm512_fmadd_ps` (fused); `_mm512_reduce_add_ps` of
+///   `(acc0+acc1)+(acc2+acc3)`.
+/// - `__AVX__ && __F16C__` (x86-64-v3): four `__m256` over steps of 32, then
+///   one over 8, `GGML_F32x8_FMA` (fused under `__FMA__`); `(acc0+acc1)+
+///   (acc2+acc3)` folded as `hsum` folds.
+/// - `GGML_SIMD` (NEON): chunks of 64 widened into a stack buffer and handed
+///   to `ggml_vec_dot_f32`, each chunk's result added to the `double`; the
+///   last partial chunk goes the same way, so the scalar tail never runs.
+pub export fn ggml_vec_dot_f16_f32(
+    n: c_int,
+    s: *f32,
+    bs: usize,
+    x: [*]const c.ggml_fp16_t,
+    bx: usize,
+    y: [*]const f32,
+    by: usize,
+    nrc: c_int,
+) callconv(.c) void {
+    // `assert(nrc == 1)`, compiled out in the reference.
+    _ = nrc;
+    _ = bs;
+    _ = bx;
+    _ = by;
+
+    var sumf: GgmlFloat = 0.0;
+    var i: usize = 0;
+    const nn: usize = @intCast(n);
+
+    if (comptime x86_arm == .avx512 or x86_arm == .avx2) {
+        const L = if (x86_arm == .avx512) 16 else 8;
+        const V = @Vector(L, f32);
+        const load = struct {
+            inline fn h(p: [*]const c.ggml_fp16_t) V {
+                var r: V = undefined;
+                inline for (0..L) |k| r[k] = impl.fp16ToFp32(p[k]);
+                return r;
+            }
+            inline fn f(p: [*]const f32) V {
+                return @as(*align(1) const V, @ptrCast(p)).*;
+            }
+        };
+        var acc0: V = @splat(0);
+        var acc1: V = @splat(0);
+        var acc2: V = @splat(0);
+        var acc3: V = @splat(0);
+        while (i + 4 * L <= nn) : (i += 4 * L) {
+            acc0 = @mulAdd(V, load.h(x + i + 0 * L), load.f(y + i + 0 * L), acc0);
+            acc1 = @mulAdd(V, load.h(x + i + 1 * L), load.f(y + i + 1 * L), acc1);
+            acc2 = @mulAdd(V, load.h(x + i + 2 * L), load.f(y + i + 2 * L), acc2);
+            acc3 = @mulAdd(V, load.h(x + i + 3 * L), load.f(y + i + 3 * L), acc3);
+        }
+        while (i + L <= nn) : (i += L) {
+            acc0 = @mulAdd(V, load.h(x + i), load.f(y + i), acc0);
+        }
+        const acc = (acc0 + acc1) + (acc2 + acc3);
+        sumf = if (comptime L == 16) simd.reduceAdd512(acc) else hsum(acc);
+    } else {
+        var tx: [64]f32 = undefined;
+        while (i + 64 <= nn) : (i += 64) {
+            for (0..64) |j| tx[j] = impl.fp16ToFp32(x[i + j]);
+            var v: f32 = undefined;
+            ggml_vec_dot_f32(64, &v, 0, &tx, 0, y + i, 0, 1);
+            sumf += v;
+        }
+        if (i < nn) {
+            const nr = nn - i;
+            for (0..nr) |j| tx[j] = impl.fp16ToFp32(x[i + j]);
+            var v: f32 = undefined;
+            ggml_vec_dot_f32(@intCast(nr), &v, 0, &tx, 0, y + i, 0, 1);
+            sumf += v;
+            i = nn;
+        }
+    }
+    while (i < nn) : (i += 1) {
+        sumf += @as(GgmlFloat, impl.fp16ToFp32(x[i]) * y[i]);
+    }
+
+    s.* = @floatCast(sumf);
+}
+
 // -----------------------------------------------------------------------------
 // The vectorized exponential
 //
-// Ports `ggml_v_expf`, `ggml_v_expf` (vec.h:1154, 1250 @cd959bae9), the `__ARM_NEON &&
+// Ports `ggml_v_expf`, `ggml_v_expf` (vec.h:1190, 1286 @b1b770d90), the `__ARM_NEON &&
 // __aarch64__` arm and the `__AVX2__ && __FMA__` one. `inline static` in the
 // C, so it has no symbol and is private here.
 //
@@ -411,7 +500,7 @@ pub export fn ggml_vec_dot_f16(
 // `_mm512_scalef_ps` compiles to: unmasked, current rounding mode (4).
 extern fn @"llvm.x86.avx512.mask.scalef.ps.512"(@Vector(16, f32), @Vector(16, f32), @Vector(16, f32), u16, i32) callconv(.{ .x86_64_sysv = .{} }) @Vector(16, f32);
 
-/// Ports `ggml_v_expf` (vec.h:1200 @cd959bae9), the `__AVX512F__ &&
+/// Ports `ggml_v_expf` (vec.h:1236 @b1b770d90), the `__AVX512F__ &&
 /// __AVX512DQ__` arm.
 ///
 /// Not the NEON and AVX2 routine at sixteen lanes. The polynomial's last
@@ -444,7 +533,7 @@ inline fn vExpf512(x: VF) VF {
     return @select(f32, d, alt, res);
 }
 
-/// Ports `ggml_v_expf`, `ggml_v_expf` (vec.h:1154, 1250 @cd959bae9), the
+/// Ports `ggml_v_expf`, `ggml_v_expf` (vec.h:1190, 1286 @b1b770d90), the
 /// NEON and AVX2 arms; the AVX-512 arm is `vExpf512`.
 inline fn vExpf(x: VF) VF {
     if (comptime lanes == 16) return vExpf512(x);
@@ -499,8 +588,8 @@ inline fn vExpf(x: VF) VF {
     return @select(f32, big, mul_f32(s1, s1), inner);
 }
 
-/// Ports `ggml_v_silu`, `ggml_v_silu`, `ggml_v_silu` (vec.h:1178, 1228,
-/// 1290 @cd959bae9), the NEON, AVX-512 and AVX2 arms: `x / (1 + exp(-x))`.
+/// Ports `ggml_v_silu`, `ggml_v_silu`, `ggml_v_silu` (vec.h:1214, 1264,
+/// 1326 @b1b770d90), the NEON, AVX-512 and AVX2 arms: `x / (1 + exp(-x))`.
 inline fn vSilu(x: VF) VF {
     const one = dup_n_f32(1.0);
     const zero = dup_n_f32(0.0);
@@ -510,7 +599,7 @@ inline fn vSilu(x: VF) VF {
     return div_f32(x, one_plus_exp_neg_x);
 }
 
-/// Ports `ggml_silu_f32` (vec.h:1060 @cd959bae9), the scalar tail's version.
+/// Ports `ggml_silu_f32` (vec.h:1096 @b1b770d90), the scalar tail's version.
 ///
 /// Note this is **not** the same computation as `vSilu`: it divides by
 /// `1 + expf(-x)` using libm's `expf`, where the vector path uses ARM's
@@ -520,11 +609,11 @@ inline fn siluF32(x: f32) f32 {
     return x / (1.0 + expf(-x));
 }
 
-/// Ports `GELU_QUICK_COEF` (vec.h:963 @cd959bae9).
+/// Ports `GELU_QUICK_COEF` (vec.h:999 @b1b770d90).
 const gelu_quick_coef: f32 = -1.702;
 
 /// Ports `ggml_v_gelu_quick`, `ggml_v_gelu_quick`, `ggml_v_gelu_quick`
-/// (vec.h:1188, 1238, 1300 @cd959bae9), the NEON, AVX-512 and AVX2 arms:
+/// (vec.h:1224, 1274, 1336 @b1b770d90), the NEON, AVX-512 and AVX2 arms:
 /// `x / (1 + exp(-1.702 x))`, with `x` the numerator so it cannot overflow.
 inline fn vGeluQuick(x: VF) VF {
     const one = dup_n_f32(1.0);
@@ -532,7 +621,7 @@ inline fn vGeluQuick(x: VF) VF {
     return div_f32(x, add_f32(one, exp_cx));
 }
 
-/// Ports `ggml_gelu_quick_f32` (vec.h:1029 @cd959bae9), the scalar tail's
+/// Ports `ggml_gelu_quick_f32` (vec.h:1065 @b1b770d90), the scalar tail's
 /// version, with `x` multiplying a reciprocal where `vGeluQuick` divides.
 inline fn geluQuickF32(x: f32) f32 {
     return x * (1.0 / (1.0 + expf(gelu_quick_coef * x)));
@@ -549,7 +638,7 @@ inline fn loadVF(p: [*]const f32) VF {
 // -----------------------------------------------------------------------------
 // The SiLU family
 
-/// Ports `ggml_vec_silu_f32` (vec.cpp:380 @cd959bae9), the
+/// Ports `ggml_vec_silu_f32` (vec.cpp:459 @b1b770d90), the
 /// `__ARM_NEON && __aarch64__` arm, the `__AVX512F__ && __AVX512DQ__` one
 /// and the `__AVX2__ && __FMA__` one.
 pub export fn ggml_vec_silu_f32(n: c_int, y: [*]f32, x: [*]const f32) callconv(.c) void {
@@ -565,7 +654,7 @@ pub export fn ggml_vec_silu_f32(n: c_int, y: [*]f32, x: [*]const f32) callconv(.
     }
 }
 
-/// Ports `ggml_vec_swiglu_f32` (vec.cpp:421 @cd959bae9), the NEON, AVX2 and
+/// Ports `ggml_vec_swiglu_f32` (vec.cpp:500 @b1b770d90), the NEON, AVX2 and
 /// AVX-512 arms.
 pub export fn ggml_vec_swiglu_f32(n: c_int, y: [*]f32, x: [*]const f32, g: [*]const f32) callconv(.c) void {
     var i: c_int = 0;
@@ -580,7 +669,7 @@ pub export fn ggml_vec_swiglu_f32(n: c_int, y: [*]f32, x: [*]const f32, g: [*]co
     }
 }
 
-/// Ports `ggml_vec_gelu_quick_f32` (vec.cpp:465 @cd959bae9), new at v0.8.0,
+/// Ports `ggml_vec_gelu_quick_f32` (vec.cpp:544 @b1b770d90), new at v0.8.0,
 /// when `vec.h` stopped defining `GGML_GELU_QUICK_FP16`: the NEON, AVX2 and
 /// AVX-512 arms, computed in `f32` where the table lost precision.
 pub export fn ggml_vec_gelu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32) callconv(.c) void {
@@ -596,7 +685,7 @@ pub export fn ggml_vec_gelu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32) call
     }
 }
 
-/// Ports `ggml_vec_geglu_quick_f32` (vec.cpp:506 @cd959bae9), new at v0.8.0:
+/// Ports `ggml_vec_geglu_quick_f32` (vec.cpp:585 @b1b770d90), new at v0.8.0:
 /// the NEON, AVX2 and AVX-512 arms.
 pub export fn ggml_vec_geglu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32, g: [*]const f32) callconv(.c) void {
     var i: c_int = 0;
@@ -618,7 +707,7 @@ pub export fn ggml_vec_geglu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32, g: 
 // one step at a time through `hsum` -- not a single reduction at the end. The
 // order is the C's and is visible in the last bit.
 
-/// Ports `ggml_vec_cvar_f32` (vec.cpp:549 @cd959bae9), the NEON, AVX2 and
+/// Ports `ggml_vec_cvar_f32` (vec.cpp:628 @b1b770d90), the NEON, AVX2 and
 /// AVX-512 arms.
 ///
 /// Writes `x - mean` into `y` and returns the mean of its squares.
@@ -644,7 +733,7 @@ pub export fn ggml_vec_cvar_f32(n: c_int, y: [*]f32, x: [*]const f32, mean: f32)
     return sum / @as(GgmlFloat, @floatFromInt(n));
 }
 
-/// Ports `ggml_vec_soft_max_f32` (vec.cpp:625 @cd959bae9), the NEON, AVX2 and
+/// Ports `ggml_vec_soft_max_f32` (vec.cpp:704 @b1b770d90), the NEON, AVX2 and
 /// AVX-512 arms.
 ///
 /// Writes `exp(x - max)` into `y` and returns the sum. The vector path uses
@@ -670,7 +759,7 @@ pub export fn ggml_vec_soft_max_f32(n: c_int, y: [*]f32, x: [*]const f32, max: f
     return sum;
 }
 
-/// Ports `ggml_vec_log_soft_max_f32` (vec.cpp:702 @cd959bae9).
+/// Ports `ggml_vec_log_soft_max_f32` (vec.cpp:781 @b1b770d90).
 ///
 /// Scalar throughout — the C has no vector arm for this one on any target.
 pub export fn ggml_vec_log_soft_max_f32(n: c_int, y: [*]f32, x: [*]const f32, max: f32) callconv(.c) GgmlFloat {

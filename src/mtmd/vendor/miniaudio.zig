@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports, from `llama.cpp/vendor/miniaudio/miniaudio.h` (miniaudio v0.11.26)
-//! at v0.9.0 (`cd959bae9`), the decoder path `mtmd-helper.cpp` compiles
+//! at v1.0.0 (`b1b770d90`), the decoder path `mtmd-helper.cpp` compiles
 //! with `MA_NO_ENCODING`, `MA_NO_DEVICE_IO`, `MA_NO_RESOURCE_MANAGER`,
 //! `MA_NO_NODE_GRAPH`, `MA_NO_ENGINE` and `MA_NO_GENERATION`: backend
 //! selection, the data-source read loop, the data converter (mono mix-down
@@ -49,7 +49,7 @@ pub fn resetIndeterminate() void {
     dr_flac.read_indeterminate = false;
 }
 
-/// Ports `audio_helpers`' `is_audio_file` (mtmd-helper.cpp:303 @cd959bae9).
+/// Ports `audio_helpers`' `is_audio_file` (mtmd-helper.cpp:303 @b1b770d90).
 ///
 /// Parameters:
 /// - `buf`: the file's bytes.
@@ -63,7 +63,7 @@ pub fn isAudioFile(buf: []const u8) bool {
     return is_wav or is_mp3 or is_flac;
 }
 
-/// Ports `audio_helpers`' `decode_audio_from_buf` (mtmd-helper.cpp:322 @cd959bae9).
+/// Ports `audio_helpers`' `decode_audio_from_buf` (mtmd-helper.cpp:322 @b1b770d90).
 ///
 /// Parameters:
 /// - `gpa`: allocates the decoder's state and `out`'s storage.
@@ -88,13 +88,13 @@ pub fn decodeAudioFromBuf(gpa: std.mem.Allocator, buf: []const u8, target_sample
     return read.ok;
 }
 
-/// `MA_MAX_CHANNELS` (miniaudio.h:4280 @cd959bae9).
+/// `MA_MAX_CHANNELS` (miniaudio.h:4280 @b1b770d90).
 const max_channels = 254;
-/// `MA_DATA_CONVERTER_STACK_BUFFER_SIZE` (miniaudio.h:17565 @cd959bae9).
+/// `MA_DATA_CONVERTER_STACK_BUFFER_SIZE` (miniaudio.h:17565 @b1b770d90).
 const stack_buffer_size = 4096;
-/// `MA_DEFAULT_RESAMPLER_LPF_ORDER` (miniaudio.h:12261 @cd959bae9).
+/// `MA_DEFAULT_RESAMPLER_LPF_ORDER` (miniaudio.h:12261 @b1b770d90).
 const lpf_order = 4;
-/// `MA_PI_D` (miniaudio.h:12218 @cd959bae9).
+/// `MA_PI_D` (miniaudio.h:12218 @b1b770d90).
 const pi_d: f64 = 3.14159265358979323846264;
 
 /// The decoding backend `ma_decoder` settled on.
@@ -121,7 +121,7 @@ pub const Backend = union(enum) {
 
     /// Ports `ma_wav_get_length_in_pcm_frames`,
     /// `ma_flac_get_length_in_pcm_frames` and
-    /// `ma_mp3_get_length_in_pcm_frames` (miniaudio.h:64038, 64684, 65381 @cd959bae9).
+    /// `ma_mp3_get_length_in_pcm_frames` (miniaudio.h:64038, 64684, 65381 @b1b770d90).
     fn length(b: *Backend) u64 {
         return switch (b.*) {
             .wav => |*w| w.total_pcm_frame_count,
@@ -131,7 +131,7 @@ pub const Backend = union(enum) {
     }
 
     /// Ports `ma_wav_read_pcm_frames`, `ma_flac_read_pcm_frames` and
-    /// `ma_mp3_read_pcm_frames` (miniaudio.h:63853, 64501, 65206 @cd959bae9)
+    /// `ma_mp3_read_pcm_frames` (miniaudio.h:63853, 64501, 65206 @b1b770d90)
     /// at `f32`: the frames read, `MA_AT_END` when there are none.
     fn read(b: *Backend, out: []f32, frames: u64) u64 {
         return switch (b.*) {
@@ -160,7 +160,7 @@ pub const Decoder = struct {
     output_sample_rate: u32,
     converter: Converter,
 
-    /// Ports `ma_decoder_init_memory` (miniaudio.h:66700 @cd959bae9) with
+    /// Ports `ma_decoder_init_memory` (miniaudio.h:66700 @b1b770d90) with
     /// `ma_decoder_config_init(ma_format_f32, 1, sample_rate)`.
     ///
     /// Parameters:
@@ -190,7 +190,7 @@ pub const Decoder = struct {
     }
 
     /// Ports `ma_decoder__postinit` and `ma_decoder__init_data_converter`
-    /// (miniaudio.h:66462, 63131 @cd959bae9).
+    /// (miniaudio.h:66462, 63131 @b1b770d90).
     fn postinit(backend_in: Backend, sample_rate: u32) ?Decoder {
         var backend = backend_in;
         const channels_in = backend.channels();
@@ -212,7 +212,7 @@ pub const Decoder = struct {
         d.backend.deinit();
     }
 
-    /// Ports `ma_decoder_get_length_in_pcm_frames` (miniaudio.h:67842 @cd959bae9).
+    /// Ports `ma_decoder_get_length_in_pcm_frames` (miniaudio.h:67842 @b1b770d90).
     ///
     /// Return: the length in output frames.
     pub fn lengthInPcmFrames(d: *Decoder) u64 {
@@ -222,7 +222,7 @@ pub const Decoder = struct {
         return frameCountAfterResampling(d.output_sample_rate, rate_in, internal);
     }
 
-    /// Ports `ma_decoder_read_pcm_frames` (miniaudio.h:67590 @cd959bae9).
+    /// Ports `ma_decoder_read_pcm_frames` (miniaudio.h:67590 @b1b770d90).
     ///
     /// Parameters:
     /// - `out`: receives up to `out.len` mono frames.
@@ -272,7 +272,7 @@ pub const Decoder = struct {
 
 const DsRead = struct { frames: u64, ok: bool, at_end: bool };
 
-/// Ports `ma_data_source_read_pcm_frames` (miniaudio.h:59536 @cd959bae9)
+/// Ports `ma_data_source_read_pcm_frames` (miniaudio.h:59536 @b1b770d90)
 /// for an unchained, unlooped source with no range: the backend is called
 /// until it has delivered `frame_count` frames or delivers none.
 fn dataSourceRead(backend: *Backend, out: []f32, frame_count: u64) DsRead {
@@ -288,7 +288,7 @@ fn dataSourceRead(backend: *Backend, out: []f32, frame_count: u64) DsRead {
     return .{ .frames = total, .ok = true, .at_end = false };
 }
 
-/// Ports `ma_calculate_frame_count_after_resampling` (miniaudio.h:17537 @cd959bae9),
+/// Ports `ma_calculate_frame_count_after_resampling` (miniaudio.h:17537 @b1b770d90),
 /// including its use of `sampleRateIn / sampleRateOut` where the
 /// resampler's own estimate divides the other way.
 pub fn frameCountAfterResampling(rate_out: u32, rate_in: u32, frames_in: u64) u64 {
@@ -310,7 +310,7 @@ const Converter = struct {
     channels_in: u32,
     resampler: LinearResampler,
 
-    /// Ports `ma_data_converter_init_preallocated` (miniaudio.h:56281 @cd959bae9).
+    /// Ports `ma_data_converter_init_preallocated` (miniaudio.h:56281 @b1b770d90).
     fn init(channels_in: u32, rate_in: u32, rate_out: u32) ?Converter {
         // one channel to one is a passthrough; more go through `mono_out`
         const has_channel_converter = channels_in != 1;
@@ -323,18 +323,18 @@ const Converter = struct {
         return c;
     }
 
-    /// Ports `ma_data_converter_get_required_input_frame_count` (miniaudio.h:57186 @cd959bae9).
+    /// Ports `ma_data_converter_get_required_input_frame_count` (miniaudio.h:57186 @b1b770d90).
     fn requiredInputFrameCount(c: *const Converter, out_frames: u64) u64 {
         if (c.path == .resample_only or c.path == .channels_first) return c.resampler.requiredInputFrameCount(out_frames);
         return out_frames;
     }
 
-    /// Ports `ma_data_converter_process_pcm_frames` (miniaudio.h:57116 @cd959bae9).
+    /// Ports `ma_data_converter_process_pcm_frames` (miniaudio.h:57116 @b1b770d90).
     fn process(c: *Converter, in: []const f32, count_in: *u64, out: []f32, count_out: *u64) void {
         switch (c.path) {
             .passthrough => unreachable, // the decoder reads straight through
             .channels_only => {
-                // `ma_data_converter_process_pcm_frames__channels_only` (miniaudio.h:56677 @cd959bae9)
+                // `ma_data_converter_process_pcm_frames__channels_only` (miniaudio.h:56677 @b1b770d90)
                 const n = @min(count_in.*, count_out.*);
                 monoOut(out, in, n, c.channels_in);
                 count_in.* = n;
@@ -345,7 +345,7 @@ const Converter = struct {
         }
     }
 
-    /// Ports `ma_data_converter_process_pcm_frames__channels_first` (miniaudio.h:56952 @cd959bae9).
+    /// Ports `ma_data_converter_process_pcm_frames__channels_first` (miniaudio.h:56952 @b1b770d90).
     fn processChannelsFirst(c: *Converter, in: []const f32, count_in: *u64, out: []f32, count_out: *u64) void {
         const frame_count_in = count_in.*;
         const frame_count_out = count_out.*;
@@ -371,7 +371,7 @@ const Converter = struct {
     }
 };
 
-/// Ports `ma_channel_converter_process_pcm_frames__mono_out` (miniaudio.h:55848 @cd959bae9)
+/// Ports `ma_channel_converter_process_pcm_frames__mono_out` (miniaudio.h:55848 @b1b770d90)
 /// at `f32`: a sum in channel order, then one division.
 fn monoOut(out: []f32, in: []const f32, frames: u64, channels_in: u32) void {
     const n: usize = @intCast(frames);
@@ -385,7 +385,7 @@ fn monoOut(out: []f32, in: []const f32, frames: u64, channels_in: u32) void {
 
 extern "c" fn sin(x: f64) f64;
 
-/// `ma_biquad` (miniaudio.h:4631 @cd959bae9), at f32 with one channel.
+/// `ma_biquad` (miniaudio.h:4631 @b1b770d90), at f32 with one channel.
 const Biquad = struct {
     b0: f32,
     b1: f32,
@@ -396,7 +396,7 @@ const Biquad = struct {
     r2: f32 = 0,
 
     /// Ports `ma_lpf2__get_biquad_config` and `ma_biquad_reinit`
-    /// (miniaudio.h:47959, 47494 @cd959bae9).
+    /// (miniaudio.h:47959, 47494 @b1b770d90).
     fn lpf2(sample_rate: u32, cutoff: f64, q: f64) Biquad {
         const w = 2 * pi_d * cutoff / @as(f64, @floatFromInt(sample_rate));
         const s = sin(w);
@@ -418,7 +418,7 @@ const Biquad = struct {
     }
 
     /// Ports `ma_biquad_process_pcm_frame_f32__direct_form_2_transposed`
-    /// (miniaudio.h:47558 @cd959bae9). Clang contracts each statement: the
+    /// (miniaudio.h:47558 @b1b770d90). Clang contracts each statement: the
     /// first product fuses with the add, and of `b1*x - a1*y + r2` the left
     /// product fuses with the subtraction before `r2` is added.
     fn process(bq: *Biquad, x: f32) f32 {
@@ -431,125 +431,217 @@ const Biquad = struct {
     }
 };
 
-/// Ports `ma_cosd` (miniaudio.h:12472 @cd959bae9): `sin(pi/2 - x)`.
+/// Ports `ma_cosd` (miniaudio.h:12472 @b1b770d90): `sin(pi/2 - x)`.
 fn cosd(x: f64) f64 {
     return sin((pi_d * 0.5) - x);
 }
 
+/// The decoder's resampler: `MA_DEFAULT_RESAMPLER_LPF_ORDER`.
+const LinearResampler = LinearResamplerOf(lpf_order);
+
+/// `MA_MAX_FILTER_ORDER` (miniaudio.h:4284 @b1b770d90), the low-pass order
+/// `mtmd_helper_resampler_init` asks for.
+pub const max_filter_order = 8;
+
 /// Ports `ma_linear_resampler` at `f32` with one channel, the only count
-/// the converter gives it.
-const LinearResampler = struct {
-    rate_in: u32, // simplified
-    rate_out: u32,
-    in_advance_int: u32,
-    in_advance_frac: u32,
-    in_time_int: u32 = 1, // force an input sample to be loaded for the first output frame
-    in_time_frac: u32 = 0,
-    x0: f32 = 0,
-    x1: f32 = 0,
-    lpf: [lpf_order / 2]Biquad,
+/// the converter and `mtmd_helper_resampler` give it, for a low-pass filter
+/// of `order` (even, as both callers' are: all second-order sections).
+pub fn LinearResamplerOf(comptime order: u32) type {
+    comptime std.debug.assert(order % 2 == 0 and order <= max_filter_order);
+    return struct {
+        const LinearResamplerT = @This();
+        rate_in: u32, // simplified
+        rate_out: u32,
+        in_advance_int: u32,
+        in_advance_frac: u32,
+        in_time_int: u32 = 1, // force an input sample to be loaded for the first output frame
+        in_time_frac: u32 = 0,
+        x0: f32 = 0,
+        x1: f32 = 0,
+        lpf: [order / 2]Biquad,
 
-    /// Ports `ma_linear_resampler_init_preallocated` and
-    /// `ma_linear_resampler_set_rate_internal` (miniaudio.h:53412, 53273 @cd959bae9).
-    fn init(rate_in_full: u32, rate_out_full: u32) ?LinearResampler {
-        if (rate_in_full == 0 or rate_out_full == 0) return null;
-        const g = gcf(rate_in_full, rate_out_full);
-        const rate_in = rate_in_full / g;
-        const rate_out = rate_out_full / g;
-        const lpf_rate = @max(rate_in, rate_out);
-        const cutoff: f64 = @as(f64, @floatFromInt(@min(rate_in, rate_out))) * 0.5 * 1.0;
-        var lpf: [lpf_order / 2]Biquad = undefined;
-        // `ma_lpf_reinit__internal` (miniaudio.h:48211 @cd959bae9): an even
-        // order is all second-order sections
-        for (&lpf, 0..) |*bq, i| {
-            const a = @as(f64, @floatFromInt(1 + i * 2)) * (pi_d / @as(f64, @floatFromInt(lpf_order * 2)));
-            const q = 1 / (2 * cosd(a));
-            bq.* = Biquad.lpf2(lpf_rate, cutoff, q);
-        }
-        return .{
-            .rate_in = rate_in,
-            .rate_out = rate_out,
-            .in_advance_int = rate_in / rate_out,
-            .in_advance_frac = rate_in % rate_out,
-            .lpf = lpf,
-        };
-    }
-
-    /// Ports `ma_gcf_u32`.
-    fn gcf(a_in: u32, b_in: u32) u32 {
-        var a = a_in;
-        var b = b_in;
-        while (b != 0) {
-            const t = a % b;
-            a = b;
-            b = t;
-        }
-        return a;
-    }
-
-    /// Ports `ma_lpf_process_pcm_frame_f32` (miniaudio.h:48452 @cd959bae9).
-    fn filter(r: *LinearResampler, x: f32) f32 {
-        var y = x;
-        for (&r.lpf) |*bq| y = bq.process(y);
-        return y;
-    }
-
-    /// Ports `ma_linear_resampler_interpolate_frame_f32` and
-    /// `ma_mix_f32_fast` (miniaudio.h:53531, 14006 @cd959bae9): three
-    /// statements, so three roundings.
-    fn interpolate(r: *const LinearResampler) f32 {
-        const a = @as(f32, @floatFromInt(r.in_time_frac)) / @as(f32, @floatFromInt(r.rate_out));
-        const r0 = r.x1 - r.x0;
-        const r1 = r0 * a;
-        return r.x0 + r1;
-    }
-
-    fn advance(r: *LinearResampler) void {
-        r.in_time_int += r.in_advance_int;
-        r.in_time_frac += r.in_advance_frac;
-        if (r.in_time_frac >= r.rate_out) {
-            r.in_time_frac -= r.rate_out;
-            r.in_time_int += 1;
-        }
-    }
-
-    /// Ports `ma_linear_resampler_process_pcm_frames_f32_downsample` and
-    /// `ma_linear_resampler_process_pcm_frames_f32_upsample` (miniaudio.h:53713, 53789 @cd959bae9).
-    fn process(r: *LinearResampler, in: []const f32, count_in: *u64, out: []f32, count_out: *u64) void {
-        const downsample = r.rate_in > r.rate_out;
-        const frame_count_in = count_in.*;
-        const frame_count_out = count_out.*;
-        var processed_in: u64 = 0;
-        var processed_out: u64 = 0;
-        while (processed_out < frame_count_out) {
-            // load the buffers, filtering every input sample when downsampling
-            while (r.in_time_int > 0 and frame_count_in > processed_in) {
-                r.x0 = r.x1;
-                r.x1 = in[@intCast(processed_in)];
-                if (downsample and r.rate_in != r.rate_out) r.x1 = r.filter(r.x1);
-                processed_in += 1;
-                r.in_time_int -= 1;
+        /// Ports `ma_linear_resampler_init_preallocated` and
+        /// `ma_linear_resampler_set_rate_internal` (miniaudio.h:53412, 53273 @b1b770d90).
+        pub fn init(rate_in_full: u32, rate_out_full: u32) ?LinearResamplerT {
+            if (rate_in_full == 0 or rate_out_full == 0) return null;
+            const g = gcf(rate_in_full, rate_out_full);
+            const rate_in = rate_in_full / g;
+            const rate_out = rate_out_full / g;
+            const lpf_rate = @max(rate_in, rate_out);
+            const cutoff: f64 = @as(f64, @floatFromInt(@min(rate_in, rate_out))) * 0.5 * 1.0;
+            var lpf: [order / 2]Biquad = undefined;
+            // `ma_lpf_reinit__internal` (miniaudio.h:48211 @b1b770d90): an even
+            // order is all second-order sections
+            for (&lpf, 0..) |*bq, i| {
+                const a = @as(f64, @floatFromInt(1 + i * 2)) * (pi_d / @as(f64, @floatFromInt(order * 2)));
+                const q = 1 / (2 * cosd(a));
+                bq.* = Biquad.lpf2(lpf_rate, cutoff, q);
             }
-            if (r.in_time_int > 0) break; // ran out of input data
-
-            var y = r.interpolate();
-            if (!downsample and r.rate_in != r.rate_out) y = r.filter(y);
-            out[@intCast(processed_out)] = y;
-            processed_out += 1;
-            r.advance();
+            return .{
+                .rate_in = rate_in,
+                .rate_out = rate_out,
+                .in_advance_int = rate_in / rate_out,
+                .in_advance_frac = rate_in % rate_out,
+                .lpf = lpf,
+            };
         }
-        count_in.* = processed_in;
-        count_out.* = processed_out;
+
+        /// Ports `ma_gcf_u32`.
+        fn gcf(a_in: u32, b_in: u32) u32 {
+            var a = a_in;
+            var b = b_in;
+            while (b != 0) {
+                const t = a % b;
+                a = b;
+                b = t;
+            }
+            return a;
+        }
+
+        /// Ports `ma_lpf_process_pcm_frame_f32` (miniaudio.h:48452 @b1b770d90).
+        fn filter(r: *LinearResamplerT, x: f32) f32 {
+            var y = x;
+            for (&r.lpf) |*bq| y = bq.process(y);
+            return y;
+        }
+
+        /// Ports `ma_linear_resampler_interpolate_frame_f32` and
+        /// `ma_mix_f32_fast` (miniaudio.h:53531, 14006 @b1b770d90): three
+        /// statements, so three roundings.
+        fn interpolate(r: *const LinearResamplerT) f32 {
+            const a = @as(f32, @floatFromInt(r.in_time_frac)) / @as(f32, @floatFromInt(r.rate_out));
+            const r0 = r.x1 - r.x0;
+            const r1 = r0 * a;
+            return r.x0 + r1;
+        }
+
+        fn advance(r: *LinearResamplerT) void {
+            r.in_time_int += r.in_advance_int;
+            r.in_time_frac += r.in_advance_frac;
+            if (r.in_time_frac >= r.rate_out) {
+                r.in_time_frac -= r.rate_out;
+                r.in_time_int += 1;
+            }
+        }
+
+        /// Ports `ma_linear_resampler_process_pcm_frames_f32_downsample` and
+        /// `ma_linear_resampler_process_pcm_frames_f32_upsample` (miniaudio.h:53713, 53789 @b1b770d90).
+        pub fn process(r: *LinearResamplerT, in: []const f32, count_in: *u64, out: []f32, count_out: *u64) void {
+            const downsample = r.rate_in > r.rate_out;
+            const frame_count_in = count_in.*;
+            const frame_count_out = count_out.*;
+            var processed_in: u64 = 0;
+            var processed_out: u64 = 0;
+            while (processed_out < frame_count_out) {
+                // load the buffers, filtering every input sample when downsampling
+                while (r.in_time_int > 0 and frame_count_in > processed_in) {
+                    r.x0 = r.x1;
+                    r.x1 = in[@intCast(processed_in)];
+                    if (downsample and r.rate_in != r.rate_out) r.x1 = r.filter(r.x1);
+                    processed_in += 1;
+                    r.in_time_int -= 1;
+                }
+                if (r.in_time_int > 0) break; // ran out of input data
+
+                var y = r.interpolate();
+                if (!downsample and r.rate_in != r.rate_out) y = r.filter(y);
+                out[@intCast(processed_out)] = y;
+                processed_out += 1;
+                r.advance();
+            }
+            count_in.* = processed_in;
+            count_out.* = processed_out;
+        }
+
+        /// Ports `ma_linear_resampler_get_required_input_frame_count` (miniaudio.h:53943 @b1b770d90).
+        fn requiredInputFrameCount(r: *const LinearResamplerT, out_frames_in: u64) u64 {
+            if (out_frames_in == 0) return 0;
+            var input: u64 = r.in_time_int;
+            const out_frames = out_frames_in - 1;
+            input +%= out_frames *% r.in_advance_int;
+            input +%= (r.in_time_frac +% (out_frames *% r.in_advance_frac)) / r.rate_out;
+            return input;
+        }
+
+        /// Ports `ma_linear_resampler_get_expected_output_frame_count`
+        /// (miniaudio.h:53974 @b1b770d90), which `ma_resampler`'s linear
+        /// backend forwards to: the preliminary count, plus one when the
+        /// input reaches the frame after it.
+        pub fn expectedOutputFrameCount(r: *const LinearResamplerT, input_frames: u64) u64 {
+            var out = (input_frames *% r.rate_out) / r.rate_in;
+            const prelim_from_frac = (r.in_time_frac +% out *% r.in_advance_frac) / r.rate_out;
+            const prelim = (r.in_time_int +% out *% r.in_advance_int) +% prelim_from_frac;
+            if (prelim <= input_frames) out += 1;
+            return out;
+        }
+    };
+}
+
+/// The state and loop of `mtmd_helper_resampler` (mtmd-helper.cpp:363
+/// @b1b770d90), a member of `audio_helpers`' neighbourhood: miniaudio's
+/// `ma_resampler` over `ma_resample_algorithm_linear` at `f32`, one channel,
+/// `lpfOrder = MA_MAX_FILTER_ORDER`. `helper.zig` exports the C entry points
+/// over it.
+pub const HelperResampler = struct {
+    const Rs = LinearResamplerOf(max_filter_order);
+
+    rs: Rs = undefined,
+    passthrough: bool = false,
+    out: std.ArrayList(f32) = .empty,
+
+    /// The allocation half of `mtmd_helper_resampler_init`
+    /// (mtmd-helper.cpp:369 @b1b770d90); both rates are positive.
+    /// Return: null where `ma_resampler_init` fails; `error.OutOfMemory`
+    /// where the C++'s `new` throws.
+    pub fn create(gpa: std.mem.Allocator, rate_in: u32, rate_out: u32) error{OutOfMemory}!?*HelperResampler {
+        const ctx = try gpa.create(HelperResampler);
+        ctx.* = .{};
+        if (rate_in == rate_out) {
+            ctx.passthrough = true;
+            return ctx;
+        }
+        ctx.rs = Rs.init(rate_in, rate_out) orelse {
+            gpa.destroy(ctx);
+            return null;
+        };
+        return ctx;
     }
 
-    /// Ports `ma_linear_resampler_get_required_input_frame_count` (miniaudio.h:53943 @cd959bae9).
-    fn requiredInputFrameCount(r: *const LinearResampler, out_frames_in: u64) u64 {
-        if (out_frames_in == 0) return 0;
-        var input: u64 = r.in_time_int;
-        const out_frames = out_frames_in - 1;
-        input +%= out_frames *% r.in_advance_int;
-        input +%= (r.in_time_frac +% (out_frames *% r.in_advance_frac)) / r.rate_out;
-        return input;
+    /// `mtmd_helper_resampler_free` (mtmd-helper.cpp:390 @b1b770d90).
+    pub fn destroy(ctx: *HelperResampler, gpa: std.mem.Allocator) void {
+        ctx.out.deinit(gpa);
+        gpa.destroy(ctx);
+    }
+
+    fn resizeZero(ctx: *HelperResampler, gpa: std.mem.Allocator, n: usize) error{OutOfMemory}!void {
+        const old = ctx.out.items.len;
+        try ctx.out.resize(gpa, n);
+        if (n > old) @memset(ctx.out.items[old..], 0);
+    }
+
+    /// Ports the body of `mtmd_helper_resampler_process` (mtmd-helper.cpp:400
+    /// @b1b770d90): `*out` stays valid until the next call; `error.OutOfMemory`
+    /// where the C++'s `resize` throws.
+    pub fn process(ctx: *HelperResampler, gpa: std.mem.Allocator, in: ?[*]const f32, n_in: usize, out: *?[*]const f32) error{OutOfMemory}!i64 {
+        if (ctx.passthrough) {
+            out.* = in;
+            return @intCast(n_in);
+        }
+        const n_expected = ctx.rs.expectedOutputFrameCount(n_in);
+        try ctx.resizeZero(gpa, @intCast(n_expected + 16));
+        var n_done_in: usize = 0;
+        var n_done_out: usize = 0;
+        while (n_done_in < n_in) {
+            if (n_done_out == ctx.out.items.len) try ctx.resizeZero(gpa, ctx.out.items.len * 2);
+            var cnt_in: u64 = n_in - n_done_in;
+            var cnt_out: u64 = ctx.out.items.len - n_done_out;
+            ctx.rs.process(in.?[n_done_in..n_in], &cnt_in, ctx.out.items[n_done_out..], &cnt_out);
+            if (cnt_in == 0 and cnt_out == 0) break;
+            n_done_in += @intCast(cnt_in);
+            n_done_out += @intCast(cnt_out);
+        }
+        out.* = ctx.out.items.ptr;
+        return @intCast(n_done_out);
     }
 };
 
@@ -572,4 +664,32 @@ test "the sniff takes RIFF/WAVE, ID3, an MPEG sync word and fLaC" {
 test "the length after resampling keeps upstream's arithmetic" {
     try std.testing.expectEqual(@as(u64, 16000), frameCountAfterResampling(16000, 44100, 44100));
     try std.testing.expectEqual(@as(u64, 0), frameCountAfterResampling(16000, 44100, 0));
+}
+
+test "the helper resampler streams what one call would produce" {
+    const gpa = std.testing.allocator;
+    var in: [1000]f32 = undefined;
+    for (&in, 0..) |*x, i| x.* = @sin(@as(f32, @floatFromInt(i)) * 0.1);
+    const one = (try HelperResampler.create(gpa, 48000, 16000)).?;
+    defer one.destroy(gpa);
+    var out: ?[*]const f32 = null;
+    const n1 = try one.process(gpa, &in, in.len, &out);
+    try std.testing.expect(n1 > 300 and n1 < 340);
+    const whole = try gpa.dupe(f32, out.?[0..@intCast(n1)]);
+    defer gpa.free(whole);
+    const two = (try HelperResampler.create(gpa, 48000, 16000)).?;
+    defer two.destroy(gpa);
+    var got: std.ArrayList(f32) = .empty;
+    defer got.deinit(gpa);
+    var pos: usize = 0;
+    while (pos < in.len) : (pos += 77) {
+        const n = @min(77, in.len - pos);
+        const k = try two.process(gpa, in[pos..].ptr, n, &out);
+        try got.appendSlice(gpa, out.?[0..@intCast(k)]);
+    }
+    try std.testing.expectEqualSlices(f32, whole, got.items);
+    const pass = (try HelperResampler.create(gpa, 16000, 16000)).?;
+    defer pass.destroy(gpa);
+    try std.testing.expectEqual(@as(i64, 5), try pass.process(gpa, &in, 5, &out));
+    try std.testing.expectEqual(@as([*]const f32, &in), out.?);
 }

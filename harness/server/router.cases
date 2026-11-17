@@ -46,6 +46,18 @@ POST /completion {"model":"qwen3","prompt":"One, two,","n_predict":6,"temperatur
 POST /v1/chat/completions {"model":"qwen3","messages":[{"role":"user","content":"Hi"}],"max_tokens":4,"temperature":0}
 POST /tokenize {"model":"qwen3","content":"hello world"}
 POST /detokenize {"model":"qwen3","tokens":[14990,1879]}
+# v1.0.0 (e182fdad4): a browser's request passes the router's origin check and
+# reaches the child without its Origin and Sec-Fetch-* headers; a child refuses
+# a request that still carries them
+!header Origin: http://127.0.0.1:$SPORT
+!header Host: 127.0.0.1:$SPORT
+!header Sec-Fetch-Site: same-origin
+!header Sec-Fetch-Mode: cors
+!header sec-fetch-dest: empty
+POST /tokenize {"model":"qwen3","content":"from a browser"}
+POST /completion {"model":"qwen3","prompt":"Hi","n_predict":2,"temperature":0,"stream":true}
+GET /props?model=qwen3
+!noheaders
 GET /props?model=qwen3
 GET /slots?model=qwen3
 GET /metrics?model=qwen3

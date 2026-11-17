@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.9.0
-//! (`cd959bae9`): `ggml_cuda_compute_forward`, the `USE_CUDA_GRAPH` helpers,
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v1.0.0
+//! (`b1b770d90`): `ggml_cuda_compute_forward`, the `USE_CUDA_GRAPH` helpers,
 //! `ggml_cuda_graph_evaluate_and_capture`, `ggml_backend_cuda_graph_compute`
 //! and `ggml_backend_cuda_graph_optimize`.
 //!
@@ -36,7 +36,6 @@ const arange = @import("arange.zig");
 const fill = @import("fill.zig");
 const tri = @import("tri.zig");
 const diag = @import("diag.zig");
-const diagmask = @import("diagmask.zig");
 const roll = @import("roll.zig");
 const pad = @import("pad.zig");
 const pad_reflect_1d = @import("pad_reflect_1d.zig");
@@ -94,13 +93,13 @@ const cudaCheck = common.cudaCheck;
 // -----------------------------------------------------------------------------
 // Dispatch
 
-/// Ports `ggml_cuda_compute_forward` (ggml-cuda.cu:2462 @cd959bae9).
+/// Ports `ggml_cuda_compute_forward` (ggml-cuda.cu:2708 @b1b770d90). v1.0.0
+/// removed `GGML_OP_ADD1` and `GGML_OP_DIAG_MASK_INF` from ggml.
 fn computeForward(ctx: *Context, dst: *Tensor) bool {
     switch (dst.op) {
         c.GGML_OP_REPEAT => binbcast.opRepeat(ctx, dst),
         c.GGML_OP_REPEAT_BACK => binbcast.opRepeatBack(ctx, dst),
-        // TODO in the C: a more efficient ADD1.
-        c.GGML_OP_ADD, c.GGML_OP_ADD1 => binbcast.opBinary(.add, ctx, dst),
+        c.GGML_OP_ADD => binbcast.opBinary(.add, ctx, dst),
         c.GGML_OP_SUB => binbcast.opBinary(.sub, ctx, dst),
         c.GGML_OP_MUL => binbcast.opBinary(.mul, ctx, dst),
         c.GGML_OP_DIV => binbcast.opBinary(.div, ctx, dst),
@@ -165,7 +164,6 @@ fn computeForward(ctx: *Context, dst: *Tensor) bool {
         c.GGML_OP_CLAMP => clamp.opClamp(ctx, dst),
         c.GGML_OP_LOG => unary.opUnary(.log, ctx, dst),
         c.GGML_OP_DIAG => diag.opDiag(ctx, dst),
-        c.GGML_OP_DIAG_MASK_INF => diagmask.opDiagMaskInf(ctx, dst),
         c.GGML_OP_ROLL => roll.opRoll(ctx, dst),
         c.GGML_OP_SUM_ROWS => sumrows.opSumRows(ctx, dst),
         c.GGML_OP_MEAN => mean.opMean(ctx, dst),
@@ -240,7 +238,7 @@ const mulMatIdNeedsSync = mulmat.mulMatIdNeedsSync;
 // -----------------------------------------------------------------------------
 // CUDA graphs
 
-/// Ports `ggml_cuda_is_view_or_noop` (ggml-cuda.cu:2953 @cd959bae9).
+/// Ports `ggml_cuda_is_view_or_noop` (ggml-cuda.cu:3195 @b1b770d90).
 fn isViewOrNoop(t: *const Tensor) bool {
     return c.ggml_is_empty(t) or t.op == c.GGML_OP_RESHAPE or t.op == c.GGML_OP_TRANSPOSE or
         t.op == c.GGML_OP_VIEW or t.op == c.GGML_OP_PERMUTE or t.op == c.GGML_OP_NONE;
@@ -250,7 +248,7 @@ fn nodes(cgraph: *impl.CGraph) []*Tensor {
     return @ptrCast(cgraph.nodes[0..@intCast(cgraph.n_nodes)]);
 }
 
-/// Ports `ggml_cuda_graph_check_compability` (ggml-cuda.cu:2964 @cd959bae9).
+/// Ports `ggml_cuda_graph_check_compability` (ggml-cuda.cu:3206 @b1b770d90).
 /// Its debug line was `#ifndef NDEBUG` through v0.6.0, compiled out of the
 /// release reference; v0.7.0 gates it on `GGML_CUDA_GRAPH_DEBUG` instead.
 fn graphCheckCompatibility(cgraph: *impl.CGraph) bool {
@@ -276,12 +274,12 @@ fn graphCheckCompatibility(cgraph: *impl.CGraph) bool {
     return use_cuda_graph;
 }
 
-/// Ports `ggml_cuda_graph_get_key` (ggml-cuda.cu:2997 @cd959bae9).
+/// Ports `ggml_cuda_graph_get_key` (ggml-cuda.cu:3239 @b1b770d90).
 fn graphGetKey(cgraph: *impl.CGraph) ?*const anyopaque {
     return cgraph.nodes[0];
 }
 
-/// Ports `ggml_cuda_graph_update_required` (ggml-cuda.cu:3001 @cd959bae9).
+/// Ports `ggml_cuda_graph_update_required` (ggml-cuda.cu:3243 @b1b770d90).
 fn graphUpdateRequired(cuda_ctx: *Context, cgraph: *impl.CGraph) bool {
     var res = false;
 
@@ -328,13 +326,73 @@ fn graphUpdateRequired(cuda_ctx: *Context, cgraph: *impl.CGraph) bool {
     return res;
 }
 
-/// Ports `ggml_cuda_graph_update_executable` (ggml-cuda.cu:3045 @cd959bae9),
+/// `ggml_cuda_graph_get_clusters`'s function-local `runtime_affected`: the
+/// CUDA runtimes whose `cudaGraphExecUpdate` keeps stale cluster dims.
+const ClusterRuntime = struct {
+    var affected: bool = false;
+    fn init() void {
+        var version: c_int = 0;
+        cudaCheck(cu.cudaRuntimeGetVersion(&version), "cudaRuntimeGetVersion(&version)", @src());
+        // TODO: upper bound once fixed in the CUDA runtime
+        affected = version >= 11080;
+    }
+    const once = common.Once(init);
+};
+
+/// Ports `ggml_cuda_graph_get_clusters` (ggml-cuda.cu:3288 @b1b770d90), new at
+/// v1.0.0 (#31284), under `USE_CUDA_GRAPH_CLUSTER_CHECK`: the cluster dims
+/// of every clustered kernel node, on Hopper and later.
+fn graphGetClusters(cuda_graph: cu.cudaGraph_t, device: c_int) std.ArrayList(common.GraphCluster) {
+    var clusters: std.ArrayList(common.GraphCluster) = .empty;
+    ClusterRuntime.once.call();
+    if (!ClusterRuntime.affected or common.info().devices[@intCast(device)].cc < common.cc.hopper) {
+        return clusters;
+    }
+    var n_nodes: usize = 0;
+    cudaCheck(cu.cudaGraphGetNodes(cuda_graph, null, &n_nodes), "cudaGraphGetNodes(cuda_graph, nullptr, &n_nodes)", @src());
+    const graph_nodes = allocator.alloc(cu.cudaGraphNode_t, n_nodes) catch impl.abort("ggml-cuda: out of memory");
+    defer allocator.free(graph_nodes);
+    // An empty `std::vector`'s `data()` is null; a zero-length Zig slice's
+    // pointer is not, and the runtime refuses it.
+    const nodes_ptr: ?[*]cu.cudaGraphNode_t = if (n_nodes == 0) null else graph_nodes.ptr;
+    cudaCheck(cu.cudaGraphGetNodes(cuda_graph, nodes_ptr, &n_nodes), "cudaGraphGetNodes(cuda_graph, nodes.data(), &n_nodes)", @src());
+    for (0..n_nodes) |i| {
+        var ty: cu.enum_cudaGraphNodeType = undefined;
+        cudaCheck(cu.cudaGraphNodeGetType(graph_nodes[i], &ty), "cudaGraphNodeGetType(nodes[i], &type)", @src());
+        if (ty != cu.cudaGraphNodeTypeKernel) continue;
+        var val: cu.cudaLaunchAttributeValue = std.mem.zeroes(cu.cudaLaunchAttributeValue);
+        cudaCheck(cu.cudaGraphKernelNodeGetAttribute(graph_nodes[i], cu.cudaLaunchAttributeClusterDimension, &val), "cudaGraphKernelNodeGetAttribute(nodes[i], cudaLaunchAttributeClusterDimension, &val)", @src());
+        const d = val.clusterDim;
+        if (d.x *% d.y *% d.z > 1) {
+            clusters.append(allocator, .{ .node = i, .x = d.x, .y = d.y, .z = d.z }) catch impl.abort("ggml-cuda: out of memory");
+        }
+    }
+    return clusters;
+}
+
+/// Ports `ggml_cuda_graph_update_executable` (ggml-cuda.cu:3319 @b1b770d90),
 /// the CUDA 12 arm. Since v0.8.0 it takes one chunk's executable and
 /// captured graph. Its debug line, `#ifndef NDEBUG` through v0.6.0, is
-/// `GGML_CUDA_GRAPH_DEBUG`'s since v0.7.0.
-fn graphUpdateExecutable(instance: *cu.cudaGraphExec_t, cuda_graph: cu.cudaGraph_t) void {
+/// `GGML_CUDA_GRAPH_DEBUG`'s since v0.7.0. Since v1.0.0 a chunk whose
+/// kernel cluster dims changed is re-instantiated rather than updated.
+fn graphUpdateExecutable(instance: *common.GraphInstance, cuda_graph: cu.cudaGraph_t, device: c_int) void {
+    {
+        var clusters = graphGetClusters(cuda_graph, device);
+        if (!instance.clustersEql(clusters.items)) {
+            if (common.graphDebugEnabled()) {
+                impl.logDebug("%s: cluster dims changed, re-instantiating CUDA graph\n", .{"ggml_cuda_graph_update_executable"});
+            }
+            cudaCheck(cu.cudaGraphExecDestroy(instance.handle), "cudaGraphExecDestroy(instance)", @src());
+            cudaCheck(cu.cudaGraphInstantiate(&instance.handle, cuda_graph, 0), "cudaGraphInstantiate(&instance.handle, cuda_graph, nullptr, nullptr, 0)", @src());
+            instance.clusters.deinit(allocator);
+            instance.clusters = clusters;
+            return;
+        }
+        clusters.deinit(allocator);
+    }
+
     var result_info: cu.cudaGraphExecUpdateResultInfo = undefined;
-    const stat = cu.cudaGraphExecUpdate(instance.*, cuda_graph, &result_info);
+    const stat = cu.cudaGraphExecUpdate(instance.handle, cuda_graph, &result_info);
 
     if (stat == cu.cudaErrorGraphExecUpdateFailure) {
         if (common.graphDebugEnabled()) {
@@ -344,9 +402,9 @@ fn graphUpdateExecutable(instance: *cu.cudaGraphExec_t, cuda_graph: cu.cudaGraph
         // The pre-existing graph exec cannot be updated due to violated
         // constraints, so clear the error and re-instantiate.
         _ = cu.cudaGetLastError();
-        cudaCheck(cu.cudaGraphExecDestroy(instance.*), "cudaGraphExecDestroy(instance)", @src());
-        instance.* = null;
-        cudaCheck(cu.cudaGraphInstantiate(instance, cuda_graph, 0), "cudaGraphInstantiate(&instance, cuda_graph, nullptr, nullptr, 0)", @src());
+        cudaCheck(cu.cudaGraphExecDestroy(instance.handle), "cudaGraphExecDestroy(instance)", @src());
+        instance.handle = null;
+        cudaCheck(cu.cudaGraphInstantiate(&instance.handle, cuda_graph, 0), "cudaGraphInstantiate(&instance.handle, cuda_graph, nullptr, nullptr, 0)", @src());
     } else {
         impl.assert(stat == cu.cudaSuccess, "stat == cudaSuccess");
     }
@@ -360,7 +418,7 @@ const GraphChunk = struct {
     const once = common.Once(init);
 };
 
-/// Ports `ggml_cuda_graph_chunk_size` (ggml-cuda.cu:3072 @cd959bae9): the
+/// Ports `ggml_cuda_graph_chunk_size` (ggml-cuda.cu:3361 @b1b770d90): the
 /// number of ggml nodes per CUDA graph chunk; 0 captures the whole ggml
 /// graph as one CUDA graph.
 fn graphChunkSize() c_int {
@@ -368,25 +426,27 @@ fn graphChunkSize() c_int {
     return GraphChunk.size;
 }
 
-/// Ports `ggml_cuda_graph_launch_chunk` (ggml-cuda.cu:3081 @cd959bae9): end
+/// Ports `ggml_cuda_graph_launch_chunk` (ggml-cuda.cu:3370 @b1b770d90): end
 /// the capture of chunk `idx`, update or create its executable and launch it.
+/// Since v1.0.0 a new executable records its cluster dims.
 fn graphLaunchChunk(cuda_ctx: *Context, graph: *common.Graph, idx: usize) void {
     var cuda_graph: cu.cudaGraph_t = null;
     cudaCheck(cu.cudaStreamEndCapture(cuda_ctx.stream(), &cuda_graph), "cudaStreamEndCapture(cuda_ctx->stream(), &cuda_graph)", @src());
 
     if (idx < graph.instances.items.len) {
-        graphUpdateExecutable(&graph.instances.items[idx], cuda_graph);
+        graphUpdateExecutable(&graph.instances.items[idx], cuda_graph, cuda_ctx.device);
     } else {
         impl.assert(idx == graph.instances.items.len, "idx == graph->instances.size()");
-        graph.instances.append(allocator, null) catch impl.abort("ggml-cuda: out of memory");
-        cudaCheck(cu.cudaGraphInstantiate(&graph.instances.items[idx], cuda_graph, 0), "cudaGraphInstantiate(&graph->instances[idx], cuda_graph, nullptr, nullptr, 0)", @src());
+        graph.instances.append(allocator, .{}) catch impl.abort("ggml-cuda: out of memory");
+        cudaCheck(cu.cudaGraphInstantiate(&graph.instances.items[idx].handle, cuda_graph, 0), "cudaGraphInstantiate(&graph->instances[idx].handle, cuda_graph, nullptr, nullptr, 0)", @src());
+        graph.instances.items[idx].clusters = graphGetClusters(cuda_graph, cuda_ctx.device);
     }
     cudaCheck(cu.cudaGraphDestroy(cuda_graph), "cudaGraphDestroy(cuda_graph)", @src());
 
-    cudaCheck(cu.cudaGraphLaunch(graph.instances.items[idx], cuda_ctx.stream()), "cudaGraphLaunch(graph->instances[idx], cuda_ctx->stream())", @src());
+    cudaCheck(cu.cudaGraphLaunch(graph.instances.items[idx].handle, cuda_ctx.stream()), "cudaGraphLaunch(graph->instances[idx], cuda_ctx->stream())", @src());
 }
 
-/// Ports `ggml_cuda_graph_set_enabled` (ggml-cuda.cu:5086 @cd959bae9).
+/// Ports `ggml_cuda_graph_set_enabled` (ggml-cuda.cu:5402 @b1b770d90).
 fn graphSetEnabled(cuda_ctx: *Context, graph_key: ?*const anyopaque) bool {
     const graph = cuda_ctx.cudaGraph(graph_key);
 
@@ -431,7 +491,7 @@ const Concurrency = struct {
     }
 };
 
-/// Ports `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4856 @cd959bae9).
+/// Ports `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:5172 @b1b770d90).
 /// Since v0.8.0 the capture ends and restarts every `graphChunkSize` nodes,
 /// each chunk launched as it ends, so the GPU runs one while the next is
 /// enqueued.
@@ -537,7 +597,8 @@ fn graphEvaluateAndCapture(cuda_ctx: *Context, cgraph: *impl.CGraph, use_cuda_gr
             // drop the chunks left over from a longer graph
             var i: usize = n_chunks;
             while (i < g.instances.items.len) : (i += 1) {
-                cudaCheck(cu.cudaGraphExecDestroy(g.instances.items[i]), "cudaGraphExecDestroy(graph->instances[i])", @src());
+                cudaCheck(cu.cudaGraphExecDestroy(g.instances.items[i].handle), "cudaGraphExecDestroy(graph->instances[i])", @src());
+                g.instances.items[i].deinit();
             }
             g.instances.resize(allocator, n_chunks) catch impl.abort("ggml-cuda: out of memory");
             graph_evaluated_or_captured = true; // CUDA graph has been captured
@@ -551,13 +612,13 @@ fn graphEvaluateAndCapture(cuda_ctx: *Context, cgraph: *impl.CGraph, use_cuda_gr
     if (use_cuda_graph and !cuda_graph_update_required) {
         // the chunks were launched during capture, otherwise launch them here
         for (graph.?.instances.items) |instance| {
-            cudaCheck(cu.cudaGraphLaunch(instance, cuda_ctx.stream()), "cudaGraphLaunch(instance, cuda_ctx->stream())", @src());
+            cudaCheck(cu.cudaGraphLaunch(instance.handle, cuda_ctx.stream()), "cudaGraphLaunch(instance, cuda_ctx->stream())", @src());
         }
     }
 }
 
 /// The C's "restore original node order within each concurrent region"
-/// block in `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:4856 @cd959bae9).
+/// block in `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:5172 @b1b770d90).
 fn restoreOriginalOrder(cuda_ctx: *Context, cgraph: *impl.CGraph) void {
     var node_to_idx: std.AutoHashMapUnmanaged(*const Tensor, usize) = .empty;
     defer node_to_idx.deinit(allocator);
@@ -595,7 +656,9 @@ fn restoreOriginalOrder(cuda_ctx: *Context, cgraph: *impl.CGraph) void {
     }
 }
 
-/// Ports `ggml_backend_cuda_graph_compute` (ggml-cuda.cu:5102 @cd959bae9).
+/// Ports `ggml_backend_cuda_graph_compute` (ggml-cuda.cu:5418 @b1b770d90).
+/// Since v1.0.0 a graph reused under the same `uid` skips the compatibility
+/// check: `graph->uid` is set only for a compatible graph.
 pub fn graphCompute(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgraph) callconv(.c) c.enum_ggml_status {
     const cuda_ctx = backend.backendCtx(backend_c);
     const cgraph: *impl.CGraph = @ptrCast(@alignCast(cgraph_c));
@@ -611,7 +674,9 @@ pub fn graphCompute(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgrap
 
     const graph = cuda_ctx.cudaGraph(graph_key);
     if (graph.isEnabled()) {
-        const graph_compatible = graphCheckCompatibility(cgraph);
+        // graph->uid is set only for a compatible graph (see ggml_cuda_graph_update_required), so a reused graph needs no new check
+        const graph_reused = cgraph.uid != 0 and cgraph.uid == graph.uid;
+        const graph_compatible = graph_reused or graphCheckCompatibility(cgraph);
         if (graph_compatible) {
             const properties_changed = graphUpdateRequired(cuda_ctx, cgraph);
 
@@ -684,7 +749,7 @@ fn appendOps(buf: *[16]c.enum_ggml_op, n: *usize, items: []const c.enum_ggml_op)
     }
 }
 
-/// `graph_optimize`'s `add_alloc_deps` lambda (ggml-cuda.cu:5195 @cd959bae9):
+/// `graph_optimize`'s `add_alloc_deps` lambda (ggml-cuda.cu:5513 @b1b770d90):
 /// keeps every node in `[start, last_node)` and each of its sources alive
 /// until `nodes[last_node]`.
 fn addAllocDeps(
@@ -715,7 +780,7 @@ const GraphOpt = struct {
     const once = common.Once(init);
 };
 
-/// Ports `ggml_backend_cuda_graph_optimize` (ggml-cuda.cu:5190 @cd959bae9),
+/// Ports `ggml_backend_cuda_graph_optimize` (ggml-cuda.cu:5508 @b1b770d90),
 /// with its `add_alloc_deps` lambda.
 ///
 /// Its first pass (v0.6.0) moves a shared expert's gate/up/GLU, wherever
@@ -792,9 +857,45 @@ pub fn graphOptimize(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgra
                 const n0: ?*const Tensor = cgraph.nodes[@intCast(i)];
                 const n1: ?*const Tensor = cgraph.nodes[@intCast(i + 1)];
                 const ok = (gate == n0 and up == n1) or (gate == n1 and up == n0);
-                if (ok and mulmat.mulMatQFusionMatches(up.?, gate.?, glu, cuda_ctx.device)) {
+                if (ok and mulmat.mulMatQFusionMatches(up.?, gate.?, glu, cuda_ctx.device, null, null)) {
                     addAllocDeps(cgraph, params, @intCast(i), @intCast(i + 2));
                     i += 2;
+                    continue;
+                }
+            }
+            // Same with the NVFP4 scales: MUL_MAT(gate), MUL(gate scale), MUL_MAT(up), MUL(up scale), GLU.
+            if (i + 4 < cgraph.n_nodes and cgraph.nodes[@intCast(i + 4)].?.op == c.GGML_OP_GLU) {
+                const glu = cgraph.nodes[@intCast(i + 4)].?;
+                const gate_scale = cgraph.nodes[@intCast(i + 1)].?;
+                const up_scale = cgraph.nodes[@intCast(i + 3)].?;
+                const mm_gate = cgraph.nodes[@intCast(i)].?;
+                const mm_up = cgraph.nodes[@intCast(i + 2)].?;
+                if (glu.src[0] == gate_scale and glu.src[1] == up_scale and
+                    mulmat.mulMatQFusionMatches(mm_up, mm_gate, glu, cuda_ctx.device, up_scale, gate_scale) and
+                    mulmat.getMulMatScale(gate_scale, mm_gate) != null and mulmat.getMulMatScale(up_scale, mm_up) != null)
+                {
+                    addAllocDeps(cgraph, params, @intCast(i), @intCast(i + 4));
+                    i += 4;
+                    continue;
+                }
+            }
+            // Same with per-expert NVFP4 scales: MUL_MAT_ID, RESHAPE, REPEAT, GET_ROWS, MUL for gate and for up, GLU.
+            if (i + 10 < cgraph.n_nodes and cgraph.nodes[@intCast(i + 10)].?.op == c.GGML_OP_GLU) {
+                const glu = cgraph.nodes[@intCast(i + 10)].?;
+                const gate_scale = cgraph.nodes[@intCast(i + 4)].?;
+                const up_scale = cgraph.nodes[@intCast(i + 9)].?;
+                const at = struct {
+                    fn f(g: *impl.CGraph, k: c_int) *Tensor {
+                        return g.nodes[@intCast(k)].?;
+                    }
+                }.f;
+                if (glu.src[0] == gate_scale and glu.src[1] == up_scale and
+                    mulmat.mulMatQFusionMatches(at(cgraph, i + 5), at(cgraph, i), glu, cuda_ctx.device, up_scale, gate_scale) and
+                    mulmat.getMulMatIdScale(at(cgraph, i + 1), at(cgraph, i + 2), at(cgraph, i + 3), gate_scale, at(cgraph, i)) != null and
+                    mulmat.getMulMatIdScale(at(cgraph, i + 6), at(cgraph, i + 7), at(cgraph, i + 8), up_scale, at(cgraph, i + 5)) != null)
+                {
+                    addAllocDeps(cgraph, params, @intCast(i), @intCast(i + 10));
+                    i += 10;
                     continue;
                 }
             }

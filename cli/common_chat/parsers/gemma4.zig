@@ -1,229 +1,59 @@
 //! Gemma 4: `<|channel>thought ... <channel|>` reasoning and
 //! `<|tool_call>call:name{key:value,...}<tool_call|>` tool calls, with
-//! strings quoted `<|"|>`; and the conversion older Gemma 4 templates need
-//! from `tool` messages to an assistant message's `tool_responses`.
+//! strings quoted `<|"|>`, their arguments shaped by each tool's parameter
+//! schema.
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/gemma4.cpp` (llama.cpp v0.9.0,
-//! `cd959bae9`): `workaround::gemma4_model_turn_builder`,
-//! `workaround::convert_tool_responses_gemma4` and
-//! `common_chat_params_init_gemma4`. The parser is built in the order clang
-//! evaluates the C++ expressions, left to right, since a parser's id is its
-//! position.
+//! Ports `llama.cpp/common/parsers/gemma4.cpp` (llama.cpp v1.0.0,
+//! `b1b770d90`): `depth_guard`, `gemma4_value_rules`,
+//! `gemma4_schema_parser` and `common_chat_params_init_gemma4`. The parser
+//! is built in the order clang evaluates the C++ expressions, left to right,
+//! since a parser's id is its position.
 
 const std = @import("std");
 const json = @import("json");
 const peg = @import("peg");
 const exception = @import("../exception.zig");
 const chat_peg = @import("../chat_peg.zig");
+const msg_mod = @import("../msg.zig");
 const params_mod = @import("../params.zig");
 const template = @import("../template.zig");
 const util = @import("../util.zig");
+const log = @import("../log.zig");
 const parsers = @import("module.zig");
 
 const Allocator = std.mem.Allocator;
 const Value = json.Value;
+const Node = json.schema.Node;
 const Error = exception.Error;
 const ChatParams = params_mod.ChatParams;
 const ChatBuilder = chat_peg.ChatBuilder;
+const Mapper = chat_peg.Mapper;
 const ParserId = peg.ParserId;
 const GenerationParams = template.GenerationParams;
 
 // -----------------------------------------------------------------------------
-// workaround
-
-/// `m.value(key, "")`: throws a type error for a member that is not a string.
-fn valueString(m: *const Value, key: []const u8) Error![]const u8 {
-    return m.value(key, []const u8, "") catch |e| util.fromJson(e);
-}
-
-/// `msg.at(key)` of a member known to be there.
-fn member(m: *const Value, key: []const u8) Error!*Value {
-    return m.at(key) catch |e| util.fromJson(e);
-}
-
-/// Ports `workaround`'s `gemma4_model_turn_builder` (parsers/gemma4.cpp:15 @cd959bae9):
-/// an assistant turn with tool calls, the tool results after it and the
-/// final assistant message, folded into one message.
-const ModelTurnBuilder = struct {
-    a: Allocator,
-    messages: *Value,
-    pos: usize,
-    tool_calls: Value = Value.emptyArray(),
-    tool_responses: Value = Value.emptyArray(),
-    content: Value = .null,
-    reasoning_content: Value = .null,
-
-    /// Ports `collect` (parsers/gemma4.cpp:25 @cd959bae9).
-    fn collect(self: *ModelTurnBuilder) Error!void {
-        const a = self.a;
-        // Collect the first assistant message
-        const msg = self.messages.indexAt(a, self.pos) catch |e| return util.fromJson(e);
-        if (msg.contains("reasoning_content") and (try member(msg, "reasoning_content")).isString()) {
-            // According to the prompt formatting guide, we need to preserve reasoning_content
-            // between function calls. The current chat templates do not support this, but we will do it anyway.
-            self.reasoning_content = try (try member(msg, "reasoning_content")).clone(a);
-        }
-        var it = (try member(msg, "tool_calls")).items();
-        while (it.next()) |tc| {
-            self.tool_calls.pushBack(a, try tc.value.clone(a)) catch |e| return util.fromJson(e);
-        }
-        self.pos += 1;
-
-        // Collect tool call results
-        while (self.pos < self.messages.size() and std.mem.eql(u8, try valueString(self.messages.indexAt(a, self.pos) catch |e| return util.fromJson(e), "role"), "tool")) {
-            try self.collectResult(self.messages.indexAt(a, self.pos) catch |err| switch (err) {
-                error.OutOfMemory, error.JsonError => unreachable,
-            });
-            self.pos += 1;
-        }
-
-        // Check if the next assistant message is the final message
-        if (self.pos < self.messages.size() and std.mem.eql(u8, try valueString(self.messages.indexAt(a, self.pos) catch |e| return util.fromJson(e), "role"), "assistant")) {
-            const next = self.messages.indexAt(a, self.pos) catch |err| switch (err) {
-                error.OutOfMemory, error.JsonError => unreachable,
-            };
-            if (!hasToolCalls(next) and hasContent(next)) {
-                self.content = try (try member(next, "content")).clone(a);
-                self.pos += 1;
-            }
-        }
-    }
-
-    /// Ports `collect_result` (parsers/gemma4.cpp:54 @cd959bae9).
-    fn collectResult(self: *ModelTurnBuilder, curr: *const Value) Error!void {
-        const a = self.a;
-        var response: Value = .null;
-        if (curr.contains("content")) {
-            const content = try member(curr, "content");
-            if (content.isString()) {
-                // Try to parse the content as JSON; fall back to raw string
-                response = json.parse(a, content.string) catch |e| switch (e) {
-                    error.OutOfMemory => return error.OutOfMemory,
-                    error.JsonError => try content.clone(a),
-                };
-            } else {
-                response = try content.clone(a);
-            }
-        }
-
-        var name: []const u8 = "";
-
-        // Match name with corresponding tool call
-        const idx = self.tool_responses.size();
-        if (idx < self.tool_calls.size()) {
-            const tc = self.tool_calls.indexAt(a, idx) catch |e| return util.fromJson(e);
-            if (tc.contains("function")) {
-                name = try valueString(try member(tc, "function"), "name");
-            }
-        }
-
-        // Fallback to the tool call id
-        if (name.len == 0) {
-            name = try valueString(curr, "tool_call_id");
-        }
-
-        var entry = Value.emptyObject();
-        try entry.set(a, "name", try Value.from(a, name));
-        try entry.set(a, "response", response);
-        self.tool_responses.pushBack(a, entry) catch |e| return util.fromJson(e);
-    }
-
-    /// Ports `build` (parsers/gemma4.cpp:89 @cd959bae9).
-    fn build(self: *ModelTurnBuilder) Error!Value {
-        const a = self.a;
-        try self.collect();
-
-        var msg = Value.emptyObject();
-        try msg.set(a, "role", try Value.from(a, "assistant"));
-        try msg.set(a, "tool_calls", try self.tool_calls.clone(a));
-        if (!self.tool_responses.empty()) {
-            try msg.set(a, "tool_responses", try self.tool_responses.clone(a));
-        }
-        if (!self.content.isNull()) {
-            try msg.set(a, "content", try self.content.clone(a));
-        }
-        if (!self.reasoning_content.isNull()) {
-            try msg.set(a, "reasoning_content", try self.reasoning_content.clone(a));
-        }
-        return msg;
-    }
-
-    /// Ports `has_content` (parsers/gemma4.cpp:108 @cd959bae9).
-    fn hasContent(msg: *const Value) bool {
-        if (!msg.contains("content")) return false;
-        const content = msg.at("content") catch |err| switch (err) {
-            error.OutOfMemory, error.JsonError => unreachable,
-        };
-        if (content.isNull()) return false;
-        if (content.isString() and content.string.len != 0) return true;
-        if (content.isArray() and !content.empty()) return true;
-        return false;
-    }
-
-    /// Ports `has_tool_calls` (parsers/gemma4.cpp:122 @cd959bae9).
-    fn hasToolCalls(msg: *const Value) bool {
-        if (!msg.contains("tool_calls")) return false;
-        const tc = msg.at("tool_calls") catch |err| switch (err) {
-            error.OutOfMemory, error.JsonError => unreachable,
-        };
-        return tc.isArray() and !tc.empty();
-    }
-};
-
-/// Ports `workaround`'s `convert_tool_responses_gemma4` (parsers/gemma4.cpp:127
-/// @cd959bae9): each assistant turn with tool calls, the `tool` messages
-/// after it and the final assistant reply, as one assistant message with
-/// `tool_responses`, as the older Gemma 4 templates expect.
-pub fn convertToolResponses(a: Allocator, messages: *Value) Error!void {
-    var result = Value.emptyArray();
-    var i: usize = 0;
-
-    while (i < messages.size()) {
-        const msg = messages.indexAt(a, i) catch |e| return util.fromJson(e);
-
-        const passes = blk: {
-            if (!std.mem.eql(u8, try valueString(msg, "role"), "assistant")) break :blk true;
-            if (!msg.contains("tool_calls")) break :blk true;
-            const tc = try member(msg, "tool_calls");
-            break :blk !tc.isArray() or tc.empty();
-        };
-        if (passes) {
-            result.pushBack(a, try msg.clone(a)) catch |e| return util.fromJson(e);
-            i += 1;
-            continue;
-        }
-
-        var builder: ModelTurnBuilder = .{ .a = a, .messages = messages, .pos = i };
-        result.pushBack(a, try builder.build()) catch |e| return util.fromJson(e);
-        i = builder.pos;
-    }
-
-    messages.assign(a, result);
-}
-
-// -----------------------------------------------------------------------------
-// The parser
+// Gemma 4 value parsers
 
 fn gemma4Dict(b: *peg.Builder) peg.Error!ParserId {
     const ws = try b.space();
     const m = try b.ref("gemma4-dict-kv");
     const members = try b.sequence(&.{ m, try b.zeroOrMore(try b.sequence(&.{ try b.literal(","), ws, m })) });
-    return b.sequence(&.{
+    return b.tag(Mapper.GEMMA4_DICT, try b.sequence(&.{
         try b.literal("{"),                                                                            ws,
         try b.choice(&.{ try b.literal("}"), try b.sequence(&.{ members, ws, try b.literal("}") }) }),
-    });
+    }));
 }
 
 fn gemma4Array(b: *peg.Builder) peg.Error!ParserId {
     const ws = try b.space();
     const value = try b.ref("gemma4-value");
     const elements = try b.sequence(&.{ value, try b.zeroOrMore(try b.sequence(&.{ try b.literal(","), ws, value })) });
-    return b.sequence(&.{
+    return b.tag(Mapper.GEMMA4_ARRAY, try b.sequence(&.{
         try b.literal("["),                                                                             ws,
         try b.choice(&.{ try b.literal("]"), try b.sequence(&.{ elements, ws, try b.literal("]") }) }),
-    });
+    }));
 }
 
 fn gemma4Value(b: *peg.Builder) peg.Error!ParserId {
@@ -233,6 +63,311 @@ fn gemma4Value(b: *peg.Builder) peg.Error!ParserId {
     });
 }
 
+/// `p.literal(q) + p.tag(DICT_KEY_NAME, p.chars(cls, 1, -1)) + p.literal(q)`.
+fn quotedKeyName(b: *peg.Builder, quote: []const u8, cls: []const u8) peg.Error!ParserId {
+    const open = try b.literal(quote);
+    const name = try b.tag(Mapper.GEMMA4_DICT_KEY_NAME, try b.chars(cls, 1, -1));
+    return b.plus(try b.plus(open, name), try b.literal(quote));
+}
+
+/// Ports `gemma4_value_rules` (parsers/gemma4.cpp:25 @b1b770d90): the
+/// rules of Gemma 4's value syntax. The tags are what `gemma4_to_json` in
+/// the mapper reads, the rules may wrap them freely.
+fn valueRules(b: *peg.Builder) peg.Error!void {
+    {
+        const open = try b.literal("<|\"|>");
+        const content = try b.tag(Mapper.GEMMA4_STRING_CONTENT, try b.until("<|\"|>"));
+        const body = try b.plus(try b.plus(open, content), try b.literal("<|\"|>"));
+        _ = try b.rule("gemma4-string", try b.tag(Mapper.GEMMA4_STRING, body), false);
+    }
+
+    _ = try b.rule("gemma4-bool", try b.tag(Mapper.GEMMA4_BOOL, try b.jsonBool()), false);
+
+    _ = try b.rule("gemma4-null", try b.tag(Mapper.GEMMA4_NULL, try b.jsonNull()), false);
+
+    _ = try b.rule("gemma4-number", try b.tag(Mapper.GEMMA4_NUMBER, try b.jsonNumber()), false);
+
+    // Keys are bare in the template, but Gemma 4 occasionally wraps them in quotes
+    {
+        const delim = try b.literal("<|\"|>");
+        const delim_name = try b.tag(Mapper.GEMMA4_DICT_KEY_NAME, try b.until("<|\"|>"));
+        const alt0 = try b.plus(try b.plus(delim, delim_name), try b.literal("<|\"|>"));
+        const alt1 = try quotedKeyName(b, "\"", "[^\"]");
+        const alt2 = try quotedKeyName(b, "'", "[^']");
+        const alt3 = try b.tag(Mapper.GEMMA4_DICT_KEY_NAME, try b.chars("[^:}]", 1, -1));
+        const key = try b.plus(try b.choice(&.{ alt0, alt1, alt2, alt3 }), try b.literal(":"));
+        _ = try b.rule("gemma4-dict-key", try b.tag(Mapper.GEMMA4_DICT_KEY, key), false);
+    }
+
+    {
+        const kv = try b.plus(try b.plus(try b.ref("gemma4-dict-key"), try b.space()), try b.ref("gemma4-value"));
+        _ = try b.rule("gemma4-dict-kv", try b.tag(Mapper.GEMMA4_DICT_KV, kv), false);
+    }
+
+    _ = try b.ruleFn("gemma4-dict", b, gemma4Dict, false);
+    _ = try b.ruleFn("gemma4-array", b, gemma4Array, false);
+    _ = try b.ruleFn("gemma4-value", b, gemma4Value, false);
+}
+
+// -----------------------------------------------------------------------------
+// The schema parser
+
+/// Ports `gemma4_schema_parser` (parsers/gemma4.cpp:75 @b1b770d90): Gemma 4
+/// uses different delimiters and cannot leverage the
+/// json-schema-to-grammar implementation. This implements a subset to
+/// enforce properties.
+const SchemaParser = struct {
+    a: Allocator,
+    b: *peg.Builder,
+    root: []const u8,
+    depth: c_int = 0,
+    /// `refs_`: each `$ref` target's rule name, keyed by the target
+    refs: std.AutoHashMapUnmanaged(*const Node, []const u8) = .empty,
+
+    fn visitRoot(self: *SchemaParser, node: *const Node) peg.Error!ParserId {
+        return self.visit(node, self.root);
+    }
+
+    /// Ports `visit` (parsers/gemma4.cpp:88 @b1b770d90), the overload taking
+    /// a name; its `depth_guard` (parsers/gemma4.cpp:14 @b1b770d90) throws
+    /// past `COMMON_RECURSIVE_LIMIT`.
+    fn visit(self: *SchemaParser, node: *const Node, name: []const u8) peg.Error!ParserId {
+        self.depth += 1;
+        defer self.depth -= 1;
+        if (self.depth > json.schema.recursive_limit) {
+            return peg.errors.raise(error.InvalidArgument, &.{"JSON schema is nested more than " ++ json.schema.recursive_limit_text ++ " levels deep"});
+        }
+        return switch (node.*) {
+            .ref => |*r| self.visitRef(r),
+            .any_of => |children| self.visitAnyOf(node, children, name),
+            .all_of => |children| self.visitAllOf(children, name),
+            .array => |*arr| self.visitArray(arr, name),
+            .tuple => |items| self.visitTuple(items, name),
+            .object => |*obj| self.visitObject(obj, name),
+            else => self.b.ref("gemma4-value"),
+        };
+    }
+
+    /// Ports `shaped` (parsers/gemma4.cpp:102 @b1b770d90): whether a schema
+    /// contributes a shape of its own, as opposed to accepting any value.
+    fn shaped(node: *const Node) bool {
+        return switch (node.*) {
+            .ref => |r| r.target != null,
+            .any_of => |children| for (children) |child| {
+                if (shaped(child)) break true;
+            } else false,
+            .all_of => |children| children.len == 1 and shaped(children[0]),
+            .array, .tuple, .object => true,
+            else => false,
+        };
+    }
+
+    /// `p_.tag(DICT_KEY_NAME, p_.literal(key))`, the lambda `name` in `key`.
+    fn keyName(self: *SchemaParser, k: []const u8) peg.Error!ParserId {
+        return self.b.tag(Mapper.GEMMA4_DICT_KEY_NAME, try self.b.literal(k));
+    }
+
+    /// `lit + name() + lit`.
+    fn quoted(self: *SchemaParser, quote: []const u8, k: []const u8) peg.Error!ParserId {
+        const open = try self.b.literal(quote);
+        const name = try self.keyName(k);
+        return self.b.plus(try self.b.plus(open, name), try self.b.literal(quote));
+    }
+
+    /// Ports `key` (parsers/gemma4.cpp:128 @b1b770d90): the template writes
+    /// keys bare. Models keep that for identifiers and quote anything else,
+    /// with single or double quotes or the string delimiter, so those are
+    /// accepted as well.
+    fn key(self: *SchemaParser, k: []const u8) peg.Error!ParserId {
+        const b = self.b;
+        var identifier = k.len != 0 and !std.ascii.isDigit(k[0]);
+        for (k) |c| {
+            if (!std.ascii.isAlphanumeric(c) and c != '_') identifier = false;
+        }
+        if (identifier) {
+            return b.tag(Mapper.GEMMA4_DICT_KEY, try b.plus(try self.keyName(k), try b.literal(":")));
+        }
+
+        var alts = try b.choiceEmpty();
+        if (k.len != 0 and std.mem.indexOfAny(u8, k, ":}") == null and std.mem.indexOfScalar(u8, "'\"<", k[0]) == null) {
+            // Check if key is unambiguous
+            try b.orAssign(&alts, try self.keyName(k));
+        }
+        // Gemma 4 may emit keys in its string delimiters or quotes
+        try b.orAssign(&alts, try self.quoted("<|\"|>", k));
+        if (std.mem.indexOfScalar(u8, k, '\'') == null) {
+            try b.orAssign(&alts, try self.quoted("'", k));
+        }
+        if (std.mem.indexOfScalar(u8, k, '"') == null) {
+            try b.orAssign(&alts, try self.quoted("\"", k));
+        }
+        return b.tag(Mapper.GEMMA4_DICT_KEY, try b.plus(alts, try b.literal(":")));
+    }
+
+    const RefRule = struct {
+        self: *SchemaParser,
+        target: *const Node,
+        name: []const u8,
+
+        fn build(ctx: *const RefRule) peg.Error!ParserId {
+            return ctx.self.visit(ctx.target, ctx.name);
+        }
+    };
+
+    /// Ports `visit_ref` (parsers/gemma4.cpp:157 @b1b770d90): a target
+    /// reached from several places gets one rule, named by the order it was
+    /// first seen.
+    fn visitRef(self: *SchemaParser, r: *const json.schema.Ref) peg.Error!ParserId {
+        const target = r.target orelse return self.b.ref("gemma4-value");
+        if (self.refs.get(target)) |rule| return self.b.ref(rule);
+        const rule = try std.fmt.allocPrint(self.a, "{s}-ref-{d}", .{ self.root, self.refs.count() });
+        try self.refs.put(self.a, target, rule);
+        const ctx: RefRule = .{ .self = self, .target = target, .name = try std.mem.concat(self.a, u8, &.{ rule, "-value" }) };
+        return self.b.ruleFn(rule, &ctx, RefRule.build, false);
+    }
+
+    /// Ports `visit_any_of` (parsers/gemma4.cpp:172 @b1b770d90): shaped
+    /// alternatives are tried first, then anything else collapses into one
+    /// generic value.
+    fn visitAnyOf(self: *SchemaParser, node: *const Node, children: []const *Node, name: []const u8) peg.Error!ParserId {
+        const b = self.b;
+        if (!shaped(node)) return b.ref("gemma4-value");
+        if (children.len == 1) return self.visit(children[0], name);
+        var alts = try b.choiceEmpty();
+        var loose = false;
+        for (children, 0..) |child, i| {
+            if (shaped(child)) {
+                try b.orAssign(&alts, try self.visit(child, try std.fmt.allocPrint(self.a, "{s}-{d}", .{ name, i })));
+            } else {
+                loose = true;
+            }
+        }
+        if (loose) try b.orAssign(&alts, try b.ref("gemma4-value"));
+        return b.rule(name, alts, false);
+    }
+
+    /// Ports `visit_all_of` (parsers/gemma4.cpp:194 @b1b770d90).
+    fn visitAllOf(self: *SchemaParser, children: []const *Node, name: []const u8) peg.Error!ParserId {
+        if (children.len == 1) return self.visit(children[0], name);
+        return self.b.ref("gemma4-value");
+    }
+
+    /// Ports `visit_array` (parsers/gemma4.cpp:201 @b1b770d90).
+    fn visitArray(self: *SchemaParser, arr: *const json.schema.Array, name: []const u8) peg.Error!ParserId {
+        const b = self.b;
+        const ws = try b.space();
+        const item = if (shaped(arr.items))
+            try self.visit(arr.items, try std.mem.concat(self.a, u8, &.{ name, "-item" }))
+        else
+            try b.ref("gemma4-value");
+        const elements = try b.plus(item, try b.zeroOrMore(try b.plus(try b.plus(try b.literal(","), ws), item)));
+        const head = try b.plus(try b.literal("["), ws);
+        const empty = try b.literal("]");
+        const full = try b.plus(try b.plus(elements, ws), try b.literal("]"));
+        return b.rule(name, try b.tag(Mapper.GEMMA4_ARRAY, try b.plus(head, try b.orr(empty, full))), false);
+    }
+
+    /// Ports `visit_tuple` (parsers/gemma4.cpp:209 @b1b770d90).
+    fn visitTuple(self: *SchemaParser, items: []const *Node, name: []const u8) peg.Error!ParserId {
+        const b = self.b;
+        const ws = try b.space();
+        var seq = try b.sequenceEmpty();
+        for (items, 0..) |item, i| {
+            if (i > 0) {
+                seq = try b.plus(seq, try b.literal(","));
+                seq = try b.plus(seq, ws);
+            }
+            seq = try b.plus(seq, try self.visit(item, try std.fmt.allocPrint(self.a, "{s}-{d}", .{ name, i })));
+        }
+        var body = try b.plus(try b.literal("["), ws);
+        body = try b.plus(body, seq);
+        body = try b.plus(body, ws);
+        body = try b.plus(body, try b.literal("]"));
+        return b.rule(name, try b.tag(Mapper.GEMMA4_ARRAY, body), false);
+    }
+
+    /// `parser + *rest`, or the parser alone without `rest`: the lambda
+    /// `then_rest` in `visit_object`.
+    fn thenRest(b: *peg.Builder, rest: ?ParserId, parser: ParserId) peg.Error!ParserId {
+        return if (rest) |r| b.plus(parser, r) else parser;
+    }
+
+    /// `p_.literal(",") + ws + kv`.
+    fn commaKv(b: *peg.Builder, ws: ParserId, kv: ParserId) peg.Error!ParserId {
+        return b.plus(try b.plus(try b.literal(","), ws), kv);
+    }
+
+    fn lowerLess(a: Allocator, x: []const u8, y: []const u8) Allocator.Error!bool {
+        const lx = try std.ascii.allocLowerString(a, x);
+        const ly = try std.ascii.allocLowerString(a, y);
+        return std.mem.order(u8, lx, ly) == .lt;
+    }
+
+    /// Ports `visit_object` (parsers/gemma4.cpp:221 @b1b770d90).
+    fn visitObject(self: *SchemaParser, obj: *const json.schema.Object, name: []const u8) peg.Error!ParserId {
+        const b = self.b;
+        const ws = try b.space();
+
+        const props = try self.a.alloc(*const json.schema.Property, obj.properties.len);
+        for (obj.properties, 0..) |*prop, i| props[i] = prop;
+
+        // The Gemma 4 jinja template sorts properties, so our rules need to match.
+        // std::stable_sort on the ASCII-lowered names: an insertion sort is stable.
+        var i_sort: usize = 1;
+        while (i_sort < props.len) : (i_sort += 1) {
+            const x = props[i_sort];
+            var j = i_sort;
+            while (j > 0 and try lowerLess(self.a, x.name, props[j - 1].name)) : (j -= 1) props[j] = props[j - 1];
+            props[j] = x;
+        }
+
+        if (props.len == 0) {
+            if (obj.additional_properties != null) return b.ref("gemma4-dict");
+            const body = try b.plus(try b.plus(try b.literal("{"), ws), try b.literal("}"));
+            return b.rule(name, try b.tag(Mapper.GEMMA4_DICT, body), false);
+        }
+
+        var rest: ?ParserId = null;
+        var first: ?ParserId = null;
+        if (obj.additional_properties != null) {
+            const kv = try b.ref("gemma4-dict-kv");
+            rest = try b.zeroOrMore(try commaKv(b, ws, kv));
+            first = try b.optional(try b.plus(kv, rest.?));
+        }
+
+        var i = props.len;
+        while (i > 0) {
+            i -= 1;
+            const prop = props[i];
+            const k = try self.key(prop.name);
+            const kws = try b.plus(k, ws);
+            const value = try self.visit(prop.schema, try std.fmt.allocPrint(self.a, "{s}-{d}", .{ name, i }));
+            const kv = try b.tag(Mapper.GEMMA4_DICT_KV, try b.plus(kws, value));
+
+            var rest_i = try thenRest(b, rest, try commaKv(b, ws, kv));
+            var first_i = try thenRest(b, rest, kv);
+            if (!prop.required) {
+                rest_i = try thenRest(b, rest, try b.optional(try commaKv(b, ws, kv)));
+                first_i = if (first) |f| try b.orr(first_i, f) else try b.optional(first_i);
+            }
+
+            if (i > 0) {
+                rest = try b.rule(try std.fmt.allocPrint(self.a, "{s}-rest-{d}", .{ name, i }), rest_i, false);
+            }
+            first = first_i;
+        }
+
+        var body = try b.plus(try b.literal("{"), ws);
+        body = try b.plus(body, first.?);
+        body = try b.plus(body, ws);
+        body = try b.plus(body, try b.literal("}"));
+        return b.rule(name, try b.tag(Mapper.GEMMA4_DICT, body), false);
+    }
+};
+
+// -----------------------------------------------------------------------------
+// The parser
+
 const Build = struct {
     a: Allocator,
     inputs: *const GenerationParams,
@@ -241,6 +376,8 @@ const Build = struct {
     extract_reasoning: bool,
     cb: *ChatBuilder = undefined,
     tool_choice: ParserId = undefined,
+    /// the `what()` of the last throw `schemaArgs` caught
+    what: []const u8 = "",
 
     fn parser(self: *Build, p: *ChatBuilder) chat_peg.Error!ParserId {
         self.cb = p;
@@ -266,18 +403,7 @@ const Build = struct {
         }
 
         if (self.has_tools and self.inputs.tool_choice != .none) {
-            // Gemma4 tool calling syntax
-            // Rules should match traversal logic in gemma4_to_json()
-            _ = try b.rule("gemma4-string-content", try b.until("<|\"|>"), false);
-            _ = try b.rule("gemma4-string", try b.plus(try b.plus(try b.literal("<|\"|>"), try b.ref("gemma4-string-content")), try b.literal("<|\"|>")), false);
-            _ = try b.rule("gemma4-bool", try b.jsonBool(), false);
-            _ = try b.rule("gemma4-null", try b.jsonNull(), false);
-            _ = try b.rule("gemma4-number", try b.jsonNumber(), false);
-            _ = try b.rule("gemma4-dict-key", try b.plus(try b.rule("gemma4-dict-key-name", try b.chars("[^:}]", 1, -1), false), try b.literal(":")), false);
-            _ = try b.rule("gemma4-dict-kv", try b.plus(try b.plus(try b.ref("gemma4-dict-key"), try b.space()), try b.ref("gemma4-value")), false);
-            _ = try b.ruleFn("gemma4-dict", b, gemma4Dict, false);
-            _ = try b.ruleFn("gemma4-array", b, gemma4Array, false);
-            _ = try b.ruleFn("gemma4-value", b, gemma4Value, false);
+            try valueRules(b);
 
             self.tool_choice = try b.choiceEmpty();
 
@@ -306,24 +432,57 @@ const Build = struct {
     }
 
     fn tool(self: *Build, tool_index: usize, t: *Value) Error!void {
-        _ = t.at("function") catch |e| return util.fromJson(e);
+        const function = t.at("function") catch |e| return util.fromJson(e);
         const name = try parsers.functionName(t);
-        self.toolPeg(tool_index, name) catch |e| return util.fromPeg(e);
+
+        // Arguments follow the shape of the parameter schema when it is an object,
+        // see gemma4_schema_parser, and are a generic dict otherwise.
+        var args = self.cb.b.ref("gemma4-dict") catch |e| return util.fromPeg(e);
+        if (self.schemaArgs(tool_index, function)) |shaped| {
+            if (shaped) |x| args = x;
+        } else |e| {
+            if (e == error.OutOfMemory) return error.OutOfMemory;
+            log.wrn("{s}: tool {s} uses the generic argument parser: {s}\n", .{ "operator()", name, self.what });
+        }
+        self.toolPeg(tool_index, name, args) catch |e| return util.fromPeg(e);
     }
 
-    fn toolPeg(self: *Build, tool_index: usize, name: []const u8) chat_peg.Error!void {
+    /// The `try` block of the tool lambda: the arguments shaped by the
+    /// parameter schema, or null when it is not an object. A throw sets
+    /// `self.what`, the `e.what()` the `catch` logs.
+    fn schemaArgs(self: *Build, tool_index: usize, function: *const Value) anyerror!?ParserId {
+        var params = msg_mod.toolParameters(self.a, function) catch |e| {
+            self.what = exception.what(e);
+            return e;
+        };
+        _ = &params;
+        var doc = json.schema.fromJsonSchema(self.a, &params) catch |e| {
+            self.what = if (e == error.JsonError) json.what() else json.schema.what();
+            return e;
+        };
+        defer doc.deinit();
+        if (doc.root.* != .object) return null;
+        var sp: SchemaParser = .{
+            .a = self.a,
+            .b = &self.cb.b,
+            .root = try parsers.indexName(self.a, "tool-", tool_index, "-args"),
+        };
+        return sp.visitRoot(doc.root) catch |e| {
+            self.what = try self.a.dupe(u8, peg.what(e));
+            return e;
+        };
+    }
+
+    fn toolPeg(self: *Build, tool_index: usize, name: []const u8, args: ParserId) chat_peg.Error!void {
         const p = self.cb;
         const b = &p.b;
-        // TODO @aldehir : need to extend json-schema-to-grammar to produce more than JSON rules
-        // const auto & params   = function.at("parameters");
         const open = try p.toolOpen(try b.plus(try p.toolName(try b.literal(name)), try b.peek(try b.literal("{"))));
-        const args = try p.toolArgs(try b.ref("gemma4-dict"));
-        const t = try p.tool(try b.sequence(&.{ open, args }));
+        const t = try p.tool(try b.sequence(&.{ open, try p.toolArgs(args) }));
         try b.orAssign(&self.tool_choice, try b.rule(try parsers.indexName(self.a, "tool-", tool_index, ""), t, false));
     }
 };
 
-/// Ports `common_chat_params_init_gemma4` (parsers/gemma4.cpp:151 @cd959bae9).
+/// Ports `common_chat_params_init_gemma4` (parsers/gemma4.cpp:283 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
@@ -391,23 +550,6 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
 
 test {
     std.testing.refAllDecls(@This());
-}
-
-test "tool results fold into the assistant turn" {
-    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena_state.deinit();
-    const a = arena_state.allocator();
-    var msgs = try json.parse(a,
-        \\[{"role":"user","content":"hi"},
-        \\ {"role":"assistant","content":"","tool_calls":[{"type":"function","function":{"name":"f","arguments":{}}}]},
-        \\ {"role":"tool","content":"{\"x\":1}","tool_call_id":"c1"},
-        \\ {"role":"assistant","content":"done"}]
-    );
-    try convertToolResponses(a, &msgs);
-    const out = try json.dump(a, &msgs, -1);
-    try std.testing.expectEqualStrings(
-        \\[{"role":"user","content":"hi"},{"role":"assistant","tool_calls":[{"type":"function","function":{"name":"f","arguments":{}}}],"tool_responses":[{"name":"f","response":{"x":1}}],"content":"done"}]
-    , out);
 }
 
 test "google-gemma-4-31B-it.jinja applies with a tool and builds a parser and a grammar" {

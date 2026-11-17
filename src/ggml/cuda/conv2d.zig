@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/conv2d.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/conv2d.cuh` at v0.9.0 (`cd959bae9`). The
+//! `llama.cpp/ggml/src/ggml-cuda/conv2d.cuh` at v1.0.0 (`b1b770d90`). The
 //! kernels -- `conv2d_kernel`, `conv2d_pad_f16`, `conv2d_implicit_gemm_f16`
 //! and `conv2d_reduce_split_k` -- stay CUDA.
 //!
@@ -29,10 +29,10 @@ const cu = common.cu;
 const Tensor = c.ggml_tensor;
 const half = kernels.half;
 
-/// Ports `CUDA_CONV2D_BLOCK_SIZE` (conv2d.cuh:4 @cd959bae9).
+/// Ports `CUDA_CONV2D_BLOCK_SIZE` (conv2d.cuh:4 @b1b770d90).
 const block_size = 256;
 
-/// Ports `conv_params` (conv2d.cu:5 @cd959bae9), passed to the kernel by
+/// Ports `conv_params` (conv2d.cu:5 @b1b770d90), passed to the kernel by
 /// value.
 const ConvParams = extern struct {
     IW: i64,
@@ -53,8 +53,8 @@ const ConvParams = extern struct {
     TOTAL: i64,
 };
 
-/// Ports `conv2d_cuda` (conv2d.cu:110 @cd959bae9), reached through
-/// `conv2d_cuda_f16` and `conv2d_cuda_f32` (conv2d.cu:326, 330 @cd959bae9).
+/// Ports `conv2d_cuda` (conv2d.cu:110 @b1b770d90), reached through
+/// `conv2d_cuda_f16` and `conv2d_cuda_f32` (conv2d.cu:326, 330 @b1b770d90).
 fn conv2dCuda(comptime T: type, X_D: ?*const anyopaque, K_D: ?*const anyopaque, Y_D: ?*anyopaque, P: ConvParams, st: cu.cudaStream_t) void {
     const blocks: c_int = @truncate(@divTrunc(P.TOTAL + block_size - 1, block_size));
     kernels.launch(kernels.get("conv2d", kernels.tmpl("conv2d_kernel", &.{ kernels.typeName(T), "whcn_layout" })), .{
@@ -65,7 +65,7 @@ fn conv2dCuda(comptime T: type, X_D: ?*const anyopaque, K_D: ?*const anyopaque, 
     }, .{ X_D, K_D, Y_D, P });
 }
 
-/// Ports `conv2d_launch_implicit_gemm` (conv2d.cu:309 @cd959bae9): the 3x3
+/// Ports `conv2d_launch_implicit_gemm` (conv2d.cu:309 @b1b770d90): the 3x3
 /// and 1x1 kernels have their sizes as template arguments, the rest read
 /// them from `params`.
 fn conv2dLaunchImplicitGemm(
@@ -91,7 +91,7 @@ fn conv2dLaunchImplicitGemm(
     }
 }
 
-/// Ports `ggml_cuda_op_conv2d` (conv2d.cu:334 @cd959bae9).
+/// Ports `ggml_cuda_op_conv2d` (conv2d.cu:334 @b1b770d90).
 pub fn opConv2d(ctx: *common.Context, dst: *Tensor) void {
     const kernel = impl.one(Tensor, dst.src[0]);
     const input = impl.one(Tensor, dst.src[1]);

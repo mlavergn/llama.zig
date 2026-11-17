@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/col2im-1d.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/col2im-1d.cuh` at v0.9.0 (`cd959bae9`).
+//! `llama.cpp/ggml/src/ggml-cuda/col2im-1d.cuh` at v1.0.0 (`b1b770d90`).
 //! The kernel, `col2im_1d_kernel`, stays CUDA.
 
 const std = @import("std");
@@ -15,7 +15,7 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `ggml_cuda_op_col2im_1d` (col2im-1d.cu:41 @cd959bae9).
+/// Ports `ggml_cuda_op_col2im_1d` (col2im-1d.cu:41 @b1b770d90).
 pub fn opCol2im1d(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const stream = ctx.stream();

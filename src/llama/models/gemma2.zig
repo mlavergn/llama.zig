@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gemma2.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/gemma2.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_gemma2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -21,7 +21,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_gemma2`'s `load_arch_hparams` (models/gemma2.cpp:3 @cd959bae9).
+/// Ports `llama_model_gemma2`'s `load_arch_hparams` (models/gemma2.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -53,7 +53,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         1.0 / impl.sqrtf(@floatFromInt(hp.nEmbdHeadK(0)));
 }
 
-/// Ports `llama_model_gemma2`'s `load_arch_tensors` (models/gemma2.cpp:30 @cd959bae9).
+/// Ports `llama_model_gemma2`'s `load_arch_tensors` (models/gemma2.cpp:30 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
 
@@ -81,13 +81,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_gemma2`'s `build_arch_graph` (models/gemma2.cpp:56 @cd959bae9).
+/// Ports `llama_model_gemma2`'s `build_arch_graph` (models/gemma2.cpp:56 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_gemma2`'s `graph`
-/// (models/gemma2.cpp:60 @cd959bae9).
+/// (models/gemma2.cpp:60 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -108,8 +108,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
-        const freq_base_l = model.getRopeFreqBase(b.cparams, @intCast(il));
-        const freq_scale_l = model.getRopeFreqScale(b.cparams, @intCast(il));
 
         // Norm.
         var cur = b.buildNorm(inpL, layer.attn_norm, null, .rms, il);
@@ -123,8 +121,8 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             var Kcur = qkv.k;
             const Vcur = qkv.v;
 
-            Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
 
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);

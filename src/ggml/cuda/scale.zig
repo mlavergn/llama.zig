@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/scale.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/scale.cuh` at v0.9.0 (`cd959bae9`). The
+//! `llama.cpp/ggml/src/ggml-cuda/scale.cuh` at v1.0.0 (`b1b770d90`). The
 //! kernel, `scale_f32`, stays CUDA and is launched from here; since v0.6.0
 //! it is a template over the element type, and computes in F32 either way.
 //! Since v0.8.0 `src` and `dst` may be views: rows are contiguous, dimensions
@@ -17,10 +17,10 @@ const kernels = @import("kernels.zig");
 const c = impl.c;
 const Tensor = c.ggml_tensor;
 
-/// Ports `CUDA_SCALE_BLOCK_SIZE` (scale.cuh:3 @cd959bae9).
+/// Ports `CUDA_SCALE_BLOCK_SIZE` (scale.cuh:3 @b1b770d90).
 const block_size = 256;
 
-/// Ports `MAX_GRIDDIM_X` (scale.cu:4 @cd959bae9).
+/// Ports `MAX_GRIDDIM_X` (scale.cu:4 @b1b770d90).
 const max_griddim_x = 0x7FFFFFFF;
 
 /// A byte stride in elements, into the kernel's `uint32_t` parameter.
@@ -28,7 +28,7 @@ fn elems(nb: usize, ts: usize) u32 {
     return @truncate(nb / ts);
 }
 
-/// Ports `scale_f32_cuda` (scale.cu:31 @cd959bae9), its element type `T`
+/// Ports `scale_f32_cuda` (scale.cu:31 @b1b770d90), its element type `T`
 /// comptime: `f32` or `kernels.bf16`.
 fn scaleF32Cuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, scale: f32, bias: f32, src0: *const Tensor, t: *const Tensor, stream: common.cu.cudaStream_t) void {
     const k = c.ggml_nelements(src0);
@@ -52,7 +52,7 @@ fn scaleF32Cuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, scale:
     });
 }
 
-/// Ports `ggml_cuda_op_scale` (scale.cu:47 @cd959bae9).
+/// Ports `ggml_cuda_op_scale` (scale.cu:47 @b1b770d90).
 pub fn opScale(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const stream = ctx.stream();

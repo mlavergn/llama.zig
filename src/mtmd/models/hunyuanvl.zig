@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/hunyuanvl.cpp` at v0.9.0 (`cd959bae9`).
+//! Ports `llama.cpp/tools/mtmd/models/hunyuanvl.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -12,7 +12,7 @@ const graph = @import("../graph.zig");
 const c = impl.c;
 const ne = graph.ne;
 
-/// Ports `build` (hunyuanvl.cpp:3 @cd959bae9), a member of `clip_graph_hunyuanvl`.
+/// Ports `build` (hunyuanvl.cpp:3 @b1b770d90), a member of `mtmd_graph_hunyuanvl`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
@@ -22,7 +22,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     const ph = g.n_patches_y;
 
     // position embedding: declared as a graph input, filled on CPU
-    // by clip_image_batch_encode (see PROJECTOR_TYPE_HUNYUANVL branch there).
+    // by mtmd_subcontext::encode() (see PROJECTOR_TYPE_HUNYUANVL branch there).
     const pos_embd = c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_F32, g.n_embd, ph * pw);
     _ = c.ggml_set_name(pos_embd, "hunyuanvl_pos_embd");
     c.ggml_set_input(pos_embd);

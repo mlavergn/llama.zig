@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/nemotron-omni.cpp` at v0.9.0 (`cd959bae9`).
+//! Ports `llama.cpp/tools/mtmd/models/nemotron-omni.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -13,8 +13,8 @@ const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
 const c = impl.c;
 
-/// Ports `build_inp_with_temporal_merge` (nemotron-omni.cpp:3 @cd959bae9), a
-/// member of `clip_graph_nemotron_omni`: one Conv2D over two frames stacked
+/// Ports `build_inp_with_temporal_merge` (nemotron-omni.cpp:3 @b1b770d90), a
+/// member of `mtmd_graph_nemotron_omni`: one Conv2D over two frames stacked
 /// on the channel axis, a still image going through the plain patch embedding.
 pub fn buildInpWithTemporalMerge(g: *graph.Graph) graph.T {
     const ctx0 = g.ctx0;
@@ -40,7 +40,7 @@ pub fn buildInpWithTemporalMerge(g: *graph.Graph) graph.T {
     return c.ggml_cont(ctx0, c.ggml_transpose(ctx0, inp));
 }
 
-/// Ports `build` (nemotron-omni.cpp:25 @cd959bae9), a member of `clip_graph_nemotron_omni`.
+/// Ports `build` (nemotron-omni.cpp:25 @b1b770d90), a member of `mtmd_graph_nemotron_omni`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

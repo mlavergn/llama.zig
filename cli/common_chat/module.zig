@@ -30,6 +30,7 @@ pub const parse = @import("parse.zig");
 pub const prompt = @import("prompt.zig");
 pub const input = @import("input.zig");
 pub const session = @import("session.zig");
+pub const tts_norm = @import("tts_norm.zig");
 
 pub const Error = exception.Error;
 pub const what = exception.what;

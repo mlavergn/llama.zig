@@ -8,7 +8,7 @@
 //! - `llama.cpp/ggml/src/ggml-cpu/common.h` — `type_conversion_table` and
 //!   `get_thread_range`
 //!
-//! at v0.9.0 (`cd959bae9`).
+//! at v1.0.0 (`b1b770d90`).
 //!
 //! `cpu/binary_ops.zig` and `cpu/unary_ops.zig` each carry their own copy of
 //! these two, because each states its own provenance and the C has them in a
@@ -90,8 +90,8 @@ pub inline fn barrier(params: *const ComputeParams) void {
 }
 
 /// Ports the `to_f32` half of `type_conversion_table`
-/// (ggml-cpu/common.h:56 @cd959bae9), with `f8_e4m3_to_f32`
-/// (ggml-cpu/common.h:46 @cd959bae9) for `ggml_fp8_e4m3_t`.
+/// (ggml-cpu/common.h:56 @b1b770d90), with `f8_e4m3_to_f32`
+/// (ggml-cpu/common.h:46 @b1b770d90) for `ggml_fp8_e4m3_t`.
 ///
 /// Parameters:
 /// - `T`: the element type, one of `f32`, `ggml_fp16_t`, `ggml_bf16_t`,
@@ -111,8 +111,8 @@ pub inline fn toF32(comptime T: type, v: T) f32 {
 }
 
 /// Ports the `from_f32` half of `type_conversion_table`
-/// (ggml-cpu/common.h:56 @cd959bae9), with `f32_to_f8_e4m3`
-/// (ggml-cpu/common.h:50 @cd959bae9) for `ggml_fp8_e4m3_t`.
+/// (ggml-cpu/common.h:56 @b1b770d90), with `f32_to_f8_e4m3`
+/// (ggml-cpu/common.h:50 @b1b770d90) for `ggml_fp8_e4m3_t`.
 ///
 /// Parameters:
 /// - `T`: the element type to produce.
@@ -133,7 +133,7 @@ pub inline fn fromF32(comptime T: type, v: f32) T {
     };
 }
 
-/// Ports `get_thread_range` (ggml-cpu/common.h:88 @cd959bae9).
+/// Ports `get_thread_range` (ggml-cpu/common.h:88 @b1b770d90).
 ///
 /// Parameters:
 /// - `params`: the thread index and count.
@@ -155,7 +155,7 @@ pub inline fn min64(a: i64, b: i64) i64 {
     return @min(a, b);
 }
 
-/// `CACHE_LINE_SIZE_F32` (ggml-cpu/ops.h:20 @cd959bae9), the stride between
+/// `CACHE_LINE_SIZE_F32` (ggml-cpu/ops.h:20 @b1b770d90), the stride between
 /// per-thread scratch slots in `params.wdata`.
 ///
 /// `CACHE_LINE_SIZE` is 64 on this target -- the `#else` arm of ops.h:12-18,

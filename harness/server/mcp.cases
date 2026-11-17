@@ -75,3 +75,20 @@ GET /tools
 GET /tools
 !server -m $QWEN3 -c 512 -np 1 --no-jinja --mcp-servers-json '[1, 2]'
 !server -m $QWEN3 -c 512 -np 1 --no-jinja --mcp-servers-json '{"mcpServers": {"s": "not an object"}}'
+
+# v1.0.0 (d8c8cc4d9): a tool call abandoned to its timeout or to a client that
+# hung up is cancelled on the MCP server (notifications/cancelled; never for
+# initialize). The fixture logs every message it reads (--log, in each side's
+# $WORK); it reads the cancellation once its sleep is over
+!fresh slowlog
+!server -m $QWEN3 -c 512 -np 1 --no-jinja --mcp-servers-json '{"mcpServers": {"slow": {"command": "python3", "args": ["$FIXTURES/mcp_slow_server.py", "--delay", "1", "--log", "$WORK/slow.jsonl"], "timeout_ms": 500}}}'
+POST /tools {"tool": "slow_sleep", "params": {"seconds": 1}}
+!sleep 2
+!tree $WORK
+!abandon 0.2
+POST /tools {"tool": "slow_sleep", "params": {"seconds": 1}}
+!sleep 2
+!tree $WORK
+POST /tools {"tool": "slow_sleep", "params": {"seconds": 0}}
+!sleep 1.5
+!tree $WORK

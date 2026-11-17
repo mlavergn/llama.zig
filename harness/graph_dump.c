@@ -22,6 +22,12 @@
 
 static struct ggml_context * ctx;
 
+/* Declared in ggml-impl.h since v1.0.0 (#30206), which is not a public
+ * header; both libraries export them. Copied from ggml-impl.h:112, 115. */
+void ggml_rope_yarn_corr_dims(int n_dims, int n_ctx_orig, float freq_base, float beta_fast, float beta_slow,
+                              bool truncate, float dims[2]);
+bool ggml_rope_get_truncate(const struct ggml_tensor * a);
+
 /* Prints everything a backend reads off a node. op_params is dumped whole
  * because slot *position* is what goes wrong -- a value in the wrong index
  * looks fine in isolation. */
@@ -220,7 +226,6 @@ int main(void) {
     D(ggml_add(ctx, a2, b2));
     D(ggml_add(ctx, a2, row));          /* broadcast */
     D(ggml_add_inplace(ctx, a2, b2));
-    D(ggml_add1(ctx, a2, scal));
     D(ggml_acc(ctx, a2, vec, 32, 64, 96, 16));
     dies("ggml_acc offset -4", acc_negative_offset);
     dies("ggml_acc offset 1<<30", acc_offset_limit);
@@ -319,8 +324,6 @@ int main(void) {
         D(ggml_set_rows(ctx, dst, data, idx));
     }
     D(ggml_diag(ctx, ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 8)));
-    D(ggml_diag_mask_inf(ctx, sq, 3));
-    D(ggml_diag_mask_zero(ctx, sq, 3));
     D(ggml_clamp(ctx, a2, -1.5f, 2.5f));
 
     puts("=== softmax ===");
@@ -350,9 +353,22 @@ int main(void) {
         ggml_rope_set_offset(r, 17);
         dump("ggml_rope_set_offset", r);
 
+        struct ggml_tensor * rt = ggml_rope_ext(ctx, q, pos, NULL, 128, GGML_ROPE_TYPE_NEOX, 4096,
+                                                10000.0f, 0.5f, 1.0f, 1.0f, 32.0f, 1.0f);
+        printf("%-28s truncate=%d\n", "ggml_rope_get_truncate", (int) ggml_rope_get_truncate(rt));
+        ggml_rope_set_truncate(rt, false);
+        dump("ggml_rope_set_truncate(0)", rt);
+        printf("%-28s truncate=%d\n", "ggml_rope_get_truncate", (int) ggml_rope_get_truncate(rt));
+        ggml_rope_set_truncate(rt, true);
+        dump("ggml_rope_set_truncate(1)", rt);
+
         float dims[2];
-        ggml_rope_yarn_corr_dims(128, 4096, 10000.0f, 32.0f, 1.0f, dims);
+        ggml_rope_yarn_corr_dims(128, 4096, 10000.0f, 32.0f, 1.0f, true, dims);
         printf("%-28s dims=[%.6f,%.6f]\n", "ggml_rope_yarn_corr_dims", dims[0], dims[1]);
+        ggml_rope_yarn_corr_dims(128, 4096, 10000.0f, 32.0f, 1.0f, false, dims);
+        printf("%-28s dims=[%.9g,%.9g]\n", "ggml_rope_yarn_corr_dims(0)", dims[0], dims[1]);
+        ggml_rope_yarn_corr_dims(64, 2048, 500000.0f, 24.0f, 1.5f, false, dims);
+        printf("%-28s dims=[%.9g,%.9g]\n", "ggml_rope_yarn_corr_dims(0)", dims[0], dims[1]);
     }
 
     puts("=== convolution and pooling ===");
@@ -404,7 +420,7 @@ int main(void) {
 
     puts("=== resampling and padding ===");
     D(ggml_upscale(ctx, a4, 2, GGML_SCALE_MODE_NEAREST));
-    D(ggml_upscale_ext(ctx, a4, 24, 20, 8, 2, GGML_SCALE_MODE_BILINEAR));
+    D(ggml_interpolate(ctx, a4, 24, 20, 8, 2, GGML_SCALE_MODE_BILINEAR));
     D(ggml_interpolate(ctx, a4, 8, 8, 8, 2,
                        GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS));
     D(ggml_pad(ctx, a4, 2, 3, 0, 0));
@@ -606,6 +622,38 @@ int main(void) {
         D(ggml_add(ctx, f8, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 32, 6, 2)));
         printf("row_size(f8,33)=%zu nbytes=%zu ftype=%d\n", ggml_row_size(GGML_TYPE_F8_E4M3, 33), ggml_nbytes(f8),
                (int) ggml_ftype_to_ggml_type(GGML_FTYPE_MOSTLY_F8_E4M3));
+    }
+
+    puts("=== backward ===");
+    {
+        /* The autodiff pass, node by node. v1.0.0 (#29801, #30712) rewrote
+         * SUM's and MEAN's gradients without ADD1, gave TRI a gradient and
+         * carries RoPE's truncation into ROPE_BACK. */
+        struct ggml_tensor * x  = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 8);
+        struct ggml_tensor * y  = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 8);
+        struct ggml_tensor * qb = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 64, 4, 6);
+        struct ggml_tensor * pb = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 6);
+        ggml_set_param(x);
+        ggml_set_param(y);
+        ggml_set_param(qb);
+
+        struct ggml_tensor * t1 = ggml_tri(ctx, x, GGML_TRI_TYPE_LOWER_DIAG);
+        struct ggml_tensor * t2 = ggml_add(ctx, t1, ggml_mean(ctx, y));
+        struct ggml_tensor * t3 = ggml_scale(ctx, ggml_sum(ctx, ggml_mul(ctx, t2, y)), 0.5f);
+        struct ggml_tensor * r  = ggml_rope_set_truncate(
+            ggml_rope_ext(ctx, qb, pb, NULL, 64, GGML_ROPE_TYPE_NEOX, 2048, 10000.0f, 0.25f, 1.0f, 1.0f, 32.0f, 1.0f), false);
+        struct ggml_tensor * loss = ggml_add(ctx, t3, ggml_sum(ctx, r));
+        ggml_set_loss(loss);
+
+        struct ggml_cgraph * gb = ggml_new_graph_custom(ctx, 256, true);
+        ggml_build_forward_expand(gb, loss);
+        ggml_build_backward_expand(ctx, gb, NULL);
+        printf("backward nodes=%d\n", ggml_graph_n_nodes(gb));
+        for (int i = 0; i < ggml_graph_n_nodes(gb); i++) {
+            char label[32];
+            snprintf(label, sizeof label, "backward node %d", i);
+            dump(label, ggml_graph_node(gb, i));
+        }
     }
 
     puts("=== op tables ===");

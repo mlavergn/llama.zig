@@ -74,7 +74,7 @@ const FileMap = struct {
 /// - `n`: the definition's first line.
 ///
 /// Return: the definition's last line.
-fn extentEnd(lines: []const []const u8, n: usize) usize {
+pub fn extentEnd(lines: []const []const u8, n: usize) usize {
     const first = std.mem.trimStart(u8, lines[n - 1], " \t");
     if (std.mem.startsWith(u8, first, "#")) {
         var i = n;
@@ -200,7 +200,7 @@ fn shifted(hunks: []const Hunk, n: usize) usize {
     return @intCast(@as(isize, @intCast(n)) + delta);
 }
 
-fn git(arena: std.mem.Allocator, io: std.Io, argv: []const []const u8) ![]u8 {
+pub fn git(arena: std.mem.Allocator, io: std.Io, argv: []const []const u8) ![]u8 {
     const res = try std.process.run(arena, io, .{ .argv = argv, .stdout_limit = .limited(256 << 20) });
     switch (res.term) {
         .exited => |code| if (code != 0) {
@@ -212,7 +212,7 @@ fn git(arena: std.mem.Allocator, io: std.Io, argv: []const []const u8) ![]u8 {
     return res.stdout;
 }
 
-fn splitLines(arena: std.mem.Allocator, text: []const u8) ![]const []const u8 {
+pub fn splitLines(arena: std.mem.Allocator, text: []const u8) ![]const []const u8 {
     var lines: std.ArrayList([]const u8) = .empty;
     var it = std.mem.splitScalar(u8, text, '\n');
     while (it.next()) |l| try lines.append(arena, l);

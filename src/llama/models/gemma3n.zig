@@ -7,7 +7,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gemma3n.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/gemma3n.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_gemma3n`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `graph` and the graph's helpers.
 
@@ -24,7 +24,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_gemma3n`'s `load_arch_hparams` (models/gemma3n.cpp:3 @cd959bae9).
+/// Ports `llama_model_gemma3n`'s `load_arch_hparams` (models/gemma3n.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -55,7 +55,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_gemma3n`'s `load_arch_tensors` (models/gemma3n.cpp:26 @cd959bae9).
+/// Ports `llama_model_gemma3n`'s `load_arch_tensors` (models/gemma3n.cpp:26 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -115,7 +115,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_gemma3n`'s `build_arch_graph` (models/gemma3n.cpp:83 @cd959bae9).
+/// Ports `llama_model_gemma3n`'s `build_arch_graph` (models/gemma3n.cpp:83 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const g: Graph = .{
         .model = model,
@@ -128,14 +128,14 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
     g.build();
 }
 
-/// Ports `gemma3n_view_2d_slice` (models/gemma3n.cpp:88 @cd959bae9): the 2D
+/// Ports `gemma3n_view_2d_slice` (models/gemma3n.cpp:88 @b1b770d90): the 2D
 /// slice of a 3D tensor at `idx` along its third dimension.
 fn view2dSlice(ctx: *c.ggml_context, x: *Tensor, idx: c_int) *Tensor {
     impl.assert(idx < @as(c_int, @intCast(x.ne[2])), "models/gemma3n.cpp", 89, "idx < (int) x->ne[2]");
     return c.ggml_view_2d(ctx, x, x.ne[0], x.ne[1], c.ggml_row_size(x.type, x.ne[0]), @intCast(idx * x.ne[0] * x.ne[1] * @as(i64, @intCast(c.ggml_element_size(x)))));
 }
 
-/// Ports `llama_model_gemma3n`'s `graph` (src/models/models.h:951 @cd959bae9): the
+/// Ports `llama_model_gemma3n`'s `graph` (src/models/models.h:862 @b1b770d90): the
 /// builder and the constants its helpers share.
 const Graph = struct {
     model: *const Model,
@@ -151,7 +151,7 @@ const Graph = struct {
     f_sparsity_std_mul: f32 = 1.6448533535003662,
 
     /// Ports the constructor of `llama_model_gemma3n`'s `graph`
-    /// (models/gemma3n.cpp:94 @cd959bae9).
+    /// (models/gemma3n.cpp:94 @b1b770d90).
     fn build(self: *const Graph) void {
         const model = self.model;
         const b = self.b;
@@ -195,8 +195,6 @@ const Graph = struct {
             const layer = &model.layers[@intCast(il)];
             // This block closely resembles Gemma3p5DecoderLayer in the
             // Python code.
-            const freq_base_l = model.getRopeFreqBase(b.cparams, @intCast(il));
-            const freq_scale_l = model.getRopeFreqScale(b.cparams, @intCast(il));
 
             var cur: *Tensor = inpL; // [n_embd, n_tokens, n_altup]
             const predictions = self.altupPredict(cur, il); // [n_embd, n_tokens, n_altup]
@@ -228,9 +226,9 @@ const Graph = struct {
                 b.cb(Kcur, "Kcur_normed", il);
                 b.cb(Vcur, "Vcur_normed", il);
 
-                Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+                Qcur = b.buildRope(Qcur, inp_pos, il);
 
-                Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+                Kcur = b.buildRope(Kcur, inp_pos, il);
 
                 b.cb(Qcur, "Qcur_pos", il);
                 b.cb(Kcur, "Kcur_pos", il);
@@ -252,7 +250,7 @@ const Graph = struct {
                 Qcur = b.buildNorm(Qcur, layer.attn_q_norm, null, .rms, il);
                 b.cb(Qcur, "Qcur_normed", il);
 
-                Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+                Qcur = b.buildRope(Qcur, inp_pos, il);
                 b.cb(Qcur, "Qcur_pos", il);
 
                 cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, null, null, null, null, null, hp.f_attention_scale, il);
@@ -370,14 +368,14 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_gemma3n`'s `graph`'s `calc_magnitude`
-    /// (models/gemma3n.cpp:319 @cd959bae9).
+    /// (models/gemma3n.cpp:312 @b1b770d90).
     fn calcMagnitude(self: *const Graph, x: *Tensor) *Tensor {
         const ctx = self.b.ctx0;
         return c.ggml_sqrt(ctx, c.ggml_sum_rows(ctx, c.ggml_sqr(ctx, x)));
     }
 
     /// Ports `llama_model_gemma3n`'s `graph`'s `build_inp_per_layer`
-    /// (models/gemma3n.cpp:325 @cd959bae9): equivalent to the Python code's
+    /// (models/gemma3n.cpp:318 @b1b770d90): equivalent to the Python code's
     /// `get_per_layer_inputs()`. In a mixed ubatch the embedding rows carry
     /// token id 0, the padding row the multimodal path below reads.
     ///
@@ -389,7 +387,7 @@ const Graph = struct {
         var inp_per_layer: *Tensor = undefined;
         const tok_embd_scale = impl.sqrtf(@floatFromInt(self.n_embd_altup));
         if (b.ubatch.token != null) {
-            const inp = impl.allocator.create(graph.InpEmbd) catch impl.abort("models/gemma3n.cpp", 326, "out of memory");
+            const inp = impl.allocator.create(graph.InpEmbd) catch impl.abort("models/gemma3n.cpp", 319, "out of memory");
             inp.* = .{ .n_embd = b.n_embd };
             inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.ubatch.n_tokens);
             c.ggml_set_input(inp.tokens);
@@ -419,7 +417,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_gemma3n`'s `graph`'s `project_per_layer_inputs`
-    /// (models/gemma3n.cpp:359 @cd959bae9): equivalent to the Python code's
+    /// (models/gemma3n.cpp:352 @b1b770d90): equivalent to the Python code's
     /// `project_per_layer_inputs()`, the per-layer inputs with `n_layer` as
     /// the last dimension.
     ///
@@ -446,8 +444,8 @@ const Graph = struct {
         return inp_per_layer;
     }
 
-    /// Ports `llama_model_gemma3n`'s `graph`'s `laurel` (models/gemma3n.cpp:382
-    /// @cd959bae9).
+    /// Ports `llama_model_gemma3n`'s `graph`'s `laurel` (models/gemma3n.cpp:375
+    /// @b1b770d90).
     fn laurel(self: *const Graph, cur: *Tensor, il: c_int) *Tensor {
         const b = self.b;
         const layer = &self.model.layers[@intCast(il)];
@@ -461,7 +459,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_gemma3n`'s `graph`'s `gaussian_topk`
-    /// (models/gemma3n.cpp:394 @cd959bae9).
+    /// (models/gemma3n.cpp:387 @b1b770d90).
     ///
     /// Return: `[n_embd, n_tokens]`, as `x`.
     fn gaussianTopk(self: *const Graph, x: *Tensor) *Tensor {
@@ -475,7 +473,7 @@ const Graph = struct {
     // AltUp.
 
     /// Ports `llama_model_gemma3n`'s `graph`'s `altup_compute_router_modalities`
-    /// (models/gemma3n.cpp:409 @cd959bae9): equivalent to the Python code's
+    /// (models/gemma3n.cpp:402 @b1b770d90): equivalent to the Python code's
     /// `compute_router_modalities()`.
     ///
     /// Return: `[n_altup, n_tokens]`, from `x` `[n_embd, n_tokens]`.
@@ -493,7 +491,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_gemma3n`'s `graph`'s `altup_predict`
-    /// (models/gemma3n.cpp:421 @cd959bae9).
+    /// (models/gemma3n.cpp:414 @b1b770d90).
     ///
     /// Return: `[n_embd, n_tokens, n_altup]`, as `cur`.
     fn altupPredict(self: *const Graph, cur: *Tensor, il: c_int) *Tensor {
@@ -524,7 +522,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_gemma3n`'s `graph`'s `altup_correct`
-    /// (models/gemma3n.cpp:446 @cd959bae9).
+    /// (models/gemma3n.cpp:439 @b1b770d90).
     ///
     /// Return: `[n_embd, n_tokens, n_altup]`, from `predictions`
     /// `[n_embd, n_tokens, n_altup]` and `activated` `[n_embd, n_tokens]`.

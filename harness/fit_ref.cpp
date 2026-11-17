@@ -51,6 +51,21 @@ void common_fit_apply(common_params &, llama_model_params &, llama_context_param
     std::abort();
 }
 
+// `common_model_load` (common/common.cpp:1725 @b1b770d90), which fit.cpp
+// calls: common.cpp is not compiled here, so its body is repeated verbatim.
+struct llama_model * common_model_load(const std::vector<std::string> & paths, const struct llama_model_params & mparams) {
+    if (paths.size() == 1) {
+        return llama_model_load_from_file(paths[0].c_str(), mparams);
+    }
+
+    std::vector<const char *> c_paths;
+    c_paths.reserve(paths.size());
+    for (const auto & path : paths) {
+        c_paths.push_back(path.c_str());
+    }
+    return llama_model_load_from_splits(c_paths.data(), c_paths.size(), mparams);
+}
+
 extern "C" {
 
 // Points `common_log` at `path`, prefixed and uncoloured, at `verbosity`.
@@ -82,14 +97,15 @@ int fit_ref_params(
         llama_context_params * extra_cparams,
         bool extra_shares_model,
         int log_level) {
-    common_fit_extra_model extra = { extra_path, extra_mparams, extra_cparams, extra_shares_model };
-    return (int) common_fit_params(path_model, mparams, cparams, tensor_split, tensor_buft_overrides,
+    common_fit_extra_model extra = { { extra_path ? extra_path : "" }, extra_mparams, extra_cparams, extra_shares_model };
+    return (int) common_fit_params({ path_model }, mparams, cparams, tensor_split, tensor_buft_overrides,
         margins, n_ctx_min, extra_path ? &extra : nullptr, (ggml_log_level) log_level);
 }
 
 // `common_get_device_memory_data`, flattened: five int64 per entry (total,
 // free, model, context, compute) into `out`, at most `cap` entries, and the
-// devices into `devs`. Returns the entry count, or -1 where it throws.
+// devices into `devs`; `hp` is hp_ngl, hp_n_ctx_train, hp_n_expert and
+// hp_ngl_skip. Returns the entry count, or -1 where it throws.
 int fit_ref_device_memory(
         const char * path_model,
         const llama_model_params * mparams,
@@ -100,7 +116,7 @@ int fit_ref_device_memory(
     std::vector<ggml_backend_dev_t> d;
     common_device_memory_data_vec v;
     try {
-        v = common_get_device_memory_data(path_model, mparams, cparams, d, hp[0], hp[1], hp[2], (ggml_log_level) log_level);
+        v = common_get_device_memory_data({ path_model }, mparams, cparams, d, hp[0], hp[3], hp[1], hp[2], (ggml_log_level) log_level);
     } catch (const std::exception & e) {
         LOG_ERR("%s\n", e.what());
         return -1;
@@ -128,7 +144,7 @@ int fit_ref_measure(const char * path_model, const llama_model_params * mparams,
     try {
         uint32_t n_ctx_train = 0;
         uint32_t n_ctx       = 0;
-        const auto rows = common_fit_measure(path_model, mparams, cparams, &n_ctx_train, &n_ctx, (ggml_log_level) log_level);
+        const auto rows = common_fit_measure({ path_model }, mparams, cparams, &n_ctx_train, &n_ctx, (ggml_log_level) log_level);
         s += "measure " + std::to_string(n_ctx_train) + " " + std::to_string(n_ctx) + "\n";
         for (const auto & r : rows) {
             s += "  row " + std::to_string((int) r.kind) + " " + r.name + "|" + r.description + " " + std::to_string(r.total) + " " +
@@ -152,7 +168,7 @@ int fit_ref_print(const char * path_model, llama_model_params * mparams, llama_c
     dup2(fileno(f), 1);
     int rc = 0;
     try {
-        common_fit_print(path_model, mparams, cparams);
+        common_fit_print({ path_model }, mparams, cparams);
     } catch (const std::exception &) {
         rc = -1;
     }

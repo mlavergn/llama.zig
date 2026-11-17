@@ -459,6 +459,11 @@ def targeted():
     yield C({"messages": [u], "response_format": {"type": "json_schema", "json_schema": {"schema": {"type": "integer"}}}})
     yield C({"messages": [u], "response_format": {"type": "json_object"}, "json_schema": {"type": "string"}})
     yield C({"messages": [u], "response_format": {"type": "json_object", "schema": {"type": "boolean"}}})
+    # v1.0.0 (1945793e0): a json_schema response_format whose schema is not nested in the json_schema wrapper
+    yield C({"messages": [u], "response_format": {"type": "json_schema", "schema": {"type": "integer"}}})
+    yield C({"messages": [u], "response_format": {"type": "json_schema", "json_schema": {"name": "x"}, "schema": {"type": "integer"}}})
+    yield C({"messages": [u], "response_format": {"type": "json_schema"}})
+    yield C({"messages": [u], "response_format": {"type": "json_schema", "json_schema": None, "schema": {"type": "boolean"}}})
     yield C({})
     yield C({"messages": {"a": 1}})
     yield C({"messages": [{"role": "user"}]})
@@ -517,6 +522,13 @@ def targeted():
         ["alloc", [1, 2, 3], 10, 0, []], ["alloc", [4, 5, 6], 10, 0, []], ["update"], ["alloc", [7, 8, 9, 9, 9], 10, 0, []], ["update"]]}
     yield "PC", {"limit_mib": 1, "limit_tokens": 2, "ops": [
         ["alloc", [1, 2, 3], 1000, 0, []], ["alloc", [4, 5, 6], 1000, 0, []], ["update"]]}
+    # v1.0.0: the full-restore tag reads the lcp of the prompt chosen, not of the slot's own
+    yield "PC", {"limit_mib": 0, "limit_tokens": 0, "ops": [
+        ["alloc", [1, 2, 9], 10, 0, []], ["alloc", [1, 2, 3, 4], 10, 0, [10, 20]], ["cur", []], ["load", [1, 2, 3, 4, 5]]]}
+    yield "PC", {"limit_mib": 0, "limit_tokens": 0, "ops": [
+        ["alloc", [1, 2, 3, 4], 10, 0, []], ["alloc", [1, 2, 9], 10, 0, []], ["cur", [1]], ["load", [1, 2, 3, 4, 5]]]}
+    yield "PC", {"limit_mib": 0, "limit_tokens": 0, "ops": [
+        ["alloc", [1, 2, 3, 4], 10, 0, []], ["cur", [1, 2, 3]], ["load", [1, 2, 3, 7, 7, 7]]]}
 
 
 def records():
@@ -1229,7 +1241,16 @@ def chat_step4():
               {"input": "hi", "max_output_tokens": 8, "reasoning": {"effort": "low"},
                "extra_params": {"max_tokens": 2, "reasoning_effort": "high", "messages": 5}},
               {"input": "hi", "extra_params": 5}, {"input": "hi", "extra_params": []}, {"input": "hi", "extra_params": None},
-              {"input": "hi", "extra_params": {}}, {"input": "hi", "extra_params": {"extra_params": {"a": 1}}}):
+              {"input": "hi", "extra_params": {}}, {"input": "hi", "extra_params": {"extra_params": {"a": 1}}},
+              # v1.0.0 (711f9f4c1): text.format as response_format
+              {"input": "hi", "text": {"format": {"type": "json_schema", "name": "n", "strict": True, "schema": {"type": "object"}}}},
+              {"input": "hi", "text": {"format": {"type": "json_object"}}}, {"input": "hi", "text": {"format": {"type": "text"}}},
+              {"input": "hi", "text": {"format": {"type": "xml"}}}, {"input": "hi", "text": {"format": {"type": 3}}},
+              {"input": "hi", "text": {"format": {}}}, {"input": "hi", "text": {"format": "json_object"}},
+              {"input": "hi", "text": {"format": None}}, {"input": "hi", "text": {}}, {"input": "hi", "text": {"verbosity": "low"}},
+              {"input": "hi", "text": "x"}, {"input": "hi", "text": None}, {"input": "hi", "text": [1]},
+              {"input": "hi", "response_format": {"type": "text"}, "text": {"format": {"type": "json_schema", "schema": {"type": "string"}}}},
+              {"input": "hi", "text": {"format": {"type": "json_schema"}}, "extra_params": {"response_format": {"type": "text"}}}):
         yield "RC", b
     for _ in range(N):
         yield "RC", responses_body()
@@ -1241,8 +1262,36 @@ def chat_step4():
     for b in ({}, {"top_k": 5}, {"top_k": -3}, {"top_p": 0.5}, {"top_p": 7}, {"seed": 7}, {"seed": -1}, {"n_predict": 4},
               {"max_tokens": 9}, {"n_predict": 4, "max_tokens": 9}, {"n_predict": -2}, {"repeat_penalty": 1.5},
               {"stream": True}, {"stream": 1}, {"top_k": "x"}, {"top_p": "y"}, {"seed": "z"}, {"n_predict": "w"},
-              {"repeat_penalty": None}, {"unknown": 1}):
+              {"repeat_penalty": None}, {"unknown": 1},
+              # v1.0.0: temperature
+              {"temperature": 0.7}, {"temperature": 0}, {"temperature": -1}, {"temperature": 1e9}, {"temperature": "x"}):
         yield "TS", b
+    # v1.0.0 (08f945ffb): the OpenAI speech API's body into /tts's
+    for b in ({}, {"input": "hi"}, {"input": "hi", "voice": "alloy"}, {"input": "hi", "voice": {"id": "v1"}},
+              {"input": "hi", "voice": {"name": "v1"}}, {"input": "hi", "voice": {"id": 3}}, {"input": "hi", "voice": 5},
+              {"response_format": "wav"}, {"response_format": "pcm"}, {"response_format": "mp3"}, {"response_format": "pcm16"},
+              {"response_format": None}, {"response_format": 3}, {"stream_format": "audio"}, {"stream_format": "sse"},
+              {"stream_format": ""}, {"stream_format": "audio", "stream": False}, {"speed": 1}, {"speed": 1.0}, {"speed": 1.5},
+              {"speed": "2"}, {"speed": None}, {"instructions": "be loud"}, {"instructions": ""}, {"instructions": 4},
+              {"model": "tts-1", "input": "a", "voice": "b", "response_format": "pcm", "stream_format": "audio", "speed": 1,
+               "extra": [1, 2]}, [1], "x"):
+        yield "SP", b
+    # v1.0.0: pcm_f32_to_s16 -- the clamp, NaN, rounding halves away from zero, the ends
+    vals = [0.0, -0.0, 1.0, -1.0, 2.0, -2.0, 0.5 / 32767, -0.5 / 32767, 1.5 / 32767, 0.25, -0.75, 1e-30,
+            float("inf"), float("-inf"), float("nan"), 0.99999, -0.99999, 3.4e38]
+    vals += [rng.uniform(-1.2, 1.2) for _ in range(64)]
+    yield "PCM", {"f": ["%08x" % struct.unpack("<I", struct.pack("<f", v))[0] for v in vals]}
+    yield "PCM", {"f": []}
+    yield "PCM", {"f": ["7fc00001", "ffc00000", "7f800000", "00000001", "80000001"]}
+    # v1.0.0 (8954f1948): server_addr_is_public, every range it names and its edges
+    yield "AP", {"a": ["8.8.8.8", "0.0.0.1", "10.1.2.3", "127.0.0.1", "224.0.0.1", "255.255.255.255", "223.255.255.255",
+                       "100.63.255.255", "100.64.0.0", "100.127.255.255", "100.128.0.0", "169.254.169.254", "169.253.0.1",
+                       "172.15.0.1", "172.16.0.1", "172.31.255.255", "172.32.0.1", "192.168.1.1", "192.169.0.1", "192.0.0.8",
+                       "192.0.1.1", "192.0.2.1", "198.17.0.1", "198.18.0.1", "198.19.255.255", "198.20.0.1", "9.255.255.255",
+                       "11.0.0.0", "::", "::1", "::2", "::ffff:8.8.8.8", "::ffff:10.0.0.1", "::ffff:127.0.0.1", "64:ff9b::8.8.8.8",
+                       "64:ff9b::a00:1", "64:ff9b:1::8.8.8.8", "::8.8.8.8", "fc00::1", "fd12::1", "fe80::1", "fec0::1", "febf::1",
+                       "ff02::1", "2001:4860:4860::8888", "2606:4700::1111", "fe80::1%eth0", "localhost", "", "1.2.3", "1.2.3.4.5",
+                       "01.02.03.04", "1.2.3.256", " 8.8.8.8", "8.8.8.8 ", "[::1]", "::ffff:0:8.8.8.8", "0::ffff:1.1.1.1"]}
     # the Anthropic API
     for b in ({}, {"messages": []}, {"messages": 5}, {"system": "s", "messages": [{"role": "user", "content": "hi"}]},
               {"system": "x-anthropic-billing-header: cc_version=2.1.101.e51; cc_entrypoint=cli; cch=a5145;You are", "messages": []},
@@ -1337,6 +1386,12 @@ COVERAGE = [
     "sp.grammar_lazy\":true", "\"has_template\":false", "\"format\":\"peg-native\"",
     "chat_format_int\":2", "chat_format_int\":3", "chat_format_int\":4", "\"chat_format\":\"peg-gemma4\"", "ctoks ",
     "does not match the expected", "response.function_call_arguments.delta", "tool_use",
+    # v1.0.0
+    "'text' must be an object", "'text.format' must be an object", "'text.format.type' must be one of",
+    "\"response_format\":{\"type\":\"json_schema\",\"json_schema\":{\"name\":\"n\"",
+    "Only 'wav' and 'pcm' response_format are supported for speech", "Only 'audio' stream_format is supported for speech",
+    "'speed' is not supported for speech", "\"response_format\":\"pcm16\"", "pcm16(", "public(",
+    "\"json_object\" or \"json_schema\", but got", "\"temp\":-1.0",
 ]
 LOG_COVERAGE = [
     "Wrong type supplied for parameter", "prompt is already in the cache",
@@ -1346,6 +1401,9 @@ LOG_COVERAGE = [
     "No parser definition detected", "Parsed message", "Grammar (tool_calls)", "Grammar (", "n_prefix_take",
     "loading image from local file", "cache state:",
     "unsupported Responses tool type", "anthropic string not as expected", "Forcing pure content template",
+    # v1.0.0
+    "'instructions' is not supported for speech and is ignored", "__TEST_TAG_PROMPT_CACHE_RESTORE__",
+    "__TEST_TAG_PROMPT_CACHE_FULL_RESTORE__",
 ]
 
 

@@ -86,6 +86,10 @@ const OptP = ?*anyopaque;
 /// is this table filled from its library.
 const Api = struct {
     mtmd_context_params_default: *const fn () callconv(.c) M.ContextParams,
+    // v1.0.0: the streaming resampler of mtmd-helper.h
+    mtmd_helper_resampler_init: *const fn (i32, i32) callconv(.c) OptP,
+    mtmd_helper_resampler_free: *const fn (OptP) callconv(.c) void,
+    mtmd_helper_resampler_process: *const fn (P, ?[*]const f32, usize, *?[*]const f32) callconv(.c) i64,
     mtmd_init_from_file: *const fn ([*:0]const u8, OptP, M.ContextParams) callconv(.c) OptP,
     mtmd_free: *const fn (OptP) callconv(.c) void,
     mtmd_support_vision: *const fn (P) callconv(.c) bool,
@@ -532,7 +536,9 @@ fn memoryUsage(port: bool, fname: [*:0]const u8, params: M.ContextParams) void {
         n = @intCast(ref_mtmd_get_memory_usage(fname, params, &devs, &sizes, devs.len, &imt, &nc));
     }
     print("memory-usage n {d} image_max_tokens {d} non_causal {}", .{ n, imt, nc });
-    for (0..@min(n, devs.len)) |k| print(" {s}={d}", .{ std.mem.span(c.ggml_backend_dev_name(devs[k])), sizes[k] });
+    // since v1.0.0 the weights are keyed by their buffer type's device, which
+    // is null for the CPU buffer type (ggml-cpu.cpp's FIXME): name it so
+    for (0..@min(n, devs.len)) |k| print(" {s}={d}", .{ if (devs[k] != null) std.mem.span(c.ggml_backend_dev_name(devs[k])) else "(null)", sizes[k] });
     print("\n", .{});
     flush();
 }
@@ -748,10 +754,51 @@ fn tokenizeAndRunAdjacent(x: *const Ctx, bitmaps: []const P, run: bool, adjacent
     flush();
 }
 
+/// v1.0.0: `mtmd_helper_resampler` (3d94ffe45) through the C entry points:
+/// invalid rates, equal rates, both directions, streamed in uneven chunks
+/// with an empty one; every output's count and bits.
+fn runResampler(api: *const Api) void {
+    const bad = [_][2]i32{ .{ 0, 16000 }, .{ 16000, 0 }, .{ -1, 16000 } };
+    for (bad) |r| print("resampler {d}->{d} null {}\n", .{ r[0], r[1], api.mtmd_helper_resampler_init(r[0], r[1]) == null });
+    const pairs = [_][2]i32{ .{ 16000, 16000 }, .{ 44100, 16000 }, .{ 8000, 24000 }, .{ 48000, 44100 } };
+    var sig: [4000]f32 = undefined;
+    for (&sig, 0..) |*v, i| v.* = 0.4 * @sin(0.013 * @as(f32, @floatFromInt(i))) + 0.2 * @sin(0.41 * @as(f32, @floatFromInt(i)));
+    const chunks = [_]usize{ 333, 0, 1, 1666, 2000 };
+    for (pairs) |r| {
+        const rs = api.mtmd_helper_resampler_init(r[0], r[1]) orelse {
+            print("resampler {d}->{d} null\n", .{ r[0], r[1] });
+            continue;
+        };
+        defer api.mtmd_helper_resampler_free(rs);
+        var off: usize = 0;
+        for (chunks) |n| {
+            var o: ?[*]const f32 = null;
+            const got = api.mtmd_helper_resampler_process(rs, sig[off..].ptr, n, &o);
+            const h: u64 = if (got > 0) hashBytes(std.mem.sliceAsBytes(o.?[0..@intCast(got)])) else 0;
+            print("resampler {d}->{d} in {d} out {d} {x:0>16}\n", .{ r[0], r[1], n, got, h });
+            off += n;
+        }
+    }
+    flush();
+}
+
+/// v1.0.0: the caller's frame temperature (`mtmd_helper_gen_audio_inp.temp`,
+/// 2d99adb10) for the next generations; -1 is the model default.
+var g_tts_temp: f32 = -1.0;
+
 fn runTts(x: *const Ctx, modality: []const u8, steps: c_int) void {
     const pocket = std.mem.eql(u8, modality, "tts-pocket");
     const lfm3a = std.mem.startsWith(u8, modality, "tts-lfm3a");
     runTtsPrompt(x, modality, steps, if (lfm3a) "hello<|audio_start|>" else "hello there, test.");
+    // the two pipelines that read inp.temp: greedy / no noise, and a set value
+    if (pocket or lfm3a) {
+        for ([_]f32{ 0.0, 0.5 }) |t| {
+            g_tts_temp = t;
+            print("tts temp {d}\n", .{t});
+            runTtsPrompt(x, modality, steps, if (lfm3a) "hello<|audio_start|>" else "hello there, test.");
+        }
+        g_tts_temp = -1.0;
+    }
     // pocket: two sentences past its 50-token chunk, run until the first
     // chunk's budget ends it, so finish_chunk re-prompts the second
     if (pocket) runTtsPrompt(x, modality, 400, "one two three four five six seven. eight nine ten eleven twelve.");
@@ -887,6 +934,7 @@ fn runTtsPromptRefLang(x: *const Ctx, modality: []const u8, steps: c_int, prompt
     inp.lang = lang;
     inp.top_k = 8;
     inp.seed = 42;
+    inp.temp = g_tts_temp;
     var rc = api.mtmd_helper_gen_audio_set_input(gen, &inp);
     print("tts set_input {d}\n", .{rc});
     if (rc != 0) return;
@@ -1475,6 +1523,8 @@ pub fn main(init: std.process.Init) !u8 {
     print("cap vision {} audio {} gen {}\n", .{ cap.inp_vision, cap.inp_audio, cap.gen_audio });
     const cap_missing = api.mtmd_get_cap_from_file("/nonexistent.gguf");
     print("cap missing vision {} audio {} gen {}\n", .{ cap_missing.inp_vision, cap_missing.inp_audio, cap_missing.gen_audio });
+
+    runResampler(api);
 
     // the test chunks, as test-mtmd-c-api.c reads them
     if (api.mtmd_test_create_input_chunks()) |tc| {

@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/qwen3-coder.cpp` (llama.cpp v0.9.0,
-//! `cd959bae9`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/qwen3-coder.cpp` (llama.cpp v1.0.0,
+//! `b1b770d90`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -190,7 +190,7 @@ const Starts = struct {
     }
 };
 
-/// Ports `common_chat_params_init_qwen3_coder` (qwen3-coder.cpp:3 @cd959bae9).
+/// Ports `common_chat_params_init_qwen3_coder` (qwen3-coder.cpp:3 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
@@ -270,7 +270,7 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     const arena = &data.parser.?;
 
     if (include_grammar) {
-        data.grammar_lazy = has_tools and inputs.tool_choice == .auto;
+        data.grammar_lazy = !has_response_format and has_tools and inputs.tool_choice == .auto;
         data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
         if (data.grammar_lazy) {
             for (starts.list.items) |start| try data.addWordTrigger(a, start);

@@ -9,7 +9,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/hy-v4.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/hy-v4.cpp` at v1.0.0 (`b1b770d90`):
 //! the view helpers, `llama_model_hy_v4`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, `hy_v4_hc_reduce`, and its
 //! `graph` with the hyper-connection, attention and indexer builders. The
@@ -26,6 +26,8 @@ const c = impl.c;
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
+const Cparams = @import("../cparams.zig").Cparams;
+const RopeParams = model_mod.RopeParams;
 const Builder = graph.Builder;
 const Tensor = c.ggml_tensor;
 
@@ -34,18 +36,18 @@ const src = "models/hy-v4.cpp";
 // -----------------------------------------------------------------------------
 // Views
 
-/// Ports `hy_v4_elem_offset` (models/hy-v4.cpp:12 @cd959bae9).
+/// Ports `hy_v4_elem_offset` (models/hy-v4.cpp:12 @b1b770d90).
 fn elemOffset(t: *const Tensor, i: i64) usize {
     return c.ggml_row_size(t.type, i);
 }
 
-/// Ports `hy_v4_view_1d` (models/hy-v4.cpp:16 @cd959bae9): `ne0`
+/// Ports `hy_v4_view_1d` (models/hy-v4.cpp:16 @b1b770d90): `ne0`
 /// elements from element `j0`.
 fn view1d(ctx: *c.ggml_context, t: *Tensor, ne0: i64, j0: i64) *Tensor {
     return c.ggml_view_1d(ctx, t, ne0, elemOffset(t, j0));
 }
 
-/// Ports `hy_v4_view_2d` (models/hy-v4.cpp:20 @cd959bae9): `ne0` by
+/// Ports `hy_v4_view_2d` (models/hy-v4.cpp:20 @b1b770d90): `ne0` by
 /// `ne1` from element `j0` of each row.
 fn view2d(ctx: *c.ggml_context, t: *Tensor, ne0: i64, ne1: i64, j0: i64) *Tensor {
     return c.ggml_view_2d(ctx, t, ne0, ne1, t.nb[1], elemOffset(t, j0));
@@ -54,7 +56,7 @@ fn view2d(ctx: *c.ggml_context, t: *Tensor, ne0: i64, ne1: i64, j0: i64) *Tensor
 // -----------------------------------------------------------------------------
 // Loading
 
-/// Ports `llama_model_hy_v4`'s `load_arch_hparams` (models/hy-v4.cpp:24 @cd959bae9).
+/// Ports `llama_model_hy_v4`'s `load_arch_hparams` (models/hy-v4.cpp:24 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -105,7 +107,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     self.type = .unknown;
 }
 
-/// Ports `llama_model_hy_v4`'s `load_arch_tensors` (models/hy-v4.cpp:70 @cd959bae9).
+/// Ports `llama_model_hy_v4`'s `load_arch_tensors` (models/hy-v4.cpp:70 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -198,7 +200,26 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_hy_v4`'s `build_arch_graph` (models/hy-v4.cpp:157 @cd959bae9).
+/// Ports `llama_model_hy_v4`'s `get_rope_params_indexer` (models/hy-v4.cpp:157 @b1b770d90):
+/// the RoPE of the lightning indexer's keys, for the graph and the K-shift alike.
+///
+/// Parameters:
+/// - `model`: the model.
+/// - `cparams`: the context's parameters.
+/// - `il`: the layer.
+///
+/// Return: the layer's RoPE parameters.
+pub fn getRopeParamsIndexer(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+    var res = model.getRopeParamsIndexerBase(cparams, il);
+
+    // [nope | rope], the same as the MLA keys.
+    res.n_offs = @as(i32, @intCast(model.hparams.indexer_head_size)) - res.n_rot;
+    res.type = model.hparams.rope_type;
+
+    return res;
+}
+
+/// Ports `llama_model_hy_v4`'s `build_arch_graph` (models/hy-v4.cpp:167 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
@@ -206,7 +227,7 @@ pub fn buildArchGraph(model: *const Model, b: *const Builder, _: *const graph.Pa
 // -----------------------------------------------------------------------------
 // Hyper-connections
 
-/// Ports `hy_v4_hc_reduce` (models/hy-v4.cpp:163 @cd959bae9): the streams
+/// Ports `hy_v4_hc_reduce` (models/hy-v4.cpp:173 @b1b770d90): the streams
 /// `x[:, i, :]` weighted by `w[i, :]` and summed, `[n_embd, n_tokens]`, in
 /// f32 as the reference runs it.
 fn hcReduce(ctx: *c.ggml_context, x: *Tensor, w: *Tensor, hc: i64, n_embd: i64, nt: i64, out_type: c.ggml_type) *Tensor {
@@ -223,7 +244,7 @@ fn hcReduce(ctx: *c.ggml_context, x: *Tensor, w: *Tensor, hc: i64, n_embd: i64, 
     return c.ggml_cast(ctx, result.?, out_type);
 }
 
-/// Mirrors the graph's `hc_pre` (src/models/models.h:2344 @cd959bae9).
+/// Mirrors the graph's `hc_pre` (src/models/models.h:2234 @b1b770d90).
 const HcPre = struct {
     /// The collapsed stream.
     cur: *Tensor,
@@ -232,7 +253,7 @@ const HcPre = struct {
 };
 
 /// Ports `llama_model_hy_v4`'s graph's `build_hc_pre`
-/// (models/hy-v4.cpp:176 @cd959bae9): an iHC's mixes -- the pre weights it
+/// (models/hy-v4.cpp:186 @b1b770d90): an iHC's mixes -- the pre weights it
 /// reduces the streams with, here, and the post weights, scaled by
 /// `hc_magnitude`, for `build_hc_post`.
 fn buildHcPre(b: *const Builder, x: *Tensor, hc_fn: *Tensor, hc_scale: *Tensor, hc_base: *Tensor, il: c_int) HcPre {
@@ -240,7 +261,7 @@ fn buildHcPre(b: *const Builder, x: *Tensor, hc_fn: *Tensor, hc_scale: *Tensor, 
     const hp = b.hparams;
     const hc: i64 = hp.dsv4_hc_mult;
     const nt = x.ne[2];
-    impl.assert(x.ne[0] == b.n_embd and x.ne[1] == hc, src, 184, "x->ne[0] == n_embd && x->ne[1] == hc");
+    impl.assert(x.ne[0] == b.n_embd and x.ne[1] == hc, src, 194, "x->ne[0] == n_embd && x->ne[1] == hc");
 
     const flat: *Tensor = c.ggml_reshape_2d(ctx, x, hc * b.n_embd, nt);
     const flat_norm: *Tensor = c.ggml_rms_norm(ctx, flat, hp.f_norm_rms_eps);
@@ -274,7 +295,7 @@ fn buildHcPre(b: *const Builder, x: *Tensor, hc_fn: *Tensor, hc_scale: *Tensor, 
 }
 
 /// Ports `llama_model_hy_v4`'s graph's `build_hc_post`
-/// (models/hy-v4.cpp:216 @cd959bae9): the block's output spread over the
+/// (models/hy-v4.cpp:226 @b1b770d90): the block's output spread over the
 /// streams by `post` and added to the residual streams, in f32 so the
 /// rounding does not accumulate across the layers.
 ///
@@ -284,8 +305,8 @@ fn buildHcPost(b: *const Builder, x: *Tensor, residual: *Tensor, post: *Tensor, 
     const ctx = b.ctx0;
     const hc: i64 = b.hparams.dsv4_hc_mult;
     const nt = x.ne[1];
-    impl.assert(x.ne[0] == b.n_embd, src, 224, "x->ne[0] == n_embd");
-    impl.assert(residual.ne[1] == hc, src, 225, "residual->ne[1] == hc");
+    impl.assert(x.ne[0] == b.n_embd, src, 234, "x->ne[0] == n_embd");
+    impl.assert(residual.ne[1] == hc, src, 235, "residual->ne[1] == hc");
 
     // post.float() * x.float() + residual.float(), then back to the
     // residual's type.
@@ -308,7 +329,7 @@ fn buildHcPost(b: *const Builder, x: *Tensor, residual: *Tensor, post: *Tensor, 
 }
 
 /// Ports `llama_model_hy_v4`'s graph's `build_hc_head`
-/// (models/hy-v4.cpp:247 @cd959bae9): the streams reduced to one for the
+/// (models/hy-v4.cpp:257 @b1b770d90): the streams reduced to one for the
 /// output head.
 fn buildHcHead(b: *const Builder, x: *Tensor, hc_fn: *Tensor, hc_scale: *Tensor, hc_base: *Tensor) *Tensor {
     const ctx = b.ctx0;
@@ -355,9 +376,9 @@ fn buildMlaQkv(b: *const Builder, layer: *const model_mod.Layer, q: *Tensor, cur
     var kv_cmpr: *Tensor = c.ggml_view_2d(ctx, kv_cmpr_pe, kv_lora_rank, b.n_tokens, c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank + n_embd_head_qk_rope), 0);
     var k_pe: *Tensor = c.ggml_view_3d(ctx, kv_cmpr_pe, n_embd_head_qk_rope, 1, b.n_tokens, c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank + n_embd_head_qk_rope), c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank + n_embd_head_qk_rope), c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank));
 
-    q_pe = c.ggml_rope_ext(ctx, q_pe, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+    q_pe = b.buildRope(q_pe, inp_pos, il);
     b.cb(q_pe, "q_pe", il);
-    k_pe = c.ggml_rope_ext(ctx, k_pe, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+    k_pe = b.buildRope(k_pe, inp_pos, il);
     b.cb(k_pe, "k_pe", il);
 
     kv_cmpr = b.buildNorm(kv_cmpr, layer.attn_kv_a_norm, null, .rms, il);
@@ -396,7 +417,7 @@ fn buildGatedOut(b: *const Builder, layer: *const model_mod.Layer, attn_: *Tenso
 }
 
 /// Ports `llama_model_hy_v4`'s graph's `build_attention`
-/// (models/hy-v4.cpp:269 @cd959bae9): MLA as MQA over a K-only cache, the
+/// (models/hy-v4.cpp:279 @b1b770d90): MLA as MQA over a K-only cache, the
 /// gate before `wo`.
 fn buildAttention(b: *const Builder, model: *const Model, inp_attn: *graph.InpAttnK, cur: *Tensor, inp_pos: *Tensor, kq_scale: f32, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -417,7 +438,7 @@ fn buildAttention(b: *const Builder, model: *const Model, inp_attn: *graph.InpAt
 }
 
 /// Ports `llama_model_hy_v4`'s graph's `build_indexer_top_k`
-/// (models/hy-v4.cpp:341 @cd959bae9): the lightning indexer -- scores
+/// (models/hy-v4.cpp:348 @b1b770d90): the lightning indexer -- scores
 /// every cached indexer key for each query, stores this ubatch's keys,
 /// and picks the top-k positions attention may see.
 ///
@@ -429,8 +450,6 @@ fn buildIndexerTopK(b: *const Builder, model: *const Model, inp_attn_dsa: *graph
 
     const n_indexer_head: i64 = hp.indexer_n_head;
     const n_embd_indexer: i64 = hp.indexer_head_size;
-    const n_embd_indexer_rope: i64 = hp.nRot(0);
-    const n_embd_indexer_nope = n_embd_indexer - n_embd_indexer_rope;
 
     // The nope rows come first, so only the last `n_embd_indexer_rope`
     // rows rotate, as on the MLA path.
@@ -438,8 +457,7 @@ fn buildIndexerTopK(b: *const Builder, model: *const Model, inp_attn_dsa: *graph
 
     iq = c.ggml_reshape_3d(ctx, iq, n_embd_indexer, n_indexer_head, b.n_tokens);
 
-    iq = c.ggml_rope_ext(ctx, iq, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-    iq = c.ggml_rope_set_offset(iq, @intCast(n_embd_indexer_nope));
+    iq = b.buildRopeIndexer(iq, inp_pos, il);
     b.cb(iq, "indexer_q", il);
 
     var ik: *Tensor = c.ggml_mul_mat(ctx, layer.indexer_attn_k, cur);
@@ -448,8 +466,7 @@ fn buildIndexerTopK(b: *const Builder, model: *const Model, inp_attn_dsa: *graph
 
     ik = c.ggml_reshape_3d(ctx, ik, n_embd_indexer, 1, b.n_tokens);
 
-    ik = c.ggml_rope_ext(ctx, ik, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-    ik = c.ggml_rope_set_offset(ik, @intCast(n_embd_indexer_nope));
+    ik = b.buildRopeIndexer(ik, inp_pos, il);
     b.cb(ik, "indexer_k", il);
 
     // The reference applies a Hadamard rotation here, which only helps its
@@ -497,7 +514,7 @@ fn buildIndexerTopK(b: *const Builder, model: *const Model, inp_attn_dsa: *graph
     return c.ggml_cont(ctx, c.ggml_top_k(ctx, score, @intCast(n_top_k)));
 }
 
-/// Mirrors the graph's `attn_dsa` (src/models/models.h:2387 @cd959bae9): the
+/// Mirrors the graph's `attn_dsa` (src/models/models.h:2275 @b1b770d90): the
 /// attention output and the top-k to carry to the
 /// following "shared" layers.
 const AttnDsa = struct {
@@ -506,7 +523,7 @@ const AttnDsa = struct {
 };
 
 /// Ports `llama_model_hy_v4`'s graph's `build_attention_dsa`
-/// (models/hy-v4.cpp:421 @cd959bae9): `build_attention` over the DSA
+/// (models/hy-v4.cpp:421 @b1b770d90): `build_attention` over the DSA
 /// cache, attending only to the top-k keys -- this layer's own when it
 /// owns an indexer, else the last full layer's, `last_top_k`.
 fn buildAttentionDsa(b: *const Builder, model: *const Model, inp_attn_dsa: *graph.InpAttnKDsa, cur: *Tensor, inp_pos: *Tensor, last_top_k: ?*Tensor, kq_scale: f32, il: c_int) AttnDsa {
@@ -522,7 +539,7 @@ fn buildAttentionDsa(b: *const Builder, model: *const Model, inp_attn_dsa: *grap
         top_k_opt = buildIndexerTopK(b, model, inp_attn_dsa, cur, qr, inp_pos, il);
         b.cb(top_k_opt.?, "top_k", il);
     }
-    impl.assert(top_k_opt != null, src, 444, "top_k != nullptr");
+    impl.assert(top_k_opt != null, src, 443, "top_k != nullptr");
     const top_k = top_k_opt.?;
 
     const q: *Tensor = c.ggml_mul_mat(ctx, layer.wq_b, qr);
@@ -539,7 +556,7 @@ fn buildAttentionDsa(b: *const Builder, model: *const Model, inp_attn_dsa: *grap
 // The graph
 
 /// Ports the constructor of `llama_model_hy_v4`'s `graph`
-/// (models/hy-v4.cpp:498 @cd959bae9).
+/// (models/hy-v4.cpp:495 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;

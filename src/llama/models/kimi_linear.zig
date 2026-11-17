@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/kimi-linear.cpp` at v0.9.0
-//! (`cd959bae9`): `llama_model_kimi_linear`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/kimi-linear.cpp` at v1.0.0
+//! (`b1b770d90`): `llama_model_kimi_linear`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, `causal_conv1d`, and its
 //! `graph`. `models.h` also declares `build_kda_autoregressive` and
 //! `build_kda_chunking` on that `graph`; neither is defined upstream, and
@@ -25,7 +25,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_kimi_linear`'s `load_arch_hparams` (models/kimi-linear.cpp:4 @cd959bae9).
+/// Ports `llama_model_kimi_linear`'s `load_arch_hparams` (models/kimi-linear.cpp:4 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -59,7 +59,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_kimi_linear`'s `load_arch_tensors` (models/kimi-linear.cpp:34 @cd959bae9).
+/// Ports `llama_model_kimi_linear`'s `load_arch_tensors` (models/kimi-linear.cpp:34 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -194,12 +194,12 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_kimi_linear`'s `build_arch_graph` (models/kimi-linear.cpp:169 @cd959bae9).
+/// Ports `llama_model_kimi_linear`'s `build_arch_graph` (models/kimi-linear.cpp:169 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
-/// Ports `causal_conv1d` (models/kimi-linear.cpp:175 @cd959bae9): the short
+/// Ports `causal_conv1d` (models/kimi-linear.cpp:175 @b1b770d90): the short
 /// convolution of one of Q (`qkv` 0), K (1) or V (2), its projection in
 /// front, its slice of the conv state in front of the input, and the last
 /// `d_conv - 1` columns written back.
@@ -254,7 +254,7 @@ fn causalConv1d(gf: *c.ggml_cgraph, ctx: *c.ggml_context, conv_states_all: *Tens
 }
 
 /// Ports the constructor of `llama_model_kimi_linear`'s `graph`
-/// (models/kimi-linear.cpp:234 @cd959bae9).
+/// (models/kimi-linear.cpp:234 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -379,8 +379,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             Qcur = delta_net.buildGdnL2Norm(ctx, Qcur, eps_norm);
             Kcur = delta_net.buildGdnL2Norm(ctx, Kcur, eps_norm);
 
-            // Chunked or recurrent, by the token count.
-            const attn_out = delta_net.buildDeltaNet(b, Qcur, Kcur, Vcur, g1, beta, state, il);
+            const attn_out = delta_net.buildDeltaNet(b, Qcur, Kcur, Vcur, g1, beta, state);
 
             const output = c.ggml_cont(ctx, attn_out.out);
             const new_state = attn_out.state;

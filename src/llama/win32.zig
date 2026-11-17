@@ -30,6 +30,48 @@ pub const LANG_NEUTRAL_SUBLANG_DEFAULT: DWORD = (0x01 << 10) | 0x00;
 /// `FILE_CURRENT` (MinGW's `winbase.h`, line 70). `FILE_BEGIN` and `FILE_END` equal
 /// `SEEK_SET` and `SEEK_END`, which the C++ asserts.
 pub const FILE_CURRENT: DWORD = 1;
+/// `FILE_BEGIN` (MinGW's `winbase.h`, line 69).
+pub const FILE_BEGIN: DWORD = 0;
+/// `INVALID_HANDLE_VALUE` (MinGW's `handleapi.h`, line 16).
+pub const INVALID_HANDLE_VALUE: HANDLE = @ptrFromInt(std.math.maxInt(usize));
+/// `GENERIC_READ` (MinGW's `winnt.h`, line 3180).
+pub const GENERIC_READ: DWORD = 0x80000000;
+/// `FILE_SHARE_READ`, `FILE_SHARE_WRITE` and `FILE_SHARE_DELETE` (MinGW's
+/// `winnt.h`, lines 6181-6183).
+pub const FILE_SHARE_READ: DWORD = 0x1;
+pub const FILE_SHARE_WRITE: DWORD = 0x2;
+pub const FILE_SHARE_DELETE: DWORD = 0x4;
+/// `FILE_FLAG_NO_BUFFERING` (MinGW's `winbase.h`, line 86).
+pub const FILE_FLAG_NO_BUFFERING: DWORD = 0x20000000;
+/// `MAXDWORD` (MinGW's `winnt.h`, line 693).
+pub const MAXDWORD: DWORD = 0xffffffff;
+/// `ERROR_SUCCESS`, `ERROR_NOT_ENOUGH_MEMORY`, `ERROR_HANDLE_EOF`,
+/// `ERROR_NOT_SUPPORTED`, `ERROR_INVALID_PARAMETER`, `ERROR_NOACCESS` and
+/// `ERROR_INVALID_USER_BUFFER` (MinGW's `winerror.h`, lines 177, 205, 207,
+/// 236, 856 and 1401), measured with `zig cc -target x86_64-windows-gnu`.
+pub const ERROR_SUCCESS: DWORD = 0;
+pub const ERROR_NOT_ENOUGH_MEMORY: DWORD = 8;
+pub const ERROR_HANDLE_EOF: DWORD = 38;
+pub const ERROR_NOT_SUPPORTED: DWORD = 50;
+pub const ERROR_INVALID_PARAMETER: DWORD = 87;
+pub const ERROR_NOACCESS: DWORD = 998;
+pub const ERROR_INVALID_USER_BUFFER: DWORD = 1784;
+/// `FileStorageInfo`, a `FILE_INFO_BY_HANDLE_CLASS` (MinGW's `minwinbase.h`,
+/// line 159): 16, measured.
+pub const FileStorageInfo: c_int = 16;
+
+/// `FILE_STORAGE_INFO` (MinGW's `winbase.h`, line 3303): seven `ULONG`s, 28
+/// bytes, measured with `zig cc -target x86_64-windows-gnu`.
+pub const FILE_STORAGE_INFO = extern struct {
+    LogicalBytesPerSector: windows.ULONG,
+    PhysicalBytesPerSectorForAtomicity: windows.ULONG,
+    PhysicalBytesPerSectorForPerformance: windows.ULONG,
+    FileSystemEffectivePhysicalBytesPerSectorForAtomicity: windows.ULONG,
+    Flags: windows.ULONG,
+    ByteOffsetForSectorAlignment: windows.ULONG,
+    ByteOffsetForPartitionAlignment: windows.ULONG,
+};
+
 /// `PAGE_READONLY` (MinGW's `winnt.h`, line 5912) and `FILE_MAP_READ`, which is
 /// `SECTION_MAP_READ` (MinGW's `memoryapi.h`, line 44, and `winnt.h`, line 5899).
 pub const PAGE_READONLY: DWORD = 0x02;
@@ -69,6 +111,8 @@ pub extern "kernel32" fn WriteFile(file: HANDLE, buffer: [*]const u8, to_write: 
 pub extern "kernel32" fn CreateFileMappingA(file: HANDLE, attributes: ?*anyopaque, protect: DWORD, size_high: DWORD, size_low: DWORD, name: ?[*:0]const u8) callconv(.winapi) ?HANDLE;
 pub extern "kernel32" fn MapViewOfFile(mapping: HANDLE, access: DWORD, offset_high: DWORD, offset_low: DWORD, size: usize) callconv(.winapi) ?*anyopaque;
 pub extern "kernel32" fn UnmapViewOfFile(addr: *const anyopaque) callconv(.winapi) BOOL;
+pub extern "kernel32" fn ReOpenFile(original: HANDLE, access: DWORD, share: DWORD, flags: DWORD) callconv(.winapi) HANDLE;
+pub extern "kernel32" fn GetFileInformationByHandleEx(file: HANDLE, class: c_int, info: *anyopaque, size: DWORD) callconv(.winapi) BOOL;
 pub extern "kernel32" fn CloseHandle(handle: HANDLE) callconv(.winapi) BOOL;
 pub extern "kernel32" fn GetModuleHandleW(name: [*:0]const u16) callconv(.winapi) ?HMODULE;
 pub extern "kernel32" fn GetProcAddress(module: HMODULE, name: [*:0]const u8) callconv(.winapi) ?*anyopaque;
@@ -85,4 +129,6 @@ pub extern "kernel32" fn ReleaseSRWLockExclusive(lock: *SRWLOCK) callconv(.winap
 pub extern "c" fn _fileno(stream: *anyopaque) c_int;
 pub extern "c" fn _get_osfhandle(fd: c_int) isize;
 pub extern "c" fn _ftelli64(stream: *anyopaque) i64;
+pub extern "c" fn _aligned_malloc(size: usize, alignment: usize) ?*anyopaque;
+pub extern "c" fn _aligned_free(ptr: ?*anyopaque) void;
 pub extern "c" fn _fseeki64(stream: *anyopaque, offset: i64, whence: c_int) c_int;

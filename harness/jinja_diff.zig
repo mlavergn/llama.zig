@@ -41,6 +41,12 @@
 //! midnight, so one template prints the hour, minute, weekday and day of
 //! year directly. `scripts/jinja-diff` runs everything under two zones.
 //!
+//! Then the TTS norm builtins task templates render with
+//! (`common/chat-tts-norm.cpp`, v1.0.0): `tts_norm_phase.zig` holds
+//! `cli/common_chat/tts_norm.zig`'s matcher, scan and substitution, and the
+//! builtins in a render, to upstream's, on random patterns and upstream's
+//! own cases. It needs `chat-tts-norm.cpp` among the script's sources.
+//!
 //! The templates are compiled in through the `inputs` module the script
 //! generates, as `unicode_diff.zig`'s are.
 //!
@@ -52,6 +58,7 @@ const common_chat = @import("common_chat");
 const json_mod = @import("json");
 const jinja = @import("zigjinja");
 const inputs = @import("inputs");
+const tts_norm_phase = @import("tts_norm_phase.zig");
 
 extern fn jinja_ref_render(tmpl: [*]const u8, tmpl_len: usize, vars: [*]const u8, vars_len: usize, out: *?[*]u8, out_len: *usize, input: *?[*]u8, parts: *?[*]u8) c_int;
 extern fn jinja_ref_free(p: ?*anyopaque) void;
@@ -566,6 +573,13 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print("  probes: {d} renders, {d} differ; capabilities: {d} templates, {d} values differ\n", .{ probe_result.renders, probe_result.differ, probe_result.caps, probe_result.caps_differ });
     const probes_ok = probe_result.differ == 0 and probe_result.caps_differ == 0;
 
+    // The TTS norm builtins of task templates (common/chat-tts-norm.cpp).
+    const tts_n: usize = if (std.c.getenv("JINJA_DIFF_TTS_N")) |v| std.fmt.parseInt(usize, std.mem.span(v), 10) catch 20000 else 20000;
+    const tts = if (filter.len > 0) tts_norm_phase.Result{} else try tts_norm_phase.run(0x7475_6e6f_726d, tts_n);
+    // every error arm and some matches must be reached, or the phase tested nothing
+    const tts_ok = filter.len > 0 or (tts.differ == 0 and tts.ref_errors > 0 and tts.matched > 0);
+    if (filter.len == 0) std.debug.print("  tts-norm: {d} checks, {d} differ ({d} where upstream throws, {d} matching segments)\n", .{ tts.checks, tts.differ, tts.ref_errors, tts.matched });
+
     var renders: usize = 0;
     for (std.enums.values(Verdict)) |v| renders += counts.get(v);
     std.debug.print(
@@ -587,10 +601,11 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("FAIL: no template matched\n", .{});
         std.process.exit(2);
     }
-    if (templates_ok == templates and clock_ok and probes_ok) {
-        std.debug.print("PASS: {d} templates x {d} conversations, {d} probe renders, the capabilities and the clock agree with upstream's engine\n", .{ templates, conversations.len, probe_result.renders });
+    if (templates_ok == templates and clock_ok and probes_ok and tts_ok) {
+        std.debug.print("PASS: {d} templates x {d} conversations, {d} probe renders, {d} TTS norm checks, the capabilities and the clock agree with upstream's engine\n", .{ templates, conversations.len, probe_result.renders, tts.checks });
         return;
     }
+    if (!tts_ok) std.debug.print("FAIL: {d} of {d} TTS norm checks disagree with upstream's chat-tts-norm.cpp\n", .{ tts.differ, tts.checks });
     if (!probes_ok) std.debug.print("FAIL: {d} probe renders and {d} capability values disagree with upstream's\n", .{ probe_result.differ, probe_result.caps_differ });
     if (!clock_ok) std.debug.print("FAIL: strftime_now disagrees with upstream's local time\n", .{});
     std.debug.print("FAIL: {d} of {d} templates disagree with upstream's engine ({d} of {d} renders)\n", .{

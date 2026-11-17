@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/rwkv6-base.cpp` at v0.9.0
-//! (`cd959bae9`): `llm_build_rwkv6_base`'s `build_rwkv6_channel_mix` and
+//! Ported from `llama.cpp/src/models/rwkv6-base.cpp` at v1.0.0
+//! (`b1b770d90`): `llm_build_rwkv6_base`'s `build_rwkv6_channel_mix` and
 //! `build_rwkv6_time_mix`. Its constructor only stores the model, which the
 //! port passes to each function instead.
 
@@ -23,7 +23,7 @@ const Layer = model_mod.Layer;
 const Tensor = c.ggml_tensor;
 
 /// Ports `llm_build_rwkv6_base`'s `build_rwkv6_channel_mix`
-/// (models/rwkv6-base.cpp:9 @cd959bae9): the squared-ReLU feed-forward,
+/// (models/rwkv6-base.cpp:8 @b1b770d90): the squared-ReLU feed-forward,
 /// gated by the receptance.
 pub fn buildRwkv6ChannelMix(b: *const graph.Builder, layer: *const Layer, cur_: *Tensor, x_prev: *Tensor, arch: arch_mod.Arch) *Tensor {
     const ctx = b.ctx0;
@@ -38,13 +38,13 @@ pub fn buildRwkv6ChannelMix(b: *const graph.Builder, layer: *const Layer, cur_: 
             const k: *Tensor = c.ggml_sqr(ctx, c.ggml_relu(ctx, b.buildLoraMm(layer.channel_mix_key.?, xk, null)));
             cur = c.ggml_mul(ctx, r, b.buildLoraMm(layer.channel_mix_value.?, k, null));
         },
-        else => impl.abort("models/rwkv6-base.cpp", 26, "fatal error"),
+        else => impl.abort("models/rwkv6-base.cpp", 25, "fatal error"),
     }
     return cur;
 }
 
 /// Ports `llm_build_rwkv6_base`'s `build_rwkv6_time_mix`
-/// (models/rwkv6-base.cpp:31 @cd959bae9): the WKV-6 recurrence, or for a
+/// (models/rwkv6-base.cpp:30 @b1b770d90): the WKV-6 recurrence, or for a
 /// QRWKV model (one without `time_mix_first`) gated linear attention.
 pub fn buildRwkv6TimeMix(model: *const Model, b: *const graph.Builder, inp: *const graph.InpRs, cur_: *Tensor, x_prev: *Tensor, ubatch: *const batch.Ubatch, il: c_int) *Tensor {
     const ctx = b.ctx0;
@@ -125,7 +125,7 @@ pub fn buildRwkv6TimeMix(model: *const Model, b: *const graph.Builder, inp: *con
         g = c.ggml_silu(ctx, g);
     }
     if (n_head_kv != 0 and n_head_kv != n_head) {
-        impl.assert(@rem(n_head, n_head_kv) == 0, "models/rwkv6-base.cpp", 111, "n_head % n_head_kv == 0");
+        impl.assert(@rem(n_head, n_head_kv) == 0, "models/rwkv6-base.cpp", 110, "n_head % n_head_kv == 0");
         k = c.ggml_reshape_4d(ctx, k, head_size, 1, n_head_kv, n_tokens);
         v = c.ggml_reshape_4d(ctx, v, head_size, 1, n_head_kv, n_tokens);
         const tmp: *Tensor = c.ggml_new_tensor_4d(ctx, c.GGML_TYPE_F32, head_size, @divTrunc(n_head, n_head_kv), n_head_kv, n_tokens);

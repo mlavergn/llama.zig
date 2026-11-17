@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/deepseek2ocr.cpp` at v0.9.0
-//! (`cd959bae9`): `llama_model_deepseek2ocr`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/deepseek2ocr.cpp` at v1.0.0
+//! (`b1b770d90`): `llama_model_deepseek2ocr`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`. Its graph is
 //! `llama_model_deepseek2`'s, which takes the OCR attention when the
 //! architecture is this one; `deepseek2.zig` holds it.
@@ -19,11 +19,14 @@ const graph = @import("../graph.zig");
 const hparams_mod = @import("../hparams.zig");
 const deepseek2 = @import("deepseek2.zig");
 
+const c = impl.c;
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
+const Cparams = @import("../cparams.zig").Cparams;
+const RopeParams = model_mod.RopeParams;
 
-/// Ports `llama_model_deepseek2ocr`'s `load_arch_hparams` (models/deepseek2ocr.cpp:3 @cd959bae9).
+/// Ports `llama_model_deepseek2ocr`'s `load_arch_hparams` (models/deepseek2ocr.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -47,7 +50,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_deepseek2ocr`'s `load_arch_tensors` (models/deepseek2ocr.cpp:23 @cd959bae9).
+/// Ports `llama_model_deepseek2ocr`'s `load_arch_tensors` (models/deepseek2ocr.cpp:23 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -105,8 +108,33 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_deepseek2ocr`'s `build_arch_graph` (models/deepseek2ocr.cpp:77
-/// @cd959bae9): DeepSeek-V2's main graph, whatever the graph type.
+/// Ports `llama_model_deepseek2ocr`'s `get_rope_params` (models/deepseek2ocr.cpp:77 @b1b770d90).
+///
+/// Parameters:
+/// - `model`: the model.
+/// - `cparams`: the context's parameters.
+/// - `il`: the layer.
+///
+/// Return: the RoPE of layer `il`, for the graph and the K-shift alike.
+pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+    var res = model.getRopeParamsBase(cparams, il);
+
+    res.n_rot = @intCast(model.hparams.nEmbdHeadK(il));
+    res.n_offs = 0;
+    res.type = c.LLAMA_ROPE_TYPE_NEOX;
+    res.n_ctx_orig = 0;
+    res.freq_scale = 1.0;
+    res.ext_factor = 0.0;
+    res.attn_factor = 1.0;
+    res.beta_fast = 0.0;
+    res.beta_slow = 0.0;
+    res.factors = null;
+
+    return res;
+}
+
+/// Ports `llama_model_deepseek2ocr`'s `build_arch_graph` (models/deepseek2ocr.cpp:94
+/// @b1b770d90): DeepSeek-V2's main graph, whatever the graph type.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     deepseek2.buildGraph(model, b);
 }

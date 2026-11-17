@@ -77,6 +77,7 @@ const RefExtToken = extern struct {
     has_state: i32,
     state_off: u64,
     embd_row: i32,
+    state_row: i32,
     output: i32,
     decision_order: i32,
     pos: [4]c.llama_pos,
@@ -119,6 +120,7 @@ extern fn ref_split_seq(a: *anyopaque, n_ubatch: u32, out: *RefUbatch) void;
 extern fn ref_ubatch_reserve(a: *anyopaque, n_seq_tokens: u32, n_seqs: u32, out: *RefUbatch) void;
 extern fn ref_ubatch_free(u: *RefUbatch) void;
 extern fn ref_ubatch_owned(u: *const RefUbatch) c_int;
+extern fn ref_ubatch_state_rows(u: *const RefUbatch, rows: *[*c]const i32) usize;
 
 extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
 extern "c" fn unsetenv(name: [*:0]const u8) c_int;
@@ -345,7 +347,9 @@ const Gen = struct {
         // v0.7.0: a context that takes state embeddings (MTP, LiliCorr),
         // and then mostly every entry given one, sometimes some
         const n_embd_state: usize = if (self.chance(40)) 1 + self.below(6) else 0;
-        const state_all = n_embd_state > 0 and self.chance(70);
+        // every entry with a state row instead (v1.0.0), and then no state embeddings
+        const state_row_all = self.chance(15);
+        const state_all = n_embd_state > 0 and !state_row_all and self.chance(70);
         const e = Exts.create(n_tokens_max, n_embd_inp, n_embd_inp_enc, n_seq_max, use_memory, @intCast(self.n_vocab), n_pos, n_embd_state);
 
         var next: [8]c.llama_pos = @splat(0);
@@ -423,6 +427,16 @@ const Gen = struct {
                 _ = both(e, "llama_batch_ext_set_embd_state", .{ if (self.chance(5)) @as(i32, 9999) else idx, self.embdArg(w, n_embd_inp) }, ref_log, port_log);
                 // a second state for the entry, which is refused
                 if (self.chance(5)) _ = both(e, "llama_batch_ext_set_embd_state", .{ idx, self.embdArg(w, n_embd_inp) }, ref_log, port_log);
+            }
+            // a state row (v1.0.0), on its own or beside a state embedding,
+            // which init refuses; invalid indices and negative rows too
+            if (state_row_all or self.chance(8)) {
+                const at: i32 = if (self.chance(10)) self.pick(i32, &.{ -1, 9999 }) else idx;
+                const row: i32 = if (self.chance(10)) -1 else @intCast(self.below(64));
+                _ = both(e, "llama_batch_ext_set_embd_state_row", .{ at, row }, ref_log, port_log);
+                if (self.chance(10)) _ = both(e, "llama_batch_ext_set_embd_state_row", .{ idx, row }, ref_log, port_log);
+                // set_token_state takes a state beside a state row, which init refuses
+                if (n_embd_state > 0 and self.chance(5)) _ = both(e, "llama_batch_ext_set_embd_state", .{ idx, self.embdArg(n_embd_state, n_embd_inp) }, ref_log, port_log);
             }
             if (self.chance(4)) _ = both(e, "llama_batch_ext_set_embd_token", .{ if (self.chance(50)) idx else @as(i32, 9999), self.embdArg(n_embd_inp, n_embd_inp_enc) }, ref_log, port_log);
             if (self.chance(2)) {
@@ -800,6 +814,12 @@ fn compareUbatch(what: []const u8, r: *const RefUbatch, p: *const B.Ubatch, n_em
     if (sameNull("embd", r.embd, p.embd)) sameArray(f32, "embd", r.embd, p.embd, @as(usize, n) * n_embd);
     if (sameNull("embd_state", r.embd_state, p.embd_state)) sameArray(f32, "embd_state", r.embd_state, p.embd_state, @as(usize, n) * n_embd_state);
     if (sameNull("embd_row", r.embd_row, p.embd_row)) sameArray(i32, "embd_row", r.embd_row, p.embd_row, n);
+    {
+        var rows: [*c]const i32 = null;
+        const nr = ref_ubatch_state_rows(r, &rows);
+        const pr: []const i32 = if (p.data) |d| d.embd_state_row.items else &.{};
+        if (expectInt("embd_state_row size", @intCast(nr), @intCast(pr.len)) and nr > 0) sameArray(i32, "embd_state_row", rows, pr.ptr, nr);
+    }
     if (sameNull("pos", r.pos, p.pos)) sameArray(c.llama_pos, "pos", r.pos, p.pos, @as(usize, n) * r.n_pos);
     const have_nsid = sameNull("n_seq_id", r.n_seq_id, p.n_seq_id);
     if (have_nsid) sameArray(i32, "n_seq_id", r.n_seq_id, p.n_seq_id, n);
@@ -901,6 +921,7 @@ fn compareExt(what: []const u8, e: Exts) void {
         if (!expectInt("ext has_state", rt.has_state, @intFromBool(pt.has_state))) break;
         if (!expectInt("ext state_off", rt.state_off, pt.state_off)) break;
         if (!expectInt("ext embd_row", rt.embd_row, pt.embd_row)) break;
+        if (!expectInt("ext state_row", rt.state_row, pt.state_row)) break;
         if (!expectInt("ext output", rt.output, @intFromBool(pt.output))) break;
         if (!expectInt("ext decision_order", rt.decision_order, pt.decision_order)) break;
         sameArray(c.llama_pos, "ext pos", &rt.pos, &pt.pos, 4);

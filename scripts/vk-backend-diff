@@ -34,6 +34,17 @@
 # a long one, `GGML_VK_DISABLE_ALLREDUCE` and the serialized and perf-logger
 # scenarios above, which refuse or always submit.
 #
+# Since v1.0.0 the buffer has batched transfers (`set_tensor_n`,
+# `get_tensor_n`, `cpy_tensor_n`): every scenario sets, reads and copies
+# five regions through them. Only llvmpipe with the host-visible VRAM off
+# reaches the staging path (the GB10 is UMA and maps every buffer); with a
+# 4 KiB suballocation block too, the staging buffer fills and a batch takes
+# several submissions. The registry also hands out the test-fusion interface
+# (`ask_fusion`): which fusions the graph walk took over four graphs, fused,
+# with fusion turned off through it, and turned back on -- and once with
+# `GGML_VK_DISABLE_FUSION`, which no longer gates the add+rms_norm partials
+# at device creation but at each use.
+#
 # Usage: scripts/vk-backend-diff
 # Requires:
 #   zig build reference vk-ref --release=fast -Dvulkan -Dcuda=false --prefix zig-out/vk-port
@@ -81,6 +92,9 @@ scenarios=(
     "GGML_VK_FORCE_MAX_BUFFER_SIZE=40000"
     "GGML_VK_FORCE_MAX_ALLOCATION_SIZE=100000"
     "GGML_VK_SUBALLOCATION_BLOCK_SIZE=12345"
+    "GGML_VK_DISABLE_HOST_VISIBLE_VIDMEM=1 GGML_VK_VISIBLE_DEVICES=1 GGML_VK_SUBALLOCATION_BLOCK_SIZE=4096"
+    "GGML_VK_DISABLE_FUSION=1"
+    "GGML_VK_FORCE_XE_FA=1"
     "GGML_VK_DISABLE_HOST_VISIBLE_VIDMEM=1 GGML_VK_VISIBLE_DEVICES=1"
     "GGML_VK_ASYNC_USE_TRANSFER_QUEUE=1"
     "GGML_VK_ASYNC_USE_TRANSFER_QUEUE=1 GGML_VK_VISIBLE_DEVICES=1"
@@ -109,6 +123,9 @@ for env in "${scenarios[@]}"; do
     # The memory logger prints Vulkan handles and host pointers, which move
     # run to run.
     sed -i -E '/^ggml_vulkan memory: /s/0x[0-9a-f]+/0x(addr)/g' "$tmp/ref.txt" "$tmp/port.txt"
+    # The perf logger's timings move too (since v1.0.0 the fusion questions
+    # compute graphs under it); the op names, counts and order stay.
+    sed -i -E 's/: ([0-9]+) x [0-9.e+-]+ us = [0-9.e+-]+ us( \([0-9.e+-]+ GFLOPS\/s\))?$/: \1 x (time)/; s/^Total time: [0-9.e+-]+ us\.$/Total time: (time)/' "$tmp/ref.txt" "$tmp/port.txt"
     # VK_BACKEND_DIFF_OUT=<prefix> keeps both answers of scenario k as
     # <prefix>.<k>.{ref,port}, so named lines can be found afterwards.
     if [ -n "${VK_BACKEND_DIFF_OUT:-}" ]; then

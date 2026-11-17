@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/qwen2vl.cpp` at v0.9.0 (`cd959bae9`).
+//! Ports `llama.cpp/tools/mtmd/models/qwen2vl.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -25,7 +25,7 @@ pub fn spatialMerge(g: *graph.Graph, inp_in: graph.T, batch_size: c_int) graph.T
     return inp;
 }
 
-/// Ports `build` (mtmd/models/qwen2vl.cpp:3 @cd959bae9), a member of `clip_graph_qwen2vl`.
+/// Ports `build` (mtmd/models/qwen2vl.cpp:3 @b1b770d90), a member of `mtmd_graph_qwen2vl`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

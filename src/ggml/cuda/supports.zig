@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.9.0
-//! (`cd959bae9`): `ggml_backend_cuda_device_supports_op`, the CUDA arms
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v1.0.0
+//! (`b1b770d90`): `ggml_backend_cuda_device_supports_op`, the CUDA arms
 //! (the `GGML_USE_MUSA` exclusions compile out; `GGML_CUDA_USE_CUB` is
 //! defined, so `ARGSORT` takes its CUB arm -- v0.6.0's shared-memory bound
 //! is the bitonic-only one -- and since v0.7.0 both it and `TOP_K`, which
@@ -20,6 +20,8 @@ const lightning_indexer = @import("lightning_indexer.zig");
 const backend = @import("backend.zig");
 const fattn = @import("fattn.zig");
 const fwht = @import("fwht.zig");
+const common = @import("common.zig");
+const mmvf = @import("mmvf.zig");
 
 const c = impl.c;
 const Tensor = c.ggml_tensor;
@@ -36,7 +38,11 @@ fn src(op: *const Tensor, i: usize) *const Tensor {
 
 /// `ggml_cuda_lightning_indexer_supported`; see `lightning_indexer.zig`.
 const lightningIndexerSupported = lightning_indexer.supported;
-/// Ports `ggml_backend_cuda_device_supports_op` (ggml-cuda.cu:5850 @cd959bae9).
+/// Ports `ggml_backend_cuda_device_supports_op` (ggml-cuda.cu:6195 @b1b770d90).
+/// v1.0.0: the `F8_E4M3` type in `MUL_MAT`, `GET_ROWS`, `SET_ROWS` and
+/// `CPY`; `MUL_MAT`'s `src1` precision (`ggml_prec_get_src`) gates F32 and
+/// BF16 requests; `SSM_SCAN` takes `d_state == 64`; `ADD1` and
+/// `DIAG_MASK_INF` are gone from ggml.
 /// v0.7.0: `UNARY` takes any strides for F16, F32 and BF16 (the kernels
 /// index by stride now), `CLAMP` and `ROLL` take non-contiguous views,
 /// `SWIGLU_OAI` refuses F16, and `TOP_K`/`ARGSORT` are bounded by
@@ -108,7 +114,18 @@ pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
             const b = src(op, 1);
             if (a.nb[0] != c.ggml_element_size(a) or b.nb[0] != c.ggml_element_size(b)) return false;
             if (b.type == c.GGML_TYPE_F16 and a.type != c.GGML_TYPE_F16 and !fwht.opMulMatUseFwht(op)) return false;
-            if (op.op == c.GGML_OP_MUL_MAT_ID and impl.getOpParamsI32(op, 3) == c.GGML_PREC_F32) return false;
+            const cc_dev = common.info().devices[@intCast(dev_ctx.device)].cc;
+            const f32_src1_ok = common.cc.isNvidia(cc_dev) and cc_dev < common.cc.ampere;
+            const prec_src1 = c.ggml_prec_get_src(op, 1);
+            const fp8_id_mmvf = op.op == c.GGML_OP_MUL_MAT_ID and
+                a.type == c.GGML_TYPE_F8_E4M3 and b.type == c.GGML_TYPE_F32 and op.type == c.GGML_TYPE_F32 and
+                mmvf.shouldUseMmvf(a, cc_dev, common.info().devices[@intCast(dev_ctx.device)].warp_size, b.ne[2]);
+            if (prec_src1 == c.GGML_PREC_F32 and !fp8_id_mmvf and (op.op == c.GGML_OP_MUL_MAT_ID or !f32_src1_ok or a.type != c.GGML_TYPE_F32)) {
+                return false;
+            }
+            if (prec_src1 == c.GGML_PREC_BF16 and (op.op == c.GGML_OP_MUL_MAT_ID or a.type != c.GGML_TYPE_F32)) {
+                return false;
+            }
             return switch (a.type) {
                 c.GGML_TYPE_F32,
                 c.GGML_TYPE_F16,
@@ -121,6 +138,7 @@ pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
                 c.GGML_TYPE_Q8_0,
                 c.GGML_TYPE_MXFP4,
                 c.GGML_TYPE_NVFP4,
+                c.GGML_TYPE_F8_E4M3,
                 c.GGML_TYPE_Q2_K,
                 c.GGML_TYPE_Q3_K,
                 c.GGML_TYPE_Q4_K,
@@ -154,6 +172,7 @@ pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
             c.GGML_TYPE_Q5_0,
             c.GGML_TYPE_Q5_1,
             c.GGML_TYPE_Q8_0,
+            c.GGML_TYPE_F8_E4M3,
             c.GGML_TYPE_Q2_K,
             c.GGML_TYPE_Q3_K,
             c.GGML_TYPE_Q4_K,
@@ -178,7 +197,7 @@ pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
             const t = op.type;
             const s0 = src(op, 0).type;
             const s1 = src(op, 1).type;
-            return (((t == c.GGML_TYPE_F32 or t == c.GGML_TYPE_F16 or t == c.GGML_TYPE_BF16 or
+            return (((t == c.GGML_TYPE_F32 or t == c.GGML_TYPE_F16 or t == c.GGML_TYPE_BF16 or t == c.GGML_TYPE_F8_E4M3 or
                 t == c.GGML_TYPE_Q4_0 or t == c.GGML_TYPE_Q4_1 or t == c.GGML_TYPE_Q5_0 or
                 t == c.GGML_TYPE_Q5_1 or t == c.GGML_TYPE_Q8_0 or t == c.GGML_TYPE_IQ4_NL) and s0 == c.GGML_TYPE_F32) or
                 (t == c.GGML_TYPE_F16 and s0 == c.GGML_TYPE_F16)) and
@@ -192,6 +211,10 @@ pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
             const s0 = src(op, 0).type;
             const s1 = src(op, 1).type;
             const F32 = c.GGML_TYPE_F32;
+            const F8 = c.GGML_TYPE_F8_E4M3;
+            if (s0 == F8 and s1 == F8) return true;
+            if ((s0 == F32 or s0 == c.GGML_TYPE_F16 or s0 == c.GGML_TYPE_BF16) and s1 == F8) return true;
+            if (s0 == F8 and s1 == F32) return true;
             if ((s0 == F32 or s0 == c.GGML_TYPE_BF16 or s0 == c.GGML_TYPE_F16) and
                 (s1 == F32 or s1 == c.GGML_TYPE_BF16 or s1 == c.GGML_TYPE_F16)) return true;
             const pairs = [_][2]c.enum_ggml_type{
@@ -247,7 +270,6 @@ pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
         c.GGML_OP_PERMUTE,
         c.GGML_OP_TRANSPOSE,
         c.GGML_OP_ADD_ID,
-        c.GGML_OP_ADD1,
         c.GGML_OP_SQR,
         c.GGML_OP_SQRT,
         c.GGML_OP_SIN,
@@ -273,9 +295,9 @@ pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
             const K = impl.getOpParamsI32(op, 0);
             if (src(op, 3).ne[0] == 1) {
                 // Mamba2
-                // (kernel only supports (d_state == 96 || d_state == 128 || d_state == 256) && d_head % 16 == 0)
+                // (kernel only supports (d_state == 64 || d_state == 96 || d_state == 128 || d_state == 256) && d_head % 16 == 0)
                 const d_state = src(op, 0).ne[0];
-                return (d_state == 96 or d_state == 128 or d_state == 256) and @mod(src(op, 0).ne[1], 16) == 0;
+                return (d_state == 64 or d_state == 96 or d_state == 128 or d_state == 256) and @mod(src(op, 0).ne[1], 16) == 0;
             }
             if (K > 1) return false;
             // Mamba: d_state == 16, d_head == 1, n_head % 128 == 0, n_group == 1
@@ -283,7 +305,7 @@ pub fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) bool {
         },
         // assumes d_inner % threads == 0
         c.GGML_OP_SSM_CONV => return @mod(src(op, 0).ne[1], 128) == 0,
-        c.GGML_OP_CONT, c.GGML_OP_DIAG_MASK_INF, c.GGML_OP_SOFT_MAX => return true,
+        c.GGML_OP_CONT, c.GGML_OP_SOFT_MAX => return true,
         c.GGML_OP_SOFT_MAX_BACK => return impl.getOpParamsF32(op, 1) == 0.0,
         c.GGML_OP_ROLL => return src(op, 0).type == c.GGML_TYPE_F32,
         c.GGML_OP_ROPE, c.GGML_OP_ROPE_BACK => return src(op, 0).nb[0] == c.ggml_type_size(src(op, 0).type) and c.ggml_is_contiguous_2(src(op, 0)),

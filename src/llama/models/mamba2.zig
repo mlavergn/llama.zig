@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/mamba2.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/mamba2.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_mamba2`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`. Its graph is `llama_model_mamba`'s, in `mamba.zig`.
 
@@ -19,7 +19,7 @@ const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 
-/// Ports `llama_model_mamba2`'s `load_arch_hparams` (models/mamba2.cpp:3 @cd959bae9).
+/// Ports `llama_model_mamba2`'s `load_arch_hparams` (models/mamba2.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -51,7 +51,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_mamba2`'s `load_arch_tensors` (models/mamba2.cpp:35 @cd959bae9).
+/// Ports `llama_model_mamba2`'s `load_arch_tensors` (models/mamba2.cpp:35 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -105,7 +105,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_mamba2`'s `build_arch_graph` (models/mamba2.cpp:85
-/// @cd959bae9): `llama_model_mamba`'s graph, which picks the Mamba-2 block
+/// @b1b770d90): `llama_model_mamba`'s graph, which picks the Mamba-2 block
 /// by the architecture.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     mamba.buildGraph(model, b);

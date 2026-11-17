@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/apertus.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/apertus.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_apertus`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -20,7 +20,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_apertus`'s `load_arch_hparams` (models/apertus.cpp:3 @cd959bae9).
+/// Ports `llama_model_apertus`'s `load_arch_hparams` (models/apertus.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -38,7 +38,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_apertus`'s `load_arch_tensors` (models/apertus.cpp:17 @cd959bae9).
+/// Ports `llama_model_apertus`'s `load_arch_tensors` (models/apertus.cpp:17 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -83,13 +83,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_apertus`'s `build_arch_graph` (models/apertus.cpp:56 @cd959bae9).
+/// Ports `llama_model_apertus`'s `build_arch_graph` (models/apertus.cpp:56 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_apertus`'s `graph`
-/// (models/apertus.cpp:60 @cd959bae9).
+/// (models/apertus.cpp:60 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -117,8 +117,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
         // Self-attention.
         {
-            const rope_factors = model.getRopeFactors(b.cparams, @intCast(il));
-
             // Q, K and V, and RoPE on Q and K.
             const qkv = b.buildQkv(layer, cur, n_embd_head, b.n_head, b.n_head_kv, il);
             var Qcur = qkv.q;
@@ -131,8 +129,8 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             Kcur = b.buildNorm(Kcur, layer.attn_k_norm, null, .rms, il);
             b.cb(Kcur, "Kcur_normed", il);
 
-            Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
 
             b.cb(Qcur, "Qcur_pos", il);
             b.cb(Kcur, "Kcur_pos", il);

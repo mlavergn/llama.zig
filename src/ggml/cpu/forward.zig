@@ -2,7 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v0.9.0, `cd959bae9`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c` (v1.0.0, `b1b770d90`),
 //! `ggml_compute_forward` at line 1711.
 //!
 //! # The kernels are still C++
@@ -66,7 +66,6 @@ const kernels = struct {
     extern fn ggml_compute_forward_dup(params: *const ComputeParams, dst: *Tensor) void;
     extern fn ggml_compute_forward_add(params: *const ComputeParams, dst: *Tensor) void;
     extern fn ggml_compute_forward_add_id(params: *const ComputeParams, dst: *Tensor) void;
-    extern fn ggml_compute_forward_add1(params: *const ComputeParams, dst: *Tensor) void;
     extern fn ggml_compute_forward_acc(params: *const ComputeParams, dst: *Tensor) void;
     extern fn ggml_compute_forward_sub(params: *const ComputeParams, dst: *Tensor) void;
     extern fn ggml_compute_forward_mul(params: *const ComputeParams, dst: *Tensor) void;
@@ -100,8 +99,6 @@ const kernels = struct {
     extern fn ggml_compute_forward_get_rows_back(params: *const ComputeParams, dst: *Tensor) void;
     extern fn ggml_compute_forward_set_rows(params: *const ComputeParams, dst: *Tensor) void;
     extern fn ggml_compute_forward_diag(params: *const ComputeParams, dst: *Tensor) void;
-    extern fn ggml_compute_forward_diag_mask_inf(params: *const ComputeParams, dst: *Tensor) void;
-    extern fn ggml_compute_forward_diag_mask_zero(params: *const ComputeParams, dst: *Tensor) void;
     extern fn ggml_compute_forward_soft_max(params: *const ComputeParams, dst: *Tensor) void;
     extern fn ggml_compute_forward_soft_max_ext_back(params: *const ComputeParams, dst: *Tensor) void;
     extern fn ggml_compute_forward_rope(params: *const ComputeParams, dst: *Tensor) void;
@@ -160,7 +157,7 @@ const kernels = struct {
     extern fn ggml_compute_forward_opt_step_sgd(params: *const ComputeParams, dst: *Tensor) void;
 };
 
-/// Ports `ggml_compute_forward` (ggml-cpu.c:1754 @cd959bae9).
+/// Ports `ggml_compute_forward` (ggml-cpu.c:1760 @b1b770d90).
 ///
 /// Parameters:
 /// - `params`: this thread's index, count, and slice of the work buffer.
@@ -177,7 +174,6 @@ pub fn computeForward(params: *const ComputeParams, tensor: *Tensor) void {
         c.GGML_OP_DUP => kernels.ggml_compute_forward_dup(params, tensor),
         c.GGML_OP_ADD => kernels.ggml_compute_forward_add(params, tensor),
         c.GGML_OP_ADD_ID => kernels.ggml_compute_forward_add_id(params, tensor),
-        c.GGML_OP_ADD1 => kernels.ggml_compute_forward_add1(params, tensor),
         c.GGML_OP_ACC => kernels.ggml_compute_forward_acc(params, tensor),
         c.GGML_OP_SUB => kernels.ggml_compute_forward_sub(params, tensor),
         c.GGML_OP_MUL => kernels.ggml_compute_forward_mul(params, tensor),
@@ -213,8 +209,6 @@ pub fn computeForward(params: *const ComputeParams, tensor: *Tensor) void {
         c.GGML_OP_GET_ROWS_BACK => kernels.ggml_compute_forward_get_rows_back(params, tensor),
         c.GGML_OP_SET_ROWS => kernels.ggml_compute_forward_set_rows(params, tensor),
         c.GGML_OP_DIAG => kernels.ggml_compute_forward_diag(params, tensor),
-        c.GGML_OP_DIAG_MASK_INF => kernels.ggml_compute_forward_diag_mask_inf(params, tensor),
-        c.GGML_OP_DIAG_MASK_ZERO => kernels.ggml_compute_forward_diag_mask_zero(params, tensor),
         c.GGML_OP_SOFT_MAX => kernels.ggml_compute_forward_soft_max(params, tensor),
         c.GGML_OP_SOFT_MAX_BACK => kernels.ggml_compute_forward_soft_max_ext_back(params, tensor),
         c.GGML_OP_ROPE => kernels.ggml_compute_forward_rope(params, tensor),

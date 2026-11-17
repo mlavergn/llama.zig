@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/quants.c` (v0.9.0, `cd959bae9`),
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/quants.c` (v1.0.0, `b1b770d90`),
 //! the `_generic` dot products at lines 127-480 and 1254. Each function names
 //! the C it replaces and the line it began at.
 //!
@@ -47,7 +47,7 @@ inline fn as(comptime Block: type, p: ?*const anyopaque) [*]const Block {
     return @ptrCast(@alignCast(p.?));
 }
 
-/// Ports `ggml_vec_dot_q1_0_q8_0_generic` (ggml-cpu/quants.c:132 @cd959bae9).
+/// Ports `ggml_vec_dot_q1_0_q8_0_generic` (ggml-cpu/quants.c:132 @b1b770d90).
 ///
 /// One-bit weights: each set bit selects `+y`, each clear bit `-y`. A q1_0
 /// block covers 128 elements, so it spans four q8_0 blocks and each of those
@@ -114,7 +114,7 @@ pub export fn ggml_vec_dot_q1_0_q8_0_generic(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_q2_0_q8_0_generic` (ggml-cpu/quants.c:182 @cd959bae9).
+/// Ports `ggml_vec_dot_q2_0_q8_0_generic` (ggml-cpu/quants.c:182 @b1b770d90).
 ///
 /// Two-bit weights mapped `{0,1,2,3} -> {-1,0,1,2}`. A q2_0 block covers 64
 /// elements and so spans two q8_0 blocks.
@@ -171,7 +171,7 @@ pub export fn ggml_vec_dot_q2_0_q8_0_generic(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_q4_0_q8_0_generic` (ggml-cpu/quants.c:230 @cd959bae9).
+/// Ports `ggml_vec_dot_q4_0_q8_0_generic` (ggml-cpu/quants.c:230 @b1b770d90).
 ///
 /// Four-bit weights, biased by 8. The low nibbles cover the first half of the
 /// block and the high nibbles the second, which is why `sumi0` and `sumi1`
@@ -222,7 +222,7 @@ inline fn x_q8(y: [*]const blocks.Q8_0, ib: usize, j: usize) i32 {
     return y[ib].qs[j];
 }
 
-/// Ports `ggml_vec_dot_q4_1_q8_1_generic` (ggml-cpu/quants.c:267 @cd959bae9).
+/// Ports `ggml_vec_dot_q4_1_q8_1_generic` (ggml-cpu/quants.c:267 @b1b770d90).
 ///
 /// Unbiased four-bit weights with a per-block minimum. The `m*s` term is the
 /// minimum times the right operand's *sum*, which `q8_1` carries in place of
@@ -269,7 +269,7 @@ pub export fn ggml_vec_dot_q4_1_q8_1_generic(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_mxfp4_q8_0_generic` (ggml-cpu/quants.c:303 @cd959bae9).
+/// Ports `ggml_vec_dot_mxfp4_q8_0_generic` (ggml-cpu/quants.c:303 @b1b770d90).
 ///
 /// Four-bit indices into `kvalues_mxfp4`, with a shared 8-bit exponent instead
 /// of an fp16 delta. Note the C reaches for `GGML_E8M0_TO_FP32_HALF`, the
@@ -311,7 +311,7 @@ pub export fn ggml_vec_dot_mxfp4_q8_0_generic(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_nvfp4_q8_0_generic` (ggml-cpu/quants.c:335 @cd959bae9).
+/// Ports `ggml_vec_dot_nvfp4_q8_0_generic` (ggml-cpu/quants.c:335 @b1b770d90).
 ///
 /// A 64-element super-block of four 16-element sub-blocks, each with its own
 /// ue4m3 scale, laid over two q8_0 blocks. The C uses `ggml_ue4m3_to_fp32`
@@ -361,7 +361,7 @@ pub export fn ggml_vec_dot_nvfp4_q8_0_generic(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_f8_e4m3_f32` (ggml-cpu/quants.c:370 @cd959bae9).
+/// Ports `ggml_vec_dot_f8_e4m3_f32` (ggml-cpu/quants.c:370 @b1b770d90).
 ///
 /// **Live, unlike every other dot product in this file**: it has no
 /// `_generic` suffix and no `arch/` replacement, so it is the entry point
@@ -453,7 +453,7 @@ const f8_tail_group: ?usize = blk: {
     @compileError("the f8 dot product's tail shape is not measured for CPU model '" ++ model ++ "'");
 };
 
-/// Ports `ggml_vec_dot_q5_0_q8_0_generic` (ggml-cpu/quants.c:413 @cd959bae9).
+/// Ports `ggml_vec_dot_q5_0_q8_0_generic` (ggml-cpu/quants.c:413 @b1b770d90).
 ///
 /// Five-bit weights biased by 16: four bits in `qs` and the fifth spread across
 /// `qh` as one bit per element. The two shift expressions are not symmetric --
@@ -507,7 +507,7 @@ pub export fn ggml_vec_dot_q5_0_q8_0_generic(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_q5_1_q8_1_generic` (ggml-cpu/quants.c:456 @cd959bae9).
+/// Ports `ggml_vec_dot_q5_1_q8_1_generic` (ggml-cpu/quants.c:456 @b1b770d90).
 ///
 /// Unbiased five-bit weights with a per-block minimum. The fifth bit is masked
 /// to 0x10 rather than shifted into place, so unlike `q5_0` both halves use the
@@ -560,7 +560,7 @@ pub export fn ggml_vec_dot_q5_1_q8_1_generic(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_q8_0_q8_0_generic` (ggml-cpu/quants.c:499 @cd959bae9).
+/// Ports `ggml_vec_dot_q8_0_q8_0_generic` (ggml-cpu/quants.c:499 @b1b770d90).
 ///
 /// The simplest of the family: both operands are already eight-bit, so it is
 /// an integer dot product and one scale per block.
@@ -599,7 +599,7 @@ pub export fn ggml_vec_dot_q8_0_q8_0_generic(
     s[0] = sumf;
 }
 
-/// Ports `ggml_vec_dot_iq4_nl_q8_0_generic` (ggml-cpu/quants.c:1302 @cd959bae9).
+/// Ports `ggml_vec_dot_iq4_nl_q8_0_generic` (ggml-cpu/quants.c:1302 @b1b770d90).
 ///
 /// Four-bit indices into `kvalues_iq4nl`, the non-linear codebook, otherwise
 /// shaped like `q4_0`.

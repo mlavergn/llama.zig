@@ -6,8 +6,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` and
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.9.0
-//! (`cd959bae9`). Upstream split `ggml-vulkan.cpp` into those files at
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v1.0.0
+//! (`b1b770d90`). Upstream split `ggml-vulkan.cpp` into those files at
 //! v0.5.0. The C++ spells each family of pipelines as a macro pasting the
 //! shader's variable name together (`NAMELC ## F16ACC ## _cm2_data`); the
 //! port pastes the same name at comptime and looks it up in the generated
@@ -74,7 +74,7 @@ pub const Tile = struct {
     }
 };
 
-/// Ports `ggml_vk_matmul_shmem_support` (ggml-vulkan.cpp:1429 @cd959bae9):
+/// Ports `ggml_vk_matmul_shmem_support` (ggml-vulkan.cpp:1617 @b1b770d90):
 /// whether a float matmul tile fits in shared memory.
 pub fn matmulShmemSupport(device: *const Device, warptile: Tile, mul_mat_id: bool, src0_type: c.ggml_type) bool {
     const lut_size: u32 = switch (src0_type) {
@@ -106,7 +106,7 @@ pub fn matmulShmemSupport(device: *const Device, warptile: Tile, mul_mat_id: boo
     return total_size <= device.properties.limits.maxComputeSharedMemorySize;
 }
 
-/// Ports `ggml_vk_matmul_int_shmem_support` (ggml-vulkan.cpp:1488 @cd959bae9):
+/// Ports `ggml_vk_matmul_int_shmem_support` (ggml-vulkan.cpp:1676 @b1b770d90):
 /// the same question for the q8_1 integer-dot matmul's layout.
 pub fn matmulIntShmemSupport(device: *const Device, warptile: Tile, mul_mat_id: bool, src0_type: c.ggml_type) bool {
     // FLOAT_TYPE in the shader is float16_t with fp16 support, otherwise float.
@@ -167,7 +167,7 @@ pub fn matmulIntShmemSupport(device: *const Device, warptile: Tile, mul_mat_id: 
     return total_size <= device.properties.limits.maxComputeSharedMemorySize;
 }
 
-/// Ports `ggml_vk_matmul_cm1_int_shmem_support` (ggml-vulkan.cpp:1553 @cd959bae9):
+/// Ports `ggml_vk_matmul_cm1_int_shmem_support` (ggml-vulkan.cpp:1741 @b1b770d90):
 /// the same question for the coopmat1 integer-dot matmul (`mul_mmq_cm1.comp`),
 /// whose tiles stage packed q8 quants and per-block scales.
 pub fn matmulCm1IntShmemSupport(device: *const Device, warptile: Tile, mul_mat_id: bool, src0_type: c.ggml_type) bool {
@@ -218,7 +218,7 @@ pub fn matmulCm1IntShmemSupport(device: *const Device, warptile: Tile, mul_mat_i
     return total <= device.properties.limits.maxComputeSharedMemorySize;
 }
 
-/// Ports `fa_block_bytes` (ggml-vulkan.cpp:1401 @cd959bae9): bytes per
+/// Ports `fa_block_bytes` (ggml-vulkan.cpp:1409 @b1b770d90): bytes per
 /// buffer block for the FaBlockBytesK/V spec constants. F32 is fed as a
 /// vec4 "block" of 4 floats, everything else uses its ggml block size.
 fn faBlockBytes(t: c.ggml_type) u32 {
@@ -226,7 +226,7 @@ fn faBlockBytes(t: c.ggml_type) u32 {
     return @intCast(c.ggml_type_size(t));
 }
 
-/// Ports `get_fa_spec_constants` (ggml-vulkan.cpp:1408 @cd959bae9).
+/// Ports `get_fa_spec_constants` (ggml-vulkan.cpp:1416 @b1b770d90).
 pub fn faSpecConstants(state: m.device.FaPipelineState) Tile {
     return Tile.of(.{
         state.workgroup_size, // 0 WorkGroupSize
@@ -248,12 +248,12 @@ pub fn faSpecConstants(state: m.device.FaPipelineState) Tile {
     });
 }
 
-/// Ports `ggml_vk_fa_type_needs_shmem` (ggml-vulkan.cpp:1657 @cd959bae9).
+/// Ports `ggml_vk_fa_type_needs_shmem` (ggml-vulkan.cpp:1845 @b1b770d90).
 fn faTypeNeedsShmem(t: c.ggml_type) bool {
     return t == c.GGML_TYPE_IQ4_NL;
 }
 
-/// Ports `ggml_vk_fa_scalar_uses_mmq` (ggml-vulkan.cpp:1666 @cd959bae9):
+/// Ports `ggml_vk_fa_scalar_uses_mmq` (ggml-vulkan.cpp:1854 @b1b770d90):
 /// whether scalar flash attention takes the integer-dot path.
 pub fn faScalarUsesMmq(device: *const Device, k_type: c.ggml_type, v_type: c.ggml_type) bool {
     if (comptime !glslc.integer_dot) return false;
@@ -285,7 +285,7 @@ const Walk = struct {
     wait_pipeline: ?*Pipeline = null,
     claimed: ?struct { pipeline: *Pipeline, args: m.pipeline.CompileArgs } = null,
 
-    /// The `ggml_vk_create_pipeline` lambda (ggml-vulkan.cpp:1965 @cd959bae9):
+    /// The `ggml_vk_create_pipeline` lambda (ggml-vulkan.cpp:2164 @b1b770d90):
     /// records the pipeline's description on first sight, and claims it for
     /// compilation if it is the one requested and nobody has yet.
     fn create(w: *Walk, base: *?*Pipeline, name: []const u8, a: Args) void {
@@ -397,11 +397,11 @@ const Tiles = struct {
     s_align: u32 = 0,
 };
 
-/// Ports `WARP_SIZE_IDX` (ggml-vulkan.cpp:1712 @cd959bae9): where a
+/// Ports `WARP_SIZE_IDX` (ggml-vulkan.cpp:1911 @b1b770d90): where a
 /// warptile holds WARP, the required subgroup size.
 const warp_size_idx = 10;
 
-/// `ggml_vk_mul_mm_spec` (ggml-vulkan.cpp:2163 @cd959bae9): the matmul spec
+/// `ggml_vk_mul_mm_spec` (ggml-vulkan.cpp:2362 @b1b770d90): the matmul spec
 /// constants with ALIGNED, and the Intel Windows shared-memory switches.
 fn mulMmSpec(device: *const Device, spec_in: Tile, aligned: bool) Tile {
     var spec = spec_in;
@@ -415,7 +415,7 @@ fn mulMmSpec(device: *const Device, spec_in: Tile, aligned: bool) Tile {
     return spec;
 }
 
-/// `ggml_vk_mul_mm_spec_quant` (ggml-vulkan.cpp:2173 @cd959bae9): as
+/// `ggml_vk_mul_mm_spec_quant` (ggml-vulkan.cpp:2372 @b1b770d90): as
 /// `mulMmSpec`, with the A type the unified quant shader decodes.
 fn mulMmSpecQuant(device: *const Device, spec_in: Tile, aligned: bool, ty: c.ggml_type) Tile {
     var spec = spec_in;
@@ -430,7 +430,7 @@ fn mulMmSpecQuant(device: *const Device, spec_in: Tile, aligned: bool, ty: c.ggm
     return spec;
 }
 
-/// `ggml_vk_mul_mm_cm2_spec` (ggml-vulkan.cpp:2277 @cd959bae9): ALIGNED and
+/// `ggml_vk_mul_mm_cm2_spec` (ggml-vulkan.cpp:2476 @b1b770d90): ALIGNED and
 /// the subgroup size, then for the unified quant shader the A type and its
 /// block size.
 fn mulMmCm2Spec(device: *const Device, spec_in: Tile, aligned: bool, ty: ?c.ggml_type) Tile {
@@ -463,7 +463,7 @@ const SpecFn = union(enum) {
     }
 };
 
-/// Ports `vk_tile_config` (ggml-vulkan-types.h:275 @cd959bae9).
+/// Ports `vk_tile_config` (ggml-vulkan-types.h:275 @b1b770d90).
 const TileConfig = struct {
     warptile: Tile,
     wg_denoms: [3]u32,
@@ -490,7 +490,7 @@ fn tcOf(t: *const Tiles, comptime warptile: []const u8, comptime wg: []const u8)
     } };
 }
 
-/// The `filter_tc` lambda (ggml-vulkan.cpp:2254 @cd959bae9): the configs
+/// The `filter_tc` lambda (ggml-vulkan.cpp:2453 @b1b770d90): the configs
 /// whose size the device enables for `ty`.
 fn filterTc(device: *const Device, configs: TileConfigs, ty: c.ggml_type, is_id: bool, is_int: bool) TileConfigs {
     const i: usize = @intCast(ty);
@@ -526,7 +526,7 @@ const MmOpts = struct {
     pin_subgroup_to_warp: bool = false,
 };
 
-/// The `create_mm_pipelines` lambda (ggml-vulkan.cpp:2209 @cd959bae9): one
+/// The `create_mm_pipelines` lambda (ggml-vulkan.cpp:2408 @b1b770d90): one
 /// pair per tile config under `key`, created on the first walk and walked
 /// again on every later one. Pipelines are named `<shader>_<i>` and
 /// `<shader>_aligned_<i>`.
@@ -578,7 +578,7 @@ fn createMmPipelines(w: *Walk, mm_key: MatmulPipelineKey, tile_configs: TileConf
     }
 }
 
-/// Ports `non_lut_quant_types` (ggml-vulkan.cpp:2184 @cd959bae9): the types
+/// Ports `non_lut_quant_types` (ggml-vulkan.cpp:2383 @b1b770d90): the types
 /// the unified quant matmul shader decodes, selected by `MmTypeA`.
 const non_lut_quant_types = [_]c.ggml_type{
     c.GGML_TYPE_Q1_0, c.GGML_TYPE_Q2_0, c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q4_1, c.GGML_TYPE_Q5_0, c.GGML_TYPE_Q5_1,  c.GGML_TYPE_Q8_0,
@@ -588,7 +588,7 @@ const non_lut_quant_types = [_]c.ggml_type{
 /// A type and its shader-name fragment.
 const MmRow = struct { ty: c.ggml_type, frag: []const u8 };
 
-/// Ports `FOR_EACH_LUT_TYPE_NONFP4` (ggml-vulkan.cpp:2189 @cd959bae9): the
+/// Ports `FOR_EACH_LUT_TYPE_NONFP4` (ggml-vulkan.cpp:2388 @b1b770d90): the
 /// lookup-table types, each with its own shader.
 const lut_nonfp4_rows = [_]MmRow{
     .{ .ty = c.GGML_TYPE_IQ1_S, .frag = "iq1_s" },
@@ -602,7 +602,7 @@ const lut_nonfp4_rows = [_]MmRow{
     .{ .ty = c.GGML_TYPE_IQ4_NL, .frag = "iq4_nl" },
 };
 
-/// Ports `FOR_EACH_LUT_FP4_TYPE` (ggml-vulkan.cpp:2199 @cd959bae9): the fp4
+/// Ports `FOR_EACH_LUT_FP4_TYPE` (ggml-vulkan.cpp:2398 @b1b770d90): the fp4
 /// lookup-table types, which have an `_ocp` variant on coopmat paths.
 const lut_fp4_rows = [_]MmRow{
     .{ .ty = c.GGML_TYPE_MXFP4, .frag = "mxfp4" },
@@ -635,7 +635,18 @@ fn ocp(device: *const Device) bool {
     return glslc.float_e2m1 and glslc.float_e4m3 and device.ocp_fp4;
 }
 
-/// Ports `ggml_vk_load_shaders` (ggml-vulkan.cpp:1681 @cd959bae9).
+/// Ports `ggml_vk_amd_large_tile_supported` (ggml-vulkan.cpp:1870 @b1b770d90):
+/// AMD proprietary drivers before 2.0.416 (Adrenalin 26.10.1) run the large
+/// coopmat matmul tile much slower than the medium one.
+pub fn amdLargeTileSupported(device: *const Device) bool {
+    if (device.driver_id != vk.VK_DRIVER_ID_AMD_PROPRIETARY) return true;
+    // AMD encodes driverVersion as major [31:22], build [21:0], not VK_MAKE_API_VERSION.
+    const major = device.properties.driverVersion >> 22;
+    const build = device.properties.driverVersion & 0x3fffff;
+    return major > 2 or (major == 2 and build >= 416);
+}
+
+/// Ports `ggml_vk_load_shaders` (ggml-vulkan.cpp:1880 @b1b770d90).
 ///
 /// Parameters:
 /// - `device`: the device whose pipeline slots are walked.
@@ -793,7 +804,7 @@ pub fn loadShaders(device: *Device, requested: ?*Pipeline) void {
             t.m_warptile_mmq_int = t.m_warptile_mmq;
             t.m_warptile_mmqid = .of(.{ 256, 64, 64, 32, 16, 16, 2, 2, 2, 1, 16 });
             t.m_warptile_mmqid_int = t.m_warptile_mmqid;
-        } else if (device.vendor_id == common.vendor_id.amd and device.coopmat_support and device.driver_id != vk.VK_DRIVER_ID_AMD_PROPRIETARY) {
+        } else if (device.vendor_id == common.vendor_id.amd and device.coopmat_support and amdLargeTileSupported(device)) {
             // This is intentionally using tx_m values, slight performance increase
             t.l_warptile = .of(.{ 256, 128, 128, 16, mm_warp_8, 64, 2, tm_m, tn_m, tk_m, mm_warp_8 });
             t.l_warptile_mmq = .of(.{ 256, 128, 128, 32, mm_warp_8, 64, 2, tm_m, tn_m, tk_m, mm_warp_8 });
@@ -1224,7 +1235,7 @@ fn walkMatmulCm1(w: *Walk, t: *const Tiles) void {
     }
 }
 
-/// The `cm1_create_mmq` lambda (ggml-vulkan.cpp:2410 @cd959bae9): the
+/// The `cm1_create_mmq` lambda (ggml-vulkan.cpp:2609 @b1b770d90): the
 /// coopmat1 integer-dot (q8_1) matmul, one shader per type, the warptile
 /// passed as the spec constants unchanged -- it carries `DEVICE_ARCH` past
 /// WARP -- the required subgroup size pinned to WARP, and no aligned
@@ -1255,7 +1266,7 @@ const cm1_mmq_rows = [_]struct { ty: c.ggml_type, frag: []const u8, k: bool = fa
 
 /// The two `cm1_create_mmq` blocks of the coopmat1 walk, each under
 /// `coopmat_int_support` and `coopmat_int_support`
-/// (ggml-vulkan.cpp:2488, 2561 @cd959bae9). RDNA4 skips the types that are
+/// (ggml-vulkan.cpp:2687, 2760 @b1b770d90). RDNA4 skips the types that are
 /// not performant there, which then fall back to the f16 matmul: q4_1,
 /// q5_1, q4_k, q5_k and nvfp4 for matmul, nvfp4 alone for matmul_id.
 fn cm1MmqRows(w: *Walk, comptime is_id: bool, rdna4: bool, tc_int: TileConfigs, tc_int_k: TileConfigs, comptime prefix: []const u8, pc_size: u32, pc: u32) void {
@@ -1268,15 +1279,15 @@ fn cm1MmqRows(w: *Walk, comptime is_id: bool, rdna4: bool, tc_int: TileConfigs, 
     }
 }
 
-/// The `sg_create` and `sg_create_quant` lambdas (ggml-vulkan.cpp:2580,
-/// 2588 @cd959bae9): filtered by the key's A type; a required subgroup
+/// The `sg_create` and `sg_create_quant` lambdas (ggml-vulkan.cpp:2779,
+/// 2787 @b1b770d90): filtered by the key's A type; a required subgroup
 /// size forces full subgroups.
 fn sgCreate(w: *Walk, k: MatmulPipelineKey, tc_base: TileConfigs, name: []const u8, spv: []const u8, pc_size: u32, pc: u32, spec_fn: SpecFn, rsgs: u32) void {
     const tc = filterTc(w.device, tc_base, k.type_a, k.mul_mat_id, false);
     if (tc.n != 0) createMmPipelines(w, k, tc, name, spv, pc_size, pc, spec_fn, .{ .require_full_subgroups = rsgs > 0, .required_subgroup_size = rsgs });
 }
 
-/// The `sg_create_mmq` lambda (ggml-vulkan.cpp:2598 @cd959bae9): the
+/// The `sg_create_mmq` lambda (ggml-vulkan.cpp:2797 @b1b770d90): the
 /// integer-dot switches, the warptile as is, no aligned variant.
 fn sgCreateMmq(w: *Walk, k: MatmulPipelineKey, tc_base: TileConfigs, name: []const u8, spv: []const u8, pc_size: u32, pc: u32, rsgs: u32) void {
     const tc = filterTc(w.device, tc_base, k.type_a, k.mul_mat_id, true);
@@ -1453,7 +1464,7 @@ fn ceilDiv(a: u32, b: u32) u32 {
     return (a +% b -% 1) / b;
 }
 
-/// The coopmat2 `matmul_tile_selector` lambda (ggml-vulkan.cpp:2824 @cd959bae9).
+/// The coopmat2 `matmul_tile_selector` lambda (ggml-vulkan.cpp:3023 @b1b770d90).
 fn cm2TileSelector(mm: u32, n: u32, k: u32, shader_core_count: u32, configs: []const MatmulPipelinePair) u32 {
     _ = k;
     if (configs.len <= 1) return 0;
@@ -1475,7 +1486,7 @@ fn cm2TileSelector(mm: u32, n: u32, k: u32, shader_core_count: u32, configs: []c
     return 0;
 }
 
-/// The coopmat2 `matmul_id_tile_selector` lambda (ggml-vulkan.cpp:2844 @cd959bae9).
+/// The coopmat2 `matmul_id_tile_selector` lambda (ggml-vulkan.cpp:3043 @b1b770d90).
 fn cm2IdTileSelector(mm: u32, n: u32, k: u32, shader_core_count: u32, configs: []const MatmulPipelinePair) u32 {
     _ = mm;
     _ = k;
@@ -1493,7 +1504,7 @@ fn cm2IdTileSelector(mm: u32, n: u32, k: u32, shader_core_count: u32, configs: [
     return 0;
 }
 
-/// The other paths' `matmul_tile_selector` lambda (ggml-vulkan.cpp:2859 @cd959bae9),
+/// The other paths' `matmul_tile_selector` lambda (ggml-vulkan.cpp:3058 @b1b770d90),
 /// shared by matmul_id.
 fn defaultTileSelector(mm: u32, n: u32, k: u32, shader_core_count: u32, configs: []const MatmulPipelinePair) u32 {
     _ = k;
@@ -1505,7 +1516,7 @@ fn defaultTileSelector(mm: u32, n: u32, k: u32, shader_core_count: u32, configs:
     return @intCast(configs.len - 1);
 }
 
-/// Ports `shader_reduction_mode` (ggml-vulkan-types.h:476 @cd959bae9), the
+/// Ports `shader_reduction_mode` (ggml-vulkan-types.h:491 @b1b770d90), the
 /// index into a dmmv shader's three variants.
 const ReductionMode = enum(usize) { shmem, hybrid, subgroup };
 
@@ -1857,30 +1868,30 @@ fn walkRest(w: *Walk, subgroup_min_size_16: bool, subgroup_size_16: u32, subgrou
     cp(w, &device.pipeline_matmul_split_k_reduce, "split_k_reduce", S.split_k_reduce_data, 2, 2 * @sizeOf(u32), .{ 256 * 4, 1, 1 }, &.{}, 1, false);
     cp(w, &device.pipeline_flash_attn_split_k_reduce, "fa_split_k_reduce", S.fa_split_k_reduce_data, 3, @sizeOf(push.FlashAttnSplitKReduce), .{ 1, device.subgroup_size, 1 }, &.{device.subgroup_size}, 1, true);
 
-    // `fa_decode_ph1`/`ph2` are generated only where glslc took coopmat.
-    if (comptime glslc.coopmat) if (device.vendor_id == common.vendor_id.intel and (device.architecture == .intel_xe2 or (device.architecture == .intel_xe1 and device.coopmat_support and device.uma))) {
-        const xe_native_sub_group_size: u32 = if (device.architecture == .intel_xe1) 8 else 16;
+    // `fa_decode_ph1`/`ph2` and `fa_prefill` are generated only where glslc
+    // took coopmat.
+    if (comptime glslc.coopmat) if (device.xe_fa_support) {
+        const shmem_sz: u32 = device.properties.limits.maxComputeSharedMemorySize;
+        const pcx = @sizeOf(push.XeFa);
 
         var xit = device.pipeline_xe_fa_decode_dual_phases.iterator();
         while (xit.next()) |it| {
-            const split_p_chunk: u32 = 32;
-            const head_dim_qk = it.key_ptr[0];
-            const head_dim_pv = it.key_ptr[1];
-            const gqa_ratio = it.key_ptr[2];
-            const q_len = it.key_ptr[3];
-            const out_dim_per_wg: u32 = if (gqa_ratio > 16) 8 else 16;
-            const aligned_q_len = m.ops_flash_attn.upperPowerOf2(q_len);
-            const group_sz_ph1 = @min(@max(aligned_q_len *% xe_native_sub_group_size, 64), 256);
-            const out_per_wg_ph1 = @min(q_len, 256 / xe_native_sub_group_size);
-            const aligned_gqa_ratio = m.ops_flash_attn.upperPowerOf2(gqa_ratio);
-            const split_p_per_iter_ph2: u32 = 256;
-            const split_p_per_warp: u32 = 16;
-            const group_sz_ph2 = (split_p_per_iter_ph2 / split_p_per_warp) * xe_native_sub_group_size;
-            const out_per_wg_ph2 = @min(@max(16 / aligned_gqa_ratio, 1), q_len);
-            const spec1 = [_]u32{ group_sz_ph1, gqa_ratio, head_dim_qk, xe_native_sub_group_size, split_p_chunk, out_per_wg_ph1 };
-            w.create(&it.value_ptr.first, "xe_fa_decode_ph1", .{ .spv = S.fa_decode_ph1_cm1_data, .parameter_count = 5, .push_constant_size = @sizeOf(push.FaXeOpt), .wg_denoms = .{ 1, 32, 1 }, .spec = &spec1, .disable_robustness = false, .require_full_subgroups = true, .required_subgroup_size = xe_native_sub_group_size });
-            const spec2 = [_]u32{ group_sz_ph2, gqa_ratio, head_dim_pv, out_per_wg_ph2, xe_native_sub_group_size, split_p_per_iter_ph2, split_p_chunk, out_dim_per_wg };
-            w.create(&it.value_ptr.second, "xe_fa_decode_ph2", .{ .spv = S.fa_decode_ph2_cm1_data, .parameter_count = 5, .push_constant_size = @sizeOf(push.FaXeOpt), .wg_denoms = .{ 1, 1, 1 }, .spec = &spec2, .disable_robustness = false, .require_full_subgroups = true, .required_subgroup_size = xe_native_sub_group_size });
+            const ps = it.key_ptr.*;
+            const xp = m.ops_flash_attn.xeFaTuningParams(device, ps, false);
+            const dp = xp.decode_params;
+            const sc_ph1 = [_]u32{ xp.workgroup_size[0], ps.qk_ratio, ps.HSK, xp.subgroup_size[0], dp.p_chunk_ph1, dp.out_per_wg_ph1, dp.p_chunk_ph1 / xp.tm, xp.tm, xp.tn, shmem_sz };
+            const sc_ph2 = [_]u32{ xp.workgroup_size[1], ps.pv_ratio, ps.HSV, dp.out_row_per_wg_ph2, xp.subgroup_size[1], dp.split_p_per_iter_ph2, dp.p_chunk_ph1, dp.out_col_per_wg_ph2, xp.tm, xp.tn, dp.pipeline_flag_ph2 };
+            w.create(&it.value_ptr.first, "xe_fa_decode_ph1", .{ .spv = S.fa_decode_ph1_cm1_data, .parameter_count = 5, .push_constant_size = pcx, .wg_denoms = .{ 1, dp.p_chunk_ph1, 1 }, .spec = &sc_ph1, .disable_robustness = false, .require_full_subgroups = true, .required_subgroup_size = xp.subgroup_size[0] });
+            w.create(&it.value_ptr.second, "xe_fa_decode_ph2", .{ .spv = S.fa_decode_ph2_cm1_data, .parameter_count = 5, .push_constant_size = pcx, .wg_denoms = .{ 1, 1, 1 }, .spec = &sc_ph2, .disable_robustness = false, .require_full_subgroups = true, .required_subgroup_size = xp.subgroup_size[0] });
+        }
+
+        var pit = device.pipeline_xe_fa_prefill.iterator();
+        while (pit.next()) |it| {
+            const ps = it.key_ptr.*;
+            const xp = m.ops_flash_attn.xeFaTuningParams(device, ps, true);
+            const pp = xp.prefill_params;
+            const sc = [_]u32{ xp.workgroup_size[0], pp.wg_row, pp.sg_col, ps.HSK, ps.HSV, ps.qk_ratio, pp.p_per_iter, xp.tm, xp.tn, pp.q_in_reg, shmem_sz, pp.acc_count, pp.pipeline_flag, xp.subgroup_size[0], pp.gqa_fold };
+            w.create(it.value_ptr, "xe_fa_prefill", .{ .spv = S.fa_prefill_cm1_data, .parameter_count = 6, .push_constant_size = pcx, .wg_denoms = .{ pp.gqa_fold, pp.wg_row / pp.gqa_fold, 1 }, .spec = &sc, .disable_robustness = false, .require_full_subgroups = true, .required_subgroup_size = xp.subgroup_size[0] });
         }
     };
 
@@ -1928,7 +1939,7 @@ fn walkRest(w: *Walk, subgroup_min_size_16: bool, subgroup_size_16: u32, subgrou
     }
     cp(w, &device.pipeline_mul_mat_vec_nc_f16_f32, "mul_mat_vec_nc_f16_f32", S.mul_mat_vec_nc_f16_f32_data, mul_mat_vec_num_bindings, @sizeOf(push.MatVecNc), .{ 1, 1, 1 }, &.{}, 1, false);
 
-    cp(w, &device.pipeline_norm_f32, "norm_f32", S.norm_f32_data, 2, pcu, .{ 1, 1, 1 }, &.{}, 1, false);
+    cp(w, &device.pipeline_norm_f32, "norm_f32", S.norm_f32_data, 2, pcu, .{ 1, 1, 1 }, &.{}, 1, true);
     cp(w, &device.pipeline_group_norm_f32, "group_norm_f32", S.group_norm_f32_data, 2, pco, .{ 1, 1, 1 }, &.{}, 1, false);
 
     const rms_subgroups = (device.vendor_id == common.vendor_id.intel or device.vendor_id == common.vendor_id.nvidia or device.vendor_id == common.vendor_id.amd) and
@@ -1964,7 +1975,7 @@ fn walkRest(w: *Walk, subgroup_min_size_16: bool, subgroup_size_16: u32, subgrou
     }
 
     cp(w, &device.pipeline_rms_norm_back_f32, "rms_norm_back_f32", S.rms_norm_back_f32_data, 3, pco, .{ 1, 1, 1 }, &.{}, 1, false);
-    cp(w, &device.pipeline_l2_norm_f32, "l2_norm_f32", S.l2_norm_f32_data, 2, pcu, .{ 1, 1, 1 }, &.{}, 1, false);
+    cp(w, &device.pipeline_l2_norm_f32, "l2_norm_f32", S.l2_norm_f32_data, 2, pcu, .{ 1, 1, 1 }, &.{}, 1, true);
 
     inline for (.{ "", "contig_" }) |pre| {
         inline for (.{ "32", "f32_f16", "16", "f16_f32", "f32_bf16", "bf16_f32", "bf16_f16", "i32_f32", "f32_i32" }) |pair| {
@@ -2022,9 +2033,13 @@ fn walkRest(w: *Walk, subgroup_min_size_16: bool, subgroup_size_16: u32, subgrou
     cp(w, &device.pipeline_acc_f32, "acc_f32", S.acc_f32_data, 3, pcb, .{ 512, 1, 1 }, &.{ 0, 1 }, 1, false);
     cp(w, &device.pipeline_set_f32, "set_f32", S.acc_f32_data, 3, pcb, .{ 512, 1, 1 }, &.{ 0, 0 }, 1, false);
 
-    inline for (.{ "i8", "i16", "i32", "i64" }) |ty| {
+    inline for (.{ "i8", "i16", "i32" }) |ty| {
         cp(w, &@field(device, "pipeline_concat_" ++ ty), "concat_" ++ ty, @field(S, "concat_" ++ ty ++ "_data"), 3, pcb, .{ 512, 1, 1 }, &.{}, 1, false);
     }
+    inline for (.{ "i8", "i16", "i32" }) |ty| {
+        cp(w, &@field(device, "pipeline_concat_transpose_" ++ ty), "concat_transpose_" ++ ty, @field(S, "concat_transpose_" ++ ty ++ "_data"), 3, pcb, .{ 32, 32, 1 }, &.{}, 1, false);
+    }
+    cp(w, &device.pipeline_concat_i64, "concat_i64", S.concat_i64_data, 3, pcb, .{ 512, 1, 1 }, &.{}, 1, false);
 
     const pcup = @sizeOf(push.Upscale);
     cp(w, &device.pipeline_upscale_nearest_f32, "upscale_f32", S.upscale_f32_data, 2, pcup, .{ 512, 1, 1 }, &.{c.GGML_SCALE_MODE_NEAREST}, 1, false);
@@ -2067,10 +2082,6 @@ fn walkRest(w: *Walk, subgroup_min_size_16: bool, subgroup_size_16: u32, subgrou
         }
     }
 
-    inline for (.{ "add1_f16_f16", "add1_f16_f32", "add1_f32_f32" }) |name| {
-        cp(w, &@field(device, "pipeline_" ++ name), name, @field(S, name ++ "_data"), 3, pcb, .{ 512, 1, 1 }, &.{}, 1, false);
-    }
-
     cp(w, &device.pipeline_arange_f32, "arange_f32", S.arange_f32_data, 1, pco, .{ 512, 1, 1 }, &.{}, 1, false);
 
     cp(w, &device.pipeline_fill_f32, "fill_f32", S.fill_f32_data, 1, pco, .{ 512, 1, 1 }, &.{}, 1, false);
@@ -2083,8 +2094,6 @@ fn walkRest(w: *Walk, subgroup_min_size_16: bool, subgroup_size_16: u32, subgrou
     }
 
     cp(w, &device.pipeline_silu_back_f32, "silu_back_f32", S.silu_back_f32_data, 3, pco, .{ 512, 1, 1 }, &.{}, 1, false);
-
-    cp(w, &device.pipeline_diag_mask_inf_f32, "diag_mask_inf_f32", S.diag_mask_inf_f32_data, 2, @sizeOf(push.DiagMask), .{ 1, 512, 1 }, &.{}, 1, true);
 
     const pcsm = @sizeOf(push.SoftMax);
     const sg = device.subgroup_size;
@@ -2152,7 +2161,7 @@ fn walkRest(w: *Walk, subgroup_min_size_16: bool, subgroup_size_16: u32, subgrou
 
     cp(w, &device.pipeline_argmax_f32, "argmax_f32", S.argmax_f32_data, 2, pco, .{ 1, 1, 1 }, &.{sg}, 1, false);
 
-    cp(w, &device.pipeline_sum_rows_f32, "sum_rows_f32", S.sum_rows_f32_data, 2, @sizeOf(push.SumRows), .{ 1, 1, 1 }, &.{sg}, 1, false);
+    cp(w, &device.pipeline_sum_rows_f32, "sum_rows_f32", S.sum_rows_f32_data, 2, @sizeOf(push.SumRows), .{ 1, 1, 1 }, &.{sg}, 1, true);
     cp(w, &device.pipeline_cross_entropy_loss_f32, "cross_entropy_loss_f32", S.cross_entropy_loss_f32_data, 3, pco, .{ 1, 1, 1 }, &.{sg}, 1, false);
     cp(w, &device.pipeline_cross_entropy_loss_f32_wg512, "cross_entropy_loss_f32_wg512", S.cross_entropy_loss_f32_data, 3, pco, .{ 1, 1, 1 }, &.{512}, 1, false);
     cp(w, &device.pipeline_cross_entropy_loss_back_f32, "cross_entropy_loss_back_f32", S.cross_entropy_loss_back_f32_data, 4, pco, .{ 1, 1, 1 }, &.{sg}, 1, false);
@@ -2161,17 +2170,32 @@ fn walkRest(w: *Walk, subgroup_min_size_16: bool, subgroup_size_16: u32, subgrou
     // crash when using fwht kernels so we gate that here
     const can_use_fwht = device.driver_id != vk.VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS or
         !intelWindowsDriverInRange(device.properties.driverVersion, 101, 8509, 101, 8860);
-    const fwht_ns = [_]u32{ 64, 128, 256, 512 };
-    if (can_use_fwht and device.subgroup_basic and device.subgroup_shuffle) {
+    if (can_use_fwht) {
+        const D = m.device;
+        const use_subgroup = device.subgroup_basic and device.subgroup_shuffle;
+        const sg1 = @max(device.subgroup_size, 1);
+        const fwht_ns = [_]u32{ 64, 128, 256, 512, 1024, 2048, 4096, 8192 };
+        const pcf = @sizeOf(push.Fwht);
         for (fwht_ns, 0..) |n, idx| {
-            if (sg <= n) {
-                w.create(&device.pipeline_fwht_f32[idx], "fwht_f32", .{ .spv = S.fwht_f32_data, .parameter_count = 2, .push_constant_size = @sizeOf(push.Fwht), .wg_denoms = .{ 1, 1, 1 }, .spec = &.{ sg, n }, .disable_robustness = true, .require_full_subgroups = true, .required_subgroup_size = sg });
+            const wide = n > D.fwht_max_subgroup_n or n / sg1 > D.fwht_max_subgroup_el_w;
+            if (use_subgroup and !wide) {
+                if (sg <= n) {
+                    w.create(&device.pipeline_fwht_f32[idx], "fwht_f32", .{ .spv = S.fwht_f32_data, .parameter_count = 2, .push_constant_size = pcf, .wg_denoms = .{ 1, 1, 1 }, .spec = &.{ sg, n, D.fwht_rows }, .disable_robustness = true, .require_full_subgroups = true, .required_subgroup_size = sg });
+                    w.create(&device.pipeline_fwht_f16[idx], "fwht_f16", .{ .spv = S.fwht_f16_data, .parameter_count = 2, .push_constant_size = pcf, .wg_denoms = .{ 1, 1, 1 }, .spec = &.{ sg, n, D.fwht_rows }, .disable_robustness = true, .require_full_subgroups = true, .required_subgroup_size = sg });
+                    device.fwht_rows_per_wg[idx] = D.fwht_rows;
+                }
+            } else {
+                // wide blocks trade rows per workgroup for a smaller register block
+                const block_size: u32 = if (wide) @min(n, 256) else @min(sg1, n);
+                const rows: u32 = if (wide) 1 else D.fwht_rows;
+                if (@as(u64, rows) * n * @sizeOf(f32) <= device.properties.limits.maxComputeSharedMemorySize and
+                    block_size * rows <= device.properties.limits.maxComputeWorkGroupInvocations)
+                {
+                    cp(w, &device.pipeline_fwht_f32[idx], "fwht_shmem_f32", S.fwht_shmem_f32_data, 2, pcf, .{ 1, 1, 1 }, &.{ block_size, n, rows }, 1, false);
+                    cp(w, &device.pipeline_fwht_f16[idx], "fwht_shmem_f16", S.fwht_shmem_f16_data, 2, pcf, .{ 1, 1, 1 }, &.{ block_size, n, rows }, 1, false);
+                    device.fwht_rows_per_wg[idx] = rows;
+                }
             }
-        }
-    } else if (can_use_fwht) {
-        for (fwht_ns, 0..) |n, idx| {
-            const block_size = @min(sg, n);
-            cp(w, &device.pipeline_fwht_f32[idx], "fwht_shmem_f32", S.fwht_shmem_f32_data, 2, @sizeOf(push.Fwht), .{ 1, 1, 1 }, &.{ block_size, n }, 1, false);
         }
     }
 
@@ -2333,7 +2357,7 @@ fn walkGatedDeltaNet(w: *Walk) void {
     }
 }
 
-/// Ports `ggml_vk_intel_windows_driver_in_range` (ggml-vulkan.cpp:16549 @cd959bae9):
+/// Ports `ggml_vk_intel_windows_driver_in_range` (ggml-vulkan.cpp:16918 @b1b770d90):
 /// whether `lower <= driver_version < upper`, each bound `xxx.yyyy`;
 /// always true off Windows.
 pub fn intelWindowsDriverInRange(driver_version: u32, lower_major: u32, lower_minor: u32, upper_major: u32, upper_minor: u32) bool {

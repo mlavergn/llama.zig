@@ -474,8 +474,8 @@ fn typeRules(quick: bool) void {
     }
 
     // The architectures the rules name, under every descriptor, parameter
-    // set and list.
-    const archs = [_][:0]const u8{ "llama", "falcon", "bailingmoe3", "qwen35", "qwen2", "deepseek2", "glm5-next", "muse-spark", "limite", "metis16" };
+    // set and list (v1.0.0 adds kimi-k31's and xing4_0's).
+    const archs = [_][:0]const u8{ "llama", "falcon", "bailingmoe3", "qwen35", "qwen2", "deepseek2", "glm5-next", "muse-spark", "limite", "metis16", "kimi-k31", "xing4_0" };
     const layer_counts = [_]u32{ 1, 8, 32, 80 };
     const heads = [_][2]u32{ .{ 32, 32 }, .{ 32, 8 }, .{ 32, 4 }, .{ 32, 0 } };
     const experts = [_]u32{ 0, 4, 8, 16 };

@@ -576,8 +576,7 @@ fn modelScript(comptime s: Side, out: *std.ArrayList(u8), m: ?*c.struct_llama_mo
             F(s, "llama_model_n_embd_out")(mc),  n_layer,                        F(s, "llama_model_n_layer_nextn")(mc),
             F(s, "llama_model_n_swa")(mc),
         });
-        if (n_layer > 0) w(out, "n_head {d} n_head_kv {d} dep {d}", .{ F(s, "llama_model_n_head")(mc), F(s, "llama_model_n_head_kv")(mc), F(s, "llama_n_head")(mc) });
-        w(out, "deprecated {d} {d} {d}", .{ F(s, "llama_n_ctx_train")(mc), F(s, "llama_n_embd")(mc), F(s, "llama_n_layer")(mc) });
+        if (n_layer > 0) w(out, "n_head {d} n_head_kv {d}", .{ F(s, "llama_model_n_head")(mc), F(s, "llama_model_n_head_kv")(mc) });
         w(out, "rope_freq_scale_train {x}", .{@as(u32, @bitCast(F(s, "llama_model_rope_freq_scale_train")(mc)))});
         w(out, "ftype {d} size {d} n_params {d} dec_start {d}", .{ F(s, "llama_model_ftype")(mc), F(s, "llama_model_size")(mc), F(s, "llama_model_n_params")(mc), F(s, "llama_model_decoder_start_token")(mc) });
         var dlen: i32 = F(s, "llama_model_desc")(mc, null, 0);
@@ -657,17 +656,15 @@ fn modelScript(comptime s: Side, out: *std.ArrayList(u8), m: ?*c.struct_llama_mo
 
 fn vocabScalars(comptime s: Side, out: *std.ArrayList(u8), v: ?*const c.struct_llama_vocab) void {
     const names = .{
-        "llama_vocab_bos",     "llama_vocab_eos",     "llama_vocab_eot",      "llama_vocab_cls",     "llama_vocab_sep",
-        "llama_vocab_nl",      "llama_vocab_pad",     "llama_vocab_mask",     "llama_vocab_fim_pre", "llama_vocab_fim_suf",
-        "llama_vocab_fim_mid", "llama_vocab_fim_pad", "llama_vocab_fim_rep",  "llama_vocab_fim_sep", "llama_token_bos",
-        "llama_token_eos",     "llama_token_eot",     "llama_token_cls",      "llama_token_sep",     "llama_token_nl",
-        "llama_token_pad",     "llama_token_fim_pre", "llama_token_fim_suf",  "llama_token_fim_mid", "llama_token_fim_pad",
-        "llama_token_fim_rep", "llama_token_fim_sep", "llama_vocab_n_tokens", "llama_n_vocab",
+        "llama_vocab_bos",     "llama_vocab_eos",      "llama_vocab_eot",     "llama_vocab_sep",
+        "llama_vocab_nl",      "llama_vocab_pad",      "llama_vocab_mask",    "llama_vocab_fim_pre",
+        "llama_vocab_fim_suf", "llama_vocab_fim_mid",  "llama_vocab_fim_pad", "llama_vocab_fim_rep",
+        "llama_vocab_fim_sep", "llama_vocab_n_tokens",
     };
     inline for (names) |n| w(out, "{s} {d}", .{ n, F(s, n)(v) });
-    w(out, "type {d} add bos {} eos {} sep {} dep {} {}", .{
+    w(out, "type {d} add bos {} eos {} sep {}", .{
         F(s, "llama_vocab_type")(v),        F(s, "llama_vocab_get_add_bos")(v), F(s, "llama_vocab_get_add_eos")(v),
-        F(s, "llama_vocab_get_add_sep")(v), F(s, "llama_add_bos_token")(v),     F(s, "llama_add_eos_token")(v),
+        F(s, "llama_vocab_get_add_sep")(v),
     });
     var n_sup: i32 = -7;
     const sup = F(s, "llama_vocab_get_suppress_tokens")(v, &n_sup);
@@ -691,17 +688,16 @@ fn checkTokens(name: []const u8, rv: ?*const c.struct_llama_vocab, pv: ?*const c
         checks += 1;
         const ta = str(c.llama_vocab_get_text(rv, t));
         const tb = str(F(.port, "llama_vocab_get_text")(pv, t));
-        const tb2 = str(F(.port, "llama_token_get_text")(pv, t));
-        if (!std.mem.eql(u8, ta, tb) or !std.mem.eql(u8, ta, tb2)) fail("{s}: token {d} text differs", .{ name, t });
+        if (!std.mem.eql(u8, ta, tb)) fail("{s}: token {d} text differs", .{ name, t });
         const sa: u32 = @bitCast(c.llama_vocab_get_score(rv, t));
-        if (sa != @as(u32, @bitCast(F(.port, "llama_vocab_get_score")(pv, t))) or sa != @as(u32, @bitCast(F(.port, "llama_token_get_score")(pv, t))))
+        if (sa != @as(u32, @bitCast(F(.port, "llama_vocab_get_score")(pv, t))))
             fail("{s}: token {d} score differs", .{ name, t });
         const aa = c.llama_vocab_get_attr(rv, t);
-        if (aa != F(.port, "llama_vocab_get_attr")(pv, t) or aa != F(.port, "llama_token_get_attr")(pv, t)) fail("{s}: token {d} attr differs", .{ name, t });
+        if (aa != F(.port, "llama_vocab_get_attr")(pv, t)) fail("{s}: token {d} attr differs", .{ name, t });
         const ea = c.llama_vocab_is_eog(rv, t);
-        if (ea != F(.port, "llama_vocab_is_eog")(pv, t) or ea != F(.port, "llama_token_is_eog")(pv, t)) fail("{s}: token {d} eog differs", .{ name, t });
+        if (ea != F(.port, "llama_vocab_is_eog")(pv, t)) fail("{s}: token {d} eog differs", .{ name, t });
         const ca = c.llama_vocab_is_control(rv, t);
-        if (ca != F(.port, "llama_vocab_is_control")(pv, t) or ca != F(.port, "llama_token_is_control")(pv, t)) fail("{s}: token {d} control differs", .{ name, t });
+        if (ca != F(.port, "llama_vocab_is_control")(pv, t)) fail("{s}: token {d} control differs", .{ name, t });
 
         for ([_]bool{ false, true }) |special| for ([_]i32{ 0, 1, 3 }) |lstrip| {
             @memset(&ba, sentinel);
@@ -887,10 +883,10 @@ fn portScoreOob(k: usize) void {
     _ = F(.port, "llama_vocab_get_score")(death_pv, @intCast(k));
 }
 fn refAttrOob(k: usize) void {
-    _ = c.llama_token_get_attr(death_rv, @intCast(k));
+    _ = c.llama_vocab_get_attr(death_rv, @intCast(k));
 }
 fn portAttrOob(k: usize) void {
-    _ = F(.port, "llama_token_get_attr")(death_pv, @intCast(k));
+    _ = F(.port, "llama_vocab_get_attr")(death_pv, @intCast(k));
 }
 fn refTokNeg(_: usize) void {
     var t: [8]Token = undefined;
@@ -1002,12 +998,8 @@ fn compareModels(label: []const u8, rm: *c.struct_llama_model, pm: *c.struct_lla
 fn checkLoadVariants(path: [:0]const u8) void {
     var mp = c.llama_model_default_params();
     mp.vocab_only = true;
-    var l = loadBoth("load_model_from_file (deprecated)", "llama_load_model_from_file", .{ path.ptr, mp });
-    if (l.rm != null and l.pm != null) compareModels("deprecated load", l.rm.?, l.pm.?);
-    freeBoth(l);
-
     var paths = [_][*c]const u8{ path.ptr, "/nonexistent-split.gguf" };
-    l = loadBoth("load_from_splits [path]", "llama_model_load_from_splits", .{ @as([*c][*c]const u8, &paths), @as(usize, 1), mp });
+    var l = loadBoth("load_from_splits [path]", "llama_model_load_from_splits", .{ @as([*c][*c]const u8, &paths), @as(usize, 1), mp });
     if (l.rm != null and l.pm != null) compareModels("splits load", l.rm.?, l.pm.?);
     freeBoth(l);
     freeBoth(loadBoth("load_from_splits [path, missing]", "llama_model_load_from_splits", .{ @as([*c][*c]const u8, &paths), @as(usize, 2), mp }));
@@ -1063,7 +1055,6 @@ fn checkLoadVariants(path: [:0]const u8) void {
         freeBoth(l);
     }
     F(.port, "llama_model_free")(null);
-    F(.port, "llama_free_model")(null);
 }
 
 fn zeroTensor(t: [*c]c.ggml_tensor, _: ?*anyopaque) callconv(.c) void {

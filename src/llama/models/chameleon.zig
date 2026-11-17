@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/chameleon.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/chameleon.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_chameleon`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -21,7 +21,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_chameleon`'s `load_arch_hparams` (models/chameleon.cpp:4 @cd959bae9).
+/// Ports `llama_model_chameleon`'s `load_arch_hparams` (models/chameleon.cpp:4 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -37,7 +37,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_chameleon`'s `load_arch_tensors` (models/chameleon.cpp:16 @cd959bae9).
+/// Ports `llama_model_chameleon`'s `load_arch_tensors` (models/chameleon.cpp:16 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -73,13 +73,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_chameleon`'s `build_arch_graph` (models/chameleon.cpp:49 @cd959bae9).
+/// Ports `llama_model_chameleon`'s `build_arch_graph` (models/chameleon.cpp:49 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_chameleon`'s `graph`
-/// (models/chameleon.cpp:53 @cd959bae9).
+/// (models/chameleon.cpp:53 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -129,8 +129,8 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 b.cb(Kcur, "Kcur", il);
             }
 
-            Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
 
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);

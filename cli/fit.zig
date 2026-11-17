@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/common/fit.cpp` and `llama.cpp/common/fit.h`
-//! (v0.9.0, `cd959bae9`), the whole file, and from the two structs of
+//! (v1.0.0, `b1b770d90`), the whole file, and from the two structs of
 //! `llama.cpp/src/llama-ext.h` it measures with.
 //!
 //! # Why the CLI needs it
@@ -58,15 +58,15 @@ const lambda: [*:0]const u8 = "operator()";
 /// `common_log_get_verbosity_thold()` and where `common_log` writes: the
 /// part of upstream's logger this file's output depends on.
 pub const Log = struct {
-    /// `LOG_LEVEL_TRACE` (common/log.h:25 @cd959bae9).
+    /// `LOG_LEVEL_TRACE` (common/log.h:25 @b1b770d90).
     pub const level_trace: i32 = 4;
-    /// `LOG_LEVEL_WARN` (common/log.h:27 @cd959bae9).
+    /// `LOG_LEVEL_WARN` (common/log.h:27 @b1b770d90).
     pub const level_warn: i32 = 2;
-    /// `LOG_LEVEL_ERROR` (common/log.h:28 @cd959bae9).
+    /// `LOG_LEVEL_ERROR` (common/log.h:28 @b1b770d90).
     pub const level_error: i32 = 1;
 
     /// Messages whose verbosity is above this are dropped. `llama-cli`
-    /// sets `LOG_LEVEL_ERROR` (tools/cli/cli.cpp:36 @cd959bae9).
+    /// sets `LOG_LEVEL_ERROR` (tools/cli/cli.cpp:36 @b1b770d90).
     verbosity: i32 = level_error,
     /// Where messages go; null drops them all.
     out: ?*std.Io.Writer = null,
@@ -77,23 +77,23 @@ pub const Log = struct {
     /// logged at: the tools hand them to their own `common_log`, which keeps
     /// its threshold, prefix and timestamps.
     sink: ?*const fn (verbosity: i32, text: [*:0]const u8) void = null,
-    /// `LOG_JSON` (common/log.h:143 @cd959bae9): where a structured record goes,
+    /// `LOG_JSON` (common/log.h:143 @b1b770d90): where a structured record goes,
     /// as its type and its data's JSON text. Null drops them, as upstream's
     /// logger does without `--log-jsonl`; the tools hand them to their
     /// `common_log`, which checks the flag.
     json: ?*const fn (kind: [*:0]const u8, data: []const u8) void = null,
 
-    /// `LOG_TRC` (common/log.h:123 @cd959bae9).
+    /// `LOG_TRC` (common/log.h:123 @b1b770d90).
     fn trc(self: Log, format: [*:0]const u8, args: anytype) void {
         self.emit(level_trace, "I ", format, args);
     }
 
-    /// `LOG_WRN` (common/log.h:125 @cd959bae9).
+    /// `LOG_WRN` (common/log.h:125 @b1b770d90).
     fn wrn(self: Log, format: [*:0]const u8, args: anytype) void {
         self.emit(level_warn, "W ", format, args);
     }
 
-    /// `LOG_ERR` (common/log.h:126 @cd959bae9).
+    /// `LOG_ERR` (common/log.h:126 @b1b770d90).
     fn err(self: Log, format: [*:0]const u8, args: anytype) void {
         self.emit(level_error, "E ", format, args);
     }
@@ -127,7 +127,7 @@ pub const Log = struct {
     }
 };
 
-/// Ports `common_params_fit_status` (fit.h:9 @cd959bae9).
+/// Ports `common_params_fit_status` (fit.h:9 @b1b770d90).
 pub const Status = enum(c_int) {
     /// Found allocations that are projected to fit.
     success = 0,
@@ -137,11 +137,23 @@ pub const Status = enum(c_int) {
     @"error" = 2,
 };
 
-/// Ports `common_fit_extra_model` (fit.h:18 @cd959bae9): a second model
+/// The model files `common_params_model::get_paths` gives: the model, then
+/// its extra shards.
+pub const Paths = []const [*:0]const u8;
+
+/// Ports `common_model_load` (common/common.cpp:1725 @b1b770d90): one file
+/// through `llama_model_load_from_file`, several through
+/// `llama_model_load_from_splits`.
+fn modelLoad(paths: Paths, mparams: c.llama_model_params) ?*c.llama_model {
+    if (paths.len == 1) return api.llama.llama_model_load_from_file(paths[0], mparams);
+    return api.llama.llama_model_load_from_splits(@ptrCast(@constCast(paths.ptr)), paths.len, mparams);
+}
+
+/// Ports `common_fit_extra_model` (fit.h:18 @b1b770d90): a second model
 /// sharing the main model's devices, as a draft model does. Its context
 /// follows the main one's, so it is measured again whenever that changes.
 pub const ExtraModel = struct {
-    path_model: [*:0]const u8,
+    paths_model: Paths,
     mparams: *c.llama_model_params,
     cparams: *c.llama_context_params,
     /// The weights are already counted in the main model, as for an MTP
@@ -149,7 +161,7 @@ pub const ExtraModel = struct {
     shares_model: bool,
 };
 
-/// Ports `llama_memory_breakdown_data` (llama-ext.h:93 @cd959bae9).
+/// Ports `llama_memory_breakdown_data` (llama-ext.h:93 @b1b770d90).
 pub const MemoryBreakdownData = struct {
     model: usize = 0,
     context: usize = 0,
@@ -160,14 +172,14 @@ pub const MemoryBreakdownData = struct {
     }
 };
 
-/// Ports `llama_device_memory_data` (llama-ext.h:103 @cd959bae9).
+/// Ports `llama_device_memory_data` (llama-ext.h:103 @b1b770d90).
 pub const LlamaDeviceMemoryData = struct {
     total: i64 = 0,
     free: i64 = 0,
     mb: MemoryBreakdownData = .{},
 };
 
-/// Ports `common_device_memory_data` (fit.h:90 @cd959bae9).
+/// Ports `common_device_memory_data` (fit.h:90 @b1b770d90).
 pub const DeviceMemoryData = struct {
     total: i64,
     free: i64,
@@ -176,7 +188,7 @@ pub const DeviceMemoryData = struct {
     compute: usize,
 };
 
-/// Ports `common_layer_fraction_t` (fit.cpp:20 @cd959bae9): which part of a
+/// Ports `common_layer_fraction_t` (fit.cpp:20 @b1b770d90): which part of a
 /// layer's tensors overflows to the next device or system memory.
 const LayerFraction = enum(c_int) {
     none = 0,
@@ -212,7 +224,7 @@ pub const Patterns = struct {
     }
 };
 
-/// Ports `common_params_fit_exception` (fit.cpp:28 @cd959bae9) as
+/// Ports `common_params_fit_exception` (fit.cpp:28 @b1b770d90) as
 /// `error.Fit`, and the `std::runtime_error`s it derives from as
 /// `error.Runtime`; the message is `Fitter.what`.
 const Failure = error{ Fit, Runtime, OutOfMemory };
@@ -231,7 +243,7 @@ const Fitter = struct {
     }
 };
 
-/// Ports `common_fit_log_scope` (fit.cpp:33 @cd959bae9): installs a logger
+/// Ports `common_fit_log_scope` (fit.cpp:33 @b1b770d90): installs a logger
 /// that demotes libllama's messages below `min_level` to debug, and puts the
 /// original back. `install` is the constructor and `deinit` the destructor;
 /// the scope must not move between the two.
@@ -251,7 +263,7 @@ const LogFilter = struct {
     }
 
     /// Ports the lambda the constructor passes to `llama_log_set`
-    /// (fit.cpp:36 @cd959bae9).
+    /// (fit.cpp:36 @b1b770d90).
     fn callback(level: c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
         const ud: *const LogFilter = @ptrCast(@alignCast(user_data));
         const level_eff = if (level >= ud.min_level) level else c.GGML_LOG_LEVEL_DEBUG;
@@ -259,7 +271,7 @@ const LogFilter = struct {
     }
 };
 
-/// Ports `common_get_device_memory_data_impl` (fit.cpp:58 @cd959bae9):
+/// Ports `common_get_device_memory_data_impl` (fit.cpp:58 @b1b770d90):
 /// loads the model and a context with `no_alloc` and reads what each device,
 /// and the host, would hold.
 ///
@@ -267,11 +279,12 @@ const LogFilter = struct {
 /// `f.arena`; `devs` and the `hp_*` outputs are set as in the C.
 fn deviceMemoryDataImpl(
     f: *Fitter,
-    path_model: [*:0]const u8,
+    paths_model: Paths,
     mparams: *const c.llama_model_params,
     cparams: *const c.llama_context_params,
     devs: *std.ArrayList(c.ggml_backend_dev_t),
     hp_ngl: *u32,
+    hp_ngl_skip: *u32,
     hp_n_ctx_train: *u32,
     hp_n_expert: *u32,
     log_level: c.enum_ggml_log_level,
@@ -284,7 +297,7 @@ fn deviceMemoryDataImpl(
     mparams_copy.no_alloc = true;
     mparams_copy.load_mode = c.LLAMA_LOAD_MODE_NONE;
 
-    const model = api.llama.llama_model_load_from_file(path_model, mparams_copy) orelse
+    const model = modelLoad(paths_model, mparams_copy) orelse
         return f.fail(error.Runtime, "failed to load model", .{});
     defer api.model.llama_model_free(model);
 
@@ -357,6 +370,8 @@ fn deviceMemoryDataImpl(
 
     hp_ngl.* = @bitCast(api.model.llama_model_n_layer(model));
     if (mparams.load_mtp) hp_ngl.* +%= @bitCast(api.model.llama_model_n_layer_nextn(model));
+    // without MTP the NextN layers hold no weights but the model loader still counts them for n_gpu_layers
+    hp_ngl_skip.* = if (mparams.load_mtp) 0 else @bitCast(api.model.llama_model_n_layer_nextn(model));
     hp_n_ctx_train.* = @bitCast(api.model.llama_model_n_ctx_train(model));
     hp_n_expert.* = @bitCast(api.model.llama_model_n_expert(model));
 
@@ -365,17 +380,18 @@ fn deviceMemoryDataImpl(
     return ret;
 }
 
-/// Ports `common_get_device_memory_data` (fit.cpp:237 @cd959bae9): the
+/// Ports `common_get_device_memory_data` (fit.cpp:240 @b1b770d90): the
 /// memory each device and the host would hold under `mparams` and
 /// `cparams`, without loading anything.
 ///
 /// Parameters:
 /// - `gpa`: allocates the result and the scratch.
 /// - `log`: where the trace and warnings go.
-/// - `path_model`: the model file.
+/// - `paths_model`: the model file and its extra shards.
 /// - `mparams`, `cparams`: the parameters to measure under.
 /// - `devs`: set to the model's devices, allocated with `gpa`.
-/// - `hp_ngl`, `hp_n_ctx_train`, `hp_n_expert`: set from the model.
+/// - `hp_ngl`, `hp_ngl_skip`, `hp_n_ctx_train`, `hp_n_expert`: set from the
+///   model; `hp_ngl_skip` counts the NextN layers the loader skips without MTP.
 /// - `log_level`: libllama's messages below this go to the debug level.
 ///
 /// Return: one entry per device and a last one for the host, the caller's
@@ -385,11 +401,12 @@ fn deviceMemoryDataImpl(
 pub fn getDeviceMemoryData(
     gpa: std.mem.Allocator,
     log: Log,
-    path_model: [*:0]const u8,
+    paths_model: Paths,
     mparams: *const c.llama_model_params,
     cparams: *const c.llama_context_params,
     devs: *std.ArrayList(c.ggml_backend_dev_t),
     hp_ngl: *u32,
+    hp_ngl_skip: *u32,
     hp_n_ctx_train: *u32,
     hp_n_expert: *u32,
     log_level: c.enum_ggml_log_level,
@@ -401,7 +418,7 @@ pub fn getDeviceMemoryData(
     var f: Fitter = .{ .arena = arena_state.allocator(), .patterns = &patterns, .log = log };
 
     var arena_devs: std.ArrayList(c.ggml_backend_dev_t) = .empty;
-    const impl_ret = deviceMemoryDataImpl(&f, path_model, mparams, cparams, &arena_devs, hp_ngl, hp_n_ctx_train, hp_n_expert, log_level) catch |e| switch (e) {
+    const impl_ret = deviceMemoryDataImpl(&f, paths_model, mparams, cparams, &arena_devs, hp_ngl, hp_ngl_skip, hp_n_ctx_train, hp_n_expert, log_level) catch |e| switch (e) {
         error.Fit, error.Runtime => {
             log.err("%s\n", .{f.what.ptr});
             return error.Runtime;
@@ -422,7 +439,7 @@ pub fn getDeviceMemoryData(
     return ret;
 }
 
-/// Ports `ngl_t` (fit.cpp:613 @cd959bae9): how many layers a device gets,
+/// Ports `ngl_t` (fit.cpp:619 @b1b770d90): how many layers a device gets,
 /// and how many of them only partly.
 const Ngl = struct {
     /// Total layers.
@@ -443,7 +460,7 @@ const Ngl = struct {
 /// reference.
 const FitImpl = struct {
     f: *Fitter,
-    path_model: [*:0]const u8,
+    paths_model: Paths,
     mparams: *c.llama_model_params,
     cparams: *c.llama_context_params,
     tensor_split: ?[*]f32,
@@ -452,7 +469,8 @@ const FitImpl = struct {
     log_level: c.enum_ggml_log_level,
 
     devs: std.ArrayList(c.ggml_backend_dev_t) = .empty,
-    hp_ngl: u32 = 0,
+    hp_ngl: u32 = 0, // hparams.n_gpu_layers
+    hp_nsk: u32 = 0, // number of skipped NextN layers, counted by the model loader but not by hp_ngl
     hp_nct: u32 = 0,
     hp_nex: u32 = 0,
     nd: usize = 0,
@@ -464,10 +482,10 @@ const FitImpl = struct {
     n_ctx_extra: u32 = 0,
 
     fn measure(self: *FitImpl, mparams: *const c.llama_model_params) Failure![]LlamaDeviceMemoryData {
-        return deviceMemoryDataImpl(self.f, self.path_model, mparams, self.cparams, &self.devs, &self.hp_ngl, &self.hp_nct, &self.hp_nex, self.log_level);
+        return deviceMemoryDataImpl(self.f, self.paths_model, mparams, self.cparams, &self.devs, &self.hp_ngl, &self.hp_nsk, &self.hp_nct, &self.hp_nex, self.log_level);
     }
 
-    /// Ports the lambda `add_extra_memory` (fit.cpp:286 @cd959bae9): the
+    /// Ports the lambda `add_extra_memory` (fit.cpp:291 @b1b770d90): the
     /// extra model competes for the same memory, so it is added to every
     /// measurement, and measured again whenever its context changes. Its
     /// messages name `operator()`, which is what `__func__` is inside a C++
@@ -478,6 +496,7 @@ const FitImpl = struct {
         if (self.dmds_extra.len == 0 or self.n_ctx_extra != self.cparams.n_ctx) {
             var devs_extra: std.ArrayList(c.ggml_backend_dev_t) = .empty;
             var ngl_extra: u32 = 0;
+            var nsk_extra: u32 = 0;
             var nct_extra: u32 = 0;
             var nex_extra: u32 = 0;
 
@@ -485,7 +504,7 @@ const FitImpl = struct {
 
             self.f.log.trc("%s: getting device memory data for the extra model at a context size of %u:\n", .{ lambda, self.cparams.n_ctx });
 
-            const measured = deviceMemoryDataImpl(self.f, extra.path_model, extra.mparams, extra.cparams, &devs_extra, &ngl_extra, &nct_extra, &nex_extra, self.log_level) catch |e| switch (e) {
+            const measured = deviceMemoryDataImpl(self.f, extra.paths_model, extra.mparams, extra.cparams, &devs_extra, &ngl_extra, &nsk_extra, &nct_extra, &nex_extra, self.log_level) catch |e| switch (e) {
                 error.Fit, error.Runtime => {
                     // The extra model is optional: fit the main model alone
                     // rather than give up.
@@ -525,7 +544,7 @@ const FitImpl = struct {
         }
     }
 
-    /// Ports the lambda `get_overflow_pattern` (fit.cpp:574 @cd959bae9):
+    /// Ports the lambda `get_overflow_pattern` (fit.cpp:580 @b1b770d90):
     /// the regex matching one layer's tensors that overflow for a fraction.
     fn overflowPattern(self: *FitImpl, il: usize, lf: LayerFraction) Failure![*:0]const u8 {
         const n_strings = 1000;
@@ -545,7 +564,7 @@ const FitImpl = struct {
         return p.ptr;
     }
 
-    /// Ports the lambda `set_ngl_tensor_split_tbo` (fit.cpp:629 @cd959bae9):
+    /// Ports the lambda `set_ngl_tensor_split_tbo` (fit.cpp:635 @b1b770d90):
     /// writes a layer assignment into `mparams` through the caller's
     /// `tensor_split` and override buffers.
     fn setNglTensorSplitTbo(self: *FitImpl, ngl_per_device: []const Ngl, overflow_bufts: []const c.ggml_backend_buffer_type_t, mparams: *c.llama_model_params) Failure!void {
@@ -558,6 +577,18 @@ const FitImpl = struct {
         mparams.n_gpu_layers = @bitCast(n_gpu_layers);
         cAssert(n_gpu_layers <= self.hp_ngl +% 1);
         var il0: u32 = self.hp_ngl +% 1 -% n_gpu_layers; // start index for tensor buft overrides
+
+        // the skipped NextN layers come right before the output layer, put them on the same device as the output layer
+        // so that the layers assigned by the model loader match the layers above
+        if (self.hp_nsk > 0 and mparams.n_gpu_layers > 0) {
+            mparams.n_gpu_layers = @bitCast(@as(u32, @bitCast(mparams.n_gpu_layers)) +% self.hp_nsk);
+            if (nd > 1) {
+                // the last devices have no layers if not even the output layer fits
+                var id_last: usize = nd - 1;
+                while (ngl_per_device[id_last].n_layer == 0) id_last -%= 1;
+                self.tensor_split.?[id_last] += @floatFromInt(self.hp_nsk);
+            }
+        }
 
         mparams.tensor_split = self.tensor_split;
 
@@ -586,7 +617,7 @@ const FitImpl = struct {
         mparams.tensor_buft_overrides = tbo;
     }
 
-    /// Ports the lambda `get_memory_for_layers` (fit.cpp:670 @cd959bae9): the
+    /// Ports the lambda `get_memory_for_layers` (fit.cpp:690 @b1b770d90): the
     /// memory each device would use for a layer assignment.
     fn memoryForLayers(self: *FitImpl, func_name: [*:0]const u8, ngl_per_device: []const Ngl, overflow_bufts: []const c.ggml_backend_buffer_type_t) Failure![]i64 {
         var mparams_copy = self.mparams.*;
@@ -626,10 +657,10 @@ fn divMiB(size: usize) i64 {
     return @divTrunc(@as(i64, @bitCast(size)), MiB);
 }
 
-/// Ports `common_params_fit_impl` (fit.cpp:260 @cd959bae9).
+/// Ports `common_params_fit_impl` (fit.cpp:264 @b1b770d90).
 fn fitImpl(
     f: *Fitter,
-    path_model: [*:0]const u8,
+    paths_model: Paths,
     mparams: *c.llama_model_params,
     cparams: *c.llama_context_params,
     tensor_split: ?[*]f32,
@@ -648,7 +679,7 @@ fn fitImpl(
 
     var s: FitImpl = .{
         .f = f,
-        .path_model = path_model,
+        .paths_model = paths_model,
         .mparams = mparams,
         .cparams = cparams,
         .tensor_split = tensor_split,
@@ -1130,7 +1161,7 @@ fn fitImpl(
     try s.setNglTensorSplitTbo(ngl_per_device, overflow_bufts, mparams);
 }
 
-/// Ports `common_fit_params` (fit.cpp:960 @cd959bae9): fits `mparams` and
+/// Ports `common_fit_params` (fit.cpp:980 @b1b770d90): fits `mparams` and
 /// `cparams` to free device memory, system memory taken as unlimited where
 /// there is a device. Only parameters still equal to
 /// `llama_model_default_params`'s are changed, and the context size only
@@ -1141,7 +1172,7 @@ fn fitImpl(
 /// - `patterns`: holds the override patterns written into
 ///   `tensor_buft_overrides`; keep it until the model is loaded.
 /// - `log`: where the trace, the warning and the error go.
-/// - `path_model`: the model file.
+/// - `paths_model`: the model file and its extra shards.
 /// - `mparams`, `cparams`: changed in place.
 /// - `tensor_split`: where a split is written, `llama_max_devices()`
 ///   entries; may be null with one device or none.
@@ -1160,7 +1191,7 @@ pub fn fitParams(
     gpa: std.mem.Allocator,
     patterns: *Patterns,
     log: Log,
-    path_model: [*:0]const u8,
+    paths_model: Paths,
     mparams: *c.llama_model_params,
     cparams: *c.llama_context_params,
     tensor_split: ?[*]f32,
@@ -1177,7 +1208,7 @@ pub fn fitParams(
 
     const t0_us = api.llama.llama_time_us();
     var status: Status = .success;
-    if (fitImpl(&f, path_model, mparams, cparams, tensor_split, tensor_buft_overrides, margins, n_ctx_min, extra, log_level)) {
+    if (fitImpl(&f, paths_model, mparams, cparams, tensor_split, tensor_buft_overrides, margins, n_ctx_min, extra, log_level)) {
         log.trc("%s: successfully fit params to free device memory\n", .{func});
     } else |e| switch (e) {
         error.Fit => {
@@ -1195,7 +1226,7 @@ pub fn fitParams(
     return status;
 }
 
-/// Ports `common_memory_breakdown_row` (fit.h:50 @cd959bae9): one row of the
+/// Ports `common_memory_breakdown_row` (fit.h:50 @b1b770d90): one row of the
 /// memory breakdown, a device, the host or another buffer type.
 pub const MemoryBreakdownRow = struct {
     pub const Kind = enum { device, host, buffer_type };
@@ -1210,7 +1241,7 @@ pub const MemoryBreakdownRow = struct {
     compute: usize = 0,
 };
 
-/// Ports `common_memory_breakdown_rows` (fit.cpp:987 @cd959bae9): the rows of
+/// Ports `common_memory_breakdown_rows` (fit.cpp:1007 @b1b770d90): the rows of
 /// `memoryBreakdownPrint`, the model's devices first, then the host, then
 /// every remaining buffer type.
 ///
@@ -1306,13 +1337,13 @@ pub fn memoryBreakdownRows(arena: std.mem.Allocator, ctx: ?*const c.struct_llama
     return rows.items;
 }
 
-/// Ports `common_fit_measure` (fit.cpp:166 @cd959bae9): loads the model and a
+/// Ports `common_fit_measure` (fit.cpp:169 @b1b770d90): loads the model and a
 /// context with `no_alloc`, the parameters used as they are, and returns the
 /// memory breakdown.
 ///
 /// Parameters:
 /// - `arena`: holds the rows, and what a failure says.
-/// - `path_model`, `mparams`, `cparams`: what to measure.
+/// - `paths_model`, `mparams`, `cparams`: what to measure.
 /// - `n_ctx_train`, `n_ctx`: optional outputs.
 /// - `log_level`: libllama's messages below it go to the debug log.
 ///
@@ -1320,7 +1351,7 @@ pub fn memoryBreakdownRows(arena: std.mem.Allocator, ctx: ?*const c.struct_llama
 /// `what_out`.
 pub fn fitMeasure(
     arena: std.mem.Allocator,
-    path_model: [*:0]const u8,
+    paths_model: Paths,
     mparams: *const c.llama_model_params,
     cparams: *const c.llama_context_params,
     n_ctx_train: ?*u32,
@@ -1336,7 +1367,7 @@ pub fn fitMeasure(
     mparams_copy.no_alloc = true;
     mparams_copy.load_mode = c.LLAMA_LOAD_MODE_NONE;
 
-    const model = api.llama.llama_model_load_from_file(path_model, mparams_copy) orelse {
+    const model = modelLoad(paths_model, mparams_copy) orelse {
         what_out.* = "failed to load model";
         return error.Runtime;
     };
@@ -1354,7 +1385,7 @@ pub fn fitMeasure(
     return memoryBreakdownRows(arena, ctx);
 }
 
-/// Ports `common_memory_breakdown_print` (fit.cpp:1092 @cd959bae9): a table
+/// Ports `common_memory_breakdown_print` (fit.cpp:1112 @b1b770d90): a table
 /// of what each device, the host and any other buffer type holds, written at
 /// the trace level, and the same rows as one `LOG_JSON` record.
 ///
@@ -1480,7 +1511,7 @@ pub fn memoryBreakdownPrint(gpa: std.mem.Allocator, log: Log, ctx: ?*const c.str
     }
 }
 
-/// Ports `common_fit_print` (fit.cpp:1182 @cd959bae9): one line per device
+/// Ports `common_fit_print` (fit.cpp:1202 @b1b770d90): one line per device
 /// and one for the host -- name, then model, context and compute in MiB --
 /// for `llama-fit-params`.
 ///
@@ -1488,7 +1519,7 @@ pub fn memoryBreakdownPrint(gpa: std.mem.Allocator, log: Log, ctx: ?*const c.str
 /// - `gpa`: allocates the scratch, freed before return.
 /// - `log`: where the measurement's trace goes.
 /// - `out`: where the C's `printf` writes, stdout.
-/// - `path_model`, `mparams`, `cparams`: what to measure.
+/// - `paths_model`, `mparams`, `cparams`: what to measure.
 ///
 /// Return: nothing; write errors, and `error.Runtime` where the C would
 /// throw out of the measurement.
@@ -1500,13 +1531,14 @@ pub fn fitPrint(
     gpa: std.mem.Allocator,
     log: Log,
     out: *std.Io.Writer,
-    path_model: [*:0]const u8,
+    paths_model: Paths,
     mparams: *c.llama_model_params,
     cparams: *c.llama_context_params,
 ) !void {
     var devs: std.ArrayList(c.ggml_backend_dev_t) = .empty;
     defer devs.deinit(gpa);
     var hp_ngl: u32 = 0; // hparams.n_gpu_layers
+    var hp_nsk: u32 = 0; // number of skipped NextN layers, counted by the model loader but not by hp_ngl
     var hp_nct: u32 = 0; // hparams.n_ctx_train
     var hp_nex: u32 = 0; // hparams.n_expert
 
@@ -1516,7 +1548,7 @@ pub fn fitPrint(
     defer patterns.deinit();
     var f: Fitter = .{ .arena = arena_state.allocator(), .patterns = &patterns, .log = log };
     var arena_devs: std.ArrayList(c.ggml_backend_dev_t) = .empty;
-    const dmd = deviceMemoryDataImpl(&f, path_model, mparams, cparams, &arena_devs, &hp_ngl, &hp_nct, &hp_nex, c.GGML_LOG_LEVEL_ERROR) catch |e| switch (e) {
+    const dmd = deviceMemoryDataImpl(&f, paths_model, mparams, cparams, &arena_devs, &hp_ngl, &hp_nsk, &hp_nct, &hp_nex, c.GGML_LOG_LEVEL_ERROR) catch |e| switch (e) {
         error.Fit, error.Runtime => {
             const w = std.mem.span(f.what.ptr);
             const n = @min(w.len, print_what.len - 1);

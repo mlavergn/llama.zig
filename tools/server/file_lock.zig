@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/file-lock.cpp` and `llama.cpp/common/file-lock.h`
-//! (v0.9.0, `cd959bae9`), their POSIX arm: `llama-server` is not a Windows
+//! (v1.0.0, `b1b770d90`), their POSIX arm: `llama-server` is not a Windows
 //! target. Each declaration names what it ports and the line it began at.
 
 const std = @import("std");
@@ -32,7 +32,7 @@ pub const KeepWaiting = struct {
     }
 };
 
-/// Ports `common_file_lock` (file-lock.h:8 @cd959bae9): `flock` on a file
+/// Ports `common_file_lock` (file-lock.h:8 @b1b770d90): `flock` on a file
 /// opened lazily, so a read-only cache works if the lock is never acquired.
 pub const FileLock = struct {
     a: Allocator,
@@ -40,14 +40,14 @@ pub const FileLock = struct {
     fd: c_int = -1,
     locked: bool = false,
 
-    /// `status` (file-lock.h:24 @cd959bae9).
+    /// `status` (file-lock.h:24 @b1b770d90).
     const Status = enum {
         acquired,
         busy, // another process holds the lock
         err, // file locking is unavailable: no exclusion is possible
     };
 
-    /// Ports `common_file_lock` (file-lock.cpp:26 @cd959bae9), the
+    /// Ports `common_file_lock` (file-lock.cpp:26 @b1b770d90), the
     /// constructor.
     ///
     /// Parameters:
@@ -57,12 +57,12 @@ pub const FileLock = struct {
     }
 
     /// Ports the destructor of `common_file_lock` (file-lock.cpp:177
-    /// @cd959bae9).
+    /// @b1b770d90).
     pub fn deinit(self: *FileLock) void {
         self.close();
     }
 
-    /// Ports `try_lock` (file-lock.cpp:68 @cd959bae9), a member of
+    /// Ports `try_lock` (file-lock.cpp:68 @b1b770d90), a member of
     /// `common_file_lock`.
     fn tryLock(self: *FileLock) Allocator.Error!Status {
         const func = "try_lock";
@@ -96,7 +96,7 @@ pub const FileLock = struct {
         return .err;
     }
 
-    /// Ports `acquire` (file-lock.cpp:124 @cd959bae9), a member of
+    /// Ports `acquire` (file-lock.cpp:124 @b1b770d90), a member of
     /// `common_file_lock`: takes the lock, waiting while another process
     /// holds it; `keep_waiting` is polled before each retry, false cancels
     /// the wait.
@@ -132,7 +132,7 @@ pub const FileLock = struct {
         }
     }
 
-    /// Ports `close` (file-lock.cpp:156 @cd959bae9), a member of
+    /// Ports `close` (file-lock.cpp:156 @b1b770d90), a member of
     /// `common_file_lock`. The lock file is never deleted: another process
     /// could then create a fresh file at the same path and lock that.
     pub fn close(self: *FileLock) void {

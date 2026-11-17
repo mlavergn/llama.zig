@@ -348,6 +348,11 @@ fn extraSizes(kind: image.Kind) []const [2]c_int {
         // an overview edge at 14.5 * 28, where half to even and std::round
         // part
         .minicpm_ocr_1_0 => &.{ .{ 170, 140 }, .{ 140, 170 } },
+        // v1.0.0: past the 512-patch side limit at 14 and 16 (7168 and 8192
+        // pixels) on either edge, exactly on it, an image the budget leaves
+        // unscaled (the copy path), edges under one patch and a scale that
+        // truncates an edge to 0 (the max then keeps it at 1)
+        .kimik25 => &.{ .{ 9000, 20 }, .{ 20, 9000 }, .{ 7168, 14 }, .{ 8192, 16 }, .{ 28, 28 }, .{ 56, 84 }, .{ 13, 13 }, .{ 1, 1 }, .{ 9000, 1 }, .{ 1, 9000 }, .{ 2048, 1536 } },
         else => &.{},
     };
 }
@@ -548,6 +553,22 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 h.image_pad_color_rf = .{ 0, 128, 255, 0 };
                 setCandidates(&h, &.{ .{ 384, 768 }, .{ 768, 384 }, .{ 768, 768 }, .{ 1152, 384 }, .{ 384, 1152 } });
                 try out.append(gpa, .{ h, .granite4_vision, "granite" });
+            };
+        },
+        .kimik25 => {
+            // v1.0.0, Kimi-K2.5 / K3.1: patch 14 (K2.5) and 16, merges 1, 2
+            // and 4, a patch budget below and above the test sizes and one
+            // past every size, each resize algorithm and torchvision's
+            for ([_]i32{ 14, 16 }) |ps| for ([_]i32{ 1, 2, 4 }) |merge| for ([_]i32{ 16, 1024, 16384, 1 << 20 }) |np| for ([_]i32{ 0, 1, 2, torch | 0, torch | 1 }) |algo| {
+                var h = base;
+                h.patch_size = ps;
+                h.n_merge = merge;
+                h.image_max_pixels = np * ps * ps;
+                h.image_resize_algo = algo;
+                // ignored: the canvas is padded with black
+                h.image_resize_pad = 1;
+                h.image_pad_color = .{ 200, 100, 50, 0 };
+                try out.append(gpa, .{ h, if (ps == 14) .kimik25 else .kimik31, "kimik25" });
             };
         },
         .muse_glimmer => {
@@ -1005,6 +1026,7 @@ fn runDeaths() !void {
         .{ "unknown torch algo", "unsupported resize algo: 3", .fixed_size, .{ .image_size = 224, .patch_size = 14, .image_resize_algo = torch | 3 } },
         .{ "dyn_size pixels", "hparams.image_min_pixels > 0", .dyn_size, .{ .patch_size = 14, .image_min_pixels = 0, .image_max_pixels = 1024 } },
         .{ "longest_edge unset", "hparams.image_longest_edge > 0", .longest_edge, .{ .patch_size = 14 } },
+        .{ "kimik25 pixels", "hparams.image_max_pixels > 0", .kimik25, .{ .patch_size = 14, .n_merge = 2, .image_max_pixels = -1 } },
     }) |d| {
         const ref = try inChild(refDie, .{ d[2], &d[3], rgb, 64, 48 });
         const port = try inChild(portDie, .{ d[2], &d[3], rgb, 64, 48 });

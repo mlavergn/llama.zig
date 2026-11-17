@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/mistral3.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/mistral3.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_mistral3`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `input_t_cond`, and its `graph`.
 
@@ -25,7 +25,7 @@ const Tensor = c.ggml_tensor;
 const Ubatch = batch.Ubatch;
 const allocator = impl.allocator;
 
-/// Ports `llama_model_mistral3`'s `load_arch_hparams` (models/mistral3.cpp:3 @cd959bae9).
+/// Ports `llama_model_mistral3`'s `load_arch_hparams` (models/mistral3.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -57,7 +57,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_mistral3`'s `load_arch_tensors` (models/mistral3.cpp:31 @cd959bae9).
+/// Ports `llama_model_mistral3`'s `load_arch_tensors` (models/mistral3.cpp:31 @b1b770d90).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -132,14 +132,14 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// Ports `llama_model_mistral3`'s `input_t_cond` (models/mistral3.cpp:99
-/// @cd959bae9): the sinusoidal embedding of the output delay, constant for
+/// @b1b770d90): the sinusoidal embedding of the output delay, constant for
 /// the whole session.
 const InputTCond = struct {
     /// F32 `[n_embd]`.
     t_cond: ?*Tensor = null,
     data: []f32,
 
-    /// `input_t_cond`'s constructor (models/mistral3.cpp:101 @cd959bae9).
+    /// `input_t_cond`'s constructor (models/mistral3.cpp:101 @b1b770d90).
     fn create(n_delay: u32, n_embd: i64) *InputTCond {
         const self = allocator.create(InputTCond) catch oom();
         const data = allocator.alloc(f32, @intCast(n_embd)) catch oom();
@@ -161,12 +161,12 @@ const InputTCond = struct {
         allocator.free(self.data);
     }
 
-    /// `input_t_cond`'s `set_input` (models/mistral3.cpp:110 @cd959bae9).
+    /// `input_t_cond`'s `set_input` (models/mistral3.cpp:110 @b1b770d90).
     pub fn setInput(self: *InputTCond, _: ?*const Ubatch) void {
         c.ggml_backend_tensor_set(self.t_cond, self.data.ptr, 0, c.ggml_nbytes(self.t_cond));
     }
 
-    /// `input_t_cond`'s `can_reuse` (models/mistral3.cpp:116 @cd959bae9):
+    /// `input_t_cond`'s `can_reuse` (models/mistral3.cpp:116 @b1b770d90):
     /// the input does not depend on the batch.
     pub fn canReuse(_: *InputTCond, _: *const graph.Params) bool {
         return true;
@@ -198,8 +198,8 @@ fn sinCos(x: f64) Double2 {
 }
 
 /// Ports `llama_model_mistral3`'s `build_arch_graph` (models/mistral3.cpp:126
-/// @cd959bae9) and the constructor of its `graph` (models/mistral3.cpp:130
-/// @cd959bae9).
+/// @b1b770d90) and the constructor of its `graph` (models/mistral3.cpp:130
+/// @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -247,17 +247,14 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 
         // Self-attention.
         {
-            // Llama 3's RoPE frequency factors; null for Llama 2 and others.
-            const rope_factors = model.getRopeFactors(b.cparams, @intCast(il));
-
             // Q, K and V, and RoPE on Q and K.
             const qkv = b.buildQkv(layer, cur, n_embd_head, b.n_head, b.n_head_kv, il);
             var Qcur = qkv.q;
             var Kcur = qkv.k;
             const Vcur = qkv.v;
 
-            Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
 
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);

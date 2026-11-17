@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/muse-glimmer.cpp` (llama.cpp v0.9.0,
-//! `cd959bae9`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/muse-glimmer.cpp` (llama.cpp v1.0.0,
+//! `b1b770d90`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -146,7 +146,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_muse_glimmer` (parsers/muse-glimmer.cpp:10 @cd959bae9).
+/// Ports `common_chat_params_init_muse_glimmer` (parsers/muse-glimmer.cpp:10 @b1b770d90).
 /// The generation prompt is just `<|start|>assistant`; the model emits its
 /// own ` to=...<|message|>`.
 ///

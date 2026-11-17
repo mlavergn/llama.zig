@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/lfm2.cpp` (llama.cpp v0.9.0,
-//! `cd959bae9`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/lfm2.cpp` (llama.cpp v1.0.0,
+//! `b1b770d90`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -34,7 +34,7 @@ const think_start = "<think>";
 const think_end = "</think>";
 const gen_prompt = "<|im_start|>assistant\n";
 
-/// Ports `is_lfm2_template` (parsers/lfm2.cpp:5 @cd959bae9): the tool list wrapped
+/// Ports `is_lfm2_template` (parsers/lfm2.cpp:5 @b1b770d90): the tool list wrapped
 /// in `<|tool_list_start|>` and `<|tool_list_end|>`.
 pub fn isLfm2Template(src: []const u8) bool {
     return util.contains(src, "<|tool_list_start|>") and util.contains(src, "<|tool_list_end|>");
@@ -72,7 +72,7 @@ const Build = struct {
     }
 };
 
-/// Ports `common_chat_params_init_lfm2` (parsers/lfm2.cpp:14 @cd959bae9).
+/// Ports `common_chat_params_init_lfm2` (parsers/lfm2.cpp:14 @b1b770d90).
 /// `tool_list_tokens` preserves LFM2's system tool-list markers; LFM2.5
 /// renders without them.
 ///

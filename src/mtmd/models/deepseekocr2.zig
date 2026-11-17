@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/deepseekocr2.cpp` at v0.9.0
-//! (`cd959bae9`).
+//! Ports `llama.cpp/tools/mtmd/models/deepseekocr2.cpp` at v1.0.0
+//! (`b1b770d90`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -18,14 +18,14 @@ const T = graph.T;
 const ne = graph.ne;
 const nb = graph.nb;
 
-/// The `add_rope` lambda (deepseekocr2.cpp:48 @cd959bae9) of `build`.
+/// The `add_rope` lambda (deepseekocr2.cpp:48 @b1b770d90) of `build`.
 fn addRope(ctx: ?*anyopaque, g: *graph.Graph, x: T, layer: *const model_mod.Layer) T {
     _ = layer;
     const inp_pos: *T = @ptrCast(@alignCast(ctx.?));
     return c.ggml_rope_ext(g.ctx0, x, inp_pos.*, null, g.d_head, c.GGML_ROPE_TYPE_NEOX, 131072, 1000000, 1, 0, 1, 0, 0);
 }
 
-/// Ports `build` (deepseekocr2.cpp:3 @cd959bae9), a member of `clip_graph_deepseekocr2`.
+/// Ports `build` (deepseekocr2.cpp:3 @b1b770d90), a member of `mtmd_graph_deepseekocr2`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

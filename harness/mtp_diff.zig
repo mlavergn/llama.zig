@@ -66,9 +66,8 @@ const P = struct {
     pub const llama_batch_ext_set_output_logits = api.batch.llama_batch_ext_set_output_logits;
 };
 
-/// The C++, under the C names. The next-token embedding calls are in
-/// `llama-ext.h`, which has C++ linkage, so they are reached by their
-/// mangled names, taken from `nm` on `libllama-ref.a`.
+/// The C++, under the C names. The next-token embedding calls moved from
+/// `llama-ext.h` into `llama.h` at v1.0.0, so they are C symbols too.
 const R = struct {
     pub const llama_model_load_from_file = c.llama_model_load_from_file;
     pub const llama_model_free = c.llama_model_free;
@@ -92,8 +91,8 @@ const R = struct {
     pub const llama_batch_ext_set_pos = c.llama_batch_ext_set_pos;
     pub const llama_batch_ext_set_embd_state = c.llama_batch_ext_set_embd_state;
     pub const llama_batch_ext_set_output_logits = c.llama_batch_ext_set_output_logits;
-    pub const llama_set_embeddings_nextn = @extern(*const fn (?*c.struct_llama_context, bool, bool) callconv(.c) void, .{ .name = "_Z26llama_set_embeddings_nextnP13llama_contextbb" });
-    pub const llama_get_embeddings_nextn_ith = @extern(*const fn (?*c.struct_llama_context, i32) callconv(.c) ?[*]f32, .{ .name = "_Z30llama_get_embeddings_nextn_ithP13llama_contexti" });
+    pub const llama_set_embeddings_nextn = c.llama_set_embeddings_nextn;
+    pub const llama_get_embeddings_nextn_ith = c.llama_get_embeddings_nextn_ith;
 };
 
 // -----------------------------------------------------------------------------

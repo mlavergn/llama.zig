@@ -12,7 +12,7 @@ MM="$ROOT/zig-out/mmproj-fixtures"
 h="$DATA/hub"
 mkdir -p "$h/files" "$h/repos/test/tiny" "$h/repos/test/vision" "$h/repos/test/split" \
          "$h/repos/test/empty" "$h/repos/test/preset" "$h/repos/test/nested/sub" "$h/repos/test/badref"
-for n in tiny tiny2 tiny3 tiny4 tiny5 tiny6 tiny7 p1 p2 p3 p4 p5 p6 r1 r2 r3 lk rd1 rd2 rd3 rd4; do cp "$FIX" "$h/files/$n.gguf"; done
+for n in tiny tiny2 tiny3 tiny4 tiny5 tiny6 tiny7 p1 p2 p3 p4 p5 p6 r1 r2 r3 lk rd1 rd2 rd3 rd4 tk1 tk2 tk3; do cp "$FIX" "$h/files/$n.gguf"; done
 cp "$MM/gemma3.gguf" "$h/files/mmproj.gguf"
 cp "$FIX" "$h/files/parts-00001-of-00002.gguf"
 cp "$FIX" "$h/files/parts-00002-of-00002.gguf"

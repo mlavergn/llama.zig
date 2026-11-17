@@ -3,14 +3,14 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/qwen3tts-gen.cpp` at v0.9.0
-//! (`cd959bae9`), and the `PROJECTOR_TYPE_QWEN3TTS_GEN` arm of
-//! `clip_get_graph_builder` (`llama.cpp/tools/mtmd/clip.cpp`). Each
+//! Ports `llama.cpp/tools/mtmd/models/qwen3tts-gen.cpp` at v1.0.0
+//! (`b1b770d90`), and the `PROJECTOR_TYPE_QWEN3TTS_GEN` arm of
+//! `mtmd_get_graph_builder` (`llama.cpp/tools/mtmd/mtmd-graph.cpp`). Each
 //! declaration names what it ports and the line it began at.
 //!
 //! # The nested builders
 //!
-//! Upstream's `code_gen` and `code2wav` are `clip_graph`s copied from the
+//! Upstream's `code_gen` and `code2wav` are `mtmd_graph`s copied from the
 //! parent, sharing its context and graph; here each holds a
 //! `graph.Graph.initChild` of the parent. `code2wav::state_in` is a
 //! `std::map` read only through `at()`, so a hash map stands in;
@@ -42,18 +42,18 @@ fn mapAt(m: *const std.StringHashMapUnmanaged(T), key: []const u8) T {
     return m.get(key) orelse impl.abortUncaught("std::out_of_range", "map::at:  key not found");
 }
 
-/// Ports `code_gen` (mtmd/models/models.h:362 @cd959bae9), nested in
-/// `clip_graph_qwen3tts_gen`: the
+/// Ports `code_gen` (mtmd/models/models.h:371 @b1b770d90), nested in
+/// `mtmd_graph_qwen3tts_gen`: the
 /// MTP-style code predictor, one token per codebook.
-const CodeGen = struct {
+pub const CodeGen = struct {
     g: graph.Graph,
     top_k: c_int,
     top_p: f32,
 
-    /// Ports `do_sampling` (qwen3tts-gen.cpp:6 @cd959bae9), a member of
-    /// `clip_graph_qwen3tts_gen::code_gen`: top-k, top-p, then a random draw,
+    /// Ports `do_sampling` (qwen3tts-gen.cpp:6 @b1b770d90), a member of
+    /// `mtmd_graph_qwen3tts_gen::code_gen`: top-k, top-p, then a random draw,
     /// all on the device.
-    fn doSampling(self: *const CodeGen, logits_in: T, inp_rand: T) T {
+    pub fn doSampling(self: *const CodeGen, logits_in: T, inp_rand: T) T {
         const ctx0 = self.g.ctx0;
         const logits = c.ggml_reshape_1d(ctx0, logits_in, c.ggml_nelements(logits_in));
         const n_vocab = ne(logits, 0);
@@ -119,10 +119,10 @@ const CodeGen = struct {
         return c.ggml_reshape_1d(ctx0, c.ggml_get_rows(ctx0, a2d, idx), ne(idx, 0));
     }
 
-    /// Ports `cache_set` (qwen3tts-gen.cpp:71 @cd959bae9), a member of
-    /// `clip_graph_qwen3tts_gen::code_gen`: a new cache with row `row_idx`
+    /// Ports `cache_set` (qwen3tts-gen.cpp:71 @b1b770d90), a member of
+    /// `mtmd_graph_qwen3tts_gen::code_gen`: a new cache with row `row_idx`
     /// set to `value`.
-    fn cacheSet(self: *const CodeGen, cache: T, row_idx: c_int, value: T) T {
+    pub fn cacheSet(self: *const CodeGen, cache: T, row_idx: c_int, value: T) T {
         const ctx0 = self.g.ctx0;
         const n_embd = ne(cache, 0);
         const n_cache = ne(cache, 1);
@@ -148,8 +148,8 @@ const CodeGen = struct {
         return result;
     }
 
-    /// Ports `const_i32` (qwen3tts-gen.cpp:98 @cd959bae9), a member of
-    /// `clip_graph_qwen3tts_gen::code_gen`: a constant with no host upload.
+    /// Ports `const_i32` (qwen3tts-gen.cpp:98 @b1b770d90), a member of
+    /// `mtmd_graph_qwen3tts_gen::code_gen`: a constant with no host upload.
     fn constI32(self: *const CodeGen, anchor: T, value: f32) T {
         const ctx0 = self.g.ctx0;
         var v = c.ggml_view_1d(ctx0, anchor, 1, 0);
@@ -157,8 +157,8 @@ const CodeGen = struct {
         return c.ggml_cast(ctx0, c.ggml_scale_bias(ctx0, v, 0.0, value), c.GGML_TYPE_I32);
     }
 
-    /// Ports `causal_mask_row` (qwen3tts-gen.cpp:107 @cd959bae9), a member of
-    /// `clip_graph_qwen3tts_gen::code_gen`.
+    /// Ports `causal_mask_row` (qwen3tts-gen.cpp:107 @b1b770d90), a member of
+    /// `mtmd_graph_qwen3tts_gen::code_gen`.
     fn causalMaskRow(self: *const CodeGen, n_kv_pad: i64, pos: c_int) T {
         const ctx0 = self.g.ctx0;
         const ones = c.ggml_fill(ctx0, c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_F32, n_kv_pad, n_kv_pad), 1.0);
@@ -170,8 +170,8 @@ const CodeGen = struct {
         return mask;
     }
 
-    /// Ports `project_in` (qwen3tts-gen.cpp:120 @cd959bae9), a member of
-    /// `clip_graph_qwen3tts_gen::code_gen`: talker hidden size to predictor
+    /// Ports `project_in` (qwen3tts-gen.cpp:120 @b1b770d90), a member of
+    /// `mtmd_graph_qwen3tts_gen::code_gen`: talker hidden size to predictor
     /// hidden size.
     fn projectIn(self: *const CodeGen, cur_in: T) T {
         const model = self.g.model;
@@ -181,8 +181,8 @@ const CodeGen = struct {
         return cur;
     }
 
-    /// Ports `layer_forward` (qwen3tts-gen.cpp:132 @cd959bae9), a member of
-    /// `clip_graph_qwen3tts_gen::code_gen`: one layer at position `pos`,
+    /// Ports `layer_forward` (qwen3tts-gen.cpp:132 @b1b770d90), a member of
+    /// `mtmd_graph_qwen3tts_gen::code_gen`: one layer at position `pos`,
     /// writing k/v into the caches at row `pos`.
     fn layerForward(self: *const CodeGen, cur_in: T, layer: *const model_mod.Layer, inp_pos: T, kq_mask: T, k_cache_layer: *T, v_cache_layer: *T, n_kv_pad: i64, pos: c_int, il: c_int) T {
         const ctx0 = self.g.ctx0;
@@ -237,8 +237,8 @@ const CodeGen = struct {
         return cur;
     }
 
-    /// Ports `prefill` (qwen3tts-gen.cpp:195 @cd959bae9), a member of
-    /// `clip_graph_qwen3tts_gen::code_gen`: position 0 seeds the cache from
+    /// Ports `prefill` (qwen3tts-gen.cpp:195 @b1b770d90), a member of
+    /// `mtmd_graph_qwen3tts_gen::code_gen`: position 0 seeds the cache from
     /// the hidden state; position 1 embeds code0 and samples codebook 1.
     fn prefill(self: *const CodeGen, k_cache: []T, v_cache: []T, out_code_cache: *T, h_state: T, code0_embd: T, inp_rand: T) void {
         const ctx0 = self.g.ctx0;
@@ -276,8 +276,8 @@ const CodeGen = struct {
         }
     }
 
-    /// Ports `step` (qwen3tts-gen.cpp:240 @cd959bae9), a member of
-    /// `clip_graph_qwen3tts_gen::code_gen`: one decode step of the code
+    /// Ports `step` (qwen3tts-gen.cpp:240 @b1b770d90), a member of
+    /// `mtmd_graph_qwen3tts_gen::code_gen`: one decode step of the code
     /// predictor, `step_idx` in [1, n_acoustic - 1].
     fn step(self: *const CodeGen, k_cache: []T, v_cache: []T, out_code_cache: T, inp_rand: T, step_idx: c_int) T {
         const ctx0 = self.g.ctx0;
@@ -328,29 +328,32 @@ const CodeGen = struct {
 };
 
 /// One `state_out` entry: a slot name and the tensor holding its new state.
-const StateOut = struct { name: [:0]const u8, t: T };
+pub const StateOut = struct { name: [:0]const u8, t: T };
 
-/// `DAC_DILATIONS` (qwen3tts-gen.cpp:588 @cd959bae9).
-const dac_dilations = [3]c_int{ 1, 3, 9 };
+/// `DAC_DILATIONS` (qwen3tts-gen.cpp:588 @b1b770d90).
+pub const dac_dilations = [3]c_int{ 1, 3, 9 };
 
-/// Ports `code2wav` (mtmd/models/models.h:407 @cd959bae9), nested in
-/// `clip_graph_qwen3tts_gen`: RVQ
+/// Ports `code2wav` (mtmd/models/models.h:416 @b1b770d90), nested in
+/// `mtmd_graph_qwen3tts_gen`: RVQ
 /// codes to raw PCM (quantizer, pre_conv, pre_transformer, upsample, DAC).
-const Code2Wav = struct {
+pub const Code2Wav = struct {
     g: graph.Graph,
     /// for the names built per call; freed with the builder
     arena: std.mem.Allocator,
     state_in: std.StringHashMapUnmanaged(T) = .empty,
     state_out: std.ArrayList(StateOut) = .empty,
+    /// Ports `gelu_erf` (mtmd/models/models.h:437 @b1b770d90). drama3: erf
+    /// GELU in ConvNeXt, not the tanh approximation.
+    gelu_erf: bool = false,
 
     fn pushState(self: *Code2Wav, name: [:0]const u8, t: T) void {
         self.state_out.append(self.arena, .{ .name = name, .t = t }) catch impl.abort("qwen3tts-gen.cpp", 0, "out of memory");
     }
 
-    /// Ports `causal_conv1d` (qwen3tts-gen.cpp:293 @cd959bae9), a member of
-    /// `clip_graph_qwen3tts_gen::code2wav`: stride 1, prepending the
+    /// Ports `causal_conv1d` (qwen3tts-gen.cpp:293 @b1b770d90), a member of
+    /// `mtmd_graph_qwen3tts_gen::code2wav`: stride 1, prepending the
     /// persisted left context instead of zero padding.
-    fn causalConv1d(self: *Code2Wav, x: T, w: T, b: T, dilation: c_int, state_name: [:0]const u8) T {
+    pub fn causalConv1d(self: *Code2Wav, x: T, w: T, b: T, dilation: c_int, state_name: [:0]const u8) T {
         const ctx0 = self.g.ctx0;
         const K: c_int = @intCast(ne(w, 0));
         const pad = (K - 1) * dilation;
@@ -370,8 +373,8 @@ const Code2Wav = struct {
         return y;
     }
 
-    /// Ports `causal_conv1d_dw` (qwen3tts-gen.cpp:317 @cd959bae9), a member
-    /// of `clip_graph_qwen3tts_gen::code2wav`.
+    /// Ports `causal_conv1d_dw` (qwen3tts-gen.cpp:317 @b1b770d90), a member
+    /// of `mtmd_graph_qwen3tts_gen::code2wav`.
     fn causalConv1dDw(self: *Code2Wav, x: T, w: T, b: T, state_name: [:0]const u8) T {
         const ctx0 = self.g.ctx0;
         const K: c_int = @intCast(ne(w, 0));
@@ -392,10 +395,10 @@ const Code2Wav = struct {
         return y;
     }
 
-    /// Ports `causal_conv_transpose1d` (qwen3tts-gen.cpp:341 @cd959bae9), a
-    /// member of `clip_graph_qwen3tts_gen::code2wav`: the (kernel - stride)
+    /// Ports `causal_conv_transpose1d` (qwen3tts-gen.cpp:341 @b1b770d90), a
+    /// member of `mtmd_graph_qwen3tts_gen::code2wav`: the (kernel - stride)
     /// overlap tail is kept as state for the next call.
-    fn causalConvTranspose1d(self: *Code2Wav, x: T, w: T, b: T, stride: c_int, state_name: [:0]const u8) T {
+    pub fn causalConvTranspose1d(self: *Code2Wav, x: T, w: T, b: T, stride: c_int, state_name: [:0]const u8) T {
         const ctx0 = self.g.ctx0;
         const K: c_int = @intCast(ne(w, 0));
         const OC: c_int = @intCast(ne(w, 1));
@@ -426,10 +429,10 @@ const Code2Wav = struct {
         return out;
     }
 
-    /// Ports `snake` (qwen3tts-gen.cpp:375 @cd959bae9), a member of
-    /// `clip_graph_qwen3tts_gen::code2wav`: SnakeBeta, `x + sin(alpha*x)^2 *
+    /// Ports `snake` (qwen3tts-gen.cpp:375 @b1b770d90), a member of
+    /// `mtmd_graph_qwen3tts_gen::code2wav`: SnakeBeta, `x + sin(alpha*x)^2 *
     /// inv_beta`.
-    fn snake(self: *const Code2Wav, x: T, alpha: T, beta: T) T {
+    pub fn snake(self: *const Code2Wav, x: T, alpha: T, beta: T) T {
         const ctx0 = self.g.ctx0;
         const a = c.ggml_reshape_2d(ctx0, alpha, 1, ne(alpha, 0));
         const b = c.ggml_reshape_2d(ctx0, beta, 1, ne(beta, 0));
@@ -444,8 +447,8 @@ const Code2Wav = struct {
         return c.ggml_add(ctx0, x, s);
     }
 
-    /// Ports `quant_decode` (qwen3tts-gen.cpp:391 @cd959bae9), a member of
-    /// `clip_graph_qwen3tts_gen::code2wav`: T frames of 16 codes to
+    /// Ports `quant_decode` (qwen3tts-gen.cpp:391 @b1b770d90), a member of
+    /// `mtmd_graph_qwen3tts_gen::code2wav`: T frames of 16 codes to
     /// `[512, T]`.
     fn quantDecode(self: *const Code2Wav, inp_codes: T) T {
         const ctx0 = self.g.ctx0;
@@ -477,11 +480,11 @@ const Code2Wav = struct {
         return c.ggml_view_1d(ctx0, inp_codes, Tn, @as(usize, @intCast(g)) * nb(inp_codes, 1));
     }
 
-    /// Ports `tfm_layer_forward` (qwen3tts-gen.cpp:421 @cd959bae9), a member
-    /// of `clip_graph_qwen3tts_gen::code2wav`: one pre_transformer layer over
+    /// Ports `tfm_layer_forward` (qwen3tts-gen.cpp:421 @b1b770d90), a member
+    /// of `mtmd_graph_qwen3tts_gen::code2wav`: one pre_transformer layer over
     /// a batch of N = sliding_window new frames, attending over the (W-1)
     /// frames kept from the last batch.
-    fn tfmLayerForward(self: *Code2Wav, cur_in: T, layer: *const model_mod.Layer, il: c_int) T {
+    pub fn tfmLayerForward(self: *Code2Wav, cur_in: T, layer: *const model_mod.Layer, il: c_int) T {
         const ctx0 = self.g.ctx0;
         const hparams = self.g.hparams;
         const n_head = hparams.wav_tfm_n_head;
@@ -568,10 +571,10 @@ const Code2Wav = struct {
         return cur;
     }
 
-    /// Ports `convnext_block` (qwen3tts-gen.cpp:518 @cd959bae9), a member of
-    /// `clip_graph_qwen3tts_gen::code2wav`: dwconv, LayerNorm, pwconv1, GELU,
+    /// Ports `convnext_block` (qwen3tts-gen.cpp:518 @b1b770d90), a member of
+    /// `mtmd_graph_qwen3tts_gen::code2wav`: dwconv, LayerNorm, pwconv1, GELU,
     /// pwconv2, layer scale, residual.
-    fn convnextBlock(self: *Code2Wav, x: T, blk: *const model_mod.Code2Wav.UpsampleBlock, state_prefix: [:0]const u8) T {
+    pub fn convnextBlock(self: *Code2Wav, x: T, blk: *const model_mod.Code2Wav.UpsampleBlock, state_prefix: [:0]const u8) T {
         const ctx0 = self.g.ctx0;
         const residual = x;
 
@@ -584,7 +587,7 @@ const Code2Wav = struct {
 
         var g = c.ggml_mul_mat(ctx0, blk.pw1_w, hc);
         g = c.ggml_add(ctx0, g, blk.pw1_b);
-        g = c.ggml_gelu(ctx0, g);
+        g = if (self.gelu_erf) c.ggml_gelu_erf(ctx0, g) else c.ggml_gelu(ctx0, g);
         g = c.ggml_mul_mat(ctx0, blk.pw2_w, g);
         g = c.ggml_add(ctx0, g, blk.pw2_b);
         g = c.ggml_mul(ctx0, g, blk.gamma);
@@ -593,9 +596,9 @@ const Code2Wav = struct {
         return c.ggml_add(ctx0, residual, g_t);
     }
 
-    /// Ports `dac_res_unit` (qwen3tts-gen.cpp:541 @cd959bae9), a member of
-    /// `clip_graph_qwen3tts_gen::code2wav`.
-    fn dacResUnit(self: *Code2Wav, x: T, res: *const model_mod.Code2Wav.DacRes, dilation: c_int, state_name: [:0]const u8) T {
+    /// Ports `dac_res_unit` (qwen3tts-gen.cpp:541 @b1b770d90), a member of
+    /// `mtmd_graph_qwen3tts_gen::code2wav`.
+    pub fn dacResUnit(self: *Code2Wav, x: T, res: *const model_mod.Code2Wav.DacRes, dilation: c_int, state_name: [:0]const u8) T {
         const residual = x;
         var h = self.snake(x, res.act1_alpha, res.act1_beta);
         h = self.causalConv1d(h, res.conv1_w, res.conv1_b, dilation, state_name);
@@ -604,8 +607,8 @@ const Code2Wav = struct {
         return c.ggml_add(self.g.ctx0, residual, h);
     }
 
-    /// Ports `decode` (qwen3tts-gen.cpp:551 @cd959bae9), a member of
-    /// `clip_graph_qwen3tts_gen::code2wav`: a batch of N = sliding_window
+    /// Ports `decode` (qwen3tts-gen.cpp:551 @b1b770d90), a member of
+    /// `mtmd_graph_qwen3tts_gen::code2wav`: a batch of N = sliding_window
     /// frames of codes to PCM.
     fn decode(self: *Code2Wav, inp_codes: T) T {
         const ctx0 = self.g.ctx0;
@@ -669,7 +672,7 @@ const Code2Wav = struct {
     }
 };
 
-/// Ports `list_c2w_state_slots` (qwen3tts-gen.cpp:616 @cd959bae9): the
+/// Ports `list_c2w_state_slots` (qwen3tts-gen.cpp:616 @b1b770d90): the
 /// position counter, K/V per pre_transformer layer, and the left context or
 /// tail of each stateful conv. The caller frees the slice with
 /// `module.freeSlots`.
@@ -681,7 +684,7 @@ pub fn listStateSlots(hparams: *const model_mod.Hparams, model: *const model_mod
         slots.deinit(gpa);
     }
 
-    if (c2w.pre_conv_w == null) return slots.toOwnedSlice(gpa); // not a code2wav model, it keeps no state between calls
+    if (c2w.dac_entry_w == null) return slots.toOwnedSlice(gpa); // not a code2wav model, it keeps no state between calls
 
     try slots.append(gpa, .{ .name = try gpa.dupeSentinel(u8, "tfm_pos", 0), .ne0 = 1, .ne1 = 1 });
 
@@ -695,7 +698,9 @@ pub fn listStateSlots(hparams: *const model_mod.Hparams, model: *const model_mod
         try slots.append(gpa, .{ .name = try impl.stringFormat(gpa, "tfm_v_%d", .{il}), .ne0 = kv_ch, .ne1 = prefix });
     }
 
-    try slots.append(gpa, .{ .name = try gpa.dupeSentinel(u8, "pre_conv", 0), .ne0 = ne(c2w.pre_conv_w, 0) - 1, .ne1 = ne(c2w.pre_conv_w, 1) });
+    if (c2w.pre_conv_w != null) {
+        try slots.append(gpa, .{ .name = try gpa.dupeSentinel(u8, "pre_conv", 0), .ne0 = ne(c2w.pre_conv_w, 0) - 1, .ne1 = ne(c2w.pre_conv_w, 1) });
+    }
 
     for (c2w.upsample.items, 0..) |*up, iu| {
         try slots.append(gpa, .{ .name = try impl.stringFormat(gpa, "up%zu_dwconv", .{iu}), .ne0 = ne(up.dwconv_w, 0) - 1, .ne1 = ne(up.dwconv_w, 2) });
@@ -716,10 +721,10 @@ pub fn listStateSlots(hparams: *const model_mod.Hparams, model: *const model_mod
     return slots.toOwnedSlice(gpa);
 }
 
-/// Ports `build` (qwen3tts-gen.cpp:664 @cd959bae9), a member of
-/// `clip_graph_qwen3tts_gen`, with the builder's parameters derived as
-/// clip_get_graph_builder's `PROJECTOR_TYPE_QWEN3TTS_GEN` arm does
-/// (mtmd/clip.cpp:1240 @cd959bae9). Both sub-graphs are always built, so the
+/// Ports `build` (qwen3tts-gen.cpp:666 @b1b770d90), a member of
+/// `mtmd_graph_qwen3tts_gen`, with the builder's parameters derived as
+/// mtmd_get_graph_builder's `PROJECTOR_TYPE_QWEN3TTS_GEN` arm does
+/// (mtmd-graph.cpp:1023 @b1b770d90). Both sub-graphs are always built, so the
 /// topology stays constant; `ggml_build_forward_select` picks the one that
 /// runs.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
@@ -735,18 +740,18 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     const model = g.model;
     const hparams = g.hparams;
 
-    impl.ggmlAssert(g.n_batch == 1, "qwen3tts-gen.cpp", 665, "n_batch == 1"); // this module only ever processes one frame at a time
+    impl.ggmlAssert(g.n_batch == 1, "qwen3tts-gen.cpp", 667, "n_batch == 1"); // this module only ever processes one frame at a time
 
     const idx: c_int = switch (gen_process) {
         .gen_code => 0,
         .gen_wav => 1,
-        else => impl.abort("qwen3tts-gen.cpp", 671, "unknown gen_process"),
+        else => impl.abort("qwen3tts-gen.cpp", 673, "unknown gen_process"),
     };
 
-    // ---- CLIP_GEN_PROCESS_GEN_CODE: backbone hidden state -> 16 RVQ codes + next-step embd ----
+    // ---- MTMD_SUBCTX_GEN_PROCESS_GEN_CODE: backbone hidden state -> 16 RVQ codes + next-step embd ----
     // not build_inp_raw(), a GEN_WAV call's `img` has no hidden-state data
     const h_state = c.ggml_new_tensor_1d(ctx0, c.GGML_TYPE_F32, g.n_mmproj_embd);
-    _ = c.ggml_set_name(h_state, "inp_raw"); // must keep this exact name, clip_encode() sets it by name
+    _ = c.ggml_set_name(h_state, "inp_raw"); // must keep this exact name, mtmd_subcontext::encode() sets it by name
     c.ggml_set_input(h_state);
 
     const code0 = c.ggml_new_tensor_1d(ctx0, c.GGML_TYPE_I32, 1);
@@ -813,7 +818,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     out_embd = c.ggml_reshape_2d(ctx0, out_embd, ne(out_embd, 0), 1);
     g.cb(out_embd, "gen_audio_out", -1);
 
-    // ---- CLIP_GEN_PROCESS_GEN_WAV: 16 RVQ codes -> raw PCM ----
+    // ---- MTMD_SUBCTX_GEN_PROCESS_GEN_WAV: 16 RVQ codes -> raw PCM ----
     const n_frames: i64 = hparams.wav_tfm_swa; // frames per batch, == the attention window
 
     const inp_codes = c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_I32, n_frames, n_codes);
@@ -839,7 +844,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         c.ggml_set_output(slot.t);
     }
 
-    // out_embd goes last, clip_encode() reads it back via ggml_graph_node(gf, -1)
+    // out_embd goes last, mtmd_subcontext::encode() reads it back via ggml_graph_node(gf, -1)
     var outs: [2]?*c.ggml_tensor = .{ out_codes, out_audio };
     _ = c.ggml_build_forward_select(g.gf, &outs, 2, idx);
     for (c2w.state_out.items) |slot| {

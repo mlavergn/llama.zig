@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/smollm3.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/smollm3.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_smollm3`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -19,11 +19,15 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_smollm3`'s `load_arch_hparams` (models/smollm3.cpp:3 @cd959bae9).
+/// Ports `llama_model_smollm3`'s `load_arch_hparams` (models/smollm3.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
     hp.n_no_rope_layer_step = 4;
+    var il: u32 = 0;
+    while (il < hp.n_layer_all) : (il += 1) {
+        hp.rope_pattern[il] = @intFromBool((il + 1) % hp.n_no_rope_layer_step != 0);
+    }
 
     self.type = switch (hp.nLayer()) {
         36 => .@"3b",
@@ -31,7 +35,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_smollm3`'s `load_arch_tensors` (models/smollm3.cpp:13 @cd959bae9).
+/// Ports `llama_model_smollm3`'s `load_arch_tensors` (models/smollm3.cpp:16 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -64,16 +68,16 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_smollm3`'s `build_arch_graph` (models/smollm3.cpp:42
-/// @cd959bae9) and the constructor of its `graph` (models/smollm3.cpp:46
-/// @cd959bae9).
+/// Ports `llama_model_smollm3`'s `build_arch_graph` (models/smollm3.cpp:45
+/// @b1b770d90) and the constructor of its `graph` (models/smollm3.cpp:49
+/// @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/smollm3.cpp", 49, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/smollm3.cpp", 50, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/smollm3.cpp", 52, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/smollm3.cpp", 53, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -92,8 +96,6 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
         var inpSA = inpL;
 
         // The C++ takes the modulus unsigned, as `n_no_rope_layer_step` is.
-        const use_rope = @as(u32, @intCast(il + 1)) % hp.n_no_rope_layer_step != 0;
-
         // Norm.
         var cur = b.buildNorm(inpL, layer.attn_norm, null, .rms, il);
         b.cb(cur, "attn_norm", il);
@@ -106,10 +108,8 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
             var Kcur = qkv.k;
             const Vcur = qkv.v;
 
-            if (use_rope) {
-                Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-                Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            }
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);
             b.cb(Vcur, "Vcur", il);

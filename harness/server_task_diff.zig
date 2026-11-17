@@ -384,7 +384,7 @@ fn runResult(j: *const Value) !void {
         r = try result.Result.create(gpa, .realtime);
         holder = r;
         const a = r.alloc();
-        r.kind.realtime.text = try a.dupe(u8, try f.value("text", []const u8, ""));
+        r.kind.realtime.content = try chat.input.Input.fromText(a, try f.value("text", []const u8, ""));
         r.kind.realtime.audio = if (f.contains("audio")) try (try f.at("audio")).getSlice(a, f32) else &.{};
         r.kind.realtime.response_done = try f.value("response_done", bool, false);
         r.kind.realtime.cancelled = try f.value("cancelled", bool, false);
@@ -711,6 +711,12 @@ fn runOp(op: []const u8, j: *Value) !void {
         try guarded(opTS(j));
     } else if (std.mem.eql(u8, op, "RC")) {
         try guarded(opRC(j));
+    } else if (std.mem.eql(u8, op, "SP")) {
+        try guarded(opSP(j));
+    } else if (std.mem.eql(u8, op, "PCM")) {
+        try guarded(opPCM(j));
+    } else if (std.mem.eql(u8, op, "AP")) {
+        try guarded(opAP(j));
     } else if (std.mem.eql(u8, op, "AC")) {
         try guarded(opAC(j));
     } else if (std.mem.eql(u8, op, "TC")) {
@@ -910,8 +916,46 @@ fn opTS(j: *Value) !void {
     try o.put("repeat", t.params.sampling.penalty_repeat);
     try o.put("stream", t.params.stream);
     try o.put("sampling_seed", t.params.sampling.seed);
+    try o.put("temp", t.tts_inp.data.temp);
     var v = o.done();
     try str("tts_params", try dumpV(&v));
+}
+
+/// v1.0.0: `convert_speech_to_tts`, the OpenAI speech API's body as /tts's.
+fn opSP(j: *Value) !void {
+    try str("conv", try dumpV(&(try sd.convert.speechToTts(ra(), j))));
+}
+
+/// v1.0.0: `pcm_f32_to_s16` over the samples' bits (`f`, hex of each f32).
+fn opPCM(j: *Value) !void {
+    var samples: std.ArrayList(f32) = .empty;
+    var it = (try j.at("f")).items();
+    while (it.next()) |h| {
+        const bits = try std.fmt.parseInt(u32, try h.value.get([]const u8), 16);
+        try samples.append(ra(), @bitCast(bits));
+    }
+    const bytes = try common.pcmF32ToS16(ra(), samples.items);
+    try str("pcm16", try hexOf(bytes));
+}
+
+/// v1.0.0: `server_addr_is_public` over each address of `a`.
+fn opAP(j: *Value) !void {
+    var res: std.ArrayList(u8) = .empty;
+    var it = (try j.at("a")).items();
+    while (it.next()) |h| {
+        try res.append(ra(), if (sd.oaicompat.serverAddrIsPublic(try h.value.get([]const u8))) '1' else '0');
+    }
+    try str("public", res.items);
+}
+
+fn hexOf(bytes: []const u8) ![]const u8 {
+    const hex = try ra().alloc(u8, bytes.len * 2);
+    const digits = "0123456789abcdef";
+    for (bytes, 0..) |b, i| {
+        hex[2 * i] = digits[b >> 4];
+        hex[2 * i + 1] = digits[b & 15];
+    }
+    return hex;
 }
 
 fn opRC(j: *Value) !void {
@@ -1047,8 +1091,8 @@ fn opQ(j: *Value) !void {
     const m = vocab_models.items[try j.value("v", usize, 0)];
     var qf: std.ArrayList([]u8) = .empty;
     var df: std.ArrayList([]u8) = .empty;
-    for (0..try j.value("n_qf", usize, 0)) |_| try oaicompat.handleMedia(ra(), &qf, try (try j.at("media")).get([]const u8), "");
-    for (0..try j.value("n_df", usize, 0)) |_| try oaicompat.handleMedia(ra(), &df, try (try j.at("media")).get([]const u8), "");
+    for (0..try j.value("n_qf", usize, 0)) |_| try oaicompat.handleMedia(ra(), &qf, try (try j.at("media")).get([]const u8), "", false);
+    for (0..try j.value("n_df", usize, 0)) |_| try oaicompat.handleMedia(ra(), &df, try (try j.at("media")).get([]const u8), "", false);
     const qs = try ra().alloc([]const u8, qf.items.len);
     for (qf.items, 0..) |f, i| qs[i] = f;
     const ds = try ra().alloc([]const u8, df.items.len);
@@ -1123,7 +1167,15 @@ fn pcOp(cache: *task.PromptCache, cur: *task.ServerPrompt, o: *Value) !void {
             while (sit.next()) |sz| {
                 const data = try gpa.alloc(u8, try sz.value.get(usize));
                 @memset(data, 0);
-                try p.checkpoints.append(gpa, .{ .data_tgt = data });
+                const ck = task.CheckpointRef.create(gpa) catch |e| {
+                    gpa.free(data);
+                    return e;
+                };
+                ck.ck.data_tgt = data;
+                p.checkpoints.append(gpa, ck) catch |e| {
+                    ck.release();
+                    return e;
+                };
             }
         }
         const st = try cache.alloc(&p, try (try o.atIndex(2)).get(usize), try (try o.atIndex(3)).get(usize));

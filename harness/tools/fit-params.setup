@@ -1,0 +1,11 @@
+#!/bin/bash
+# Writes fit-params' inputs into $DATA: llama-dense split in two by upstream's
+# gguf-split, renamed so the second file is not found by the split naming,
+# for v1.0.0's --ple/--shard (5f490d7bf), which the fit loads through
+# llama_model_load_from_splits. Run by scripts/tools-diff.
+set -eu
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$DATA"
+"$ROOT/zig-out/tools-ref/bin/llama-gguf-split" --split-max-tensors 34 "$ROOT/zig-out/arch-fixtures/llama-dense.gguf" lm >/dev/null 2>&1
+mv lm-00001-of-00002.gguf main.gguf
+mv lm-00002-of-00002.gguf shard.gguf

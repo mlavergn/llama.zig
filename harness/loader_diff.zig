@@ -23,7 +23,9 @@
 //! Inputs are upstream's vocabulary files, any Qwen3.5 model present, and
 //! files synthesized into the directory given: Qwen3.5's metadata without
 //! its tensors and edited one key at a time, small files with real tensors
-//! for the type guess and the bounds check, and split sets.
+//! for the type guess and the bounds check, and split sets -- since v1.0.0
+//! also given as `llama_model_load_from_splits`' paths, with extra shards
+//! and external per-layer embedding tables appended (5f490d7bf).
 //!
 //! Usage: loader_diff <tmpdir> <file.gguf>...
 
@@ -36,7 +38,7 @@ const M = harness_root.model;
 
 const gpa = std.heap.c_allocator;
 
-extern fn ref_load_metadata(path: [*:0]const u8, overrides: ?[*]const c.llama_model_kv_override, vocab_only: c_int, what: [*]u8, n: usize) ?*c.llama_model;
+extern fn ref_load_metadata(path: [*:0]const u8, split_paths: [*]const [*:0]const u8, n_split_paths: c_int, overrides: ?[*]const c.llama_model_kv_override, vocab_only: c_int, what: [*]u8, n: usize) ?*c.llama_model;
 extern fn ref_free(model: *c.llama_model) void;
 extern fn ref_hparams(model: *const c.llama_model) *const anyopaque;
 extern fn ref_type(model: *const c.llama_model) c_int;
@@ -164,6 +166,9 @@ const Case = struct {
     path: [:0]const u8,
     vocab_only: bool,
     overrides: []const c.llama_model_kv_override = &.{},
+    /// The paths `llama_model_load_from_splits` would be given, `path`
+    /// first; empty for `llama_model_load_from_file`.
+    splits: []const [:0]const u8 = &.{},
 };
 
 const Tally = struct {
@@ -193,7 +198,9 @@ fn runCase(cs: Case) void {
     // Reference.
     var what: [1024]u8 = undefined;
     log_target = &ref_log;
-    const ref_model = ref_load_metadata(cs.path.ptr, ovr_ptr, @intFromBool(cs.vocab_only), &what, what.len);
+    var split_ptrs: [8][*:0]const u8 = undefined;
+    for (cs.splits, 0..) |sp, i| split_ptrs[i] = sp.ptr;
+    const ref_model = ref_load_metadata(cs.path.ptr, &split_ptrs, @intCast(cs.splits.len), ovr_ptr, @intFromBool(cs.vocab_only), &what, what.len);
     defer if (ref_model) |m| ref_free(m);
 
     // Port.
@@ -204,6 +211,7 @@ fn runCase(cs: Case) void {
         for (splits.items) |s| gpa.free(s);
         splits.deinit(gpa);
     }
+    for (cs.splits) |sp| splits.append(gpa, gpa.dupeSentinel(u8, sp, 0) catch unreachable) catch unreachable;
     var params = M.defaultParams();
     params.vocab_only = cs.vocab_only;
     var loaded = M.loadMetadata(.{ .path = cs.path }, &splits, params, ovr_ptr, &exc);
@@ -1049,6 +1057,14 @@ const Qwen = struct {
     fn clsActSilu(ctx: *c.gguf_context) void {
         c.gguf_set_val_str(ctx, "qwen35.classifier.activation", "silu");
     }
+    /// v1.0.0's `<arch>.classifier_free_guidance` (b1c902f02), read for
+    /// every architecture.
+    fn cfgOn(ctx: *c.gguf_context) void {
+        c.gguf_set_val_bool(ctx, "qwen35.classifier_free_guidance", true);
+    }
+    fn cfgAsU32(ctx: *c.gguf_context) void {
+        c.gguf_set_val_u32(ctx, "qwen35.classifier_free_guidance", 1);
+    }
     /// v0.7.0's `<arch>.rope.section_order`, which Qwen3.5's M-RoPE takes.
     fn sectionOrderZyxt(ctx: *c.gguf_context) void {
         c.gguf_set_val_str(ctx, "qwen35.rope.section_order", "zyxt");
@@ -1136,6 +1152,13 @@ const Tensors = struct {
         _ = c.gguf_remove_key(g, "general.file_type");
     }
 
+    /// `tie` with a per-layer embedding table of its own, for an external
+    /// one to replace (v1.0.0, 5f490d7bf).
+    fn withPle(g: *c.gguf_context, ctx: *c.ggml_context) void {
+        tie(g, ctx);
+        addTensor(g, ctx, "per_layer_token_embd.weight", c.GGML_TYPE_F16, 64);
+    }
+
     /// v0.9.0's F8_E4M3: the guessed type and its file-type name.
     fn f8(g: *c.gguf_context, ctx: *c.ggml_context) void {
         addTensor(g, ctx, "output.weight", c.GGML_TYPE_F32, 64);
@@ -1159,7 +1182,7 @@ const Tensors = struct {
 
 /// A split set derived from `base`: the first file holds the metadata and
 /// one tensor, the second another tensor; `kind` breaks it in one place.
-fn splitSet(dir: []const u8, base: [:0]const u8, name: []const u8, kind: enum { ok, wrong_idx, first_not_zero, bad_count, missing_second, duplicate, bad_name }) [:0]const u8 {
+fn splitSet(dir: []const u8, base: [:0]const u8, name: []const u8, kind: enum { ok, wrong_idx, first_not_zero, bad_count, missing_second, duplicate, bad_name, ple_second, missing_bad_count }) [:0]const u8 {
     const src = c.gguf_init_from_file(base.ptr, .{ .no_alloc = true, .ctx = null }).?;
     defer c.gguf_free(src);
 
@@ -1171,7 +1194,7 @@ fn splitSet(dir: []const u8, base: [:0]const u8, name: []const u8, kind: enum { 
             gpa.printSentinel("{s}/{s}-{d:0>5}-of-00002.gguf", .{ dir, name, i + 1 }, 0) catch unreachable;
     }
     for (0..2) |i| {
-        if (kind == .missing_second and i == 1) continue;
+        if ((kind == .missing_second or kind == .missing_bad_count) and i == 1) continue;
         const g = c.gguf_init_empty().?;
         defer c.gguf_free(g);
         if (i == 0) c.gguf_set_kv(g, src);
@@ -1183,14 +1206,39 @@ fn splitSet(dir: []const u8, base: [:0]const u8, name: []const u8, kind: enum { 
         };
         c.gguf_set_val_u16(g, "split.no", no);
         c.gguf_set_val_u16(g, "split.count", 2);
-        c.gguf_set_val_i32(g, "split.tensors.count", if (kind == .bad_count) 3 else 2);
+        c.gguf_set_val_i32(g, "split.tensors.count", if (kind == .bad_count or kind == .missing_bad_count) 3 else 2);
         const ctx = c.ggml_init(.{ .mem_size = 1 << 20, .mem_buffer = null, .no_alloc = false }).?;
         defer c.ggml_free(ctx);
-        const tname: [:0]const u8 = if (kind == .duplicate) "blk.0.dup" else if (i == 0) "blk.0.a" else "blk.1.b";
+        const tname: [:0]const u8 = if (kind == .duplicate) "blk.0.dup" else if (i == 0) "blk.0.a" else if (kind == .ple_second) "per_layer_token_embd.weight" else "blk.1.b";
         addTensor(g, ctx, tname, if (i == 0) c.GGML_TYPE_F16 else c.GGML_TYPE_Q8_0, 64);
         if (!c.gguf_write_to_file(g, paths[i].ptr, false)) @panic("cannot write a split");
     }
     return paths[0];
+}
+
+/// The second file of `splitSet`'s set `name` in `dir`.
+fn splitSecond(dir: []const u8, name: []const u8) [:0]const u8 {
+    return gpa.printSentinel("{s}/{s}-00002-of-00002.gguf", .{ dir, name }, 0) catch unreachable;
+}
+
+/// v1.0.0's extra GGUF shards (5f490d7bf): a file of the given tensors and
+/// no other metadata -- with `numbered`, the split keys too, which the
+/// loader ignores on an extra. One tensor named `per_layer_token_embd.weight`
+/// makes it an external per-layer embedding table.
+fn shardFile(dir: []const u8, name: []const u8, tensors: []const [:0]const u8, ty: c.enum_ggml_type, numbered: bool) [:0]const u8 {
+    const g = c.gguf_init_empty().?;
+    defer c.gguf_free(g);
+    if (numbered) {
+        c.gguf_set_val_u16(g, "split.no", 0);
+        c.gguf_set_val_u16(g, "split.count", 1);
+        c.gguf_set_val_i32(g, "split.tensors.count", @intCast(tensors.len));
+    }
+    const ctx = c.ggml_init(.{ .mem_size = 1 << 20, .mem_buffer = null, .no_alloc = false }).?;
+    defer c.ggml_free(ctx);
+    for (tensors) |t| addTensor(g, ctx, t, ty, 64);
+    const path = gpa.printSentinel("{s}/{s}.gguf", .{ dir, name }, 0) catch unreachable;
+    if (!c.gguf_write_to_file(g, path.ptr, false)) @panic("cannot write a shard");
+    return path;
 }
 
 // -----------------------------------------------------------------------------
@@ -1258,6 +1306,47 @@ pub fn main(init: std.process.Init) !void {
         runCase(.{ .name = "split: duplicate tensor", .path = splitSet(dir, base, "s-dup", .duplicate), .vocab_only = true });
         runCase(.{ .name = "split: unrecognized name", .path = splitSet(dir, base, "s-name", .bad_name), .vocab_only = true });
         runCase(.{ .name = "missing file", .path = try gpa.printSentinel("{s}/no-such-file.gguf", .{dir}, 0), .vocab_only = true });
+        // v1.0.0's extra shards and external per-layer embedding tables
+        // (5f490d7bf), given as llama_model_load_from_splits' paths.
+        const ple = shardFile(dir, "ple", &.{"per_layer_token_embd.weight"}, c.GGML_TYPE_Q8_0, false);
+        const ple2 = shardFile(dir, "ple2", &.{"per_layer_token_embd.weight"}, c.GGML_TYPE_F16, false);
+        const ple_numbered = shardFile(dir, "ple-numbered", &.{"per_layer_token_embd.weight"}, c.GGML_TYPE_Q8_0, true);
+        const extra_dup = shardFile(dir, "extra-dup", &.{"output.weight"}, c.GGML_TYPE_F16, false);
+        const extra_new = shardFile(dir, "extra-new", &.{ "blk.9.x", "blk.9.y" }, c.GGML_TYPE_F16, false);
+        const single = tensorFile(dir, base, "single", Tensors.tie, 0);
+        const single_ple = tensorFile(dir, base, "single-ple", Tensors.withPle, 0);
+        runCase(.{ .name = "extra: one file, given alone", .path = single, .vocab_only = true, .splits = &.{single} });
+        runCase(.{ .name = "extra: PLE appended", .path = single, .vocab_only = true, .splits = &.{ single, ple } });
+        runCase(.{ .name = "extra: PLE overrides the model's", .path = single_ple, .vocab_only = true, .splits = &.{ single_ple, ple } });
+        runCase(.{ .name = "extra: numbered PLE", .path = single, .vocab_only = true, .splits = &.{ single, ple_numbered } });
+        runCase(.{ .name = "extra: two PLEs", .path = single, .vocab_only = true, .splits = &.{ single, ple, ple2 } });
+        runCase(.{ .name = "extra: duplicate, not PLE", .path = single, .vocab_only = true, .splits = &.{ single, extra_dup } });
+        runCase(.{ .name = "extra: new tensors", .path = single, .vocab_only = true, .splits = &.{ single, extra_new } });
+        runCase(.{ .name = "extra: missing file", .path = single, .vocab_only = true, .splits = &.{ single, try gpa.printSentinel("{s}/no-such-extra.gguf", .{dir}, 0) } });
+
+        const s_extra = splitSet(dir, base, "s-extra", .ok);
+        runCase(.{ .name = "split: given, with an extra", .path = s_extra, .vocab_only = true, .splits = &.{ s_extra, extra_new } });
+        runCase(.{ .name = "split: given, with a PLE", .path = s_extra, .vocab_only = true, .splits = &.{ s_extra, ple } });
+        runCase(.{ .name = "split: given, first only", .path = s_extra, .vocab_only = true, .splits = &.{s_extra} });
+        const s_pmiss = splitSet(dir, base, "s-pmiss", .missing_second);
+        runCase(.{ .name = "split+PLE: second missing", .path = s_pmiss, .vocab_only = true, .splits = &.{ s_pmiss, ple } });
+        const s_pcount = splitSet(dir, base, "s-pcount", .missing_bad_count);
+        runCase(.{ .name = "split+PLE: second missing, count wrong", .path = s_pcount, .vocab_only = true, .splits = &.{ s_pcount, ple } });
+        const s_pple = splitSet(dir, base, "s-pple", .ple_second);
+        runCase(.{ .name = "split: second PLE-only", .path = s_pple, .vocab_only = true });
+        runCase(.{ .name = "split+PLE: second PLE-only", .path = s_pple, .vocab_only = true, .splits = &.{ s_pple, ple } });
+        const s_name = splitSet(dir, base, "s-gname", .bad_name);
+        runCase(.{ .name = "split: unrecognized name, given", .path = s_name, .vocab_only = true, .splits = &.{ s_name, splitSecond(dir, "s-gname") } });
+        runCase(.{ .name = "split: unrecognized name, given short", .path = s_name, .vocab_only = true, .splits = &.{s_name} });
+        runCase(.{ .name = "split: unrecognized name, given with a PLE", .path = s_name, .vocab_only = true, .splits = &.{ s_name, splitSecond(dir, "s-gname"), ple } });
+        // A numbered split given from another directory wins over the one
+        // the name implies, which is missing.
+        const sub = try gpa.printSentinel("{s}/sub", .{dir}, 0);
+        _ = std.c.mkdir(sub.ptr, 0o755);
+        const s_moved = splitSet(dir, base, "s-moved", .missing_second);
+        _ = splitSet(sub, base, "s-moved", .ok);
+        runCase(.{ .name = "split: second given from another directory", .path = s_moved, .vocab_only = true, .splits = &.{ s_moved, splitSecond(sub, "s-moved") } });
+        runCase(.{ .name = "split: second given out of order", .path = s_moved, .vocab_only = true, .splits = &.{ splitSecond(sub, "s-moved"), s_moved } });
     }
 
     // v0.5.0's hyperparameter reads on fixtures, one key edited at a time:
@@ -1329,6 +1418,9 @@ pub fn main(init: std.process.Init) !void {
             .{ "rope section order unknown", Qwen.sectionOrderBad },
             .{ "rope section order as u32", Qwen.sectionOrderU32 },
             .{ "value expert counts", Qwen.valueExperts },
+            // v1.0.0's keys
+            .{ "classifier free guidance", Qwen.cfgOn },
+            .{ "classifier free guidance as u32", Qwen.cfgAsU32 },
             .{ "hadamard identity", Hadamard.identity },
             .{ "hadamard tied latent", Hadamard.tiedLatent },
             .{ "hadamard explicit", Hadamard.explicit },

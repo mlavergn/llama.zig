@@ -62,6 +62,9 @@ POST /v1/chat/completions {"messages": [{"role": "user", "content": "Give me a J
 POST /v1/chat/completions {"messages": [{"role": "user", "content": "An integer between 1 and 9?"}], "response_format": {"type": "json_schema", "json_schema": {"schema": {"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]}}}, "max_tokens": 48, "temperature": 0}
 POST /v1/chat/completions {"messages": [{"role": "user", "content": "A color?"}], "json_schema": {"type": "string", "enum": ["red", "green"]}, "max_tokens": 16, "temperature": 0, "stream": true}
 POST /v1/chat/completions {"messages": [{"role": "user", "content": "x"}], "response_format": {"type": "xml"}}
+# v1.0.0 (1945793e0): a json_schema response_format whose schema is not in the json_schema wrapper
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "An integer between 1 and 9?"}], "response_format": {"type": "json_schema", "schema": {"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]}}, "max_tokens": 48, "temperature": 0}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "x"}], "response_format": {"type": "json_schema"}, "max_tokens": 4, "temperature": 0}
 
 # continuation and prefill
 POST /v1/chat/completions {"messages": [{"role": "user", "content": "Tell me about Paris."}, {"role": "assistant", "content": "Paris is"}], "max_tokens": 16, "temperature": 0}

@@ -870,10 +870,11 @@ static void run_vocab(const struct llama_vocab * vocab) {
         }
     }
     {
-        // The deprecated trigger-word form, which escapes the words into a
-        // regex with std::regex_replace.
-        const char * words[] = { "<tool_call>", "a.b*(c)" };
-        struct llama_sampler * s = llama_sampler_init_grammar_lazy(vocab, tool_gbnf, "root", words, 2, NULL, 0);
+        // The pattern the trigger-word form built from these words before
+        // v1.0.0 removed it (llama_sampler_init_grammar_lazy): escaped and
+        // captured, so the records keep exercising the same grammar.
+        const char * words[] = { "[\\s\\S]*?(<tool_call>|a\\.b\\*\\(c\\))[\\s\\S]*" };
+        struct llama_sampler * s = llama_sampler_init_grammar_lazy_patterns(vocab, tool_gbnf, "root", words, 1, NULL, 0);
         printf("lazy words init=%s\n", s ? "ok" : "(null)");
         if (s) {
             feed_lazy("words", s, vocab, lazy_text);

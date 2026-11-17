@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/yasa2.cpp` at v0.9.0 (`cd959bae9`).
+//! Ports `llama.cpp/tools/mtmd/models/yasa2.cpp` at v1.0.0 (`b1b770d90`).
 //! Each declaration names the C++ it replaces and the line it began at.
 
 const std = @import("std");
@@ -15,22 +15,22 @@ const c = impl.c;
 const T = graph.T;
 const ne = graph.ne;
 
-/// Ports `add_channel_bias` (yasa2.cpp:6 @cd959bae9).
+/// Ports `add_channel_bias` (yasa2.cpp:6 @b1b770d90).
 fn addChannelBias(ctx0: ?*c.ggml_context, x_whcb: T, b_c: T) T {
     if (b_c == null) return x_whcb;
     const b4 = c.ggml_reshape_4d(ctx0, b_c, 1, 1, ne(b_c, 0), 1);
     return c.ggml_add(ctx0, x_whcb, b4);
 }
 
-/// Ports `mul_channel_weight` (yasa2.cpp:17 @cd959bae9).
+/// Ports `mul_channel_weight` (yasa2.cpp:17 @b1b770d90).
 fn mulChannelWeight(ctx0: ?*c.ggml_context, x_whcb: T, w_c: T) T {
     if (w_c == null) return x_whcb;
     const w4 = c.ggml_reshape_4d(ctx0, w_c, 1, 1, ne(w_c, 0), 1);
     return c.ggml_mul(ctx0, x_whcb, w4);
 }
 
-/// Ports `layer_norm_channels` (yasa2.cpp:28 @cd959bae9), a member of
-/// `clip_graph_yasa2`: HF's `ConvNextLayerNorm(channels_first)`.
+/// Ports `layer_norm_channels` (yasa2.cpp:28 @b1b770d90), a member of
+/// `mtmd_graph_yasa2`: HF's `ConvNextLayerNorm(channels_first)`.
 fn layerNormChannels(g: *const graph.Graph, inp: T, w: T, b: T, eps: f32) T {
     const ctx0 = g.ctx0;
     // u = mean_c(x), s = mean_c((x-u)^2), x = (x-u)/sqrt(s+eps)
@@ -54,8 +54,8 @@ fn layerNormChannels(g: *const graph.Graph, inp: T, w: T, b: T, eps: f32) T {
     return xhat;
 }
 
-/// Ports `convnext_grn` (yasa2.cpp:51 @cd959bae9), a member of
-/// `clip_graph_yasa2`: ConvNeXt-V2's global response normalization.
+/// Ports `convnext_grn` (yasa2.cpp:51 @b1b770d90), a member of
+/// `mtmd_graph_yasa2`: ConvNeXt-V2's global response normalization.
 fn convnextGrn(g: *const graph.Graph, inp: T, w: T, b: T) T {
     const ctx0 = g.ctx0;
     // Gx = ||x||_2 over spatial dims (W,H), Nx = Gx / (mean_c(Gx) + eps)
@@ -86,7 +86,7 @@ fn convnextGrn(g: *const graph.Graph, inp: T, w: T, b: T) T {
     return c.ggml_add(ctx0, inp, xnx);
 }
 
-/// Ports `build` (yasa2.cpp:81 @cd959bae9), a member of `clip_graph_yasa2`.
+/// Ports `build` (yasa2.cpp:81 @b1b770d90), a member of `mtmd_graph_yasa2`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

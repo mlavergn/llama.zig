@@ -31,11 +31,14 @@ PROMPT="${3:-The capital of France is}"
 . "$ROOT/scripts/check-reference-pin"
 . "$ROOT/scripts/platform-libs"
 
-REF_LIBS=(llama.cpp.zmake/zig-out/lib/libllama.a llama.cpp.zmake/zig-out/lib/libggml.a)
+# VK_REPRO_PREFIX names another install prefix of the Vulkan reference, so
+# it can be built without replacing the CPU reference other gates link.
+REF_PREFIX="${VK_REPRO_PREFIX:-llama.cpp.zmake/zig-out}"
+REF_LIBS=("$REF_PREFIX/lib/libllama.a" "$REF_PREFIX/lib/libggml.a")
 for lib in "${REF_LIBS[@]}"; do
     [ -f "$lib" ] || { echo "missing $lib -- run 'make -C llama.cpp.zmake lib VULKAN=1'" >&2; exit 2; }
 done
-nm -u llama.cpp.zmake/zig-out/lib/libggml.a 2>/dev/null | grep -qE '(^|[ _])vkGetInstanceProcAddr$' \
+nm -u "$REF_PREFIX/lib/libggml.a" 2>/dev/null | grep -qE '(^|[ _])vkGetInstanceProcAddr$' \
     || { echo "FAIL: the reference libggml.a has no Vulkan backend -- build it with VULKAN=1" >&2; exit 2; }
 platform_libs cc "${REF_LIBS[@]}"
 

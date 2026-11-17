@@ -1,9 +1,9 @@
-//! `get_rows`, `get_rows_back`, `set_rows`, `diag`, `diag_mask_inf` and
-//! `diag_mask_zero`.
+//! `get_rows`, `get_rows_back`, `set_rows` and `diag`. `diag_mask_inf` and
+//! `diag_mask_zero` lived here until v1.0.0 removed both ops (#29801).
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v0.9.0 (`cd959bae9`).
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/ops.cpp` at v1.0.0 (`b1b770d90`).
 //! Each declaration below names the C++ it replaces and the line it began at.
 //!
 //! # `assert` versus `GGML_ASSERT`
@@ -43,7 +43,7 @@ const RowKind = enum { q, f16, bf16, f32 };
 
 /// Ports `ggml_compute_forward_get_rows_q`, `ggml_compute_forward_get_rows_f16`,
 /// `ggml_compute_forward_get_rows_bf16` and `ggml_compute_forward_get_rows_f32`
-/// (ops.cpp:5187, 5231, 5272, 5313 @cd959bae9).
+/// (ops.cpp:5187, 5231, 5272, 5313 @b1b770d90).
 ///
 /// The four are the same loop with a different row conversion, so they are
 /// one function over a comptime kind. The `f32` variant also serves `I32`
@@ -100,7 +100,7 @@ fn getRows(comptime kind: RowKind, params: *const ComputeParams, dst: *Tensor) v
     }
 }
 
-/// Ports `ggml_compute_forward_get_rows` (ops.cpp:5354 @cd959bae9).
+/// Ports `ggml_compute_forward_get_rows` (ops.cpp:5354 @b1b770d90).
 pub export fn ggml_compute_forward_get_rows(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -143,7 +143,7 @@ pub export fn ggml_compute_forward_get_rows(params: *const ComputeParams, dst: *
 // -----------------------------------------------------------------------------
 // set_rows
 
-/// Ports `ggml_compute_forward_set_rows_impl` (ops.cpp:5430 @cd959bae9).
+/// Ports `ggml_compute_forward_set_rows_impl` (ops.cpp:5430 @b1b770d90).
 ///
 /// Parameters:
 /// - `SrcT`: `f32` or `ggml_fp16_t`, the source row type.
@@ -214,7 +214,7 @@ fn setRowsImpl(comptime SrcT: type, comptime IdxT: type, params: *const ComputeP
     }
 }
 
-/// Ports `ggml_compute_forward_set_rows` (ops.cpp:5500 @cd959bae9).
+/// Ports `ggml_compute_forward_set_rows` (ops.cpp:5500 @b1b770d90).
 pub export fn ggml_compute_forward_set_rows(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -245,7 +245,7 @@ pub export fn ggml_compute_forward_set_rows(params: *const ComputeParams, dst: *
 // -----------------------------------------------------------------------------
 // get_rows_back
 
-/// Ports `ggml_compute_forward_get_rows_back_f32_f16` (ops.cpp:5537 @cd959bae9).
+/// Ports `ggml_compute_forward_get_rows_back_f32_f16` (ops.cpp:5537 @b1b770d90).
 fn getRowsBackF32F16(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -282,7 +282,7 @@ fn getRowsBackF32F16(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_get_rows_back_f32` (ops.cpp:5572 @cd959bae9).
+/// Ports `ggml_compute_forward_get_rows_back_f32` (ops.cpp:5572 @b1b770d90).
 fn getRowsBackF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -314,7 +314,7 @@ fn getRowsBackF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_get_rows_back` (ops.cpp:5607 @cd959bae9).
+/// Ports `ggml_compute_forward_get_rows_back` (ops.cpp:5607 @b1b770d90).
 pub export fn ggml_compute_forward_get_rows_back(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -328,7 +328,7 @@ pub export fn ggml_compute_forward_get_rows_back(params: *const ComputeParams, d
 // -----------------------------------------------------------------------------
 // diag
 
-/// Ports `ggml_compute_forward_diag_f32` (ops.cpp:5649 @cd959bae9).
+/// Ports `ggml_compute_forward_diag_f32` (ops.cpp:5649 @b1b770d90).
 fn diagF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
@@ -366,86 +366,12 @@ fn diagF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_diag` (ops.cpp:5689 @cd959bae9).
+/// Ports `ggml_compute_forward_diag` (ops.cpp:5689 @b1b770d90).
 pub export fn ggml_compute_forward_diag(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 
     switch (src0.type) {
         c.GGML_TYPE_F32 => diagF32(params, dst),
-        else => impl.abort("fatal error"),
-    }
-}
-
-// -----------------------------------------------------------------------------
-// diag_mask
-
-/// Ports `ggml_compute_forward_diag_mask_f32` (ops.cpp:5709 @cd959bae9).
-///
-/// Parameters:
-/// - `value`: what the masked entries are set to — `-inf` or `0`.
-fn diagMaskF32(params: *const ComputeParams, dst: *Tensor, value: f32) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-
-    const ith: i64 = params.ith;
-    const nth: i64 = params.nth;
-
-    const n_past: i64 = impl.getOpParamsI32(dst, 0);
-    const inplace = src0.data == dst.data;
-
-    impl.assert(n_past >= 0, "n_past >= 0");
-
-    if (!inplace) {
-        if (ith == 0) {
-            // memcpy needs to be synchronized across threads to avoid race conditions.
-            // => do it in INIT phase
-            impl.assert(c.ggml_nelements(dst) == c.ggml_nelements(src0), "ggml_nelements(dst) == ggml_nelements(src0)");
-            impl.assert(c.ggml_is_contiguous(dst) and c.ggml_is_contiguous(src0), "ggml_is_contiguous(dst) && ggml_is_contiguous(src0)");
-            const nbytes = c.ggml_nbytes(dst);
-            @memcpy(at(u8, dst.data, 0)[0..nbytes], at(u8, src0.data, 0)[0..nbytes]);
-        }
-        threading.ggml_barrier(@ptrCast(@alignCast(params.threadpool.?)));
-    }
-
-    // TODO: handle transposed/permuted matrices
-
-    const n: i64 = c.ggml_nrows(src0);
-    const nc: i64 = src0.ne[0];
-    const nr: i64 = src0.ne[1];
-    const nz = @divTrunc(n, nr);
-
-    impl.assert(dst.nb[0] == @sizeOf(f32), "dst->nb[0] == sizeof(float)");
-    impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
-
-    var k: i64 = 0;
-    while (k < nz) : (k += 1) {
-        var j: i64 = ith;
-        while (j < nr) : (j += nth) {
-            var i: i64 = n_past;
-            while (i < nc) : (i += 1) {
-                if (i > n_past + j) {
-                    at(f32, dst.data, k * s(dst.nb[2]) + j * s(dst.nb[1]) + i * s(dst.nb[0]))[0] = value;
-                }
-            }
-        }
-    }
-}
-
-/// Ports `ggml_compute_forward_diag_mask_inf` (ops.cpp:5759 @cd959bae9).
-pub export fn ggml_compute_forward_diag_mask_inf(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-
-    switch (src0.type) {
-        c.GGML_TYPE_F32 => diagMaskF32(params, dst, -std.math.inf(f32)),
-        else => impl.abort("fatal error"),
-    }
-}
-
-/// Ports `ggml_compute_forward_diag_mask_zero` (ops.cpp:5777 @cd959bae9).
-pub export fn ggml_compute_forward_diag_mask_zero(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-
-    switch (src0.type) {
-        c.GGML_TYPE_F32 => diagMaskF32(params, dst, 0),
         else => impl.abort("fatal error"),
     }
 }

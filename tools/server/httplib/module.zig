@@ -6,7 +6,7 @@
 //!
 //! **Not a port.** The files it re-exports port parts of
 //! `llama.cpp/vendor/cpp-httplib/httplib.cpp` and `httplib.h` (cpp-httplib
-//! 0.64.0, vendored at v0.9.0, `cd959bae9`); each names its own.
+//! 0.66.0, vendored at v1.0.0, `b1b770d90`); each names its own.
 
 const std = @import("std");
 
@@ -31,6 +31,8 @@ pub const Handler = server.Handler;
 pub const HandlerResponse = server.HandlerResponse;
 pub const HandlerWithResponse = server.HandlerWithResponse;
 pub const ExceptionHandler = server.ExceptionHandler;
+pub const hostedAt = socket.hostedAt;
+pub const encodeUriComponent = detail.encodeUriComponent;
 
 // -----------------------------------------------------------------------------
 // Unit Tests

@@ -11,8 +11,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/dots3note.cpp` at v0.9.0
-//! (`cd959bae9`): `llama_model_dots3note`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/dots3note.cpp` at v1.0.0
+//! (`b1b770d90`): `llama_model_dots3note`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`. The C++
 //! notes it was adapted from `deepseek32.cpp` (the DSA indexer and absorbed
 //! MLA) and `step35.cpp` (the head-wise output gate).
@@ -29,9 +29,11 @@ const c = impl.c;
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
+const Cparams = @import("../cparams.zig").Cparams;
+const RopeParams = model_mod.RopeParams;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_dots3note`'s `load_arch_hparams` (src/models/dots3note.cpp:8 @cd959bae9).
+/// Ports `llama_model_dots3note`'s `load_arch_hparams` (src/models/dots3note.cpp:8 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -76,7 +78,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_dots3note`'s `load_arch_tensors` (src/models/dots3note.cpp:48 @cd959bae9).
+/// Ports `llama_model_dots3note`'s `load_arch_tensors` (src/models/dots3note.cpp:48 @b1b770d90).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     _ = ml;
     const l = self.loadLocals();
@@ -187,18 +189,34 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 // -----------------------------------------------------------------------------
 // The graph
 
-/// Ports `llama_model_dots3note`'s `build_arch_graph` (src/models/dots3note.cpp:148 @cd959bae9).
+/// Ports `llama_model_dots3note`'s `get_rope_params` (src/models/dots3note.cpp:148 @b1b770d90).
+///
+/// Parameters:
+/// - `model`: the model.
+/// - `cparams`: the context's parameters.
+/// - `il`: the layer.
+///
+/// Return: the RoPE of layer `il`, for the graph and the K-shift alike.
+pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+    var res = model.getRopeParamsBase(cparams, il);
+
+    res.freq_scale = cparams.rope_freq_scale;
+
+    return res;
+}
+
+/// Ports `llama_model_dots3note`'s `build_arch_graph` (src/models/dots3note.cpp:156 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     _ = params;
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_dots3note`'s `graph`
-/// (src/models/dots3note.cpp:152 @cd959bae9).
+/// (src/models/dots3note.cpp:160 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
-    impl.assert(hp.isMla(), "models/dots3note.cpp", 154, "hparams.is_mla()");
+    impl.assert(hp.isMla(), "models/dots3note.cpp", 162, "hparams.is_mla()");
 
     const n_embd_head_qk_rope: i64 = hp.nRot(0);
 
@@ -207,7 +225,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const n_indexer_top_k: u32 = hp.indexer_top_k;
 
     // The indexer head's layout is `[rope | nope]`.
-    impl.assert(hp.nRot(0) <= n_embd_indexer_head, "models/dots3note.cpp", 163, "hparams.n_rot() <= n_embd_indexer_head");
+    impl.assert(hp.nRot(0) <= n_embd_indexer_head, "models/dots3note.cpp", 171, "hparams.n_rot() <= n_embd_indexer_head");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -233,7 +251,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         const n_embd_head_qk_nope = n_embd_head_k_mla - n_embd_head_qk_rope;
 
         const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head_k_mla));
-        const freq_base_l = model.getRopeFreqBase(b.cparams, ilu);
 
         // Norm.
         var cur = b.buildNorm(inpL, layer.attn_norm, null, .rms, il);
@@ -253,7 +270,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
             // The lightning indexer, on the full-attention layers alone.
             if (!is_swa) {
-                const t = deepseek32.lightningIndexer(b, c.LLAMA_ROPE_TYPE_NEOX, layer, inp_attn.getDsa(), cur, qr, inp_pos, n_indexer_head, n_embd_indexer_head, n_indexer_top_k, il);
+                const t = deepseek32.lightningIndexer(b, layer, inp_attn.getDsa(), cur, qr, inp_pos, n_indexer_head, n_embd_indexer_head, n_indexer_top_k, il);
                 b.cb(t, "top_k", il);
                 top_k = t;
             }
@@ -284,10 +301,10 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             k_pe = b.buildNorm(k_pe, layer.attn_k_norm, null, .rms, il);
             b.cb(k_pe, "k_pe", il);
 
-            q_pe = c.ggml_rope_ext(ctx, q_pe, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            q_pe = b.buildRope(q_pe, inp_pos, il);
             b.cb(q_pe, "q_pe", il);
 
-            k_pe = c.ggml_rope_ext(ctx, k_pe, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            k_pe = b.buildRope(k_pe, inp_pos, il);
             b.cb(k_pe, "k_pe", il);
 
             kv_cmpr = b.buildNorm(kv_cmpr, layer.attn_kv_a_norm, null, .rms, il);

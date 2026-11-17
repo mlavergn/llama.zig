@@ -4,8 +4,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/common/parsers/ministral3.cpp` (llama.cpp v0.9.0,
-//! `cd959bae9`). The parser is built in the order clang evaluates the C++
+//! Ports `llama.cpp/common/parsers/ministral3.cpp` (llama.cpp v1.0.0,
+//! `b1b770d90`). The parser is built in the order clang evaluates the C++
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
@@ -146,7 +146,7 @@ fn adjustMessages(a: Allocator, messages: *const Value) Error!Value {
     return adjusted_messages;
 }
 
-/// Ports `common_chat_params_init_ministral_3` (parsers/ministral3.cpp:3 @cd959bae9).
+/// Ports `common_chat_params_init_ministral_3` (parsers/ministral3.cpp:3 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
 pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
@@ -191,7 +191,7 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     const arena = &data.parser.?;
 
     if (build.include_grammar) {
-        data.grammar_lazy = has_tools and inputs.tool_choice == .auto;
+        data.grammar_lazy = !has_response_format and has_tools and inputs.tool_choice == .auto;
         data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
         try data.addWordTrigger(a, "[TOOL_CALLS]");
     }

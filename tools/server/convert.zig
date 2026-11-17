@@ -10,7 +10,7 @@
 //! `server_chat_convert_anthropic_to_oai`,
 //! `convert_transcriptions_to_chatcmpl` and `server_chat_get_asr_prompt` from
 //! `llama.cpp/tools/server/server-chat.cpp` and
-//! `llama.cpp/tools/server/server-chat.h` (llama.cpp v0.9.0, `cd959bae9`);
+//! `llama.cpp/tools/server/server-chat.h` (llama.cpp v1.0.0, `b1b770d90`);
 //! the file's fourth function, `server_chat_msg_diff_to_json_oaicompat`, is
 //! `result.zig`'s. Each declaration names what it ports and the line it
 //! began at.
@@ -73,7 +73,7 @@ fn arrayOf(a: Allocator, v: Value) Error!Value {
 // the Responses API
 
 /// Ports `server_chat_convert_responses_tools` (server-chat.cpp:6
-/// @cd959bae9): OpenAI Responses API tools as Chat Completions API tools,
+/// @b1b770d90): OpenAI Responses API tools as Chat Completions API tools,
 /// non-function tools skipped.
 ///
 /// Return: owned by `a`.
@@ -107,12 +107,13 @@ pub fn responsesTools(a: Allocator, tools_in: *const Value) Error!Value {
 }
 
 /// Ports `server_chat_convert_responses_to_chatcmpl` (server-chat.cpp:32
-/// @cd959bae9): an OpenAI Responses request as a `/chat/completions` one --
+/// @b1b770d90): an OpenAI Responses request as a `/chat/completions` one --
 /// `instructions` a system message, each input item a message (an output
 /// item, a function call or a reasoning item following an assistant
 /// message merged into it), function tools unwrapped, `max_output_tokens`
-/// and `reasoning.effort` renamed, and the members of an `extra_params`
-/// object (llama.cpp's own parameters) merged in.
+/// and `reasoning.effort` renamed, `text.format` as `response_format`, and
+/// the members of an `extra_params` object (llama.cpp's own parameters)
+/// merged in.
 ///
 /// Parameters:
 /// - `a`: an arena; the result is its.
@@ -394,6 +395,34 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
         try chatcmpl_body.erase(a, "reasoning");
     }
 
+    if (response_body.contains("text")) {
+        const text = try response_body.at("text");
+        if (!text.isObject()) {
+            return throw(error.InvalidArgument, "'text' must be an object", .{});
+        }
+
+        try chatcmpl_body.erase(a, "text");
+        if (text.contains("format")) {
+            const format = try text.at("format");
+            if (!format.isObject()) {
+                return throw(error.InvalidArgument, "'text.format' must be an object", .{});
+            }
+
+            const ty = jsonValue(format, "type", []const u8, "");
+            if (std.mem.eql(u8, ty, "json_schema")) {
+                var rf = Value.emptyObject();
+                try rf.set(a, "type", try Value.initString(a, "json_schema"));
+                try rf.set(a, "json_schema", try format.clone(a));
+                try chatcmpl_body.set(a, "response_format", rf);
+                try (try (try chatcmpl_body.index(a, "response_format")).index(a, "json_schema")).erase(a, "type");
+            } else if (std.mem.eql(u8, ty, "json_object") or std.mem.eql(u8, ty, "text")) {
+                try chatcmpl_body.set(a, "response_format", try format.clone(a));
+            } else if (ty.len != 0) {
+                return throw(error.InvalidArgument, "'text.format.type' must be one of 'text', 'json_object', or 'json_schema'", .{});
+            }
+        }
+    }
+
     // llama.cpp params (e.g. seed, min_p) go under extra_params and are merged into the converted body
     if (response_body.contains("extra_params")) {
         try chatcmpl_body.erase(a, "extra_params");
@@ -412,8 +441,8 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
 // -----------------------------------------------------------------------------
 // the Anthropic Messages API
 
-/// Ports `normalize_anthropic_billing_header` (server-chat.cpp:341
-/// @cd959bae9): the five-character `cch=` stamp of an
+/// Ports `normalize_anthropic_billing_header` (server-chat.cpp:369
+/// @b1b770d90): the five-character `cch=` stamp of an
 /// `x-anthropic-billing-header:` system prompt overwritten with `f`s, so it
 /// does not break prefix caching. Any other prompt is left alone.
 ///
@@ -463,8 +492,8 @@ fn imageUrlOf(a: Allocator, source: *const Value) Error!?Value {
     return null;
 }
 
-/// Ports `server_chat_convert_anthropic_to_oai` (server-chat.cpp:363
-/// @cd959bae9): an Anthropic Messages request as a `/chat/completions`
+/// Ports `server_chat_convert_anthropic_to_oai` (server-chat.cpp:391
+/// @b1b770d90): an Anthropic Messages request as a `/chat/completions`
 /// one -- the system prompt a message, content blocks as parts, thinking
 /// blocks as reasoning, `tool_use` blocks as tool calls and `tool_result`
 /// blocks as tool messages after their turn; tools, `tool_choice`,
@@ -799,8 +828,8 @@ pub fn stof(s: []const u8) Error!f32 {
     return r;
 }
 
-/// Ports `convert_transcriptions_to_chatcmpl` (server-chat.cpp:683
-/// @cd959bae9): a transcription request -- its form fields as JSON, its
+/// Ports `convert_transcriptions_to_chatcmpl` (server-chat.cpp:711
+/// @b1b770d90): a transcription request -- its form fields as JSON, its
 /// uploaded `file` -- as a `/chat/completions` body: the template's ASR
 /// preset as the system and user messages, the prompt ending in the media
 /// marker, and the form's string fields typed.
@@ -876,9 +905,58 @@ pub fn transcriptionsToChatcmpl(
 }
 
 // -----------------------------------------------------------------------------
+// the speech API
+
+/// Ports `convert_speech_to_tts` (server-chat.cpp:768 @b1b770d90): an OpenAI
+/// speech request as a `/tts` one -- a custom voice `{"id": ...}` as its
+/// name, `response_format` `wav` or `pcm` (16-bit, `pcm16` in `/tts`),
+/// `stream_format` `audio` as streaming; `speed` other than 1 is refused
+/// and `instructions` ignored with a warning.
+///
+/// Parameters:
+/// - `a`: an arena; the result is its.
+///
+/// Return: the body; `error.InvalidArgument` for what it cannot convert.
+pub fn speechToTts(a: Allocator, inp_body: *const Value) Error!Value {
+    var tts_body = try inp_body.clone(a); // copy all fields
+
+    // a custom voice is given as {"id": "..."}
+    if (inp_body.contains("voice") and (try inp_body.at("voice")).isObject()) {
+        try tts_body.set(a, "voice", try Value.initString(a, jsonValue(try inp_body.at("voice"), "id", []const u8, "")));
+    }
+
+    // the default of the OpenAI API is mp3, we have no encoder for it
+    const response_format = jsonValue(inp_body, "response_format", []const u8, "wav");
+    if (std.mem.eql(u8, response_format, "pcm")) {
+        try tts_body.set(a, "response_format", try Value.initString(a, "pcm16")); // "pcm" is float32 in /tts
+    } else if (std.mem.eql(u8, response_format, "wav")) {
+        try tts_body.set(a, "response_format", try Value.initString(a, "wav"));
+    } else {
+        return throw(error.InvalidArgument, "Only 'wav' and 'pcm' response_format are supported for speech", .{});
+    }
+
+    const stream_format = jsonValue(inp_body, "stream_format", []const u8, "");
+    if (std.mem.eql(u8, stream_format, "audio")) {
+        try tts_body.set(a, "stream", .{ .boolean = true });
+    } else if (stream_format.len != 0) {
+        return throw(error.InvalidArgument, "Only 'audio' stream_format is supported for speech", .{});
+    }
+
+    if (jsonValue(inp_body, "speed", f64, 1.0) != 1.0) {
+        return throw(error.InvalidArgument, "'speed' is not supported for speech", .{});
+    }
+
+    if (jsonValue(inp_body, "instructions", []const u8, "").len != 0) {
+        common.srv(.wrn, "convert_speech_to_tts", "%s", .{@as([*:0]const u8, "'instructions' is not supported for speech and is ignored\n")});
+    }
+
+    return tts_body;
+}
+
+// -----------------------------------------------------------------------------
 // the "asr" chat template
 
-/// Ports `server_chat_get_asr_prompt` (server-chat.cpp:740 @cd959bae9):
+/// Ports `server_chat_get_asr_prompt` (server-chat.cpp:804 @b1b770d90):
 /// prompt of the "asr" chat template, live ASR models (e.g. LFM3-Audio live
 /// ASR) transcribe with it; empty if the model has no such template,
 /// `error.RuntimeError` on a template error.

@@ -3,9 +3,9 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/llama-vocab.cpp` (v0.9.0, `cd959bae9`): the
+//! Ported from `llama.cpp/src/llama-vocab.cpp` (v1.0.0, `b1b770d90`): the
 //! C API at the end of the file, from `llama_vocab_n_tokens` through
-//! `llama_detokenize` -- its 49 unmangled exports -- with the forwarding
+//! `llama_detokenize` -- its 27 unmangled exports -- with the forwarding
 //! members of `llama_vocab` they go through. The vocabulary is
 //! `vocab/vocab.zig`.
 //!
@@ -50,7 +50,7 @@ fn cSlice(comptime T: type, ptr: [*c]T, n: i32) []T {
     return ptr[0..@intCast(n)];
 }
 
-/// Ports `llama_vocab`'s `token_get_text` (llama-vocab.cpp:4477 @cd959bae9).
+/// Ports `llama_vocab`'s `token_get_text` (llama-vocab.cpp:4477 @b1b770d90).
 fn tokenGetText(v: *const Vocab, id: Token) [*c]const u8 {
     impl.assert(v.type != vm.vocab.type_none, "llama-vocab.cpp", 4478, "pimpl->type != LLAMA_VOCAB_TYPE_NONE");
     var exc: impl.Exception = .{};
@@ -58,7 +58,7 @@ fn tokenGetText(v: *const Vocab, id: Token) [*c]const u8 {
     return v.text(id).ptr;
 }
 
-/// Ports `llama_vocab`'s `token_get_score` (llama-vocab.cpp:4482 @cd959bae9).
+/// Ports `llama_vocab`'s `token_get_score` (llama-vocab.cpp:4482 @b1b770d90).
 fn tokenGetScore(v: *const Vocab, id: Token) f32 {
     impl.assert(v.type != vm.vocab.type_none, "llama-vocab.cpp", 4483, "pimpl->type != LLAMA_VOCAB_TYPE_NONE");
     var exc: impl.Exception = .{};
@@ -66,102 +66,91 @@ fn tokenGetScore(v: *const Vocab, id: Token) f32 {
     return d.score;
 }
 
-/// Ports `llama_vocab_n_tokens` (llama-vocab.cpp:4719 @cd959bae9).
+/// Ports `llama_vocab_n_tokens` (llama-vocab.cpp:4719 @b1b770d90).
 pub fn llama_vocab_n_tokens(vocab: ?*const c.struct_llama_vocab) callconv(.c) i32 {
     return @bitCast(vocabOf(vocab).nTokens());
 }
 
-/// Ports `llama_n_vocab` (llama-vocab.cpp:4724 @cd959bae9).
-pub fn llama_n_vocab(vocab: ?*const c.struct_llama_vocab) callconv(.c) i32 {
-    return llama_vocab_n_tokens(vocab);
-}
-
-/// Ports `llama_vocab_type` (llama-vocab.cpp:4728 @cd959bae9).
+/// Ports `llama_vocab_type` (llama-vocab.cpp:4723 @b1b770d90).
 pub fn llama_vocab_type(vocab: ?*const c.struct_llama_vocab) callconv(.c) c.enum_llama_vocab_type {
     return vocabOf(vocab).type;
 }
 
-/// Ports `llama_vocab_get_text` (llama-vocab.cpp:4732 @cd959bae9).
+/// Ports `llama_vocab_get_text` (llama-vocab.cpp:4727 @b1b770d90).
 ///
 /// Return: the token's text, borrowed from the vocabulary.
 pub fn llama_vocab_get_text(vocab: ?*const c.struct_llama_vocab, token: Token) callconv(.c) [*c]const u8 {
     return tokenGetText(vocabOf(vocab), token);
 }
 
-/// Ports `llama_vocab_get_score` (llama-vocab.cpp:4736 @cd959bae9).
+/// Ports `llama_vocab_get_score` (llama-vocab.cpp:4731 @b1b770d90).
 pub fn llama_vocab_get_score(vocab: ?*const c.struct_llama_vocab, token: Token) callconv(.c) f32 {
     return tokenGetScore(vocabOf(vocab), token);
 }
 
-/// Ports `llama_vocab_get_attr` (llama-vocab.cpp:4740 @cd959bae9).
+/// Ports `llama_vocab_get_attr` (llama-vocab.cpp:4735 @b1b770d90).
 pub fn llama_vocab_get_attr(vocab: ?*const c.struct_llama_vocab, token: Token) callconv(.c) c.enum_llama_token_attr {
     var exc: impl.Exception = .{};
-    return vocabOf(vocab).tokenGetAttr(token, &exc) catch exc.terminate("llama-vocab.cpp", 4741);
+    return vocabOf(vocab).tokenGetAttr(token, &exc) catch exc.terminate("llama-vocab.cpp", 4736);
 }
 
-/// Ports `llama_vocab_is_eog` (llama-vocab.cpp:4744 @cd959bae9).
+/// Ports `llama_vocab_is_eog` (llama-vocab.cpp:4739 @b1b770d90).
 pub fn llama_vocab_is_eog(vocab: ?*const c.struct_llama_vocab, token: Token) callconv(.c) bool {
     return vocabOf(vocab).isEog(token);
 }
 
-/// Ports `llama_vocab_is_control` (llama-vocab.cpp:4748 @cd959bae9): no
+/// Ports `llama_vocab_is_control` (llama-vocab.cpp:4743 @b1b770d90): no
 /// bounds check, as the C++'s `id_to_token[id]` has none.
 pub fn llama_vocab_is_control(vocab: ?*const c.struct_llama_vocab, token: Token) callconv(.c) bool {
     return vocabOf(vocab).isControl(token);
 }
 
-/// Ports `llama_vocab_bos` (llama-vocab.cpp:4752 @cd959bae9).
+/// Ports `llama_vocab_bos` (llama-vocab.cpp:4747 @b1b770d90).
 pub fn llama_vocab_bos(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
     return vocabOf(vocab).special_bos_id;
 }
 
-/// Ports `llama_vocab_eos` (llama-vocab.cpp:4756 @cd959bae9).
+/// Ports `llama_vocab_eos` (llama-vocab.cpp:4751 @b1b770d90).
 pub fn llama_vocab_eos(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
     return vocabOf(vocab).special_eos_id;
 }
 
-/// Ports `llama_vocab_eot` (llama-vocab.cpp:4760 @cd959bae9).
+/// Ports `llama_vocab_eot` (llama-vocab.cpp:4755 @b1b770d90).
 pub fn llama_vocab_eot(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
     return vocabOf(vocab).special_eot_id;
 }
 
-/// Ports `llama_vocab_cls` (llama-vocab.cpp:4765 @cd959bae9): deprecated,
-/// and BOS.
-pub fn llama_vocab_cls(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
-    return vocabOf(vocab).special_bos_id;
-}
-
-/// Ports `llama_vocab_sep` (llama-vocab.cpp:4769 @cd959bae9).
+/// Ports `llama_vocab_sep` (llama-vocab.cpp:4759 @b1b770d90).
 pub fn llama_vocab_sep(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
     return vocabOf(vocab).special_sep_id;
 }
 
-/// Ports `llama_vocab_nl` (llama-vocab.cpp:4773 @cd959bae9).
+/// Ports `llama_vocab_nl` (llama-vocab.cpp:4763 @b1b770d90).
 pub fn llama_vocab_nl(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
     return vocabOf(vocab).linefeed_id;
 }
 
-/// Ports `llama_vocab_pad` (llama-vocab.cpp:4777 @cd959bae9).
+/// Ports `llama_vocab_pad` (llama-vocab.cpp:4767 @b1b770d90).
 pub fn llama_vocab_pad(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
     return vocabOf(vocab).special_pad_id;
 }
 
-/// Ports `llama_vocab_get_add_bos` (llama-vocab.cpp:4781 @cd959bae9).
+/// Ports `llama_vocab_get_add_bos` (llama-vocab.cpp:4771 @b1b770d90).
 pub fn llama_vocab_get_add_bos(vocab: ?*const c.struct_llama_vocab) callconv(.c) bool {
     return vocabOf(vocab).add_bos;
 }
 
-/// Ports `llama_vocab_get_add_eos` (llama-vocab.cpp:4785 @cd959bae9).
+/// Ports `llama_vocab_get_add_eos` (llama-vocab.cpp:4775 @b1b770d90).
 pub fn llama_vocab_get_add_eos(vocab: ?*const c.struct_llama_vocab) callconv(.c) bool {
     return vocabOf(vocab).add_eos;
 }
 
-/// Ports `llama_vocab_get_add_sep` (llama-vocab.cpp:4789 @cd959bae9).
+/// Ports `llama_vocab_get_add_sep` (llama-vocab.cpp:4779 @b1b770d90).
 pub fn llama_vocab_get_add_sep(vocab: ?*const c.struct_llama_vocab) callconv(.c) bool {
     return vocabOf(vocab).add_sep;
 }
 
-/// Ports `llama_vocab_get_suppress_tokens` (llama-vocab.cpp:4793 @cd959bae9).
+/// Ports `llama_vocab_get_suppress_tokens` (llama-vocab.cpp:4783 @b1b770d90).
 ///
 /// Parameters:
 /// - `vocab`: the vocabulary.
@@ -176,143 +165,43 @@ pub fn llama_vocab_get_suppress_tokens(vocab: ?*const c.struct_llama_vocab, n_su
     return tokens.items.ptr;
 }
 
-/// Ports `llama_vocab_fim_pre` (llama-vocab.cpp:4801 @cd959bae9).
+/// Ports `llama_vocab_fim_pre` (llama-vocab.cpp:4791 @b1b770d90).
 pub fn llama_vocab_fim_pre(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
     return vocabOf(vocab).special_fim_pre_id;
 }
 
-/// Ports `llama_vocab_fim_suf` (llama-vocab.cpp:4805 @cd959bae9).
+/// Ports `llama_vocab_fim_suf` (llama-vocab.cpp:4795 @b1b770d90).
 pub fn llama_vocab_fim_suf(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
     return vocabOf(vocab).special_fim_suf_id;
 }
 
-/// Ports `llama_vocab_fim_mid` (llama-vocab.cpp:4809 @cd959bae9).
+/// Ports `llama_vocab_fim_mid` (llama-vocab.cpp:4799 @b1b770d90).
 pub fn llama_vocab_fim_mid(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
     return vocabOf(vocab).special_fim_mid_id;
 }
 
-/// Ports `llama_vocab_fim_pad` (llama-vocab.cpp:4813 @cd959bae9).
+/// Ports `llama_vocab_fim_pad` (llama-vocab.cpp:4803 @b1b770d90).
 pub fn llama_vocab_fim_pad(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
     return vocabOf(vocab).special_fim_pad_id;
 }
 
-/// Ports `llama_vocab_fim_rep` (llama-vocab.cpp:4817 @cd959bae9).
+/// Ports `llama_vocab_fim_rep` (llama-vocab.cpp:4807 @b1b770d90).
 pub fn llama_vocab_fim_rep(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
     return vocabOf(vocab).special_fim_rep_id;
 }
 
-/// Ports `llama_vocab_fim_sep` (llama-vocab.cpp:4821 @cd959bae9).
+/// Ports `llama_vocab_fim_sep` (llama-vocab.cpp:4811 @b1b770d90).
 pub fn llama_vocab_fim_sep(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
     return vocabOf(vocab).special_fim_sep_id;
 }
 
-/// Ports `llama_vocab_mask` (llama-vocab.cpp:4825 @cd959bae9).
+/// Ports `llama_vocab_mask` (llama-vocab.cpp:4815 @b1b770d90).
 pub fn llama_vocab_mask(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
     return vocabOf(vocab).special_mask_id;
 }
 
-/// Ports `llama_token_get_text` (llama-vocab.cpp:4830 @cd959bae9).
-pub fn llama_token_get_text(vocab: ?*const c.struct_llama_vocab, token: Token) callconv(.c) [*c]const u8 {
-    return llama_vocab_get_text(vocab, token);
-}
-
-/// Ports `llama_token_get_score` (llama-vocab.cpp:4835 @cd959bae9).
-pub fn llama_token_get_score(vocab: ?*const c.struct_llama_vocab, token: Token) callconv(.c) f32 {
-    return llama_vocab_get_score(vocab, token);
-}
-
-/// Ports `llama_token_get_attr` (llama-vocab.cpp:4840 @cd959bae9).
-pub fn llama_token_get_attr(vocab: ?*const c.struct_llama_vocab, token: Token) callconv(.c) c.enum_llama_token_attr {
-    return llama_vocab_get_attr(vocab, token);
-}
-
-/// Ports `llama_token_is_eog` (llama-vocab.cpp:4845 @cd959bae9).
-pub fn llama_token_is_eog(vocab: ?*const c.struct_llama_vocab, token: Token) callconv(.c) bool {
-    return llama_vocab_is_eog(vocab, token);
-}
-
-/// Ports `llama_token_is_control` (llama-vocab.cpp:4850 @cd959bae9).
-pub fn llama_token_is_control(vocab: ?*const c.struct_llama_vocab, token: Token) callconv(.c) bool {
-    return llama_vocab_is_control(vocab, token);
-}
-
-/// Ports `llama_token_bos` (llama-vocab.cpp:4855 @cd959bae9).
-pub fn llama_token_bos(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
-    return llama_vocab_bos(vocab);
-}
-
-/// Ports `llama_token_eos` (llama-vocab.cpp:4860 @cd959bae9).
-pub fn llama_token_eos(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
-    return llama_vocab_eos(vocab);
-}
-
-/// Ports `llama_token_eot` (llama-vocab.cpp:4865 @cd959bae9).
-pub fn llama_token_eot(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
-    return llama_vocab_eot(vocab);
-}
-
-/// Ports `llama_token_cls` (llama-vocab.cpp:4870 @cd959bae9): BOS.
-pub fn llama_token_cls(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
-    return llama_vocab_bos(vocab);
-}
-
-/// Ports `llama_token_sep` (llama-vocab.cpp:4876 @cd959bae9).
-pub fn llama_token_sep(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
-    return llama_vocab_sep(vocab);
-}
-
-/// Ports `llama_token_nl` (llama-vocab.cpp:4881 @cd959bae9).
-pub fn llama_token_nl(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
-    return llama_vocab_nl(vocab);
-}
-
-/// Ports `llama_token_pad` (llama-vocab.cpp:4886 @cd959bae9).
-pub fn llama_token_pad(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
-    return llama_vocab_pad(vocab);
-}
-
-/// Ports `llama_add_bos_token` (llama-vocab.cpp:4891 @cd959bae9).
-pub fn llama_add_bos_token(vocab: ?*const c.struct_llama_vocab) callconv(.c) bool {
-    return llama_vocab_get_add_bos(vocab);
-}
-
-/// Ports `llama_add_eos_token` (llama-vocab.cpp:4896 @cd959bae9).
-pub fn llama_add_eos_token(vocab: ?*const c.struct_llama_vocab) callconv(.c) bool {
-    return llama_vocab_get_add_eos(vocab);
-}
-
-/// Ports `llama_token_fim_pre` (llama-vocab.cpp:4901 @cd959bae9).
-pub fn llama_token_fim_pre(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
-    return llama_vocab_fim_pre(vocab);
-}
-
-/// Ports `llama_token_fim_suf` (llama-vocab.cpp:4906 @cd959bae9).
-pub fn llama_token_fim_suf(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
-    return llama_vocab_fim_suf(vocab);
-}
-
-/// Ports `llama_token_fim_mid` (llama-vocab.cpp:4911 @cd959bae9).
-pub fn llama_token_fim_mid(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
-    return llama_vocab_fim_mid(vocab);
-}
-
-/// Ports `llama_token_fim_pad` (llama-vocab.cpp:4916 @cd959bae9).
-pub fn llama_token_fim_pad(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
-    return llama_vocab_fim_pad(vocab);
-}
-
-/// Ports `llama_token_fim_rep` (llama-vocab.cpp:4921 @cd959bae9).
-pub fn llama_token_fim_rep(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
-    return llama_vocab_fim_rep(vocab);
-}
-
-/// Ports `llama_token_fim_sep` (llama-vocab.cpp:4926 @cd959bae9).
-pub fn llama_token_fim_sep(vocab: ?*const c.struct_llama_vocab) callconv(.c) Token {
-    return llama_vocab_fim_sep(vocab);
-}
-
-/// Ports `llama_tokenize` (llama-vocab.cpp:4934 @cd959bae9), through
-/// `llama_vocab`'s C-buffer `tokenize` (llama-vocab.cpp:4645 @cd959bae9).
+/// Ports `llama_tokenize` (llama-vocab.cpp:4823 @b1b770d90), through
+/// `llama_vocab`'s C-buffer `tokenize` (llama-vocab.cpp:4645 @b1b770d90).
 ///
 /// Return: the number of tokens written; minus the number needed when
 /// `n_tokens_max` is too small; `INT32_MIN` past `int32_t`.
@@ -333,7 +222,7 @@ pub fn llama_tokenize(
     }
     const t: []const u8 = if (text_len == 0) "" else text[0..@intCast(text_len)];
     return tokenize(vocab, t, cSlice(Token, tokens, n_tokens_max), add_special, parse_special, &exc) catch
-        exc.terminate("llama-vocab.cpp", 4942);
+        exc.terminate("llama-vocab.cpp", 4831);
 }
 
 /// `llama_tokenize` for Zig callers. Where upstream's tokenizer throws -- a
@@ -364,7 +253,7 @@ pub fn tokenize(
     return vocabOf(vocab).tokenizeInto(text, tokens, add_special, parse_special, exc);
 }
 
-/// Ports `llama_token_to_piece` (llama-vocab.cpp:4945 @cd959bae9). Writes
+/// Ports `llama_token_to_piece` (llama-vocab.cpp:4834 @b1b770d90). Writes
 /// no NUL.
 ///
 /// Return: the bytes written, or minus the bytes needed.
@@ -378,7 +267,7 @@ pub fn llama_token_to_piece(
 ) callconv(.c) i32 {
     var exc: impl.Exception = .{};
     return tokenToPiece(vocab, token, cSlice(u8, buf, length), lstrip, special, &exc) catch
-        exc.terminate("llama-vocab.cpp", 4952);
+        exc.terminate("llama-vocab.cpp", 4841);
 }
 
 /// `llama_token_to_piece` for Zig callers, as `tokenize` is for
@@ -406,7 +295,7 @@ pub fn tokenToPiece(
     return vocabOf(vocab).tokenToPiece(token, buf, lstrip, special, exc);
 }
 
-/// Ports `llama_detokenize` (llama-vocab.cpp:4955 @cd959bae9). Writes no
+/// Ports `llama_detokenize` (llama-vocab.cpp:4844 @b1b770d90). Writes no
 /// NUL.
 ///
 /// A negative `text_len_max` is the C++'s `avail` starting negative: its
@@ -437,7 +326,7 @@ pub fn llama_detokenize(
     }
     var exc: impl.Exception = .{};
     return detokenize(vocab, toks, cSlice(u8, text, text_len_max), remove_special, unparse_special, &exc) catch
-        exc.terminate("llama-vocab.cpp", 4963);
+        exc.terminate("llama-vocab.cpp", 4852);
 }
 
 /// `llama_detokenize` for Zig callers, as `tokenize` is for

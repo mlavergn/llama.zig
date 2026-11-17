@@ -3,10 +3,9 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/top-k.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/top-k.cuh` at v0.9.0 (`cd959bae9`). The
+//! `llama.cpp/ggml/src/ggml-cuda/top-k.cuh` at v1.0.0 (`b1b770d90`). The
 //! radix-select kernels -- `top_k_radix_init`, `top_k_radix_histogram`,
-//! `top_k_radix_select`, `top_k_radix_reset_counters`,
-//! `top_k_radix_gather` -- stay CUDA; the argsort arms sort with
+//! `top_k_radix_select`, `top_k_radix_gather` -- stay CUDA; the argsort arms sort with
 //! `argsort.zig`'s row sorters and copy the first `k` columns.
 //!
 //! # Which arms
@@ -31,42 +30,46 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
-/// Ports `GGML_CUDA_TOP_K_NCOLS_THRESHOLD_BITONIC` (top-k.cu:10 @cd959bae9),
+/// Ports `GGML_CUDA_TOP_K_NCOLS_THRESHOLD_BITONIC` (top-k.cu:10 @b1b770d90),
 /// the CUDA arm.
 const ncols_threshold_bitonic = 512;
-/// Ports `GGML_CUDA_TOP_K_NCOLS_THRESHOLD_ARGSORT` (top-k.cu:15 @cd959bae9).
+/// Ports `GGML_CUDA_TOP_K_NCOLS_THRESHOLD_ARGSORT` (top-k.cu:15 @b1b770d90).
 const ncols_threshold_argsort = 4096;
 /// Ports `GGML_CUDA_TOP_K_NCOLS_THRESHOLD_BITONIC_FEW_ROWS` (top-k.cu:23
-/// @cd959bae9), the CUDA arm: bitonic up to this width while nrows fits in
+/// @b1b770d90), the CUDA arm: bitonic up to this width while nrows fits in
 /// one wave of SMs.
 const ncols_threshold_bitonic_few_rows = 1024;
-/// Ports `GGML_CUDA_TOP_K_NROWS_THRESHOLD` (top-k.cu:45 @cd959bae9), the arm
+/// Ports `GGML_CUDA_TOP_K_NROWS_THRESHOLD` (top-k.cu:45 @b1b770d90), the arm
 /// without `CUB_TOP_K_AVAILABLE`: max rows for the per-row CUB path before
 /// switching to radix or bitonic.
 const nrows_threshold = 1;
 
-/// Ports `top_k_radix_state` (top-k.cu:91 @cd959bae9), for its size: the
-/// host only allocates the states.
+/// Ports `top_k_radix_state` (top-k.cu:92 @b1b770d90), for its size: the
+/// host only allocates the states. Since v1.0.0 it is `alignas(128)`, one
+/// state per cache line, and has no `equal_count`.
 const RadixState = extern struct {
-    prefix: u32,
+    prefix: u32 align(128),
     prefix_mask: u32,
     rank: c_int,
     greater_count: c_int,
-    equal_count: c_int,
 };
 
 comptime {
-    if (@sizeOf(RadixState) != 20) @compileError("top_k_radix_state is five 4-byte fields");
+    if (@sizeOf(RadixState) != 128) @compileError("top_k_radix_state is alignas(128)");
 }
 
-/// Ports `top_k_radix_cuda` (top-k.cu:212 @cd959bae9), which launches with
+/// Ports `top_k_radix_cuda` (top-k.cu:261 @b1b770d90), which launches with
 /// `<<<>>>`. Since v0.7.0 the rows go in chunks that bound the histograms
-/// to 64 MB.
+/// to 64 MB. Since v1.0.0 each block of a row reads a contiguous range of
+/// `block_cols` columns, and the gather breaks ties by column from the last
+/// pass's histograms, which made `top_k_radix_reset_counters` unneeded.
 fn topKRadixCuda(pool: *common.Pool, src_in: [*]const f32, dst_in: [*]c_int, ncols: c_int, nrows: i64, k: c_int, stream: cu.cudaStream_t) void {
     const BLOCK_SIZE = 256;
     const RADIX_BITS = 8;
     const NBINS = 1 << RADIX_BITS;
     const blocks_per_row: c_int = @intCast(@min(@divTrunc(@as(i64, ncols) + 1023, 1024), 64));
+    // each block of a row reads a contiguous range of whole tiles
+    const block_cols: c_int = @truncate(@divTrunc(@as(i64, ncols) + blocks_per_row * BLOCK_SIZE - 1, blocks_per_row * BLOCK_SIZE) * BLOCK_SIZE);
 
     var src = src_in;
     var dst = dst_in;
@@ -84,8 +87,7 @@ fn topKRadixCuda(pool: *common.Pool, src_in: [*]const f32, dst_in: [*]c_int, nco
     const init_k = kernels.get("top-k", "top_k_radix_init");
     const histogram_k = kernels.get("top-k", kernels.tmpl("top_k_radix_histogram", &.{ kernels.int(BLOCK_SIZE), kernels.int(RADIX_BITS) }));
     const select_k = kernels.get("top-k", kernels.tmpl("top_k_radix_select", &.{ kernels.int(BLOCK_SIZE), kernels.int(RADIX_BITS) }));
-    const reset_k = kernels.get("top-k", "top_k_radix_reset_counters");
-    const gather_k = kernels.get("top-k", kernels.tmpl("top_k_radix_gather", &.{kernels.int(BLOCK_SIZE)}));
+    const gather_k = kernels.get("top-k", kernels.tmpl("top_k_radix_gather", &.{ kernels.int(BLOCK_SIZE), kernels.int(RADIX_BITS) }));
 
     var i: i64 = 0;
     while (i < nrows) : (i += chunk_nrows) {
@@ -97,19 +99,18 @@ fn topKRadixCuda(pool: *common.Pool, src_in: [*]const f32, dst_in: [*]c_int, nco
         const row_grid: kernels.Dim3 = .{ .x = @bitCast(blocks_per_row *% iter_nrows) };
         var shift: c_int = 32 - RADIX_BITS;
         while (shift >= 0) : (shift -= RADIX_BITS) {
-            kernels.launch(histogram_k, .{ .grid = row_grid, .block = .{ .x = BLOCK_SIZE }, .stream = stream }, .{ @as(?*const anyopaque, src), @as(?*const anyopaque, states), histograms, ncols, blocks_per_row, shift });
+            kernels.launch(histogram_k, .{ .grid = row_grid, .block = .{ .x = BLOCK_SIZE }, .stream = stream }, .{ @as(?*const anyopaque, src), @as(?*const anyopaque, states), histograms, ncols, block_cols, blocks_per_row, shift });
             kernels.launch(select_k, .{ .grid = .{ .x = @bitCast(iter_nrows) }, .block = .{ .x = BLOCK_SIZE }, .stream = stream }, .{ @as(?*const anyopaque, histograms), states, blocks_per_row, shift });
         }
 
-        kernels.launch(reset_k, .{ .grid = .{ .x = row_blocks }, .block = .{ .x = BLOCK_SIZE }, .stream = stream }, .{ states, iter_nrows });
-        kernels.launch(gather_k, .{ .grid = row_grid, .block = .{ .x = BLOCK_SIZE }, .stream = stream }, .{ @as(?*const anyopaque, src), @as(?*anyopaque, dst), states, ncols, k, blocks_per_row });
+        kernels.launch(gather_k, .{ .grid = row_grid, .block = .{ .x = BLOCK_SIZE }, .stream = stream }, .{ @as(?*const anyopaque, src), @as(?*anyopaque, dst), @as(?*const anyopaque, histograms), states, ncols, block_cols, k, blocks_per_row });
 
         src += @as(usize, @intCast(ncols)) * @as(usize, @intCast(iter_nrows));
         dst += @as(usize, @intCast(k)) * @as(usize, @intCast(iter_nrows));
     }
 }
 
-/// Ports `top_k_argsort_cuda` (top-k.cu:253 @cd959bae9): argsort each chunk
+/// Ports `top_k_argsort_cuda` (top-k.cu:302 @b1b770d90): argsort each chunk
 /// of rows into a scratch buffer, bitonic or CUB, and copy the first `k`
 /// columns out.
 fn topKArgsortCuda(pool: *common.Pool, src_in: [*]const f32, dst_in: [*]c_int, ncols: c_int, nrows: i64, k: c_int, use_cub: bool, stream: cu.cudaStream_t) void {
@@ -148,9 +149,9 @@ fn topKArgsortCuda(pool: *common.Pool, src_in: [*]const f32, dst_in: [*]c_int, n
     }
 }
 
-/// Ports `ggml_cuda_op_top_k` (top-k.cu:281 @cd959bae9), the
+/// Ports `ggml_cuda_op_top_k` (top-k.cu:330 @b1b770d90), the
 /// `GGML_CUDA_USE_CUB` arm without `CUB_TOP_K_AVAILABLE`, with
-/// `next_power_of_2` (top-k.cu:77 @cd959bae9), which is `argsort.cu`'s.
+/// `next_power_of_2` (top-k.cu:77 @b1b770d90), which is `argsort.cu`'s.
 pub fn opTopK(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src0_d: [*]const f32 = @ptrCast(@alignCast(src0.data.?));

@@ -339,6 +339,26 @@ static void run_amp(const char * label, struct ggml_tensor * node, int64_t bound
 /* The map_custom and custom ops call back into the caller. These split rows
  * by `ith`/`nth` the way a real kernel would, so the dispatch's thread
  * arguments are part of what is compared. */
+/* A causal mask with -inf above the diagonal shifted by `n_past`, what
+ * `ggml_diag_mask_inf` computed until v1.0.0 removed the op (#29801). The
+ * flash-attention cases build their masks with it, in the graph, so both
+ * sides compute the same mask with the same code. One task, f32. */
+static void causal_mask_fn(struct ggml_tensor * dst, const struct ggml_tensor * a, int ith, int nth, void * ud) {
+    (void) ith; (void) nth;
+    const int n_past = (int) (intptr_t) ud;
+    const int nc = (int) a->ne[0], nr = (int) a->ne[1], nz = (int) (ggml_nrows(a) / a->ne[1]);
+    memcpy(dst->data, a->data, ggml_nbytes(dst));
+    for (int k = 0; k < nz; k++)
+        for (int j = 0; j < nr; j++)
+            for (int i = n_past; i < nc; i++)
+                if (i > n_past + j)
+                    *(float *) ((char *) dst->data + k*dst->nb[2] + j*dst->nb[1] + i*dst->nb[0]) = -INFINITY;
+}
+
+static struct ggml_tensor * causal_mask(struct ggml_context * c, struct ggml_tensor * a, int n_past) {
+    return ggml_map_custom1(c, a, causal_mask_fn, 1, (void *) (intptr_t) n_past);
+}
+
 static void custom1_fn(struct ggml_tensor * dst, const struct ggml_tensor * a, int ith, int nth, void * ud) {
     (void) ud;
     const int64_t n = ggml_nelements(dst);
@@ -644,7 +664,6 @@ int main(int argc, char ** argv) {
     puts("=== elementwise ===");
     R(ggml_add(ctx, a2, b2));
     R(ggml_add(ctx, a2, row));          /* broadcast */
-    R(ggml_add1(ctx, a2, scal));
     R(ggml_sub(ctx, a2, b2));
     R(ggml_mul(ctx, a2, b2));
     R(ggml_div(ctx, a2, b2));
@@ -898,8 +917,6 @@ int main(int argc, char ** argv) {
     R(ggml_cont(ctx, ggml_permute(ctx, a4, 1, 2, 0, 3)));
     R(ggml_set(ctx, a2, vec, 32, 64, 96, 16));
     R(ggml_diag(ctx, vec));
-    R(ggml_diag_mask_inf(ctx, sq, 3));
-    R(ggml_diag_mask_zero(ctx, sq, 3));
 
     puts("=== softmax ===");
     {
@@ -941,7 +958,7 @@ int main(int argc, char ** argv) {
 
     puts("=== padding and resampling ===");
     R(ggml_upscale(ctx, a4, 2, GGML_SCALE_MODE_NEAREST));
-    R(ggml_upscale_ext(ctx, a4, 24, 20, 8, 2, GGML_SCALE_MODE_BILINEAR));
+    R(ggml_interpolate(ctx, a4, 24, 20, 8, 2, GGML_SCALE_MODE_BILINEAR));
     R(ggml_pad(ctx, a4, 2, 3, 0, 0));
     /* v0.7.0 (#30526) splits pad's rows over threads and copies a contiguous
      * row whole: padding on every axis, a negative (cropping) pad on axis 0,
@@ -1071,6 +1088,16 @@ int main(int argc, char ** argv) {
         R(ggml_rope_ext(ctx, q, pos, NULL, 48, GGML_ROPE_TYPE_NEOX, 4096, 10000.0f, 1.0f, 0.0f, 1.0f, 32.0f, 1.0f)); /* partial */
         R(ggml_rope_ext(ctx, qh, pos, NULL, 64, GGML_ROPE_TYPE_NEOX, 4096, 10000.0f, 1.0f, 0.0f, 1.0f, 32.0f, 1.0f));
         R(ggml_rope_ext(ctx, q, pos, NULL, 64, GGML_ROPE_TYPE_NEOX, 2048, 10000.0f, 0.25f, 1.0f, 1.0f, 32.0f, 1.0f)); /* yarn */
+        /* v1.0.0 (#30206): YaRN with the correction bounds left fractional,
+         * through slot 3 of op_params, forward and back, both rope types. */
+        run_amp("rope_ext yarn truncate=false neox", ggml_rope_set_truncate(
+            ggml_rope_ext(ctx, q, pos, NULL, 64, GGML_ROPE_TYPE_NEOX, 2048, 10000.0f, 0.25f, 1.0f, 1.0f, 32.0f, 1.0f), false), 0, 1.0f);
+        run_amp("rope_ext yarn truncate=false normal", ggml_rope_set_truncate(
+            ggml_rope_ext(ctx, q, pos, NULL, 64, GGML_ROPE_TYPE_NORMAL, 2048, 10000.0f, 0.25f, 1.0f, 1.0f, 24.0f, 1.5f), false), 0, 1.0f);
+        run_amp("rope_ext_back yarn truncate=false", ggml_rope_set_truncate(
+            ggml_rope_ext_back(ctx, q, pos, NULL, 64, GGML_ROPE_TYPE_NEOX, 2048, 10000.0f, 0.25f, 1.0f, 1.0f, 32.0f, 1.0f), false), 0, 1.0f);
+        run_amp("rope_multi yarn truncate=false", ggml_rope_set_truncate(
+            ggml_rope_multi(ctx, q, p4, NULL, 64, sections, GGML_ROPE_TYPE_MROPE, 2048, 10000.0f, 0.25f, 1.0f, 1.0f, 32.0f, 1.0f), false), 0, 1.0f);
         R(ggml_rope_multi(ctx, q, p4, NULL, 64, sections, GGML_ROPE_TYPE_MROPE, 4096, 10000.0f, 1.0f, 0.0f, 1.0f, 32.0f, 1.0f));
         R(ggml_rope_multi(ctx, q, p4, NULL, 64, sections, GGML_ROPE_TYPE_IMROPE, 4096, 10000.0f, 1.0f, 0.0f, 1.0f, 32.0f, 1.0f));
         R(ggml_rope_multi(ctx, q, p4, NULL, 32, vsect, GGML_ROPE_TYPE_VISION, 4096, 10000.0f, 1.0f, 0.0f, 1.0f, 32.0f, 1.0f));
@@ -1190,11 +1217,21 @@ int main(int argc, char ** argv) {
         R(ggml_conv_transpose_1d(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3, 4, 2), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 7, 2), 2, 0, 1));
         R(ggml_conv_transpose_1d(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F16, 3, 4, 2), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 7, 2), 1, 0, 1));
         R(ggml_conv_transpose_2d_p0(ctx, ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 3, 3, 4, 2), ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 5, 5, 2, 1), 2));
+        /* v1.0.0 (#31854) permutes the source into f32 ahead of the kernel
+         * in the work buffer: an f32 kernel, a batch of two, and a channel
+         * count past one f32 vector (ne03 = 37 for the f16 dot's tail). */
+        R(ggml_conv_transpose_2d_p0(ctx, ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 3, 3, 4, 2), ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 5, 5, 2, 2), 2));
+        R(ggml_conv_transpose_2d_p0(ctx, ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 2, 3, 3, 37), ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 4, 3, 37, 2), 1));
+        R(ggml_conv_transpose_1d(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F16, 3, 5, 70), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 9, 70), 2, 0, 1));
         R(ggml_conv_2d_direct(ctx, k2f, x2, 1, 1, 1, 1, 1, 1));
         R(ggml_conv_2d_direct(ctx, k2, x2, 2, 1, 0, 1, 1, 1));
         R(ggml_conv_2d_dw_direct(ctx, ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 3, 3, 1, 3), x2, 1, 1, 1, 1, 1, 1));
         R(ggml_conv_2d_dw_direct(ctx, ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 3, 3, 1, 3), x2, 2, 1, 0, 1, 1, 1));
         R(ggml_conv_3d_direct(ctx, ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 3, 3, 3, 2 * 3), ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 6, 6, 5, 2 * 2),
+                              1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3));
+        /* An f16 kernel: since v1.0.0 the patches stay f32 and the matmul
+         * takes f16 x f32. */
+        R(ggml_conv_3d_direct(ctx, ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 3, 3, 3, 2 * 3), ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 6, 6, 5, 2 * 2),
                               1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3));
         R(ggml_col2im_1d(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 3 * 4, 6), 2, 4, 1));
     }
@@ -1211,7 +1248,7 @@ int main(int argc, char ** argv) {
         struct ggml_tensor * vf = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 64, 32, 2, 1);
         /* A causal mask with real -inf entries, so the kernels' skip of a
          * fully masked score is exercised rather than never taken. */
-        struct ggml_tensor * m  = ggml_cast(ctx, ggml_diag_mask_inf(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 32, 5), 27), GGML_TYPE_F16);
+        struct ggml_tensor * m  = ggml_cast(ctx, causal_mask(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 32, 5), 27), GGML_TYPE_F16);
         struct ggml_tensor * m1 = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 32, 1, 1, 1);
         R(ggml_flash_attn_ext(ctx, q, k, v, m, 0.125f, 0.0f, 0.0f));
         R(ggml_flash_attn_ext(ctx, q, k, v, NULL, 0.125f, 0.0f, 0.0f));
@@ -1227,15 +1264,22 @@ int main(int argc, char ** argv) {
         }
         {
             struct ggml_tensor * o = ggml_flash_attn_ext(ctx, q, k, v, m, 0.125f, 0.0f, 0.0f);
-            ggml_flash_attn_ext_set_prec(o, GGML_PREC_F32);
+            ggml_prec_set_acc(o, GGML_PREC_F32);
             run_amp("flash_attn_ext prec=f32", o, 0, 1.0f);
+        }
+        {
+            /* v1.0.0 reads the precision through ggml_prec_get_acc and
+             * accepts BF16 beside F32 and UNDEFINED (#31896). */
+            struct ggml_tensor * o = ggml_flash_attn_ext(ctx, q, k, v, m, 0.125f, 0.0f, 0.0f);
+            ggml_prec_set_acc(o, GGML_PREC_BF16);
+            run_amp("flash_attn_ext prec=bf16", o, 0, 1.0f);
         }
         /* Longer, to reach any tiled or chunked path. */
         {
             struct ggml_tensor * ql = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 128, 40, 4, 1);
             struct ggml_tensor * kl = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 128, 300, 2, 1);
             struct ggml_tensor * vl = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 128, 300, 2, 1);
-            struct ggml_tensor * ml = ggml_cast(ctx, ggml_diag_mask_inf(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 300, 40), 260), GGML_TYPE_F16);
+            struct ggml_tensor * ml = ggml_cast(ctx, causal_mask(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 300, 40), 260), GGML_TYPE_F16);
             R(ggml_flash_attn_ext(ctx, ql, kl, vl, ml, 0.0883883f, 0.0f, 0.0f));
         }
         /* The two fast paths, each with its own entry condition (ops.cpp's
@@ -1247,7 +1291,7 @@ int main(int argc, char ** argv) {
             struct ggml_tensor * qs = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 64, 1, 4, 1);
             struct ggml_tensor * ks = ggml_new_tensor_4d(ctx, tkv, 64, 600, 2, 1);
             struct ggml_tensor * vs = ggml_new_tensor_4d(ctx, tkv, 64, 600, 2, 1);
-            struct ggml_tensor * ms = ggml_cast(ctx, ggml_diag_mask_inf(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 600, 1), 550), GGML_TYPE_F16);
+            struct ggml_tensor * ms = ggml_cast(ctx, causal_mask(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 600, 1), 550), GGML_TYPE_F16);
             run_amp(kt == 0 ? "flash_attn_ext split-kv f16" : "flash_attn_ext split-kv f32",
                     ggml_flash_attn_ext(ctx, qs, ks, vs, ms, 0.125f, 0.0f, 0.0f), 0, 1.0f);
             {
@@ -1259,7 +1303,7 @@ int main(int argc, char ** argv) {
             struct ggml_tensor * qt = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 64, 70, 4, 1);
             struct ggml_tensor * kt_ = ggml_new_tensor_4d(ctx, tkv, 64, 150, 2, 1);
             struct ggml_tensor * vt = ggml_new_tensor_4d(ctx, tkv, 64, 150, 2, 1);
-            struct ggml_tensor * mt = ggml_cast(ctx, ggml_diag_mask_inf(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 150, 70), 80), GGML_TYPE_F16);
+            struct ggml_tensor * mt = ggml_cast(ctx, causal_mask(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 150, 70), 80), GGML_TYPE_F16);
             run_amp(kt == 0 ? "flash_attn_ext tiled f16" : "flash_attn_ext tiled f32",
                     ggml_flash_attn_ext(ctx, qt, kt_, vt, mt, 0.125f, 0.0f, 0.0f), 0, 1.0f);
             run_amp(kt == 0 ? "flash_attn_ext tiled f16 nomask" : "flash_attn_ext tiled f32 nomask",
@@ -1284,7 +1328,7 @@ int main(int argc, char ** argv) {
             struct ggml_tensor * qt = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 36, 70, 4, 1);
             struct ggml_tensor * kt_ = ggml_new_tensor_4d(ctx, tkv, 36, 150, 2, 1);
             struct ggml_tensor * vt = ggml_new_tensor_4d(ctx, tkv, 36, 150, 2, 1);
-            struct ggml_tensor * mt = ggml_cast(ctx, ggml_diag_mask_inf(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 150, 70), 80), GGML_TYPE_F16);
+            struct ggml_tensor * mt = ggml_cast(ctx, causal_mask(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 150, 70), 80), GGML_TYPE_F16);
             run_amp(kt == 0 ? "flash_attn_ext tiled d36 f16" : "flash_attn_ext tiled d36 f32",
                     ggml_flash_attn_ext(ctx, qt, kt_, vt, mt, 0.125f, 0.0f, 0.0f), 0, 1.0f);
             run_amp(kt == 0 ? "flash_attn_ext tiled d36 f16 softcap" : "flash_attn_ext tiled d36 f32 softcap",
@@ -1407,7 +1451,6 @@ int main(int argc, char ** argv) {
         RB(ggml_set_rows(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F8_E4M3, 37, 10), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 37, 3),
                          ggml_new_tensor_1d(ctx, GGML_TYPE_I64, 3)), 10);
         R(ggml_add(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F8_E4M3, 37, 6), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 37, 6)));
-        R(ggml_add1(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F8_E4M3, 37, 6), ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1)));
         R(ggml_out_prod(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F8_E4M3, 37, 8), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 6, 8)));
     }
 

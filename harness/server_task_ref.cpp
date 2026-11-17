@@ -305,7 +305,7 @@ static void run_result(const json & j) {
         r.reset(x);
     } else if (kind == "realtime") {
         auto * x = new server_task_result_realtime();
-        x->text = f.value("text", std::string());
+        x->content = common_chat_input(f.value("text", std::string()));
         x->audio = f.value("audio", std::vector<float>());
         x->response_done = f.value("response_done", false);
         x->cancelled = f.value("cancelled", false);
@@ -647,10 +647,39 @@ static void run(const std::string & op, const std::string & payload) {
                 {"top_k", t.tts_inp.data.top_k}, {"top_p", t.tts_inp.data.top_p}, {"seed", t.tts_inp.data.seed},
                 {"n_predict", t.params.n_predict}, {"repeat", t.params.sampling.penalty_repeat},
                 {"stream", t.params.stream}, {"sampling_seed", t.params.sampling.seed},
+                {"temp", t.tts_inp.data.temp},
             }.dump());
         });
     } else if (op == "RC") {
         guarded([&] { str("conv", server_chat_convert_responses_to_chatcmpl(j).dump()); });
+    } else if (op == "SP") {
+        guarded([&] { str("conv", convert_speech_to_tts(j).dump()); });
+    } else if (op == "PCM") {
+        guarded([&] {
+            std::vector<float> f;
+            for (const auto & h : j.at("f")) {
+                uint32_t bits = (uint32_t) std::stoul(h.get<std::string>(), nullptr, 16);
+                float x;
+                memcpy(&x, &bits, sizeof(x));
+                f.push_back(x);
+            }
+            const std::string b = pcm_f32_to_s16(f.data(), f.size());
+            static const char * digits = "0123456789abcdef";
+            std::string hex;
+            for (unsigned char c : b) {
+                hex += digits[c >> 4];
+                hex += digits[c & 15];
+            }
+            str("pcm16", hex);
+        });
+    } else if (op == "AP") {
+        guarded([&] {
+            std::string res;
+            for (const auto & a : j.at("a")) {
+                res += server_addr_is_public(a.get<std::string>()) ? '1' : '0';
+            }
+            str("public", res);
+        });
     } else if (op == "AC") {
         guarded([&] { str("conv", server_chat_convert_anthropic_to_oai(j).dump()); });
     } else if (op == "TC") {
@@ -797,11 +826,11 @@ static void run(const std::string & op, const std::string & payload) {
                         p.tokens = server_tokens(o.at(1).get<std::vector<int>>(), false);
                         if (o.size() > 4) {
                             for (const auto & sz : o.at(4)) {
-                                common_prompt_checkpoint ck;
-                                ck.n_tokens = 0;
-                                ck.pos_min = 0;
-                                ck.pos_max = 0;
-                                ck.data_tgt.resize(sz.get<size_t>());
+                                auto ck = std::make_shared<common_prompt_checkpoint>();
+                                ck->n_tokens = 0;
+                                ck->pos_min = 0;
+                                ck->pos_max = 0;
+                                ck->data_tgt.assign(sz.get<size_t>(), 0); // common_state_data leaves a resize uninitialized
                                 p.checkpoints.push_back(ck);
                             }
                         }

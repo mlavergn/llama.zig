@@ -3,12 +3,12 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/lightning-indexer.cu` at v0.9.0
-//! (`cd959bae9`), the host half. The kernels,
-//! `lightning_indexer_kernel_wmma`, `lightning_indexer_kernel_vec` and
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/lightning-indexer.cu` at v1.0.0
+//! (`b1b770d90`), the host half. The kernels,
+//! `lightning_indexer_kernel_mma` (v1.0.0's rename of `_wmma`, now on
+//! `mma.cuh` with four warps a block), `lightning_indexer_kernel_vec` and
 //! (v0.6.0, for four heads) `lightning_indexer_kernel_tile`, stay CUDA. The
-//! HIP/MUSA arm, which always takes the vector kernel, is not compiled
-//! here.
+//! HIP/MUSA arms (AMD MFMA and WMMA) are not compiled here.
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -26,38 +26,39 @@ fn kernel(comptime family: []const u8, comptime warps_per_block: c_int, comptime
     }));
 }
 
-const wmma_types = [_]c.enum_ggml_type{ c.GGML_TYPE_F16, c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q4_1, c.GGML_TYPE_Q5_0, c.GGML_TYPE_Q5_1, c.GGML_TYPE_Q8_0 };
-const vec_types = wmma_types ++ [_]c.enum_ggml_type{ c.GGML_TYPE_BF16, c.GGML_TYPE_F32 };
+const mma_types = [_]c.enum_ggml_type{ c.GGML_TYPE_F16, c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q4_1, c.GGML_TYPE_Q5_0, c.GGML_TYPE_Q5_1, c.GGML_TYPE_Q8_0 };
+const vec_types = mma_types ++ [_]c.enum_ggml_type{ c.GGML_TYPE_BF16, c.GGML_TYPE_F32 };
 
 /// One `if (K->type == type_K) … else` chain of `LIGHTNING_INDEXER_CASE`s
 /// ending in `GGML_ABORT`.
-fn launchCase(comptime family: []const u8, comptime k_vecs_per_block: c_int, comptime n_head: i64, comptime types: []const c.enum_ggml_type, k_type: c.enum_ggml_type, p: kernels.LaunchParams, args: anytype) void {
+fn launchCase(comptime family: []const u8, comptime warps_per_block: c_int, comptime k_vecs_per_block: c_int, comptime n_head: i64, comptime types: []const c.enum_ggml_type, k_type: c.enum_ggml_type, p: kernels.LaunchParams, args: anytype) void {
     inline for (types) |t| {
         if (k_type == t) {
-            kernels.launch(kernel(family, 8, k_vecs_per_block, n_head, t), p, args);
+            kernels.launch(kernel(family, warps_per_block, k_vecs_per_block, n_head, t), p, args);
             return;
         }
     }
     impl.abort("fatal error");
 }
 
-/// `n_head == 4` has no wmma instantiation (upstream's four-head arm names
-/// only the tile and vec kernels), so its wmma branch must not be analysed.
-fn shapeCase(comptime n_head: i64, use_wmma: bool, k_type: c.enum_ggml_type, n_kv: c_int, n_batch: c_int, n_stream: c_int, stream: common.cu.cudaStream_t, args: anytype) void {
-    const warps_per_block = 8;
-    if (n_head != 4 and use_wmma) {
-        // use wmma kernel
+/// `n_head == 4` has no mma instantiation (upstream's four-head arm names
+/// only the tile and vec kernels), so its mma branch must not be analysed.
+/// Since v1.0.0 the mma kernel runs four warps of the device's warp size.
+fn shapeCase(comptime n_head: i64, use_mma: bool, k_type: c.enum_ggml_type, n_kv: c_int, n_batch: c_int, n_stream: c_int, warp_size: c_int, stream: common.cu.cudaStream_t, args: anytype) void {
+    if (n_head != 4 and use_mma) {
         const k_vecs_per_block = 32;
+        const warps_per_block = 4;
         const num_kv_blocks = @divTrunc(n_kv + k_vecs_per_block - 1, k_vecs_per_block);
         const p: kernels.LaunchParams = .{
             .grid = .{ .x = @bitCast(num_kv_blocks), .y = @bitCast(n_batch), .z = @bitCast(n_stream) },
-            .block = .{ .x = 32, .y = warps_per_block },
+            .block = .{ .x = @bitCast(warp_size), .y = warps_per_block },
             .stream = stream,
         };
-        launchCase("wmma", k_vecs_per_block, n_head, &wmma_types, k_type, p, args);
+        launchCase("mma", warps_per_block, k_vecs_per_block, n_head, &mma_types, k_type, p, args);
     } else {
         // use vector kernel
         const k_vecs_per_warp = 8;
+        const warps_per_block = 8;
         const k_vecs_per_block = k_vecs_per_warp * warps_per_block;
         const num_kv_blocks = @divTrunc(n_kv + k_vecs_per_block - 1, k_vecs_per_block);
         const p: kernels.LaunchParams = .{
@@ -65,17 +66,17 @@ fn shapeCase(comptime n_head: i64, use_wmma: bool, k_type: c.enum_ggml_type, n_k
             .block = .{ .x = 32, .y = warps_per_block },
             .stream = stream,
         };
-        launchCase("vec", k_vecs_per_block, n_head, &vec_types, k_type, p, args);
+        launchCase("vec", warps_per_block, k_vecs_per_block, n_head, &vec_types, k_type, p, args);
     }
 }
 
-/// Ports `LIGHTNING_INDEXER_TILE_TOKENS` (lightning-indexer.cu:240 @cd959bae9):
+/// Ports `LIGHTNING_INDEXER_TILE_TOKENS` (lightning-indexer.cu:8 @b1b770d90):
 /// tokens scored per block by the tile kernel.
 const tile_tokens = 8;
 
-/// Ports `ggml_cuda_lightning_indexer` (lightning-indexer.cu:569 @cd959bae9).
-/// v0.7.0 dropped the tile arm's `#ifndef GGML_USE_MUSA` (MUSA now takes the tile
-/// kernel too, staging fewer heads per pass); nothing changed on CUDA.
+/// Ports `ggml_cuda_lightning_indexer` (lightning-indexer.cu:504 @b1b770d90).
+/// v1.0.0 asks `turing_mma_available` alone on NVIDIA (the AMD MFMA and WMMA
+/// arms join it on HIP).
 pub fn opLightningIndexer(ctx: *common.Context, dst: *Tensor) void {
     const q = impl.one(Tensor, dst.src[0]);
     const k = impl.one(Tensor, dst.src[1]);
@@ -123,13 +124,14 @@ pub fn opLightningIndexer(ctx: *common.Context, dst: *Tensor) void {
         m.nb[1],            m.nb[2],           m.nb[3],        m.ne[3],
     };
 
-    const use_wmma = common.cc.isNvidia(x) and common.turingMmaAvailable(x) and k.type != c.GGML_TYPE_F32 and k.type != c.GGML_TYPE_BF16;
+    const use_mma = common.turingMmaAvailable(x) and k.type != c.GGML_TYPE_F32 and k.type != c.GGML_TYPE_BF16;
+    const warp_size = common.info().devices[@intCast(device)].warp_size;
     const stream = ctx.stream();
 
     if (n_embd == 128 and n_head == 64) {
-        shapeCase(64, use_wmma, k.type, n_kv, n_batch, n_stream, stream, args);
+        shapeCase(64, use_mma, k.type, n_kv, n_batch, n_stream, warp_size, stream, args);
     } else if (n_embd == 128 and n_head == 32) {
-        shapeCase(32, use_wmma, k.type, n_kv, n_batch, n_stream, stream, args);
+        shapeCase(32, use_mma, k.type, n_kv, n_batch, n_stream, warp_size, stream, args);
     } else if (n_embd == 128 and n_head == 4 and n_batch >= tile_tokens) {
         // too few heads for a wmma tile, the tile kernel shares the keys across the tokens
         const warps_per_block = 8;
@@ -142,16 +144,16 @@ pub fn opLightningIndexer(ctx: *common.Context, dst: *Tensor) void {
             .block = .{ .x = 32, .y = warps_per_block },
             .stream = stream,
         };
-        launchCase("tile", k_vecs_per_block, 4, &vec_types, k.type, p, args);
+        launchCase("tile", warps_per_block, k_vecs_per_block, 4, &vec_types, k.type, p, args);
     } else if (n_embd == 128 and n_head == 4) {
         // a batch smaller than a token tile, use vector kernel
-        shapeCase(4, false, k.type, n_kv, n_batch, n_stream, stream, args);
+        shapeCase(4, false, k.type, n_kv, n_batch, n_stream, warp_size, stream, args);
     } else {
         impl.abort("fatal error");
     }
 }
 
-/// Ports `ggml_cuda_lightning_indexer_supported` (lightning-indexer.cu:743 @cd959bae9).
+/// Ports `ggml_cuda_lightning_indexer_supported` (lightning-indexer.cu:668 @b1b770d90).
 pub fn supported(device: c_int, dst: *const Tensor) bool {
     _ = device;
     const q = impl.one(Tensor, dst.src[0]);

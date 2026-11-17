@@ -3,8 +3,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/simd-mappings.h` at v0.9.0
-//! (`cd959bae9`): the `GGML_SIMD` block, each arm chosen at comptime on
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/simd-mappings.h` at v1.0.0
+//! (`b1b770d90`): the `GGML_SIMD` block, each arm chosen at comptime on
 //! `builtin.cpu` as the C's `#if` chooses it. Each declaration names the macro
 //! it replaces and the line it is defined on.
 //!
@@ -77,7 +77,7 @@ pub const F16 = switch (builtin.cpu.arch) {
     else => @compileError("no SIMD arm for " ++ @tagName(builtin.cpu.arch)),
 };
 
-/// `GGML_F16_DOT_VEC` and its operations (simd-mappings.h:1369 @cd959bae9),
+/// `GGML_F16_DOT_VEC` and its operations (simd-mappings.h:1369 @b1b770d90),
 /// the arm without `__AVX512FP16__`: `GGML_F16_*` for a dot product that must
 /// accumulate in `f32` on AVX512-FP16. Off that arm, which `x86Arm` refuses,
 /// it is `F16` itself, so on every target this port builds the two are the
@@ -118,51 +118,51 @@ inline fn halve(comptime V: type, comptime n: usize, x: *[n]V) void {
 /// `GGML_F32_VEC` on NEON: `GGML_F32x4`, `float32x4_t`.
 const NeonF32 = struct {
     /// Ports `GGML_F32_STEP`, `GGML_F32_EPR` (simd-mappings.h:358, 359
-    /// @cd959bae9): four registers of four lanes per step.
+    /// @b1b770d90): four registers of four lanes per step.
     pub const step: usize = 16;
     pub const epr: usize = 4;
 
-    /// Ports `GGML_F32_ARR` (simd-mappings.h:1346 @cd959bae9).
+    /// Ports `GGML_F32_ARR` (simd-mappings.h:1346 @b1b770d90).
     pub const arr: usize = step / epr;
 
     /// `GGML_F32x4`.
     pub const Vec = neon.f32x4;
 
-    /// Ports `GGML_F32x4_ZERO` (simd-mappings.h:362 @cd959bae9).
+    /// Ports `GGML_F32x4_ZERO` (simd-mappings.h:362 @b1b770d90).
     pub const zero: Vec = @splat(0.0);
 
-    /// Ports `GGML_F32x4_SET1` (simd-mappings.h:363 @cd959bae9).
+    /// Ports `GGML_F32x4_SET1` (simd-mappings.h:363 @b1b770d90).
     pub inline fn set1(x: f32) Vec {
         return @splat(x);
     }
 
-    /// Ports `GGML_F32x4_LOAD` (simd-mappings.h:364 @cd959bae9).
+    /// Ports `GGML_F32x4_LOAD` (simd-mappings.h:364 @b1b770d90).
     pub inline fn load(p: [*]const f32) Vec {
         return p[0..epr].*;
     }
 
-    /// Ports `GGML_F32x4_STORE` (simd-mappings.h:365 @cd959bae9).
+    /// Ports `GGML_F32x4_STORE` (simd-mappings.h:365 @b1b770d90).
     pub inline fn store(p: [*]f32, v: Vec) void {
         p[0..epr].* = v;
     }
 
-    /// Ports `GGML_F32x4_FMA` (simd-mappings.h:366 @cd959bae9): `a + b * cc`,
+    /// Ports `GGML_F32x4_FMA` (simd-mappings.h:366 @b1b770d90): `a + b * cc`,
     /// fused -- `vfmaq_f32`.
     pub inline fn fma(a: Vec, b: Vec, cc: Vec) Vec {
         return neon.fma_f32(a, b, cc);
     }
 
-    /// Ports `GGML_F32x4_ADD` (simd-mappings.h:367 @cd959bae9).
+    /// Ports `GGML_F32x4_ADD` (simd-mappings.h:367 @b1b770d90).
     pub inline fn add(a: Vec, b: Vec) Vec {
         return a + b;
     }
 
-    /// Ports `GGML_F32x4_MUL` (simd-mappings.h:368 @cd959bae9).
+    /// Ports `GGML_F32x4_MUL` (simd-mappings.h:368 @b1b770d90).
     pub inline fn mul(a: Vec, b: Vec) Vec {
         return neon.mul_f32(a, b);
     }
 
-    /// Ports `GGML_F32x4_REDUCE` (simd-mappings.h:370 @cd959bae9): halve,
+    /// Ports `GGML_F32x4_REDUCE` (simd-mappings.h:370 @b1b770d90): halve,
     /// halve, then one **pairwise** `vaddvq_f32`.
     ///
     /// The pairwise step is load-bearing. `neon.addvq_f32` reduces as
@@ -182,11 +182,11 @@ const NeonF32 = struct {
 /// `GGML_F16x8`, `float16x8_t`, and the arithmetic **is** half precision.
 const NeonF16x8 = struct {
     /// Ports `GGML_F16_STEP`, `GGML_F16_EPR` (simd-mappings.h:400, 401
-    /// @cd959bae9), the `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC` arm.
+    /// @b1b770d90), the `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC` arm.
     pub const step: usize = 32;
     pub const epr: usize = 8;
 
-    /// Ports `GGML_F16_ARR` (simd-mappings.h:1347 @cd959bae9).
+    /// Ports `GGML_F16_ARR` (simd-mappings.h:1347 @b1b770d90).
     pub const arr: usize = step / epr;
 
     /// Whether `Vec`'s arithmetic rounds to half precision. True here; see
@@ -196,10 +196,10 @@ const NeonF16x8 = struct {
     /// `GGML_F16x8`.
     pub const Vec = neon.f16x8;
 
-    /// Ports `GGML_F16x8_ZERO` (simd-mappings.h:404 @cd959bae9).
+    /// Ports `GGML_F16x8_ZERO` (simd-mappings.h:404 @b1b770d90).
     pub const zero: Vec = @splat(0.0);
 
-    /// Ports `GGML_F16x8_LOAD` (simd-mappings.h:406 @cd959bae9).
+    /// Ports `GGML_F16x8_LOAD` (simd-mappings.h:406 @b1b770d90).
     ///
     /// `ggml_fp16_t` is a `u16` after the import, so the eight lanes are
     /// reinterpreted rather than converted -- a load, as `vld1q_f16` is, not
@@ -208,18 +208,18 @@ const NeonF16x8 = struct {
         return @bitCast(@as(@Vector(epr, u16), p[0..epr].*));
     }
 
-    /// Ports `GGML_F16x8_FMA` (simd-mappings.h:408 @cd959bae9): `a + b * cc`
+    /// Ports `GGML_F16x8_FMA` (simd-mappings.h:408 @b1b770d90): `a + b * cc`
     /// in half precision, fused -- `vfmaq_f16`.
     pub inline fn fma(a: Vec, b: Vec, cc: Vec) Vec {
         return neon.fma_f16(a, b, cc);
     }
 
-    /// Ports `GGML_F16x8_ADD` (simd-mappings.h:409 @cd959bae9).
+    /// Ports `GGML_F16x8_ADD` (simd-mappings.h:409 @b1b770d90).
     pub inline fn add(a: Vec, b: Vec) Vec {
         return neon.add_f16(a, b);
     }
 
-    /// Ports `GGML_F16x8_REDUCE` (simd-mappings.h:411 @cd959bae9): halve,
+    /// Ports `GGML_F16x8_REDUCE` (simd-mappings.h:411 @b1b770d90): halve,
     /// halve **in half precision**, then widen both halves of `x[0]` to
     /// `f32x4`, add, and one pairwise `vaddvq_f32`.
     pub inline fn reduce(x: *[arr]Vec) f32 {
@@ -235,11 +235,11 @@ const NeonF16x8 = struct {
 /// arithmetic is `f32`'s.
 const NeonF32Cx4 = struct {
     /// Ports `GGML_F16_STEP`, `GGML_F16_EPR` (simd-mappings.h:443, 444
-    /// @cd959bae9), the arm without `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC`.
+    /// @b1b770d90), the arm without `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC`.
     pub const step: usize = 16;
     pub const epr: usize = 4;
 
-    /// Ports `GGML_F16_ARR` (simd-mappings.h:1347 @cd959bae9).
+    /// Ports `GGML_F16_ARR` (simd-mappings.h:1347 @b1b770d90).
     pub const arr: usize = step / epr;
 
     /// Whether `Vec`'s arithmetic rounds to half precision. False: each load
@@ -251,27 +251,27 @@ const NeonF32Cx4 = struct {
     /// `GGML_F32Cx4`.
     pub const Vec = neon.f32x4;
 
-    /// Ports `GGML_F32Cx4_ZERO` (simd-mappings.h:447 @cd959bae9).
+    /// Ports `GGML_F32Cx4_ZERO` (simd-mappings.h:447 @b1b770d90).
     pub const zero: Vec = @splat(0.0);
 
-    /// Ports `GGML_F32Cx4_LOAD` (simd-mappings.h:449 @cd959bae9): `vld1_f16`
+    /// Ports `GGML_F32Cx4_LOAD` (simd-mappings.h:449 @b1b770d90): `vld1_f16`
     /// then `vcvt_f32_f16`, an exact widening.
     pub inline fn load(p: [*]const u16) Vec {
         return neon.cvt_f32_f16(neon.load_f16x4(p));
     }
 
-    /// Ports `GGML_F32Cx4_FMA` (simd-mappings.h:451 @cd959bae9): `a + b * cc`
+    /// Ports `GGML_F32Cx4_FMA` (simd-mappings.h:451 @b1b770d90): `a + b * cc`
     /// in `f32`, fused -- `vfmaq_f32`.
     pub inline fn fma(a: Vec, b: Vec, cc: Vec) Vec {
         return neon.fma_f32(a, b, cc);
     }
 
-    /// Ports `GGML_F32Cx4_ADD` (simd-mappings.h:452 @cd959bae9).
+    /// Ports `GGML_F32Cx4_ADD` (simd-mappings.h:452 @b1b770d90).
     pub inline fn add(a: Vec, b: Vec) Vec {
         return a + b;
     }
 
-    /// Ports `GGML_F32Cx4_REDUCE` (simd-mappings.h:454 @cd959bae9), which is
+    /// Ports `GGML_F32Cx4_REDUCE` (simd-mappings.h:454 @b1b770d90), which is
     /// `GGML_F32x4_REDUCE`.
     pub inline fn reduce(x: *[arr]Vec) f32 {
         return NeonF32.reduce(x);
@@ -284,51 +284,51 @@ const NeonF32Cx4 = struct {
 /// `GGML_F32_VEC` on AVX: `GGML_F32x8`, `__m256`.
 const AvxF32 = struct {
     /// Ports `GGML_F32_STEP`, `GGML_F32_EPR` (simd-mappings.h:608, 609
-    /// @cd959bae9): four registers of eight lanes per step.
+    /// @b1b770d90): four registers of eight lanes per step.
     pub const step: usize = 32;
     pub const epr: usize = 8;
 
-    /// Ports `GGML_F32_ARR` (simd-mappings.h:1346 @cd959bae9).
+    /// Ports `GGML_F32_ARR` (simd-mappings.h:1346 @b1b770d90).
     pub const arr: usize = step / epr;
 
     /// `GGML_F32x8`.
     pub const Vec = @Vector(epr, f32);
 
-    /// Ports `GGML_F32x8_ZERO` (simd-mappings.h:612 @cd959bae9).
+    /// Ports `GGML_F32x8_ZERO` (simd-mappings.h:612 @b1b770d90).
     pub const zero: Vec = @splat(0.0);
 
-    /// Ports `GGML_F32x8_SET1` (simd-mappings.h:613 @cd959bae9).
+    /// Ports `GGML_F32x8_SET1` (simd-mappings.h:613 @b1b770d90).
     pub inline fn set1(x: f32) Vec {
         return @splat(x);
     }
 
-    /// Ports `GGML_F32x8_LOAD` (simd-mappings.h:614 @cd959bae9).
+    /// Ports `GGML_F32x8_LOAD` (simd-mappings.h:614 @b1b770d90).
     pub inline fn load(p: [*]const f32) Vec {
         return p[0..epr].*;
     }
 
-    /// Ports `GGML_F32x8_STORE` (simd-mappings.h:615 @cd959bae9).
+    /// Ports `GGML_F32x8_STORE` (simd-mappings.h:615 @b1b770d90).
     pub inline fn store(p: [*]f32, v: Vec) void {
         p[0..epr].* = v;
     }
 
-    /// Ports `GGML_F32x8_FMA` (simd-mappings.h:617 @cd959bae9), the
+    /// Ports `GGML_F32x8_FMA` (simd-mappings.h:617 @b1b770d90), the
     /// `__FMA__` arm: `_mm256_fmadd_ps(b, c, a)`, so `a + b * c`, fused.
     pub inline fn fma(a: Vec, b: Vec, cc: Vec) Vec {
         return @mulAdd(Vec, b, cc, a);
     }
 
-    /// Ports `GGML_F32x8_ADD` (simd-mappings.h:621 @cd959bae9).
+    /// Ports `GGML_F32x8_ADD` (simd-mappings.h:621 @b1b770d90).
     pub inline fn add(a: Vec, b: Vec) Vec {
         return a + b;
     }
 
-    /// Ports `GGML_F32x8_MUL` (simd-mappings.h:622 @cd959bae9).
+    /// Ports `GGML_F32x8_MUL` (simd-mappings.h:622 @b1b770d90).
     pub inline fn mul(a: Vec, b: Vec) Vec {
         return a * b;
     }
 
-    /// Ports `GGML_F32x8_REDUCE` (simd-mappings.h:623 @cd959bae9): halve,
+    /// Ports `GGML_F32x8_REDUCE` (simd-mappings.h:623 @b1b770d90): halve,
     /// halve, then fold the upper 128 bits onto the lower and two
     /// `_mm_hadd_ps`.
     ///
@@ -355,11 +355,11 @@ extern fn @"llvm.x86.vcvtps2ph.256"(@Vector(8, f32), i32) callconv(.{ .x86_64_sy
 /// arithmetic.
 const AvxF32Cx8 = struct {
     /// Ports `GGML_F16_STEP`, `GGML_F16_EPR` (simd-mappings.h:656, 657
-    /// @cd959bae9).
+    /// @b1b770d90).
     pub const step: usize = 32;
     pub const epr: usize = 8;
 
-    /// Ports `GGML_F16_ARR` (simd-mappings.h:1347 @cd959bae9).
+    /// Ports `GGML_F16_ARR` (simd-mappings.h:1347 @b1b770d90).
     pub const arr: usize = step / epr;
 
     /// Whether `Vec`'s arithmetic rounds to half precision. False, as for
@@ -370,22 +370,22 @@ const AvxF32Cx8 = struct {
     /// `GGML_F32Cx8`.
     pub const Vec = @Vector(epr, f32);
 
-    /// Ports `GGML_F32Cx8_ZERO` (simd-mappings.h:662 @cd959bae9).
+    /// Ports `GGML_F32Cx8_ZERO` (simd-mappings.h:662 @b1b770d90).
     pub const zero: Vec = @splat(0.0);
 
-    /// Ports `GGML_F32Cx8_SET1` (simd-mappings.h:663 @cd959bae9).
+    /// Ports `GGML_F32Cx8_SET1` (simd-mappings.h:663 @b1b770d90).
     pub inline fn set1(x: f32) Vec {
         return @splat(x);
     }
 
-    /// Ports `GGML_F32Cx8_LOAD` (simd-mappings.h:667 @cd959bae9), the
+    /// Ports `GGML_F32Cx8_LOAD` (simd-mappings.h:667 @b1b770d90), the
     /// `__F16C__` arm: `_mm256_cvtph_ps`, an exact widening.
     pub inline fn load(p: [*]const u16) Vec {
         const h: @Vector(epr, f16) = @bitCast(@as(@Vector(epr, u16), p[0..epr].*));
         return @floatCast(h);
     }
 
-    /// Ports `GGML_F32Cx8_STORE` (simd-mappings.h:668 @cd959bae9), the
+    /// Ports `GGML_F32Cx8_STORE` (simd-mappings.h:668 @b1b770d90), the
     /// `__F16C__` arm: `_mm256_cvtps_ph(y, 0)`, through LLVM's own intrinsic.
     ///
     /// **Not** `@floatCast`. The instruction rounds to nearest-even exactly
@@ -397,23 +397,23 @@ const AvxF32Cx8 = struct {
         p[0..epr].* = @bitCast(@"llvm.x86.vcvtps2ph.256"(v, 0));
     }
 
-    /// Ports `GGML_F32Cx8_FMA` (simd-mappings.h:691 @cd959bae9), which is
+    /// Ports `GGML_F32Cx8_FMA` (simd-mappings.h:691 @b1b770d90), which is
     /// `GGML_F32x8_FMA`.
     pub inline fn fma(a: Vec, b: Vec, cc: Vec) Vec {
         return AvxF32.fma(a, b, cc);
     }
 
-    /// Ports `GGML_F32Cx8_ADD` (simd-mappings.h:692 @cd959bae9).
+    /// Ports `GGML_F32Cx8_ADD` (simd-mappings.h:692 @b1b770d90).
     pub inline fn add(a: Vec, b: Vec) Vec {
         return a + b;
     }
 
-    /// Ports `GGML_F32Cx8_MUL` (simd-mappings.h:693 @cd959bae9).
+    /// Ports `GGML_F32Cx8_MUL` (simd-mappings.h:693 @b1b770d90).
     pub inline fn mul(a: Vec, b: Vec) Vec {
         return a * b;
     }
 
-    /// Ports `GGML_F32Cx8_REDUCE` (simd-mappings.h:694 @cd959bae9), which is
+    /// Ports `GGML_F32Cx8_REDUCE` (simd-mappings.h:694 @b1b770d90), which is
     /// `GGML_F32x8_REDUCE`.
     pub inline fn reduce(x: *[arr]Vec) f32 {
         return AvxF32.reduce(x);
@@ -444,51 +444,51 @@ extern fn @"llvm.x86.avx512.mask.vcvtps2ph.512"(@Vector(16, f32), i32, @Vector(1
 /// `GGML_F32_VEC` on AVX-512: `GGML_F32x16`, `__m512`.
 const Avx512F32 = struct {
     /// Ports `GGML_F32_STEP`, `GGML_F32_EPR` (simd-mappings.h:473, 474
-    /// @cd959bae9): four registers of sixteen lanes per step.
+    /// @b1b770d90): four registers of sixteen lanes per step.
     pub const step: usize = 64;
     pub const epr: usize = 16;
 
-    /// Ports `GGML_F32_ARR` (simd-mappings.h:1346 @cd959bae9).
+    /// Ports `GGML_F32_ARR` (simd-mappings.h:1346 @b1b770d90).
     pub const arr: usize = step / epr;
 
     /// `GGML_F32x16`.
     pub const Vec = @Vector(epr, f32);
 
-    /// Ports `GGML_F32x16_ZERO` (simd-mappings.h:477 @cd959bae9).
+    /// Ports `GGML_F32x16_ZERO` (simd-mappings.h:477 @b1b770d90).
     pub const zero: Vec = @splat(0.0);
 
-    /// Ports `GGML_F32x16_SET1` (simd-mappings.h:478 @cd959bae9).
+    /// Ports `GGML_F32x16_SET1` (simd-mappings.h:478 @b1b770d90).
     pub inline fn set1(x: f32) Vec {
         return @splat(x);
     }
 
-    /// Ports `GGML_F32x16_LOAD` (simd-mappings.h:479 @cd959bae9).
+    /// Ports `GGML_F32x16_LOAD` (simd-mappings.h:479 @b1b770d90).
     pub inline fn load(p: [*]const f32) Vec {
         return p[0..epr].*;
     }
 
-    /// Ports `GGML_F32x16_STORE` (simd-mappings.h:480 @cd959bae9).
+    /// Ports `GGML_F32x16_STORE` (simd-mappings.h:480 @b1b770d90).
     pub inline fn store(p: [*]f32, v: Vec) void {
         p[0..epr].* = v;
     }
 
-    /// Ports `GGML_F32x16_FMA` (simd-mappings.h:482 @cd959bae9):
+    /// Ports `GGML_F32x16_FMA` (simd-mappings.h:482 @b1b770d90):
     /// `_mm512_fmadd_ps(b, c, a)`, so `a + b * c`, fused.
     pub inline fn fma(a: Vec, b: Vec, cc: Vec) Vec {
         return @mulAdd(Vec, b, cc, a);
     }
 
-    /// Ports `GGML_F32x16_ADD` (simd-mappings.h:483 @cd959bae9).
+    /// Ports `GGML_F32x16_ADD` (simd-mappings.h:483 @b1b770d90).
     pub inline fn add(a: Vec, b: Vec) Vec {
         return a + b;
     }
 
-    /// Ports `GGML_F32x16_MUL` (simd-mappings.h:484 @cd959bae9).
+    /// Ports `GGML_F32x16_MUL` (simd-mappings.h:484 @b1b770d90).
     pub inline fn mul(a: Vec, b: Vec) Vec {
         return a * b;
     }
 
-    /// Ports `GGML_F32x16_REDUCE` (simd-mappings.h:485 @cd959bae9): halve,
+    /// Ports `GGML_F32x16_REDUCE` (simd-mappings.h:485 @b1b770d90): halve,
     /// halve, then `_mm512_reduce_add_ps`, in `reduceAdd512`'s tree.
     pub inline fn reduce(x: *[arr]Vec) f32 {
         halve(Vec, arr, x);
@@ -500,11 +500,11 @@ const Avx512F32 = struct {
 /// `__m512` over sixteen widened halves, so the arithmetic is `f32`'s.
 const Avx512F32Cx16 = struct {
     /// Ports `GGML_F16_STEP`, `GGML_F16_EPR` (simd-mappings.h:558, 559
-    /// @cd959bae9), the arm without `__AVX512FP16__`.
+    /// @b1b770d90), the arm without `__AVX512FP16__`.
     pub const step: usize = 64;
     pub const epr: usize = 16;
 
-    /// Ports `GGML_F16_ARR` (simd-mappings.h:1347 @cd959bae9).
+    /// Ports `GGML_F16_ARR` (simd-mappings.h:1347 @b1b770d90).
     pub const arr: usize = step / epr;
 
     /// Whether `Vec`'s arithmetic rounds to half precision. False, as for
@@ -514,15 +514,15 @@ const Avx512F32Cx16 = struct {
     /// `GGML_F32Cx16`.
     pub const Vec = @Vector(epr, f32);
 
-    /// Ports `GGML_F32Cx16_ZERO` (simd-mappings.h:562 @cd959bae9).
+    /// Ports `GGML_F32Cx16_ZERO` (simd-mappings.h:562 @b1b770d90).
     pub const zero: Vec = @splat(0.0);
 
-    /// Ports `GGML_F32Cx16_SET1` (simd-mappings.h:563 @cd959bae9).
+    /// Ports `GGML_F32Cx16_SET1` (simd-mappings.h:563 @b1b770d90).
     pub inline fn set1(x: f32) Vec {
         return @splat(x);
     }
 
-    /// Ports `GGML_F32Cx16_LOAD` (simd-mappings.h:567 @cd959bae9):
+    /// Ports `GGML_F32Cx16_LOAD` (simd-mappings.h:567 @b1b770d90):
     /// `_mm512_cvtph_ps`, an exact widening -- an `fpext` in the
     /// reference's IR.
     pub inline fn load(p: [*]const u16) Vec {
@@ -530,29 +530,29 @@ const Avx512F32Cx16 = struct {
         return @floatCast(h);
     }
 
-    /// Ports `GGML_F32Cx16_STORE` (simd-mappings.h:568 @cd959bae9):
+    /// Ports `GGML_F32Cx16_STORE` (simd-mappings.h:568 @b1b770d90):
     /// `_mm512_cvtps_ph(y, 0)`, through LLVM's own intrinsic, for the NaN
     /// payloads `AvxF32Cx8.store` explains.
     pub inline fn store(p: [*]u16, v: Vec) void {
         p[0..epr].* = @bitCast(@"llvm.x86.avx512.mask.vcvtps2ph.512"(v, 0, @splat(0), 0xffff));
     }
 
-    /// Ports `GGML_F32Cx16_FMA` (simd-mappings.h:570 @cd959bae9).
+    /// Ports `GGML_F32Cx16_FMA` (simd-mappings.h:570 @b1b770d90).
     pub inline fn fma(a: Vec, b: Vec, cc: Vec) Vec {
         return Avx512F32.fma(a, b, cc);
     }
 
-    /// Ports `GGML_F32Cx16_ADD` (simd-mappings.h:571 @cd959bae9).
+    /// Ports `GGML_F32Cx16_ADD` (simd-mappings.h:571 @b1b770d90).
     pub inline fn add(a: Vec, b: Vec) Vec {
         return a + b;
     }
 
-    /// Ports `GGML_F32Cx16_MUL` (simd-mappings.h:572 @cd959bae9).
+    /// Ports `GGML_F32Cx16_MUL` (simd-mappings.h:572 @b1b770d90).
     pub inline fn mul(a: Vec, b: Vec) Vec {
         return a * b;
     }
 
-    /// Ports `GGML_F32Cx16_REDUCE` (simd-mappings.h:573 @cd959bae9), which
+    /// Ports `GGML_F32Cx16_REDUCE` (simd-mappings.h:573 @b1b770d90), which
     /// halves over `GGML_F32_ARR` -- the same count here -- and ends in
     /// `_mm512_reduce_add_ps`.
     pub inline fn reduce(x: *[arr]Vec) f32 {

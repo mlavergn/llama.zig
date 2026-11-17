@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/minicpm3.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/minicpm3.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_minicpm3`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -21,7 +21,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_minicpm3`'s `load_arch_hparams` (models/minicpm3.cpp:3 @cd959bae9).
+/// Ports `llama_model_minicpm3`'s `load_arch_hparams` (models/minicpm3.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -36,7 +36,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_minicpm3`'s `load_arch_tensors` (models/minicpm3.cpp:14 @cd959bae9).
+/// Ports `llama_model_minicpm3`'s `load_arch_tensors` (models/minicpm3.cpp:14 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -88,13 +88,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_minicpm3`'s `build_arch_graph` (models/minicpm3.cpp:59 @cd959bae9).
+/// Ports `llama_model_minicpm3`'s `build_arch_graph` (models/minicpm3.cpp:59 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_minicpm3`'s `graph`
-/// (models/minicpm3.cpp:63 @cd959bae9).
+/// (models/minicpm3.cpp:63 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -126,8 +126,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
         var inpSA = inpL;
-
-        const rope_factors = model.getRopeFactors(b.cparams, @intCast(il));
 
         // Norm.
         var cur = b.buildNorm(inpL, layer.attn_norm, null, .rms, il);
@@ -181,12 +179,12 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             v_states = c.ggml_cont(ctx, v_states);
             b.cb(v_states, "v_states", il);
 
-            q = c.ggml_rope_ext(ctx, q, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            q = b.buildRope(q, inp_pos, il);
             q = c.ggml_rope_set_offset(q, @bitCast(n_embd_head_qk_nope));
             b.cb(q, "q_rope", il);
 
             // The shared RoPE key.
-            k_pe = c.ggml_rope_ext(ctx, k_pe, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            k_pe = b.buildRope(k_pe, inp_pos, il);
             b.cb(k_pe, "k_pe", il);
 
             const q_states = q;

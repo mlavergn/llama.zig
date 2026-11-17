@@ -11,8 +11,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/granite-switch.cpp` at v0.9.0
-//! (`cd959bae9`): `llama_model_granite_switch`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/granite-switch.cpp` at v1.0.0
+//! (`b1b770d90`): `llama_model_granite_switch`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, its `graph` with
 //! `build_switched_lora_delta`, `build_switched_lora_mm`,
 //! `build_attention_layer` and `build_layer_ffn`, and the graph input
@@ -39,7 +39,7 @@ fn oom() noreturn {
 }
 
 /// Ports `llama_model_granite_switch`'s `load_arch_hparams`
-/// (models/granite-switch.cpp:5 @cd959bae9).
+/// (models/granite-switch.cpp:5 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -117,7 +117,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_granite_switch`'s `load_arch_tensors`
-/// (models/granite-switch.cpp:74 @cd959bae9).
+/// (models/granite-switch.cpp:74 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const gs = &self.granite_switch;
@@ -185,7 +185,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llm_graph_input_switch` (models/granite-switch.cpp:134
-/// @cd959bae9): the substituted token ids and the router's three signals,
+/// @b1b770d90): the substituted token ids and the router's three signals,
 /// set from the batch's tokens.
 const InpSwitch = struct {
     /// I32 `[n_tokens]`: the adapter-substituted token ids.
@@ -200,7 +200,7 @@ const InpSwitch = struct {
     smodel: *const Model,
 
     /// Ports `llm_graph_input_switch`'s `set_input`
-    /// (models/granite-switch.cpp:151 @cd959bae9). K's dimension 0 is
+    /// (models/granite-switch.cpp:151 @b1b770d90). K's dimension 0 is
     /// `+gain` for an adapter token and `-gain` otherwise; the causal
     /// softmax then lets a single visible adapter token dominate, so the
     /// readback recovers its slot.
@@ -244,13 +244,13 @@ const InpSwitch = struct {
 };
 
 /// Ports `llama_model_granite_switch`'s `build_arch_graph`
-/// (models/granite-switch.cpp:188 @cd959bae9).
+/// (models/granite-switch.cpp:188 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports `llama_model_granite_switch`'s `graph`'s
-/// `build_switched_lora_delta` (models/granite-switch.cpp:194 @cd959bae9):
+/// `build_switched_lora_delta` (models/granite-switch.cpp:194 @b1b770d90):
 /// the per-token switched LoRA delta `B_a*(A_a*x)`, the adapter chosen per
 /// token by `ids`. `cur` is `{n_in, n_tokens}` and `ids` `{n_tokens}`; the
 /// result is `{n_out, n_tokens}`.
@@ -271,7 +271,7 @@ fn buildSwitchedLoraDelta(b: *const graph.Builder, lora_a: *Tensor, lora_b: *Ten
 }
 
 /// Ports `llama_model_granite_switch`'s `graph`'s `build_switched_lora_mm`
-/// (models/granite-switch.cpp:211 @cd959bae9): the base projection plus the
+/// (models/granite-switch.cpp:211 @b1b770d90): the base projection plus the
 /// switched delta.
 fn buildSwitchedLoraMm(b: *const graph.Builder, w: *Tensor, lora_a: *Tensor, lora_b: *Tensor, cur: *Tensor, ids: *Tensor) *Tensor {
     const base: *Tensor = c.ggml_mul_mat(b.ctx0, w, cur);
@@ -287,7 +287,7 @@ fn routerLane(b: *const graph.Builder, sig1d: *Tensor, n_embd_head: i64) *Tensor
 }
 
 /// Ports the constructor of `llama_model_granite_switch`'s `graph`
-/// (models/granite-switch.cpp:222 @cd959bae9).
+/// (models/granite-switch.cpp:222 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -295,12 +295,12 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     // TODO upstream: support raw embedding input (multimodal or pre-embedded
     // tokens) when needed.
-    b.ubatch.assertEmbdOrToken("models/granite-switch.cpp", 230);
-    impl.assert(b.ubatch.token != null, "models/granite-switch.cpp", 231, "ubatch.token && \"granite-switch requires token input\"");
+    b.ubatch.assertEmbdOrToken("models/granite-switch.cpp", 227);
+    impl.assert(b.ubatch.token != null, "models/granite-switch.cpp", 228, "ubatch.token && \"granite-switch requires token input\"");
 
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/granite-switch.cpp", 234, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/granite-switch.cpp", 235, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/granite-switch.cpp", 231, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/granite-switch.cpp", 232, "n_embd_head == n_rot");
 
     const inp_switch = allocator.create(InpSwitch) catch oom();
     inp_switch.* = .{ .smodel = model };
@@ -336,7 +336,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     // graph: only dimension 0 carries signal (Q[0] = 1, K[0] = +/-gain,
     // V[0] = slot or 0), the rest is zero padding.
     const R = hp.router_layer;
-    impl.assert(R >= 0, "models/granite-switch.cpp", 268, "R >= 0");
+    impl.assert(R >= 0, "models/granite-switch.cpp", 265, "R >= 0");
     const Qr = routerLane(b, router_q, n_embd_head);
     const Kr = routerLane(b, router_ksig, n_embd_head);
     const Vr = routerLane(b, router_vval, n_embd_head);
@@ -395,7 +395,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports `llama_model_granite_switch`'s `graph`'s `build_attention_layer`
-/// (models/granite-switch.cpp:333 @cd959bae9): the fused QKV sliced, each
+/// (models/granite-switch.cpp:330 @b1b770d90): the fused QKV sliced, each
 /// part plus its switched delta, and the output projection switched too.
 fn buildAttentionLayer(
     b: *const graph.Builder,
@@ -437,11 +437,10 @@ fn buildAttentionLayer(
     Kcur = c.ggml_reshape_3d(ctx, Kcur, n_embd_head, n_head_kv, b.n_tokens);
     Vcur = c.ggml_reshape_3d(ctx, Vcur, n_embd_head, n_head_kv, b.n_tokens);
 
-    if (hp.hasRope(@intCast(il))) {
-        const rope_factors = model.getRopeFactors(b.cparams, @intCast(il));
-        Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-        Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, rope_factors, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-    }
+    // `build_rope` leaves a layer without RoPE as it is; the positions are
+    // null only when layer 0 has none, as the C++'s `inp_pos` is.
+    Qcur = b.buildRope(Qcur, inp_pos, il);
+    Kcur = b.buildRope(Kcur, inp_pos, il);
     b.cb(Qcur, "Qcur", il);
     b.cb(Kcur, "Kcur", il);
     b.cb(Vcur, "Vcur", il);
@@ -459,7 +458,7 @@ fn buildAttentionLayer(
 }
 
 /// Ports `llama_model_granite_switch`'s `graph`'s `build_layer_ffn`
-/// (models/granite-switch.cpp:394 @cd959bae9): Granite's scaled residuals
+/// (models/granite-switch.cpp:383 @b1b770d90): Granite's scaled residuals
 /// around a SwiGLU whose three projections are all switched.
 fn buildLayerFfn(b: *const graph.Builder, cur_: *Tensor, inpSA: *Tensor, adapter_ids: *Tensor, model: *const Model, il: c_int) *Tensor {
     const ctx = b.ctx0;

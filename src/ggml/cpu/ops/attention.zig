@@ -11,7 +11,7 @@
 //! - `llama.cpp/ggml/src/ggml-cpu/common.h`    — the tile sizes
 //! - `llama.cpp/ggml/src/ggml-impl.h`          — `ggml_up`
 //!
-//! all at v0.9.0 (`cd959bae9`). Each declaration below names the C++ it
+//! all at v1.0.0 (`b1b770d90`). Each declaration below names the C++ it
 //! replaces and the line it began at.
 //!
 //! # Three paths through `flash_attn_ext`
@@ -72,21 +72,21 @@ const off = common.byteOff;
 /// Typed pointer at a byte offset; see `common.ptr`.
 const at = common.ptr;
 
-/// Ports `GGML_FA_TILE_Q` (ggml-cpu/common.h:9 @cd959bae9), the query rows
+/// Ports `GGML_FA_TILE_Q` (ggml-cpu/common.h:9 @b1b770d90), the query rows
 /// per tile of the tiled path.
 const q_tile_sz: usize = 64;
 
-/// Ports `GGML_FA_TILE_KV` (ggml-cpu/common.h:10 @cd959bae9), the keys per
+/// Ports `GGML_FA_TILE_KV` (ggml-cpu/common.h:10 @b1b770d90), the keys per
 /// tile.
 const kv_tile_sz: usize = 64;
 
 /// `GGML_F32_EPR`; see `simd.F32`.
 const f32_epr: i64 = simd.F32.epr;
 
-/// `GGML_SOFT_MAX_UNROLL` (vec.h:48 @cd959bae9).
+/// `GGML_SOFT_MAX_UNROLL` (vec.h:48 @b1b770d90).
 const soft_max_unroll: i64 = 4;
 
-/// Ports `ggml_up` (ggml-impl.h:68 @cd959bae9): round `n` up to a multiple of
+/// Ports `ggml_up` (ggml-impl.h:68 @b1b770d90): round `n` up to a multiple of
 /// the power of two `m`.
 inline fn up(n: i64, m: i64) i64 {
     impl.assert((m & (m - 1)) == 0, "(m & (m - 1)) == 0");
@@ -171,11 +171,11 @@ fn checkShapes(dst: *const Tensor) void {
 // -----------------------------------------------------------------------------
 // simd_gemm
 
-/// Ports `simd_gemm` (simd-gemm.h:110 @cd959bae9), the `GGML_SIMD` arm without
+/// Ports `simd_gemm` (simd-gemm.h:110 @b1b770d90), the `GGML_SIMD` arm without
 /// SVE: `C[M x N] += A[M x K] * B[K x N]`.
 ///
 /// Since v0.6.0 the column remainder is `simd_gemm_ukernel_tail`
-/// (simd-gemm.h:60 @cd959bae9): a masked AVX-512 or AVX2 fused multiply-add
+/// (simd-gemm.h:60 @b1b770d90): a masked AVX-512 or AVX2 fused multiply-add
 /// on x86, the same scalar loop as before elsewhere. Every arm still folds
 /// `A[i][kk] * B[kk][j]` into `C[i][j]` one fused step per `kk` ascending.
 ///
@@ -185,7 +185,9 @@ fn checkShapes(dst: *const Tensor) void {
 /// fused multiply-add per step — `vfmaq_f32` in the kernels, and `a += A*B`
 /// contracted by clang in the scalar remainders. Elements never meet. So the
 /// blocking is a schedule, not a result, and one loop with `kk` outside `j`
-/// gives the same bits.
+/// gives the same bits. That is why v1.0.0's switch of NEON from the 2×2
+/// tile to 4×4 (#32128, `__ARM_NEON__` corrected to `__ARM_NEON`) changes
+/// nothing here.
 fn simdGemm(C: [*]f32, A: [*]const f32, B: [*]const f32, M: usize, K: usize, N: usize) void {
     for (0..M) |i| {
         const crow = C + i * N;
@@ -201,7 +203,7 @@ fn simdGemm(C: [*]f32, A: [*]const f32, B: [*]const f32, M: usize, K: usize, N: 
 // flash_attn_ext
 
 /// Ports `ggml_compute_forward_flash_attn_ext_f16_one_chunk`
-/// (ops.cpp:8834 @cd959bae9).
+/// (ops.cpp:8727 @b1b770d90).
 ///
 /// With `kv_rows` (`src[5]`, from `ggml_flash_attn_ext_rows`) the loop runs
 /// over the mask columns, and column `ic` of slice `iq3` reads K/V row
@@ -287,14 +289,9 @@ fn oneChunk(
         const wbase: [*]f32 = @ptrCast(@alignCast(params.wdata.?));
         const VKQ32 = wbase + ith * (1 * dk + 2 * dv + common.cache_line_size_f32); // FP32 VKQ accumulator
         const V32 = VKQ32 + 1 * dv; // (temporary) FP32 V buffer
-        const VKQ16: [*]c.ggml_fp16_t = @ptrCast(@alignCast(VKQ32 + 1 * dv)); // (temporary) FP16 VKQ accumulator
         const Q_q: [*]c.ggml_fp16_t = @ptrCast(@alignCast(VKQ32 + 2 * dv)); // (temporary) buffer for Q converted to quantized/FP16
 
-        if (v.type == c.GGML_TYPE_F16) {
-            @memset(VKQ16[0..dv], 0);
-        } else {
-            @memset(VKQ32[0..dv], 0);
-        }
+        @memset(VKQ32[0..dv], 0);
 
         const mp: ?[*]const c.ggml_fp16_t = if (mask) |m|
             at(c.ggml_fp16_t, m.data, off(iq1, m.nb[1]) + off(@rem(iq2, m.ne[2]), m.nb[2]) + off(@rem(iq3, m.ne[3]), m.nb[3]))
@@ -350,52 +347,31 @@ fn oneChunk(
 
             const v_data = at(u8, v.data, off(ik1, nbv1) + off(iv2, nbv2) + off(iv3, nbv3));
 
-            if (v.type == c.GGML_TYPE_F16) {
-                if (s > M) {
-                    // s is new maximum, ms < 1.0f, vs == expf(s - s) == 1.0f
-                    M = s;
-                    ms = expf(Mold - M);
+            if (s > M) {
+                // s is new maximum, ms < 1.0f, vs == expf(s - s) == 1.0f
+                M = s;
+                ms = expf(Mold - M);
 
-                    // V = V*expf(Mold - M)
-                    vec.scale_f16(DV, VKQ16, ms);
-                } else {
-                    // no new maximum, ms == 1.0f, vs != 1.0f
-                    vs = expf(s - M);
-                }
-
-                // V += v*expf(s - M)
-                vec.mad_f16(DV, VKQ16, @ptrCast(@alignCast(v_data)), vs);
+                // V = V*expf(Mold - M)
+                vec.scale_f32(DV, VKQ32, ms);
             } else {
-                if (s > M) {
-                    // s is new maximum, ms < 1.0f, vs == expf(s - s) == 1.0f
-                    M = s;
-                    ms = expf(Mold - M);
+                // no new maximum, ms == 1.0f, vs != 1.0f
+                vs = expf(s - M);
+            }
 
-                    // V = V*expf(Mold - M)
-                    vec.scale_f32(DV, VKQ32, ms);
-                } else {
-                    // no new maximum, ms == 1.0f, vs != 1.0f
-                    vs = expf(s - M);
-                }
-
-                // V += v*expf(s - M)
-                if (v_to_float) |to_float| {
-                    to_float(v_data, V32, DV);
-                    vec.mad_f32(DV, VKQ32, V32, vs);
-                } else {
-                    // V is F32
-                    vec.mad_f32(DV, VKQ32, @ptrCast(@alignCast(v_data)), vs);
-                }
+            // V += v*expf(s - M)
+            if (v.type == c.GGML_TYPE_F16) {
+                vec.mad_f16_f32(DV, VKQ32, @ptrCast(@alignCast(v_data)), vs);
+            } else if (v_to_float) |to_float| {
+                to_float(v_data, V32, DV);
+                vec.mad_f32(DV, VKQ32, V32, vs);
+            } else {
+                // V is F32
+                vec.mad_f32(DV, VKQ32, @ptrCast(@alignCast(v_data)), vs);
             }
 
             // scale and increment sum with partial sum: one expression, fused
             S = @mulAdd(f32, S, ms, vs);
-        }
-
-        if (v.type == c.GGML_TYPE_F16) {
-            for (0..dv) |d| {
-                VKQ32[d] = impl.fp16ToFp32(VKQ16[d]);
-            }
         }
 
         // sinks - apply only on the first kv-chunk
@@ -440,7 +416,7 @@ fn oneChunk(
     }
 }
 
-/// Ports the `kv_row` lambda (ops.cpp:9170 @cd959bae9) of the tiled flash
+/// Ports the `kv_row` lambda (ops.cpp:9037 @b1b770d90) of the tiled flash
 /// attention kernel: the K/V row for mask column `i`, padding
 /// (negative) rows clamped to row 0, or `i` itself without `kv_rows`.
 const KvRow = struct {
@@ -452,7 +428,7 @@ const KvRow = struct {
     }
 };
 
-/// Ports `ggml_compute_forward_flash_attn_ext_tiled` (ops.cpp:9080 @cd959bae9).
+/// Ports `ggml_compute_forward_flash_attn_ext_tiled` (ops.cpp:8947 @b1b770d90).
 ///
 /// With `kv_rows` the tile loop runs over the mask columns and reads each K/V
 /// row through `kv_rows`; a padding row (negative) is masked to `-inf`, so the
@@ -733,7 +709,7 @@ fn tiled(params: *const ComputeParams, dst: *Tensor, ir0: i64, ir1: i64) void {
     }
 }
 
-/// Ports `ggml_flash_attn_ext_reduce_partials` (ops.cpp:9378 @cd959bae9).
+/// Ports `ggml_flash_attn_ext_reduce_partials` (ops.cpp:9245 @b1b770d90).
 ///
 /// Combines the per-chunk `[M, S, VKQ]` the split-KV path wrote. Partials
 /// layout in `wdata`: `[n_q_heads][n_chunks][2 + DV]`.
@@ -810,7 +786,7 @@ fn reducePartials(params: *const ComputeParams, dst: *Tensor, n_chunks: i64, chu
     }
 }
 
-/// Ports `ggml_compute_forward_flash_attn_ext_f16` (ops.cpp:9448 @cd959bae9),
+/// Ports `ggml_compute_forward_flash_attn_ext_f16` (ops.cpp:9315 @b1b770d90),
 /// the `GGML_SIMD` arm without SVE for the tiled-path guard, which since
 /// v0.6.0 x86 skips.
 fn flashAttnExtF16(params: *const ComputeParams, dst: *Tensor) void {
@@ -926,10 +902,10 @@ fn flashAttnExtF16(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_flash_attn_ext` (ops.cpp:9588 @cd959bae9).
+/// Ports `ggml_compute_forward_flash_attn_ext` (ops.cpp:9455 @b1b770d90).
 pub export fn ggml_compute_forward_flash_attn_ext(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    switch (impl.getOpParamsI32(dst, 3)) {
-        c.GGML_PREC_DEFAULT, c.GGML_PREC_F32 => {
+    switch (c.ggml_prec_get_acc(dst)) {
+        c.GGML_PREC_UNDEFINED, c.GGML_PREC_F32, c.GGML_PREC_BF16 => {
             // uses F32 accumulators
             flashAttnExtF16(params, dst);
         },
@@ -940,7 +916,7 @@ pub export fn ggml_compute_forward_flash_attn_ext(params: *const ComputeParams, 
 // -----------------------------------------------------------------------------
 // flash_attn_back
 
-/// Ports `ggml_compute_forward_flash_attn_back_f32` (ops.cpp:9607 @cd959bae9),
+/// Ports `ggml_compute_forward_flash_attn_back_f32` (ops.cpp:9475 @b1b770d90),
 /// the arm without `GGML_SOFT_MAX_ACCELERATE`, which nothing defines (it is
 /// commented out at ggml.c:327).
 fn flashAttnBackF32(params: *const ComputeParams, masked: bool, dst: *Tensor) void {
@@ -1207,7 +1183,7 @@ fn flashAttnBackF32(params: *const ComputeParams, masked: bool, dst: *Tensor) vo
     }
 }
 
-/// Ports `ggml_compute_forward_flash_attn_back` (ops.cpp:9922 @cd959bae9).
+/// Ports `ggml_compute_forward_flash_attn_back` (ops.cpp:9790 @b1b770d90).
 pub export fn ggml_compute_forward_flash_attn_back(params: *const ComputeParams, masked: bool, dst: *Tensor) callconv(.c) void {
     const q = impl.one(Tensor, dst.src[0]);
 
@@ -1220,7 +1196,7 @@ pub export fn ggml_compute_forward_flash_attn_back(params: *const ComputeParams,
 // -----------------------------------------------------------------------------
 // lightning_indexer
 
-/// Ports `ggml_compute_forward_lightning_indexer` (ops.cpp:12452 @cd959bae9).
+/// Ports `ggml_compute_forward_lightning_indexer` (ops.cpp:12320 @b1b770d90).
 ///
 /// `score += MAX(qk, 0.0f) * w_row[h]` is one expression — the ternary the
 /// macro expands to is the product's left operand, not a barrier — so each

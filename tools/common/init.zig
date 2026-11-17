@@ -7,7 +7,7 @@
 //! `common_init_sampler_from_model`, `common_control_vector_load`,
 //! `common_set_adapter_lora`, `common_threadpools::init`,
 //! `ggml_threadpool_params_from_cpu_params` and `set_process_priority` from
-//! `llama.cpp/common/common.cpp` (v0.9.0, `cd959bae9`). Each declaration
+//! `llama.cpp/common/common.cpp` (v1.0.0, `b1b770d90`). Each declaration
 //! names what it ports and the line it began at.
 //!
 //! # The sampler, for the tools
@@ -18,6 +18,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const c = @import("tools_h");
+const llama = @import("llama");
 const params_mod = @import("params.zig");
 const log = @import("log.zig");
 const common = @import("common.zig");
@@ -48,7 +49,7 @@ fn comErr(comptime func: [*:0]const u8, comptime fmt: []const u8, args: anytype)
     log.err(comPrefix(fmt), .{ @as(c_int, 12), func } ++ args);
 }
 
-/// Ports `common_init_result` (common/common.h:998 @cd959bae9).
+/// Ports `common_init_result` (common/common.h:1009 @b1b770d90).
 pub const InitResult = struct {
     model: ?*c.llama_model = null,
     context: ?*c.llama_context = null,
@@ -57,12 +58,12 @@ pub const InitResult = struct {
     threadpool: ?*c.ggml_threadpool = null,
     threadpool_batch: ?*c.ggml_threadpool = null,
 
-    /// Ports `reset_samplers` (common/common.cpp:1439 @cd959bae9), a member of `common_init_result`.
+    /// Ports `reset_samplers` (common/common.cpp:1414 @b1b770d90), a member of `common_init_result`.
     fn resetSamplers(self: *InitResult) void {
         for (self.samplers.items) |s| c.llama_sampler_reset(s.get());
     }
 
-    /// Ports `sampler` (common/common.cpp:1432 @cd959bae9), a member of
+    /// Ports `sampler` (common/common.cpp:1407 @b1b770d90), a member of
     /// `common_init_result`.
     ///
     /// Return: the sampler for `seq_id`, or null past the last; owned by
@@ -82,7 +83,7 @@ pub const InitResult = struct {
     }
 };
 
-/// Ports `common_init_sampler_from_model` (common/common.cpp:1110 @cd959bae9): the
+/// Ports `common_init_sampler_from_model` (common/common.cpp:1079 @b1b770d90): the
 /// model's recommended sampling, where the command line set none.
 fn initSamplerFromModel(p: *Params, model: ?*const c.llama_model) !void {
     const sp = &p.sampling;
@@ -149,7 +150,7 @@ pub fn samplerInit(p: *Params, model: ?*const c.llama_model) !*sampling.Sampler 
     return sampling.init(model, &p.sampling);
 }
 
-/// Ports `ggml_threadpool_params_from_cpu_params` (common/common.cpp:1795 @cd959bae9).
+/// Ports `ggml_threadpool_params_from_cpu_params` (common/common.cpp:1784 @b1b770d90).
 fn threadpoolParams(cp: *const params_mod.CpuParams) c.ggml_threadpool_params {
     var tpp: c.ggml_threadpool_params = undefined;
     c.ggml_threadpool_params_init(&tpp, cp.n_threads); // setup the defaults
@@ -160,7 +161,7 @@ fn threadpoolParams(cp: *const params_mod.CpuParams) c.ggml_threadpool_params {
     return tpp;
 }
 
-/// Ports `init` (common/common.cpp:1819 @cd959bae9), a member of `common_threadpools`.
+/// Ports `init` (common/common.cpp:1808 @b1b770d90), a member of `common_threadpools`.
 fn threadpoolsInit(res: *InitResult, ctx: ?*c.llama_context, p: *const Params) void {
     const func = "init";
     comInf(func, "llama threadpool init, n_threads = %d\n", .{p.cpuparams.n_threads});
@@ -199,7 +200,7 @@ fn threadpoolsInit(res: *InitResult, ctx: ?*c.llama_context, p: *const Params) v
 extern fn setpriority(which: c_int, who: c_uint, prio: c_int) c_int;
 extern fn strerror(e: c_int) [*:0]const u8;
 
-/// Ports `set_process_priority` (common/common.cpp:281 @cd959bae9), the POSIX arm;
+/// Ports `set_process_priority` (common/common.cpp:281 @b1b770d90), the POSIX arm;
 /// Windows has its own, through `SetPriorityClass`.
 pub fn setProcessPriority(prio: c.ggml_sched_priority) bool {
     if (prio == c.GGML_SCHED_PRIO_NORMAL) return true;
@@ -237,10 +238,10 @@ pub fn setProcessPriority(prio: c.ggml_sched_priority) bool {
     return true;
 }
 
-/// Ports `common_control_vector_data` (common/common.h:1228 @cd959bae9).
+/// Ports `common_control_vector_data` (common/common.h:1245 @b1b770d90).
 const ControlVectorData = struct { n_embd: i32, data: std.ArrayList(f32) };
 
-/// Ports `common_control_vector_load_one` (common/common.cpp:2009 @cd959bae9).
+/// Ports `common_control_vector_load_one` (common/common.cpp:1998 @b1b770d90).
 fn controlVectorLoadOne(a: std.mem.Allocator, info: params_mod.ControlVectorLoadInfo, n_layer: i32) !ControlVectorData {
     const func = "common_control_vector_load_one";
     var result: ControlVectorData = .{ .n_embd = -1, .data = .empty };
@@ -324,7 +325,7 @@ fn controlVectorLoadOne(a: std.mem.Allocator, info: params_mod.ControlVectorLoad
     return result;
 }
 
-/// Ports `common_control_vector_load` (common/common.cpp:2098 @cd959bae9):
+/// Ports `common_control_vector_load` (common/common.cpp:2087 @b1b770d90):
 /// direction layer indices must be in `[1, n_layer]`.
 fn controlVectorLoad(a: std.mem.Allocator, infos: []const params_mod.ControlVectorLoadInfo, n_layer: i32) !ControlVectorData {
     const func = "common_control_vector_load";
@@ -358,7 +359,7 @@ fn controlVectorLoad(a: std.mem.Allocator, infos: []const params_mod.ControlVect
     return result;
 }
 
-/// Ports `common_fit_apply` (common/common.cpp:1269 @cd959bae9): applies
+/// Ports `common_fit_apply` (common/common.cpp:1238 @b1b770d90): applies
 /// `--fit` to `mparams` and `cparams`, a no-op if `fit_params` is false.
 ///
 /// Parameters:
@@ -369,7 +370,7 @@ pub fn fitApply(gpa: std.mem.Allocator, p: *Params, mparams: *c.llama_model_para
     if (!p.fit_params) return;
 
     const a = p.arena;
-    const model_path = try a.dupeSentinel(u8, p.model.path, 0);
+    const model_paths = try common.modelPaths(a, &p.model);
 
     comTrc("common_fit_apply", "%s", .{@as([*:0]const u8, "fitting params to device memory ...\n")});
     comTrc("common_fit_apply", "%s", .{@as([*:0]const u8, "(for bugs during this step try to reproduce them with -fit off, or provide --verbose logs if the bug only occurs with -fit on)\n")});
@@ -387,9 +388,8 @@ pub fn fitApply(gpa: std.mem.Allocator, p: *Params, mparams: *c.llama_model_para
     if (spec_mtp) cparams_dft.ctx_type = c.LLAMA_CONTEXT_TYPE_MTP;
     cparams_dft.n_rs_seq = 0;
 
-    const path_dft = try a.dupeSentinel(u8, params_dft.model.path, 0);
     const extra: fit.ExtraModel = .{
-        .path_model = path_dft.ptr,
+        .paths_model = try common.modelPaths(a, &params_dft.model),
         .mparams = @ptrCast(&mparams_dft),
         .cparams = @ptrCast(&cparams_dft),
         .shares_model = !has_draft, // an MTP context runs on the weights of the main model
@@ -400,7 +400,7 @@ pub fn fitApply(gpa: std.mem.Allocator, p: *Params, mparams: *c.llama_model_para
         gpa,
         &patterns,
         .{ .verbosity = std.math.maxInt(i32), .sink = common.fitLogSink, .json = common.fitLogJson },
-        model_path.ptr,
+        model_paths,
         @ptrCast(mparams),
         @ptrCast(cparams),
         &p.tensor_split,
@@ -412,7 +412,7 @@ pub fn fitApply(gpa: std.mem.Allocator, p: *Params, mparams: *c.llama_model_para
     );
 }
 
-/// Ports `common_memory_reports` (fit.h:64 @cd959bae9): the memory a model
+/// Ports `common_memory_reports` (fit.h:64 @b1b770d90): the memory a model
 /// needs at the smallest and largest context `--fit` may pick.
 pub const MemoryReports = struct {
     n_ctx_train: u32 = 0,
@@ -422,7 +422,7 @@ pub const MemoryReports = struct {
     info_min: []fit.MemoryBreakdownRow = &.{}, // breakdown at n_ctx_min
 };
 
-/// Ports `common_measure_memory` (fit.cpp:199 @cd959bae9): measures the
+/// Ports `common_measure_memory` (fit.cpp:202 @b1b770d90): measures the
 /// smallest and largest context without allocating. `p` may be modified as
 /// with `--fit`.
 ///
@@ -434,7 +434,7 @@ pub const MemoryReports = struct {
 /// Return: the reports, their rows from `p.arena`.
 pub fn measureMemory(gpa: std.mem.Allocator, p: *Params, what_out: *[]const u8) !MemoryReports {
     const log_level: c.enum_ggml_log_level = if (p.verbosity >= log.level_debug) c.GGML_LOG_LEVEL_DEBUG else c.GGML_LOG_LEVEL_ERROR;
-    const path_model = try p.arena.dupeSentinel(u8, p.model.path, 0);
+    const paths_model = try common.modelPaths(p.arena, &p.model);
 
     var res: MemoryReports = .{};
 
@@ -446,7 +446,7 @@ pub fn measureMemory(gpa: std.mem.Allocator, p: *Params, what_out: *[]const u8) 
         var mparams_fit = mparams;
         var cparams_fit = cparams;
         try fitApply(gpa, p, &mparams_fit, &cparams_fit);
-        res.info_max = try fit.fitMeasure(p.arena, path_model.ptr, @ptrCast(&mparams_fit), @ptrCast(&cparams_fit), &res.n_ctx_train, &res.n_ctx_max, log_level, what_out);
+        res.info_max = try fit.fitMeasure(p.arena, paths_model, @ptrCast(&mparams_fit), @ptrCast(&cparams_fit), &res.n_ctx_train, &res.n_ctx_max, log_level, what_out);
     }
 
     // min: the smallest context --fit may pick (--fit only changes n_ctx when it is 0)
@@ -465,13 +465,13 @@ pub fn measureMemory(gpa: std.mem.Allocator, p: *Params, what_out: *[]const u8) 
         res.info_min = res.info_max;
     } else {
         cparams.n_ctx = n_ctx_min;
-        res.info_min = try fit.fitMeasure(p.arena, path_model.ptr, @ptrCast(&mparams), @ptrCast(&cparams), null, &res.n_ctx_min, log_level, what_out);
+        res.info_min = try fit.fitMeasure(p.arena, paths_model, @ptrCast(&mparams), @ptrCast(&cparams), null, &res.n_ctx_min, log_level, what_out);
     }
 
     return res;
 }
 
-/// Ports `common_init_result` (common/common.cpp:1307 @cd959bae9), a member of `common_init_result`.
+/// Ports `common_init_result` (common/common.cpp:1276 @b1b770d90), a member of `common_init_result`.
 fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitResult) !void {
     const a = p.arena;
     var mparams = common.modelParamsToLlama(p);
@@ -481,7 +481,7 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
 
     try fitApply(gpa, p, &mparams, &cparams);
 
-    const model = c.llama_model_load_from_file(model_path.ptr, mparams) orelse return;
+    const model = common.modelLoad(try common.modelPaths(a, &p.model), mparams) orelse return;
     res.model = model;
 
     if (model_only) return;
@@ -507,6 +507,12 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
         cparams.n_outputs_max_per_seq = 1;
 
         log.inf("%s", .{@as([*:0]const u8, "decision model reads the embeddings output, enabling embedding mode\n")});
+    }
+
+    if (llama.api.model.llama_model_classifier_free_guidance(@ptrCast(model))) { // llama-ext.h: C++ linkage, reached through the port's api
+        p.kv_unified = true;
+        cparams.kv_unified = true;
+        cparams.n_seq_max *%= 2;
     }
 
     // embeddings need the whole batch in one ubatch, so n_batch must not be larger than n_ubatch
@@ -594,7 +600,7 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
 
 const io_ = @import("io.zig");
 
-/// Ports `common_init_from_params` (common/common.cpp:1457 @cd959bae9).
+/// Ports `common_init_from_params` (common/common.cpp:1432 @b1b770d90).
 ///
 /// Return: the model and context, either null where loading failed, having
 /// logged why. The caller owns the result.
@@ -657,7 +663,7 @@ pub fn initFromParams(gpa: std.mem.Allocator, p: *Params, model_only: bool) !Ini
     }
 
     if (!p.lora_init_without_apply) {
-        // `common_set_adapter_lora` (common/common.cpp:1699 @cd959bae9)
+        // `common_set_adapter_lora` (common/common.cpp:1674 @b1b770d90)
         var loras: std.ArrayList(?*c.llama_adapter_lora) = .empty;
         var scales: std.ArrayList(f32) = .empty;
         for (p.lora_adapters.items) |la| {

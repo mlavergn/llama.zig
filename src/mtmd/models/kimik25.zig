@@ -1,9 +1,11 @@
-//! The Kimi-K2.5 vision encoder: Kimi-VL's ViT and projector over a 3-D
-//! learned position-embedding grid resized bicubically.
+//! The Kimi-K2.5 and Kimi-K3.1 vision encoders: Kimi-VL's ViT and projector
+//! over a 3-D learned position-embedding grid, resized bicubically for K2.5
+//! and bilinearly for K3.1, whose ViT is RMS-normed and whose projector
+//! (patchmergerv2) has no pre-norm and an RMS norm after the MLP.
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/kimik25.cpp` at v0.9.0 (`cd959bae9`).
+//! Ports `llama.cpp/tools/mtmd/models/kimik25.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -12,8 +14,8 @@ const graph = @import("../graph.zig");
 const kimivl = @import("kimivl.zig");
 const c = impl.c;
 
-/// Ports `resize_position_embeddings_3d` (kimik25.cpp:8 @cd959bae9), a
-/// member of `clip_graph_kimik25`: `resize_position_embeddings` with w and
+/// Ports `resize_position_embeddings_3d` (kimik25.cpp:8 @b1b770d90), a
+/// member of `mtmd_graph_kimik25`: `resize_position_embeddings` with w and
 /// h stored in ne[1] and ne[2].
 pub fn resizePositionEmbeddings3d(g: *graph.Graph, interpolation_mode: u32) graph.T {
     const ctx0 = g.ctx0;
@@ -43,7 +45,7 @@ pub fn resizePositionEmbeddings3d(g: *graph.Graph, interpolation_mode: u32) grap
     return pos_embd;
 }
 
-/// Ports `build` (kimik25.cpp:34 @cd959bae9), a member of `clip_graph_kimik25`.
+/// Ports `build` (kimik25.cpp:34 @b1b770d90), a member of `mtmd_graph_kimik25`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
@@ -58,7 +60,9 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     _ = c.ggml_set_name(pos_w, "pos_w");
     c.ggml_set_input(pos_w);
 
-    const learned_pos_embd = resizePositionEmbeddings3d(g, c.GGML_SCALE_MODE_BICUBIC);
+    const is_k31 = g.proj_type == .kimik31;
+
+    const learned_pos_embd = resizePositionEmbeddings3d(g, if (is_k31) c.GGML_SCALE_MODE_BILINEAR else c.GGML_SCALE_MODE_BICUBIC);
 
     // Kimi-K2.5 uses interleaved 2D RoPE pattern natively, but
     // Q / K are permuted during conversion to use split format.
@@ -69,11 +73,17 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     // added here rather than through build_vit, as upstream does
     inp = c.ggml_add(ctx0, inp, learned_pos_embd);
 
-    var cur = g.buildVit(inp, g.n_patches, .normal, hparams.ffn_op, null, .{ .ctx = &rope, .f = kimivl.Rope2d.addPos }, .{});
+    var cur = g.buildVit(inp, g.n_patches, if (is_k31) .rms else .normal, hparams.ffn_op, null, .{ .ctx = &rope, .f = kimivl.Rope2d.addPos }, .{});
 
     g.cb(cur, "vit_out", -1);
 
-    {
+    if (is_k31) {
+        // patchmergerv2: no pre-norm, RMS norm after the MLP
+        cur = g.buildPatchMergePermute(cur, hparams.n_merge);
+        cur = g.buildFfn(cur, model.mm_1_w, null, null, null, model.mm_2_w, null, .gelu_erf, -1);
+        cur = g.buildNorm(cur, model.mm_post_norm_w, null, .rms, 1e-5, -1);
+        g.cb(cur, "proj_out", -1);
+    } else {
         // patch_merger
         const scale_factor = model.hparams.n_merge;
         cur = g.buildPatchMergePermute(cur, scale_factor);
@@ -89,7 +99,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         g.cb(cur, "proj_inp_normed", -1);
 
         // projection mlp
-        cur = g.buildFfn(cur, model.mm_1_w, model.mm_1_b, null, null, model.mm_2_w, model.mm_2_b, .gelu, -1);
+        cur = g.buildFfn(cur, model.mm_1_w, model.mm_1_b, null, null, model.mm_2_w, model.mm_2_b, .gelu_erf, -1);
 
         g.cb(cur, "proj_out", -1);
     }

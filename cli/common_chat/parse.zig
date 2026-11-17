@@ -5,7 +5,7 @@
 //!
 //! Ports `common_chat_parser_params`, `common_chat_parse` and
 //! `common_chat_peg_parse` from `llama.cpp/common/chat.h` and
-//! `llama.cpp/common/chat.cpp` (llama.cpp v0.9.0, `cd959bae9`). Each
+//! `llama.cpp/common/chat.cpp` (llama.cpp v1.0.0, `b1b770d90`). Each
 //! declaration names what it ports and the line it began at.
 
 const std = @import("std");
@@ -23,7 +23,7 @@ const Error = exception.Error;
 const Msg = msg_mod.Msg;
 const Input = input_mod.Input;
 
-/// Ports `common_chat_parser_params` (chat.h:347 @cd959bae9): per-message
+/// Ports `common_chat_parser_params` (chat.h:347 @b1b770d90): per-message
 /// parsing syntax, derived from `common_chat_params`.
 pub const ParserParams = struct {
     format: msg_mod.Format = .content_only,
@@ -34,7 +34,7 @@ pub const ParserParams = struct {
     parser: ?*const peg.Arena = null,
 };
 
-/// Ports `common_chat_parse` (chat.cpp:1781 @cd959bae9).
+/// Ports `common_chat_parse` (chat.cpp:1801 @b1b770d90).
 pub fn parse(gpa: Allocator, input: *const Input, is_partial: bool, params: *const ParserParams) Error!Msg {
     return pegParse(gpa, params.parser, input, is_partial, params);
 }
@@ -51,7 +51,7 @@ fn mapperKind(format: msg_mod.Format) chat_peg.Mapper.Kind {
     };
 }
 
-/// Ports `common_chat_peg_parse` (chat.cpp:1787 @cd959bae9): the reply,
+/// Ports `common_chat_peg_parse` (chat.cpp:1807 @b1b770d90): the reply,
 /// with the generation prompt in front, parsed leniently and mapped to an
 /// assistant message. A partial reply that fails past its start still maps
 /// what it matched; anything else that fails throws.

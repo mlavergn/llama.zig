@@ -1,12 +1,12 @@
 //! The per-projector tensors: the model-specific switch of `load_tensors`,
-//! and `clip_n_mmproj_embd`, which reads the projector's output size off
+//! and `mtmd_model::n_mmproj_embd`, which reads the projector's output size off
 //! them.
 //!
 //! # Provenance
 //!
-//! Ports the model-specific switch of `clip_model_loader::load_tensors`
-//! and `clip_n_mmproj_embd` from `llama.cpp/tools/mtmd/clip.cpp` at v0.9.0
-//! (`cd959bae9`). Each declaration names what it ports and the line it
+//! Ports the model-specific switch of `mtmd_model_loader::load_tensors`
+//! and `mtmd_model::n_mmproj_embd` from `llama.cpp/tools/mtmd/mtmd-model.cpp`
+//! at v1.0.0 (`b1b770d90`) -- `clip.cpp` until v0.9.0. Each declaration names what it ports and the line it
 //! began at.
 //!
 //! # Order is part of the contract
@@ -60,11 +60,11 @@ fn resizeList(comptime E: type, list: *std.ArrayList(E), n: usize) Error!void {
     }
 }
 
-/// The clamp-info loop the Gemma4 arms share, at lines 2570 and 3272 of
-/// mtmd/clip.cpp: for every tensor loaded so far named `*.weight`, the four
+/// The clamp-info loop the Gemma4 arms share, at lines 2004 and 3112 of
+/// mtmd-model.cpp: for every tensor loaded so far named `*.weight`, the four
 /// Gemma4ClippableLinear bounds, read as scalar tensors where present.
 fn loadClampInfo(tl: *TensorLoader) Error!void {
-    const model = &tl.ctx_clip.model;
+    const model = tl.model;
     var a: std.heap.ArenaAllocator = .init(gpa);
     defer a.deinit();
     const ar = a.allocator();
@@ -99,8 +99,8 @@ fn getCat(tl: *TensorLoader, a: []const u8, b: []const u8, required: bool) Error
     return tl.getTensor(name.ptr, required);
 }
 
-/// The `load_bn` lambda of the CHATTERBOX_SPKENC arm (mtmd/clip.cpp:4006
-/// @cd959bae9).
+/// The `load_bn` lambda of the CHATTERBOX_SPKENC arm (mtmd-model.cpp:2835
+/// @b1b770d90).
 fn cbxLoadBn(tl: *TensorLoader, p: []const u8, n: *model_mod.Chatterbox.Bn) Error!void {
     n.mean = try getCat(tl, p, ".running_mean", true);
     n.@"var" = try getCat(tl, p, ".running_var", true);
@@ -108,8 +108,8 @@ fn cbxLoadBn(tl: *TensorLoader, p: []const u8, n: *model_mod.Chatterbox.Bn) Erro
     n.b = try getCat(tl, p, ".bias", false);
 }
 
-/// The `load_res2d` lambda of the CHATTERBOX_SPKENC arm (mtmd/clip.cpp:4012
-/// @cd959bae9).
+/// The `load_res2d` lambda of the CHATTERBOX_SPKENC arm (mtmd-model.cpp:2841
+/// @b1b770d90).
 fn cbxLoadRes2d(tl: *TensorLoader, p: []const u8, r: *model_mod.Chatterbox.SpkRes2d) Error!void {
     var buf: [256]u8 = undefined;
     r.conv1_w = try getCat(tl, p, ".conv1.weight", true);
@@ -123,7 +123,7 @@ fn cbxLoadRes2d(tl: *TensorLoader, p: []const u8, r: *model_mod.Chatterbox.SpkRe
 }
 
 /// The `load_cam_block` lambda of the CHATTERBOX_SPKENC arm
-/// (mtmd/clip.cpp:4022 @cd959bae9).
+/// (mtmd-model.cpp:2851 @b1b770d90).
 fn cbxLoadCamBlock(tl: *TensorLoader, bp: []const u8, tp: []const u8, blk: *model_mod.Chatterbox.SpkCamBlock) Error!void {
     var pbuf: [200]u8 = undefined;
     var nbuf: [256]u8 = undefined;
@@ -147,7 +147,7 @@ fn cbxLoadCamBlock(tl: *TensorLoader, bp: []const u8, tp: []const u8, blk: *mode
     blk.transit_w = try getCat(tl, tp, ".linear.weight", true);
 }
 
-/// The `has` lambda of the CHATTERBOX arm (mtmd/clip.cpp:3748 @cd959bae9),
+/// The `has` lambda of the CHATTERBOX arm (mtmd-model.cpp:2577 @b1b770d90),
 /// over a name `std::to_string` and `+` would build.
 fn cbxHas(tl: *TensorLoader, comptime fmt: []const u8, args: anytype) bool {
     var buf: [256]u8 = undefined;
@@ -155,8 +155,8 @@ fn cbxHas(tl: *TensorLoader, comptime fmt: []const u8, args: anytype) bool {
     return c.gguf_find_tensor(tl.loader.ctx_gguf, name.ptr) >= 0;
 }
 
-/// The `load_enc_layer` lambda of the CHATTERBOX arm (mtmd/clip.cpp:3751
-/// @cd959bae9).
+/// The `load_enc_layer` lambda of the CHATTERBOX arm (mtmd-model.cpp:2580
+/// @b1b770d90).
 fn cbxLoadEncLayer(tl: *TensorLoader, p: []const u8, l: *model_mod.Chatterbox.EncLayer) Error!void {
     l.norm_mha_w = try getCat(tl, p, ".norm_mha.weight", true);
     l.norm_mha_b = try getCat(tl, p, ".norm_mha.bias", true);
@@ -179,8 +179,8 @@ fn cbxLoadEncLayer(tl: *TensorLoader, p: []const u8, l: *model_mod.Chatterbox.En
     l.ffn_2_b = try getCat(tl, p, ".feed_forward.w_2.bias", true);
 }
 
-/// The `load_causal` lambda of the CHATTERBOX arm (mtmd/clip.cpp:3772
-/// @cd959bae9).
+/// The `load_causal` lambda of the CHATTERBOX arm (mtmd-model.cpp:2601
+/// @b1b770d90).
 fn cbxLoadCausal(tl: *TensorLoader, p: []const u8, b: *model_mod.Chatterbox.CausalBlock) Error!void {
     b.conv_w = try getCat(tl, p, ".block.0.weight", true);
     b.conv_b = try getCat(tl, p, ".block.0.bias", true);
@@ -188,8 +188,8 @@ fn cbxLoadCausal(tl: *TensorLoader, p: []const u8, b: *model_mod.Chatterbox.Caus
     b.norm_b = try getCat(tl, p, ".block.2.bias", true);
 }
 
-/// The `load_resnet` lambda of the CHATTERBOX arm (mtmd/clip.cpp:3778
-/// @cd959bae9).
+/// The `load_resnet` lambda of the CHATTERBOX arm (mtmd-model.cpp:2607
+/// @b1b770d90).
 fn cbxLoadResnet(tl: *TensorLoader, p: []const u8, r: *model_mod.Chatterbox.Resnet) Error!void {
     var buf: [200]u8 = undefined;
     try cbxLoadCausal(tl, std.fmt.bufPrint(&buf, "{s}.block1", .{p}) catch unreachable, &r.block1);
@@ -200,8 +200,8 @@ fn cbxLoadResnet(tl: *TensorLoader, p: []const u8, r: *model_mod.Chatterbox.Resn
     r.res_conv_b = try getCat(tl, p, ".res_conv.bias", true);
 }
 
-/// The `load_tfm` lambda of the CHATTERBOX arm (mtmd/clip.cpp:3786
-/// @cd959bae9).
+/// The `load_tfm` lambda of the CHATTERBOX arm (mtmd-model.cpp:2615
+/// @b1b770d90).
 fn cbxLoadTfm(tl: *TensorLoader, p: []const u8, b: *model_mod.Chatterbox.TfmBlock) Error!void {
     b.norm1_w = try getCat(tl, p, ".norm1.weight", true);
     b.norm1_b = try getCat(tl, p, ".norm1.bias", true);
@@ -218,8 +218,8 @@ fn cbxLoadTfm(tl: *TensorLoader, p: []const u8, b: *model_mod.Chatterbox.TfmBloc
     b.ff_out_b = try getCat(tl, p, ".ff.net.2.bias", true);
 }
 
-/// The `load_stage` lambda of the CHATTERBOX arm (mtmd/clip.cpp:3801
-/// @cd959bae9).
+/// The `load_stage` lambda of the CHATTERBOX arm (mtmd-model.cpp:2630
+/// @b1b770d90).
 fn cbxLoadStage(tl: *TensorLoader, p: []const u8, s_: *model_mod.Chatterbox.EstStage, boundary: bool) Error!void {
     var buf: [200]u8 = undefined;
     try cbxLoadResnet(tl, std.fmt.bufPrint(&buf, "{s}.0", .{p}) catch unreachable, &s_.res);
@@ -235,8 +235,8 @@ fn cbxLoadStage(tl: *TensorLoader, p: []const u8, s_: *model_mod.Chatterbox.EstS
     }
 }
 
-/// The `load_hres` lambda of the CHATTERBOX arm (mtmd/clip.cpp:3813
-/// @cd959bae9).
+/// The `load_hres` lambda of the CHATTERBOX arm (mtmd-model.cpp:2642
+/// @b1b770d90).
 fn cbxLoadHres(tl: *TensorLoader, p: []const u8, r: *model_mod.Chatterbox.HiftRes) Error!void {
     var buf: [256]u8 = undefined;
     var j: c_int = 0;
@@ -260,11 +260,11 @@ fn cbxGet(tl: *TensorLoader, comptime fmt: []const u8, args: anytype) Error!T {
     return tl.getTensor(name.ptr, true);
 }
 
-/// The `PROJECTOR_TYPE_CHATTERBOX` arm (mtmd/clip.cpp:3745 @cd959bae9) of
+/// The `PROJECTOR_TYPE_CHATTERBOX` arm (mtmd-model.cpp:2574 @b1b770d90) of
 /// load_tensors.
 fn loadChatterbox(tl: *TensorLoader) Error!void {
     const func = "load_tensors";
-    const model = &tl.ctx_clip.model;
+    const model = tl.model;
     const cb = &model.cbx;
     var pbuf: [200]u8 = undefined;
 
@@ -448,8 +448,8 @@ fn loadChatterbox(tl: *TensorLoader) Error!void {
     }
 }
 
-/// The `take` lambda of the CHATTERBOX arm's voice loop (mtmd/clip.cpp:3955
-/// @cd959bae9): strips `suffix` off `voice` if it ends with it.
+/// The `take` lambda of the CHATTERBOX arm's voice loop (mtmd-model.cpp:2784
+/// @b1b770d90): strips `suffix` off `voice` if it ends with it.
 fn cbxTake(voice: *[]const u8, suffix: []const u8) bool {
     const n = suffix.len;
     if (voice.len > n and std.mem.eql(u8, voice.*[voice.len - n ..], suffix)) {
@@ -459,33 +459,123 @@ fn cbxTake(voice: *[]const u8, suffix: []const u8) bool {
     return false;
 }
 
-/// Ports the model-specific switch of `load_tensors` (mtmd/clip.cpp:2536
-/// @cd959bae9), the `switch (model.proj_type)` after its generic layer loop.
+/// Ports the `load_code2wav` lambda (mtmd-model.cpp:1580 @b1b770d90) of
+/// `load_tensors`: code2wav, RVQ codes to raw PCM; drama3 has no quant,
+/// pre_conv or tfm projections (`with_proj` false).
+fn loadCode2wav(tl: *TensorLoader, with_proj: bool) Error!void {
+    const model = tl.model;
+    const hparams = &model.hparams;
+    const c2w = &model.c2w;
+
+    c2w.quant_first_in_w = try get(tl, names.TN_A_GEN_WAV_QUANT_FIRST_IN, .{W}, with_proj);
+    c2w.quant_first_out_w = try get(tl, names.TN_A_GEN_WAV_QUANT_FIRST_OUT, .{W}, with_proj);
+    c2w.quant_first_cb_w = try get(tl, names.TN_A_GEN_WAV_QUANT_FIRST_CB, .{W}, true);
+    c2w.quant_rest_in_w = try get(tl, names.TN_A_GEN_WAV_QUANT_REST_IN, .{W}, with_proj);
+    c2w.quant_rest_out_w = try get(tl, names.TN_A_GEN_WAV_QUANT_REST_OUT, .{W}, with_proj);
+    c2w.quant_rest_cb_w = try get(tl, names.TN_A_GEN_WAV_QUANT_REST_CB, .{W}, true);
+
+    c2w.pre_conv_w = try get(tl, names.TN_A_GEN_WAV_PRE_CONV, .{W}, with_proj);
+    c2w.pre_conv_b = try get(tl, names.TN_A_GEN_WAV_PRE_CONV, .{B}, with_proj);
+
+    c2w.tfm_in_proj_w = try get(tl, names.TN_A_GEN_WAV_TFM_IN_PROJ, .{W}, with_proj);
+    c2w.tfm_in_proj_b = try get(tl, names.TN_A_GEN_WAV_TFM_IN_PROJ, .{B}, with_proj);
+    c2w.tfm_out_proj_w = try get(tl, names.TN_A_GEN_WAV_TFM_OUT_PROJ, .{W}, with_proj);
+    c2w.tfm_out_proj_b = try get(tl, names.TN_A_GEN_WAV_TFM_OUT_PROJ, .{B}, with_proj);
+    c2w.tfm_output_norm_w = try get(tl, names.TN_A_GEN_WAV_TFM_OUT_NORM, .{W}, true);
+
+    // loaded manually, the generic model.layers loop is taken by code_predictor
+    try resizeList(model_mod.Layer, &c2w.tfm_layers, @intCast(hparams.wav_tfm_n_layer));
+    const p = s("a.gen.wav.tfm");
+    for (c2w.tfm_layers.items, 0..) |*layer, ilu| {
+        const l: c_int = @intCast(ilu);
+        layer.q_w = try get(tl, names.TN_ATTN_Q, .{ p, l, W }, true);
+        layer.k_w = try get(tl, names.TN_ATTN_K, .{ p, l, W }, true);
+        layer.v_w = try get(tl, names.TN_ATTN_V, .{ p, l, W }, true);
+        layer.o_w = try get(tl, names.TN_ATTN_OUTPUT, .{ p, l, W }, true);
+        layer.ln_1_w = try get(tl, names.TN_LN_1, .{ p, l, W }, true);
+        layer.ln_2_w = try get(tl, names.TN_LN_2, .{ p, l, W }, true);
+        layer.ls_1_w = try get(tl, names.TN_LS_1, .{ p, l, W }, true);
+        layer.ls_2_w = try get(tl, names.TN_LS_2, .{ p, l, W }, true);
+        layer.ff_gate_w = try get(tl, names.TN_FFN_GATE, .{ p, l, W }, true);
+        layer.ff_up_w = try get(tl, names.TN_FFN_UP, .{ p, l, W }, true);
+        layer.ff_down_w = try get(tl, names.TN_FFN_DOWN, .{ p, l, W }, true);
+    }
+
+    // upsample: 2x (causal ConvTranspose1d + ConvNeXt block)
+    try resizeList(model_mod.Code2Wav.UpsampleBlock, &c2w.upsample, @intCast(hparams.wav_upsample_n_block));
+    for (c2w.upsample.items, 0..) |*up, ilu| {
+        const l: c_int = @intCast(ilu);
+        up.conv_w = try get(tl, names.TN_A_GEN_WAV_UP_CONV, .{ l, W }, true);
+        up.conv_b = try get(tl, names.TN_A_GEN_WAV_UP_CONV, .{ l, B }, true);
+        up.dwconv_w = try get(tl, names.TN_A_GEN_WAV_UP_DWCONV, .{ l, W }, true);
+        up.dwconv_b = try get(tl, names.TN_A_GEN_WAV_UP_DWCONV, .{ l, B }, true);
+        up.norm_w = try get(tl, names.TN_A_GEN_WAV_UP_NORM, .{ l, W }, true);
+        up.norm_b = try get(tl, names.TN_A_GEN_WAV_UP_NORM, .{ l, B }, true);
+        up.pw1_w = try get(tl, names.TN_A_GEN_WAV_UP_PW1, .{ l, W }, true);
+        up.pw1_b = try get(tl, names.TN_A_GEN_WAV_UP_PW1, .{ l, B }, true);
+        up.pw2_w = try get(tl, names.TN_A_GEN_WAV_UP_PW2, .{ l, W }, true);
+        up.pw2_b = try get(tl, names.TN_A_GEN_WAV_UP_PW2, .{ l, B }, true);
+        up.gamma = try get(tl, names.TN_A_GEN_WAV_UP_GAMMA, .{l}, true);
+    }
+
+    // DAC decoder: conv_pre + n upsample blocks (each with n_res residual units) + conv_post
+    c2w.dac_entry_w = try get(tl, names.TN_A_GEN_WAV_DAC_ENTRY, .{W}, true);
+    c2w.dac_entry_b = try get(tl, names.TN_A_GEN_WAV_DAC_ENTRY, .{B}, true);
+
+    try resizeList(model_mod.Code2Wav.DacBlock, &c2w.dac, @intCast(hparams.wav_dac_n_block));
+    for (c2w.dac.items, 0..) |*blk, ilu| {
+        const l: c_int = @intCast(ilu);
+        blk.snake_alpha = try get(tl, names.TN_A_GEN_WAV_DAC_SNAKE, .{ l, s("alpha") }, true);
+        blk.snake_beta = try get(tl, names.TN_A_GEN_WAV_DAC_SNAKE, .{ l, s("beta") }, true);
+        blk.conv_w = try get(tl, names.TN_A_GEN_WAV_DAC_CONV, .{ l, W }, true);
+        blk.conv_b = try get(tl, names.TN_A_GEN_WAV_DAC_CONV, .{ l, B }, true);
+
+        try resizeList(model_mod.Code2Wav.DacRes, &blk.res, @intCast(hparams.wav_dac_n_res));
+        for (blk.res.items, 0..) |*res, iru| {
+            const ir: c_int = @intCast(iru);
+            res.act1_alpha = try get(tl, names.TN_A_GEN_WAV_DAC_RES_ACT1, .{ l, ir, s("alpha") }, true);
+            res.act1_beta = try get(tl, names.TN_A_GEN_WAV_DAC_RES_ACT1, .{ l, ir, s("beta") }, true);
+            res.conv1_w = try get(tl, names.TN_A_GEN_WAV_DAC_RES_CONV1, .{ l, ir, W }, true);
+            res.conv1_b = try get(tl, names.TN_A_GEN_WAV_DAC_RES_CONV1, .{ l, ir, B }, true);
+            res.act2_alpha = try get(tl, names.TN_A_GEN_WAV_DAC_RES_ACT2, .{ l, ir, s("alpha") }, true);
+            res.act2_beta = try get(tl, names.TN_A_GEN_WAV_DAC_RES_ACT2, .{ l, ir, s("beta") }, true);
+            res.conv2_w = try get(tl, names.TN_A_GEN_WAV_DAC_RES_CONV2, .{ l, ir, W }, true);
+            res.conv2_b = try get(tl, names.TN_A_GEN_WAV_DAC_RES_CONV2, .{ l, ir, B }, true);
+        }
+    }
+
+    c2w.dac_post_snake_alpha = try get(tl, names.TN_A_GEN_WAV_DAC_POST_SNAKE, .{s("alpha")}, true);
+    c2w.dac_post_snake_beta = try get(tl, names.TN_A_GEN_WAV_DAC_POST_SNAKE, .{s("beta")}, true);
+    c2w.dac_post_conv_w = try get(tl, names.TN_A_GEN_WAV_DAC_POST_CONV, .{W}, true);
+    c2w.dac_post_conv_b = try get(tl, names.TN_A_GEN_WAV_DAC_POST_CONV, .{B}, true);
+}
+
+/// Ports the model-specific switch of `load_tensors` (mtmd-model.cpp:1321
+/// @b1b770d90), the `switch (model.proj_type)` after its generic layer loop.
 pub fn load(tl: *TensorLoader) Error!void {
     const func = "load_tensors";
-    const model = &tl.ctx_clip.model;
+    const model = tl.model;
     const hparams = &model.hparams;
     const prefix = tl.prefix;
 
     switch (model.proj_type) {
         .mlp, .mlp_norm => {
-            // LLaVA projection
-            model.mm_0_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(0), W }, false);
-            model.mm_0_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(0), B }, false);
-            // Yi-type llava
-            model.mm_1_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(1), W }, false);
-            model.mm_1_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(1), B }, false);
-            // missing in Yi-type llava
-            model.mm_2_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(2), W }, false);
-            model.mm_2_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(2), B }, false);
-            // Yi-type llava
-            model.mm_3_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(3), W }, false);
-            model.mm_3_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(3), B }, false);
-            model.mm_4_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(4), W }, false);
-            model.mm_4_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(4), B }, false);
+            // LLaVA projection: mm.0 -> gelu -> mm.2
+            // Yi-type llava (MLP_NORM): mm.0 -> norm mm.1 -> gelu -> mm.3 -> norm mm.4
+            model.mm_0_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(0), W }, true);
+            model.mm_0_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(0), B }, true);
+            model.mm_3_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(3), W }, model.proj_type == .mlp_norm);
             if (model.mm_3_w != null) {
                 // TODO: this is a hack to support Yi-type llava
                 model.proj_type = .mlp_norm;
+                model.mm_1_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(1), W }, true);
+                model.mm_1_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(1), B }, true);
+                model.mm_3_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(3), B }, true);
+                model.mm_4_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(4), W }, true);
+                model.mm_4_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(4), B }, true);
+            } else {
+                model.mm_2_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(2), W }, true);
+                model.mm_2_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(2), B }, true);
             }
             model.image_newline = try tl.getTensor(names.TN_IMAGE_NEWLINE, false);
         },
@@ -594,6 +684,20 @@ pub fn load(tl: *TensorLoader) Error!void {
             model.mm_1_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(2), W }, true);
             model.mm_1_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(2), B }, true);
         },
+        .magevl => {
+            // d_head rope factors: the first half drives the even outputs, the second half the odd ones
+            model.rope_freqs = try tl.getTensor(names.TN_ROPE_FREQS, true);
+            const d_head: c_int = if (hparams.n_head > 0) @divTrunc(hparams.n_embd, hparams.n_head) else 0;
+            if (d_head <= 0 or d_head * hparams.n_head != hparams.n_embd or @rem(d_head, 32) != 0 or
+                model.rope_freqs.?.type != c.GGML_TYPE_F32 or c.ggml_nelements(model.rope_freqs) != d_head)
+            {
+                return clip.throwErr("%s: hparams do not match the tensor shapes\n", .{func});
+            }
+            model.mm_0_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(0), W }, true);
+            model.mm_0_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(0), B }, true);
+            model.mm_1_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(2), W }, true);
+            model.mm_1_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(2), B }, true);
+        },
         .qwen3vl => {
             model.mm_0_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(0), W }, true);
             model.mm_0_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(0), B }, true);
@@ -696,7 +800,6 @@ pub fn load(tl: *TensorLoader) Error!void {
         .yasa2 => {
             // reuse tensors already loaded by the common section
             // (TN_PATCH_EMBD and TN_PATCH_BIAS have the same tensor names)
-            impl.ggmlAssert(model.patch_embeddings_0 != null, "clip.cpp", 3044, "model.patch_embeddings_0 && \"yasa2 requires v.patch_embd.weight\"");
             model.yasa_patch_w = model.patch_embeddings_0;
             model.yasa_patch_b = model.patch_bias;
             model.yasa_patch_ln_w = try tl.getTensor(names.TN_YASA_PATCH_LN_W, false);
@@ -895,6 +998,11 @@ pub fn load(tl: *TensorLoader) Error!void {
             model.mm_1_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(1), B }, true);
             model.mm_2_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(2), W }, true);
             model.mm_2_b = try get(tl, names.TN_LLAVA_PROJ, .{ ci(2), B }, true);
+        },
+        .kimik31 => {
+            model.mm_1_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(1), W }, true);
+            model.mm_2_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(2), W }, true);
+            model.mm_post_norm_w = try get(tl, names.TN_MM_POST_NORM, .{W}, true);
         },
         .deepseek4v => {
             model.mm_1_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(1), W }, true);
@@ -1102,7 +1210,7 @@ pub fn load(tl: *TensorLoader) Error!void {
             model.downsample_w = try get(tl, names.TN_A_DOWNSAMPLE_CONV, .{W}, true);
             model.spk_proj_w = try get(tl, names.TN_A_SPEAKER_PROJ, .{W}, true);
         },
-        // `PROJECTOR_TYPE_CHATTERBOX_SPKENC` (mtmd/clip.cpp:4000 @cd959bae9)
+        // `PROJECTOR_TYPE_CHATTERBOX_SPKENC` (mtmd-model.cpp:2829 @b1b770d90)
         .chatterbox_spkenc => {
             const cb = &model.cbx;
             cb.spk_conv1_w = try tl.getTensor("a.spk.head.conv1.weight", true);
@@ -1134,7 +1242,7 @@ pub fn load(tl: *TensorLoader) Error!void {
                 }
             }
         },
-        // `PROJECTOR_TYPE_CHATTERBOX` (mtmd/clip.cpp:3745 @cd959bae9)
+        // `PROJECTOR_TYPE_CHATTERBOX` (mtmd-model.cpp:2574 @b1b770d90)
         .chatterbox => try loadChatterbox(tl),
         .pockettts_gen => {
             const flow = &model.flow;
@@ -1297,89 +1405,24 @@ pub fn load(tl: *TensorLoader) Error!void {
             model.gen_code_norm_w = try get(tl, names.TN_A_GEN_CODE_NORM, .{W}, true);
 
             // code2wav: RVQ codes -> raw PCM, lives in the same ctx as code_predictor
-            const c2w = &model.c2w;
-
-            c2w.quant_first_in_w = try get(tl, names.TN_A_GEN_WAV_QUANT_FIRST_IN, .{W}, true);
-            c2w.quant_first_out_w = try get(tl, names.TN_A_GEN_WAV_QUANT_FIRST_OUT, .{W}, true);
-            c2w.quant_first_cb_w = try get(tl, names.TN_A_GEN_WAV_QUANT_FIRST_CB, .{W}, true);
-            c2w.quant_rest_in_w = try get(tl, names.TN_A_GEN_WAV_QUANT_REST_IN, .{W}, true);
-            c2w.quant_rest_out_w = try get(tl, names.TN_A_GEN_WAV_QUANT_REST_OUT, .{W}, true);
-            c2w.quant_rest_cb_w = try get(tl, names.TN_A_GEN_WAV_QUANT_REST_CB, .{W}, true);
-
-            c2w.pre_conv_w = try get(tl, names.TN_A_GEN_WAV_PRE_CONV, .{W}, true);
-            c2w.pre_conv_b = try get(tl, names.TN_A_GEN_WAV_PRE_CONV, .{B}, true);
-
-            c2w.tfm_in_proj_w = try get(tl, names.TN_A_GEN_WAV_TFM_IN_PROJ, .{W}, true);
-            c2w.tfm_in_proj_b = try get(tl, names.TN_A_GEN_WAV_TFM_IN_PROJ, .{B}, true);
-            c2w.tfm_out_proj_w = try get(tl, names.TN_A_GEN_WAV_TFM_OUT_PROJ, .{W}, true);
-            c2w.tfm_out_proj_b = try get(tl, names.TN_A_GEN_WAV_TFM_OUT_PROJ, .{B}, true);
-            c2w.tfm_output_norm_w = try get(tl, names.TN_A_GEN_WAV_TFM_OUT_NORM, .{W}, true);
-
-            // loaded manually, the generic model.layers loop is taken by code_predictor
-            try resizeList(model_mod.Layer, &c2w.tfm_layers, @intCast(hparams.wav_tfm_n_layer));
-            const p = s("a.gen.wav.tfm");
-            for (c2w.tfm_layers.items, 0..) |*layer, ilu| {
-                const l: c_int = @intCast(ilu);
-                layer.q_w = try get(tl, names.TN_ATTN_Q, .{ p, l, W }, true);
-                layer.k_w = try get(tl, names.TN_ATTN_K, .{ p, l, W }, true);
-                layer.v_w = try get(tl, names.TN_ATTN_V, .{ p, l, W }, true);
-                layer.o_w = try get(tl, names.TN_ATTN_OUTPUT, .{ p, l, W }, true);
-                layer.ln_1_w = try get(tl, names.TN_LN_1, .{ p, l, W }, true);
-                layer.ln_2_w = try get(tl, names.TN_LN_2, .{ p, l, W }, true);
-                layer.ls_1_w = try get(tl, names.TN_LS_1, .{ p, l, W }, true);
-                layer.ls_2_w = try get(tl, names.TN_LS_2, .{ p, l, W }, true);
-                layer.ff_gate_w = try get(tl, names.TN_FFN_GATE, .{ p, l, W }, true);
-                layer.ff_up_w = try get(tl, names.TN_FFN_UP, .{ p, l, W }, true);
-                layer.ff_down_w = try get(tl, names.TN_FFN_DOWN, .{ p, l, W }, true);
+            try loadCode2wav(tl, true);
+        },
+        .drama3_gen => {
+            // generic a.gen.code.blk.* tensors are loaded by the loop above
+            try resizeList(model_mod.Drama3Layer, &model.drama3_layers, @intCast(hparams.n_layer));
+            for (model.drama3_layers.items, 0..) |*dl, ilu| {
+                const il: c_int = @intCast(ilu);
+                model.layers.items[ilu].attn_gate_w = try get(tl, names.TN_ATTN_GATE, .{ prefix, il, W }, true);
+                dl.enorm_w = try get(tl, names.TN_A_GEN_CODE_ENORM, .{ il, W }, true);
+                dl.hnorm_w = try get(tl, names.TN_A_GEN_CODE_HNORM, .{ il, W }, true);
+                dl.eh_proj_w = try get(tl, names.TN_A_GEN_CODE_EH_PROJ, .{ il, W }, true);
+                dl.embd_w = try get(tl, names.TN_A_GEN_CODE_BLK_EMBD, .{ il, W }, true);
+                dl.out_norm_w = try get(tl, names.TN_A_GEN_CODE_BLK_OUT_NORM, .{ il, W }, true);
             }
-
-            // upsample: 2x (causal ConvTranspose1d + ConvNeXt block)
-            try resizeList(model_mod.Code2Wav.UpsampleBlock, &c2w.upsample, @intCast(hparams.wav_upsample_n_block));
-            for (c2w.upsample.items, 0..) |*up, ilu| {
-                const l: c_int = @intCast(ilu);
-                up.conv_w = try get(tl, names.TN_A_GEN_WAV_UP_CONV, .{ l, W }, true);
-                up.conv_b = try get(tl, names.TN_A_GEN_WAV_UP_CONV, .{ l, B }, true);
-                up.dwconv_w = try get(tl, names.TN_A_GEN_WAV_UP_DWCONV, .{ l, W }, true);
-                up.dwconv_b = try get(tl, names.TN_A_GEN_WAV_UP_DWCONV, .{ l, B }, true);
-                up.norm_w = try get(tl, names.TN_A_GEN_WAV_UP_NORM, .{ l, W }, true);
-                up.norm_b = try get(tl, names.TN_A_GEN_WAV_UP_NORM, .{ l, B }, true);
-                up.pw1_w = try get(tl, names.TN_A_GEN_WAV_UP_PW1, .{ l, W }, true);
-                up.pw1_b = try get(tl, names.TN_A_GEN_WAV_UP_PW1, .{ l, B }, true);
-                up.pw2_w = try get(tl, names.TN_A_GEN_WAV_UP_PW2, .{ l, W }, true);
-                up.pw2_b = try get(tl, names.TN_A_GEN_WAV_UP_PW2, .{ l, B }, true);
-                up.gamma = try get(tl, names.TN_A_GEN_WAV_UP_GAMMA, .{l}, true);
-            }
-
-            // DAC decoder: conv_pre + n upsample blocks (each with n_res residual units) + conv_post
-            c2w.dac_entry_w = try get(tl, names.TN_A_GEN_WAV_DAC_ENTRY, .{W}, true);
-            c2w.dac_entry_b = try get(tl, names.TN_A_GEN_WAV_DAC_ENTRY, .{B}, true);
-
-            try resizeList(model_mod.Code2Wav.DacBlock, &c2w.dac, @intCast(hparams.wav_dac_n_block));
-            for (c2w.dac.items, 0..) |*blk, ilu| {
-                const l: c_int = @intCast(ilu);
-                blk.snake_alpha = try get(tl, names.TN_A_GEN_WAV_DAC_SNAKE, .{ l, s("alpha") }, true);
-                blk.snake_beta = try get(tl, names.TN_A_GEN_WAV_DAC_SNAKE, .{ l, s("beta") }, true);
-                blk.conv_w = try get(tl, names.TN_A_GEN_WAV_DAC_CONV, .{ l, W }, true);
-                blk.conv_b = try get(tl, names.TN_A_GEN_WAV_DAC_CONV, .{ l, B }, true);
-
-                try resizeList(model_mod.Code2Wav.DacRes, &blk.res, @intCast(hparams.wav_dac_n_res));
-                for (blk.res.items, 0..) |*res, iru| {
-                    const ir: c_int = @intCast(iru);
-                    res.act1_alpha = try get(tl, names.TN_A_GEN_WAV_DAC_RES_ACT1, .{ l, ir, s("alpha") }, true);
-                    res.act1_beta = try get(tl, names.TN_A_GEN_WAV_DAC_RES_ACT1, .{ l, ir, s("beta") }, true);
-                    res.conv1_w = try get(tl, names.TN_A_GEN_WAV_DAC_RES_CONV1, .{ l, ir, W }, true);
-                    res.conv1_b = try get(tl, names.TN_A_GEN_WAV_DAC_RES_CONV1, .{ l, ir, B }, true);
-                    res.act2_alpha = try get(tl, names.TN_A_GEN_WAV_DAC_RES_ACT2, .{ l, ir, s("alpha") }, true);
-                    res.act2_beta = try get(tl, names.TN_A_GEN_WAV_DAC_RES_ACT2, .{ l, ir, s("beta") }, true);
-                    res.conv2_w = try get(tl, names.TN_A_GEN_WAV_DAC_RES_CONV2, .{ l, ir, W }, true);
-                    res.conv2_b = try get(tl, names.TN_A_GEN_WAV_DAC_RES_CONV2, .{ l, ir, B }, true);
-                }
-            }
-
-            c2w.dac_post_snake_alpha = try get(tl, names.TN_A_GEN_WAV_DAC_POST_SNAKE, .{s("alpha")}, true);
-            c2w.dac_post_snake_beta = try get(tl, names.TN_A_GEN_WAV_DAC_POST_SNAKE, .{s("beta")}, true);
-            c2w.dac_post_conv_w = try get(tl, names.TN_A_GEN_WAV_DAC_POST_CONV, .{W}, true);
-            c2w.dac_post_conv_b = try get(tl, names.TN_A_GEN_WAV_DAC_POST_CONV, .{B}, true);
+            model.gen_code_embd_w = try get(tl, names.TN_A_GEN_CODE_EMBD, .{W}, true); // merged 3D, one table per codebook
+            model.gen_code_head_w = try get(tl, names.TN_A_GEN_CODE_HEAD, .{W}, true); // merged 3D, codebooks 1..
+            model.gen_code_out_embd_w = try get(tl, names.TN_A_GEN_CODE_OUT_EMBD, .{W}, true); // backbone rows of the semantic band
+            try loadCode2wav(tl, false);
         },
         .soprano => {
             const v = &model.vocos;
@@ -1479,6 +1522,11 @@ pub fn load(tl: *TensorLoader) Error!void {
             model.mm_img_end = try tl.getTensor(names.TN_MM_IMG_END, true);
             model.image_newline = try tl.getTensor(names.TN_IMAGE_NEWLINE, true);
             model.view_seperator = try tl.getTensor(names.TN_IMAGE_SEPERATOR, false);
+            // the position embedding is resampled on the host as F32
+            if (model.position_embeddings == null or model.position_embeddings.?.type != c.GGML_TYPE_F32) {
+                var pb: [256]u8 = undefined;
+                return clip.throwErr("%s: HunyuanVL requires an F32 %s\n", .{ func, clip.fmtKey(&pb, names.TN_POS_EMBD, prefix) });
+            }
         },
         .janus_pro => {
             model.mm_0_w = try get(tl, names.TN_LLAVA_PROJ, .{ ci(0), W }, true);
@@ -1909,12 +1957,12 @@ pub fn load(tl: *TensorLoader) Error!void {
                 try loadQfLayer(tl, &b.qf_proj_layers.items[0], prefix, bid);
             }
         },
-        else => impl.ggmlAssert(false, "clip.cpp", 4678, "false && \"unknown projector type\""),
+        else => impl.ggmlAssert(false, "mtmd-model.cpp", 3511, "false && \"unknown projector type\""),
     }
 }
 
 /// One QFormer layer's tensors, as the granite speech and granite4 vision
-/// arms load them at lines 3453 and 3509 of clip.cpp, indexed by `il`.
+/// arms load them at lines 3418 and 3474 of mtmd-model.cpp, indexed by `il`.
 fn loadQfLayer(tl: *TensorLoader, pl: *model_mod.Layer, prefix: [*:0]const u8, il: c_int) Error!void {
     pl.q_w = try get(tl, names.TN_QF_SELF_ATTN_Q, .{ prefix, il, W }, true);
     pl.q_b = try get(tl, names.TN_QF_SELF_ATTN_Q, .{ prefix, il, B }, true);
@@ -1951,21 +1999,21 @@ inline fn neI(t: T, i: usize) c_int {
     return @truncate(graph.ne(t, i));
 }
 
-/// Ports `clip_n_mmproj_embd` (mtmd/clip.cpp:7816 @cd959bae9): the embedding
-/// size of the projector's output, which must be the text model's.
-pub fn nMmprojEmbd(ctx: *const clip.Ctx) c_int {
-    const m = &ctx.model;
+/// Ports `n_mmproj_embd` (mtmd-model.cpp:4223 @b1b770d90), a member of
+/// `mtmd_model`: the embedding size of the projector's output, which must
+/// be the text model's.
+pub fn nMmprojEmbd(m: *const model_mod.Model) c_int {
     return switch (m.proj_type) {
         .ldp => neI(m.mm_model_block_1_block_2_1_b, 0),
         .ldpv2 => neI(m.mm_model_peg_0_b, 0),
         .mlp, .phi4, .pixtral, .lightonocr, .dots_ocr, .dots3note_v, .dots3note_a => neI(m.mm_2_w, 1),
         .mlp_norm => neI(m.mm_3_b, 0),
-        .minicpmv => neI(m.mm_model_proj, 0),
+        .minicpmv => neI(m.mm_model_proj, 1),
         .minicpmv4_6, .minicpmv4_7, .minicpm_ocr_1_0 => neI(m.mm_ffn_down_w, 1),
         .glm_edge => neI(m.mm_model_mlp_3_w, 1),
         .minimax_m3 => neI(m.mm_merger_fc2_b, 0),
         .muse_glimmer => neI(m.mm_2_w, 1),
-        .qwen2vl, .qwen25vl, .lfm3vl, .exaone4_5, .janus_pro, .youtuvl => neI(m.mm_1_b, 0),
+        .qwen2vl, .qwen25vl, .magevl, .lfm3vl, .exaone4_5, .janus_pro, .youtuvl => neI(m.mm_1_b, 0),
         .sensenova_u1, .soprano => m.hparams.projection_dim,
         // main path + deepstack paths
         .qwen3vl => @truncate(graph.ne(m.mm_1_b, 0) * (1 + @as(i64, m.n_deepstack_layers))),
@@ -1982,6 +2030,7 @@ pub fn nMmprojEmbd(ctx: *const clip.Ctx) c_int {
         .qwen2a, .nemotron_transcribe => neI(m.mm_fc_w, 1),
         .qwen3a => neI(m.mm_2_w, 1),
         .glma, .lfm2, .d1omni_v, .kimivl, .paddleocr, .kimik25, .yasa2, .deepseek4v, .deepseek41v, .cohere2v => neI(m.mm_2_w, 1),
+        .kimik31 => neI(m.mm_2_w, 1),
         .hunyuanvl => neI(m.mm_model_proj, 1),
         .cogvlm => neI(m.mm_4h_to_h_w, 1),
         .deepseekocr, .deepseekocr2 => neI(m.mm_fc_w, 1),
@@ -1993,7 +2042,7 @@ pub fn nMmprojEmbd(ctx: *const clip.Ctx) c_int {
         .glm4v, .glm5v => neI(m.mm_ffn_down_w, 1),
         .mimo_audio => neI(m.mm_2_w, 1),
         .qwen3tts_spkenc => neI(m.mm_fc_w, 2),
-        .qwen3tts_gen, .lfm3a_gen => neI(m.gen_code_out_embd_w, 0),
+        .qwen3tts_gen, .drama3_gen, .lfm3a_gen => neI(m.gen_code_out_embd_w, 0),
         .pockettts_spkenc => neI(m.spk_proj_w, 1),
         .pockettts_gen => neI(m.gen_input_lin_w, 1),
         // talker conditioning rows, the speaker projection carries their width
@@ -2003,7 +2052,7 @@ pub fn nMmprojEmbd(ctx: *const clip.Ctx) c_int {
         .chatterbox => neI(m.cbx_tensors.get("a.gen.code.out_embd.weight") orelse
             impl.abortUncaught("std::out_of_range", "map::at:  key not found"), 0),
         .parakeet => neI(m.mm_1_w, 1),
-        else => impl.abort("clip.cpp", 7943, "Unknown projector type"),
+        else => impl.abort("mtmd-model.cpp", 4353, "Unknown projector type"),
     };
 }
 

@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/mellum.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/mellum.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_mellum`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `graph<iswa>` and `graph_mtp<iswa>`.
 
@@ -21,8 +21,10 @@ const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
+const Cparams = @import("../cparams.zig").Cparams;
+const RopeParams = model_mod.RopeParams;
 
-/// Ports `llama_model_mellum`'s `load_arch_hparams` (models/mellum.cpp:3 @cd959bae9).
+/// Ports `llama_model_mellum`'s `load_arch_hparams` (models/mellum.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -57,7 +59,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// One decoder block's tensors, the constructor's `load_block` lambda
-/// (models/mellum.cpp:52 @cd959bae9).
+/// (models/mellum.cpp:52 @b1b770d90).
 fn loadBlock(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const layer = &self.layers[@intCast(i)];
@@ -81,7 +83,7 @@ fn loadBlock(self: *Model, l: *const Model.Locals, i: i32, flags: u32, exc: *Exc
     layer.ffn_up_exps = try self.createTensor(.{ .tensor = .ffn_up_exps, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_ff_exp, l.n_expert }, flags, exc);
 }
 
-/// Ports `llama_model_mellum`'s `load_arch_tensors` (models/mellum.cpp:32 @cd959bae9).
+/// Ports `llama_model_mellum`'s `load_arch_tensors` (models/mellum.cpp:32 @b1b770d90).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
 
@@ -122,7 +124,29 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports `llama_model_mellum`'s `build_arch_graph` (models/mellum.cpp:91 @cd959bae9).
+/// Ports `llama_model_mellum`'s `get_rope_params` (models/mellum.cpp:91
+/// @b1b770d90): the sliding-window layers take plain RoPE, without YaRN.
+///
+/// Parameters:
+/// - `model`: the model.
+/// - `cparams`: the context's parameters.
+/// - `il`: the layer.
+///
+/// Return: the layer's RoPE parameters.
+pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+    var res = model.getRopeParamsBase(cparams, il);
+
+    if (model.hparams.isSwa(il)) {
+        res.ext_factor = 0.0;
+        res.attn_factor = 1.0;
+        res.beta_fast = 32.0;
+        res.beta_slow = 1.0;
+    }
+
+    return res;
+}
+
+/// Ports `llama_model_mellum`'s `build_arch_graph` (models/mellum.cpp:104 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     const iswa = @as(hparams_mod.SwaType, @fromBackingInt(@intCast(model.hparams.swa_type))) == .standard;
 
@@ -140,14 +164,14 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 }
 
 /// Ports the constructor of `llama_model_mellum`'s `graph<iswa>`
-/// (models/mellum.cpp:108 @cd959bae9).
+/// (models/mellum.cpp:121 @b1b770d90).
 fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/mellum.cpp", 111, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/mellum.cpp", 112, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/mellum.cpp", 124, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/mellum.cpp", 125, "n_embd_head == n_rot");
 
     var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
 
@@ -181,18 +205,8 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
             Kcur = b.buildNorm(Kcur, layer.attn_k_norm, null, .rms, il);
             b.cb(Kcur, "Kcur_normed", il);
 
-            const is_swa = hp.isSwa(@intCast(il));
-
-            // The sliding-window layers take plain RoPE, without YaRN.
-            const freq_base_l = model.getRopeFreqBase(b.cparams, @intCast(il));
-            const freq_scale_l = model.getRopeFreqScale(b.cparams, @intCast(il));
-            const ext_factor_l: f32 = if (is_swa) 0.0 else b.ext_factor;
-            const attn_factor_l: f32 = if (is_swa) 1.0 else b.attn_factor;
-            const beta_fast_l: f32 = if (is_swa) 32.0 else b.beta_fast;
-            const beta_slow_l: f32 = if (is_swa) 1.0 else b.beta_slow;
-
-            Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, ext_factor_l, attn_factor_l, beta_fast_l, beta_slow_l);
-            Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, ext_factor_l, attn_factor_l, beta_fast_l, beta_slow_l);
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
 
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);
@@ -261,36 +275,34 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
 }
 
 /// Ports the constructor of `llama_model_mellum`'s `graph_mtp<iswa>`
-/// (models/mellum.cpp:249 @cd959bae9): the NextN draft head.
+/// (models/mellum.cpp:244 @b1b770d90): the NextN draft head.
 fn buildGraphMtp(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
-    impl.assert(hp.n_layer_nextn == 1, "models/mellum.cpp", 250, "hparams.n_layer_nextn == 1 && \"MELLUM MTP currently only supports a single MTP block\"");
+    impl.assert(hp.n_layer_nextn == 1, "models/mellum.cpp", 245, "hparams.n_layer_nextn == 1 && \"MELLUM MTP currently only supports a single MTP block\"");
 
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/mellum.cpp", 254, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/mellum.cpp", 255, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/mellum.cpp", 249, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/mellum.cpp", 250, "n_embd_head == n_rot");
 
     const il: c_int = @intCast(hp.nLayer());
     const layer = &model.layers[@intCast(il)];
 
-    impl.assert(layer.nextn.eh_proj != null, "models/mellum.cpp", 260, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
-    impl.assert(layer.nextn.enorm != null, "models/mellum.cpp", 261, "layer.nextn.enorm && \"MTP block missing nextn.enorm\"");
-    impl.assert(layer.nextn.hnorm != null, "models/mellum.cpp", 262, "layer.nextn.hnorm && \"MTP block missing nextn.hnorm\"");
-    impl.assert(layer.nextn.shared_head_norm != null, "models/mellum.cpp", 263, "layer.nextn.shared_head_norm && \"MTP block missing nextn.shared_head_norm\"");
+    impl.assert(layer.nextn.eh_proj != null, "models/mellum.cpp", 255, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
+    impl.assert(layer.nextn.enorm != null, "models/mellum.cpp", 256, "layer.nextn.enorm && \"MTP block missing nextn.enorm\"");
+    impl.assert(layer.nextn.hnorm != null, "models/mellum.cpp", 257, "layer.nextn.hnorm && \"MTP block missing nextn.hnorm\"");
+    impl.assert(layer.nextn.shared_head_norm != null, "models/mellum.cpp", 258, "layer.nextn.shared_head_norm && \"MTP block missing nextn.shared_head_norm\"");
 
-    const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("models/mellum.cpp", 266, "out of memory");
+    const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("models/mellum.cpp", 261, "out of memory");
     inp.* = .{ .n_embd = hp.nEmbdInp(), .n_embd_state = hp.n_embd };
     inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens);
     c.ggml_set_input(inp.tokens);
     inp.embd = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
     c.ggml_set_input(inp.embd);
-    inp.h = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, hp.n_embd, b.n_tokens);
-    c.ggml_set_input(inp.h);
-    _ = c.ggml_set_name(inp.h, "mtp_h_input");
+    inp.h = b.buildInpEmbdState(inp, hp.n_embd);
 
-    b.ubatch.assertEmbdOrToken("models/mellum.cpp", 281);
+    b.ubatch.assertEmbdOrToken("models/mellum.cpp", 274);
     const tok_embd: *Tensor = if (b.ubatch.token != null) c.ggml_get_rows(ctx, model.tok_embd, inp.tokens) else inp.embd.?;
     b.cb(tok_embd, "mtp_tok_embd", il);
 
@@ -333,17 +345,8 @@ fn buildGraphMtp(comptime iswa: bool, model: *const Model, b: *const graph.Build
         Kcur = b.buildNorm(Kcur, layer.attn_k_norm, null, .rms, il);
         b.cb(Kcur, "mtp_Kcur_normed", il);
 
-        const is_swa = hp.isSwa(@intCast(il));
-
-        const freq_base_l = model.getRopeFreqBase(b.cparams, @intCast(il));
-        const freq_scale_l = model.getRopeFreqScale(b.cparams, @intCast(il));
-        const ext_factor_l: f32 = if (is_swa) 0.0 else b.ext_factor;
-        const attn_factor_l: f32 = if (is_swa) 1.0 else b.attn_factor;
-        const beta_fast_l: f32 = if (is_swa) 32.0 else b.beta_fast;
-        const beta_slow_l: f32 = if (is_swa) 1.0 else b.beta_slow;
-
-        Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, ext_factor_l, attn_factor_l, beta_fast_l, beta_slow_l);
-        Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, ext_factor_l, attn_factor_l, beta_fast_l, beta_slow_l);
+        Qcur = b.buildRope(Qcur, inp_pos, il);
+        Kcur = b.buildRope(Kcur, inp_pos, il);
 
         b.cb(Qcur, "mtp_Qcur", il);
         b.cb(Kcur, "mtp_Kcur", il);

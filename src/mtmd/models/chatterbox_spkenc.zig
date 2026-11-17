@@ -5,8 +5,8 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/chatterbox-spkenc.cpp` at v0.9.0
-//! (`cd959bae9`), and the `clip_graph_chatterbox_spkenc` declaration in
+//! Ports `llama.cpp/tools/mtmd/models/chatterbox-spkenc.cpp` at v1.0.0
+//! (`b1b770d90`), and the `mtmd_graph_chatterbox_spkenc` declaration in
 //! `llama.cpp/tools/mtmd/models/models.h`. Each declaration names what it
 //! ports and the line it began at. The base class's builders are
 //! `chatterbox_base.zig`.
@@ -23,11 +23,11 @@ const ne = graph.ne;
 const nb = graph.nb;
 const Cbx = model_mod.Chatterbox;
 
-/// Ports `bn_eps` (chatterbox-spkenc.cpp:5 @cd959bae9).
+/// Ports `bn_eps` (chatterbox-spkenc.cpp:5 @b1b770d90).
 const bn_eps: f32 = 1e-5;
 
-/// Ports `bn1d` (chatterbox-spkenc.cpp:8 @cd959bae9), a member of
-/// `clip_graph_chatterbox_spkenc`: per-channel batchnorm on x `[C, T]`;
+/// Ports `bn1d` (chatterbox-spkenc.cpp:8 @b1b770d90), a member of
+/// `mtmd_graph_chatterbox_spkenc`: per-channel batchnorm on x `[C, T]`;
 /// `w`/`b` are null on the affine=False variant.
 fn bn1d(g: *const graph.Graph, n: *const Cbx.Bn, x: T) T {
     const ctx0 = g.ctx0;
@@ -40,7 +40,7 @@ fn bn1d(g: *const graph.Graph, n: *const Cbx.Bn, x: T) T {
     return c.ggml_add(ctx0, c.ggml_mul(ctx0, x, a), shift);
 }
 
-/// Ports `cbx_bn2d` (chatterbox-spkenc.cpp:19 @cd959bae9): batchnorm on a
+/// Ports `cbx_bn2d` (chatterbox-spkenc.cpp:19 @b1b770d90): batchnorm on a
 /// conv2d activation `[W=T, H=F, C, 1]`, stats on ne2.
 fn cbxBn2d(ctx0: ?*c.ggml_context, n: *const Cbx.Bn, x: T) T {
     const C = ne(x, 2);
@@ -53,14 +53,14 @@ fn cbxBn2d(ctx0: ?*c.ggml_context, n: *const Cbx.Bn, x: T) T {
     return c.ggml_add(ctx0, c.ggml_mul(ctx0, x, a), shift);
 }
 
-/// Ports `bn2d_relu` (chatterbox-spkenc.cpp:30 @cd959bae9), a member of
-/// `clip_graph_chatterbox_spkenc`.
+/// Ports `bn2d_relu` (chatterbox-spkenc.cpp:30 @b1b770d90), a member of
+/// `mtmd_graph_chatterbox_spkenc`.
 fn bn2dRelu(g: *const graph.Graph, n: *const Cbx.Bn, x: T) T {
     return c.ggml_relu(g.ctx0, cbxBn2d(g.ctx0, n, x));
 }
 
-/// Ports `res2d` (chatterbox-spkenc.cpp:35 @cd959bae9), a member of
-/// `clip_graph_chatterbox_spkenc`: the FCM residual 2-d block, stride on
+/// Ports `res2d` (chatterbox-spkenc.cpp:35 @b1b770d90), a member of
+/// `mtmd_graph_chatterbox_spkenc`: the FCM residual 2-d block, stride on
 /// the frequency axis only.
 fn res2d(g: *const graph.Graph, r: *const Cbx.SpkRes2d, x: T, stride: c_int) T {
     const ctx0 = g.ctx0;
@@ -77,8 +77,8 @@ fn res2d(g: *const graph.Graph, r: *const Cbx.SpkRes2d, x: T, stride: c_int) T {
     return c.ggml_relu(ctx0, c.ggml_add(ctx0, cur, res));
 }
 
-/// Ports `cam_layer` (chatterbox-spkenc.cpp:51 @cd959bae9), a member of
-/// `clip_graph_chatterbox_spkenc`: a CAM dense TDNN layer, a bottleneck
+/// Ports `cam_layer` (chatterbox-spkenc.cpp:51 @b1b770d90), a member of
+/// `mtmd_graph_chatterbox_spkenc`: a CAM dense TDNN layer, a bottleneck
 /// then a context-gated conv; x `[C_in, T]` to `[growth, T]`.
 fn camLayer(g: *const graph.Graph, l: *const Cbx.SpkCamLayer, x: T, dil: c_int, segfix: T) T {
     const ctx0 = g.ctx0;
@@ -118,11 +118,11 @@ fn camLayer(g: *const graph.Graph, l: *const Cbx.SpkCamLayer, x: T, dil: c_int, 
     return c.ggml_mul(ctx0, y, m);
 }
 
-/// Ports `block_dil` (chatterbox-spkenc.cpp:121 @cd959bae9).
+/// Ports `block_dil` (chatterbox-spkenc.cpp:121 @b1b770d90).
 const block_dil = [3]c_int{ 1, 2, 2 };
 
-/// Ports `build` (chatterbox-spkenc.cpp:89 @cd959bae9), a member of
-/// `clip_graph_chatterbox_spkenc`.
+/// Ports `build` (chatterbox-spkenc.cpp:89 @b1b770d90), a member of
+/// `mtmd_graph_chatterbox_spkenc`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/minimax-m3.cpp` at v0.9.0 (`cd959bae9`).
+//! Ports `llama.cpp/tools/mtmd/models/minimax-m3.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -13,8 +13,8 @@ const graph = @import("../graph.zig");
 const model_mod = @import("../model.zig");
 const c = impl.c;
 
-/// Ports `apply_rope` (mtmd/models/minimax-m3.cpp:3 @cd959bae9), a member of
-/// `clip_graph_minimax_m3`. The head is laid out [t, h, w, pad]: t and pad
+/// Ports `apply_rope` (mtmd/models/minimax-m3.cpp:3 @b1b770d90), a member of
+/// `mtmd_graph_minimax_m3`. The head is laid out [t, h, w, pad]: t and pad
 /// stay unrotated.
 pub fn applyRope(g: *graph.Graph, x_in: graph.T, pos_h: graph.T, pos_w: graph.T) graph.T {
     const ctx0 = g.ctx0;
@@ -34,7 +34,7 @@ pub fn applyRope(g: *graph.Graph, x_in: graph.T, pos_h: graph.T, pos_w: graph.T)
     return x;
 }
 
-/// The `add_pos` lambda passed to `build_vit` (mtmd/models/minimax-m3.cpp:55 @cd959bae9),
+/// The `add_pos` lambda passed to `build_vit` (mtmd/models/minimax-m3.cpp:55 @b1b770d90),
 /// the call it is an argument of.
 const AddPos = struct {
     pos_h: graph.T,
@@ -47,7 +47,7 @@ const AddPos = struct {
     }
 };
 
-/// Ports `build` (mtmd/models/minimax-m3.cpp:23 @cd959bae9), a member of `clip_graph_minimax_m3`.
+/// Ports `build` (mtmd/models/minimax-m3.cpp:23 @b1b770d90), a member of `mtmd_graph_minimax_m3`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;

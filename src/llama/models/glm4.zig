@@ -6,7 +6,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/glm4.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/glm4.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_glm4`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -22,7 +22,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_glm4`'s `load_arch_hparams` (models/glm4.cpp:3 @cd959bae9).
+/// Ports `llama_model_glm4`'s `load_arch_hparams` (models/glm4.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -38,7 +38,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_glm4`'s `load_arch_tensors` (models/glm4.cpp:15 @cd959bae9).
+/// Ports `llama_model_glm4`'s `load_arch_tensors` (models/glm4.cpp:15 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -91,13 +91,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_glm4`'s `build_arch_graph` (models/glm4.cpp:64 @cd959bae9).
+/// Ports `llama_model_glm4`'s `build_arch_graph` (models/glm4.cpp:64 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_glm4`'s `graph` (models/glm4.cpp:68
-/// @cd959bae9).
+/// @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -105,15 +105,12 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/glm4.cpp", 71, "n_embd_head == hparams.n_embd_head_k()");
 
-    var sections: [4]c_int = undefined;
-    @memcpy(&sections, hp.rope_sections[0..4]);
-
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
     const use_mrope = hp.useMrope();
     if (b.ubatch.embd != null and !use_mrope) {
         // Stopped here, rather than give wrong results.
-        impl.abort("models/glm4.cpp", 84, "This GGUF does not support multimodal. Please reconvert it.");
+        impl.abort("models/glm4.cpp", 81, "This GGUF does not support multimodal. Please reconvert it.");
     }
 
     // The positions.
@@ -141,14 +138,9 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             var Kcur = qkv.k;
             const Vcur = qkv.v;
 
-            if (use_mrope) {
-                Qcur = c.ggml_rope_multi(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), &sections, b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-                Kcur = c.ggml_rope_multi(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), &sections, b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            } else {
-                // Normal RoPE.
-                Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-                Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            }
+            // RoPE, multimodal where the type says so.
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
 
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);

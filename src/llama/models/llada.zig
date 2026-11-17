@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/llada.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/llada.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_llada`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -17,9 +17,11 @@ const c = impl.c;
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
+const RopeParams = model_mod.RopeParams;
+const Cparams = @import("../cparams.zig").Cparams;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_llada`'s `load_arch_hparams` (models/llada.cpp:3 @cd959bae9).
+/// Ports `llama_model_llada`'s `load_arch_hparams` (models/llada.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
@@ -34,7 +36,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.causal_attn = false;
 }
 
-/// Ports `llama_model_llada`'s `load_arch_tensors` (models/llada.cpp:19 @cd959bae9).
+/// Ports `llama_model_llada`'s `load_arch_tensors` (models/llada.cpp:19 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -76,21 +78,38 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_llada`'s `build_arch_graph` (models/llada.cpp:62 @cd959bae9).
+/// Ports `llama_model_llada`'s `get_rope_params` (models/llada.cpp:62
+/// @b1b770d90): no frequency factors.
+///
+/// Parameters:
+/// - `model`: the model.
+/// - `cparams`: the context's parameters.
+/// - `il`: the layer.
+///
+/// Return: the layer's RoPE.
+pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+    var res = model.getRopeParamsBase(cparams, il);
+
+    res.factors = null;
+
+    return res;
+}
+
+/// Ports `llama_model_llada`'s `build_arch_graph` (models/llada.cpp:70 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_llada`'s `graph`
-/// (models/llada.cpp:66 @cd959bae9). LLaDA is Llama with non-causal
+/// (models/llada.cpp:74 @b1b770d90). LLaDA is Llama with non-causal
 /// attention, for diffusion.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/llada.cpp", 70, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/llada.cpp", 71, "n_embd_head == n_rot");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/llada.cpp", 78, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == b.n_rot, "models/llada.cpp", 79, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -119,9 +138,9 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             var Kcur = qkv.k;
             const Vcur = qkv.v;
 
-            Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            Qcur = b.buildRope(Qcur, inp_pos, il);
 
-            Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
 
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);

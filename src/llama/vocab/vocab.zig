@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/src/llama-vocab.cpp` and
-//! `llama.cpp/src/llama-vocab.h` at v0.9.0 (`cd959bae9`), with `replace_all`
+//! `llama.cpp/src/llama-vocab.h` at v1.0.0 (`b1b770d90`), with `replace_all`
 //! from `llama.cpp/src/llama-impl.cpp`. `struct llama_vocab` and its pimpl
 //! `llama_vocab::impl` are one struct here; the C++'s forwarding layer adds
 //! nothing.
@@ -70,7 +70,7 @@ pub const type_plamo2: Type = c.LLAMA_VOCAB_TYPE_PLAMO2;
 pub const type_test: Type = c.LLAMA_VOCAB_TYPE_TEST;
 pub const type_plamo3: Type = c.LLAMA_VOCAB_TYPE_PLAMO3;
 
-/// Ports `enum llama_vocab_pre_type` (llama-vocab.h:10 @cd959bae9).
+/// Ports `enum llama_vocab_pre_type` (llama-vocab.h:10 @b1b770d90).
 pub const PreType = enum(c_int) {
     default = 0,
     llama3 = 1,
@@ -141,7 +141,7 @@ pub const PreType = enum(c_int) {
     tekken_num3 = 66,
 };
 
-/// Ports `enum llama_metaspace_prepend_scheme` (llama-vocab.h:81 @cd959bae9):
+/// Ports `enum llama_metaspace_prepend_scheme` (llama-vocab.h:81 @b1b770d90):
 /// HF's Metaspace pre-tokenizer `prepend_scheme`.
 pub const MetaspacePrependScheme = enum(c_int) {
     never = 0,
@@ -149,7 +149,7 @@ pub const MetaspacePrependScheme = enum(c_int) {
     always = 2,
 };
 
-/// Ports `llama_vocab`'s `token_data` (llama-vocab.h:91 @cd959bae9). The text
+/// Ports `llama_vocab`'s `token_data` (llama-vocab.h:91 @b1b770d90). The text
 /// lives in `Vocab.text_buf`, NUL-terminated, as `c_str()` exposes it.
 pub const TokenData = struct {
     off: u32,
@@ -158,7 +158,7 @@ pub const TokenData = struct {
     attr: Attr,
 };
 
-/// Ports `llama_vocab`'s `normalizer_options` (llama-vocab.h:97 @cd959bae9).
+/// Ports `llama_vocab`'s `normalizer_options` (llama-vocab.h:97 @b1b770d90).
 pub const NormalizerOptions = struct {
     /// Since v0.7.0: Unigram text is NFC-normalized first.
     nfc: bool = false,
@@ -257,14 +257,14 @@ pub const Tokenizer = union(enum) {
 
 /// A piece of the text being tokenized: a token already decided, or a
 /// span of the raw text still to tokenize. Ports `fragment_buffer_variant`
-/// (llama-vocab.cpp:2067 @cd959bae9).
+/// (llama-vocab.cpp:2067 @b1b770d90).
 pub const Fragment = union(enum) {
     token: Token,
     raw: struct { offset: usize, length: usize },
 };
 
 /// Ports `llama_vocab` and `llama_vocab`'s `impl` (llama-vocab.cpp:2096
-/// @cd959bae9).
+/// @b1b770d90).
 pub const Vocab = struct {
     n_token_types: u32 = 0,
 
@@ -331,7 +331,7 @@ pub const Vocab = struct {
 
     precompiled_charsmap: std.ArrayList(u8) = .empty,
 
-    /// Ports `llama_vocab`'s `llama_vocab` (llama-vocab.cpp:4360 @cd959bae9).
+    /// Ports `llama_vocab`'s `llama_vocab` (llama-vocab.cpp:4360 @b1b770d90).
     ///
     /// Return: an empty vocabulary, reserved for the lifecycle convention as
     /// fallible.
@@ -359,12 +359,12 @@ pub const Vocab = struct {
     // -------------------------------------------------------------------------
     // Accessors
 
-    /// Ports `llama_vocab`'s `n_tokens` (llama-vocab.cpp:4385 @cd959bae9).
+    /// Ports `llama_vocab`'s `n_tokens` (llama-vocab.cpp:4385 @b1b770d90).
     pub fn nTokens(self: *const Vocab) u32 {
         return @intCast(self.id_to_token.items.len);
     }
 
-    /// Ports `llama_vocab::impl`'s `type_name` (llama-vocab.cpp:3529 @cd959bae9).
+    /// Ports `llama_vocab::impl`'s `type_name` (llama-vocab.cpp:3529 @b1b770d90).
     pub fn typeName(self: *const Vocab) [:0]const u8 {
         return switch (self.type) {
             type_none => "no vocab",
@@ -390,48 +390,48 @@ pub const Vocab = struct {
         impl.assert(self.type != type_none, "llama-vocab.cpp", line, "type != LLAMA_VOCAB_TYPE_NONE");
     }
 
-    /// Ports `llama_vocab::impl`'s `is_normal` (llama-vocab.cpp:3544 @cd959bae9).
+    /// Ports `llama_vocab::impl`'s `is_normal` (llama-vocab.cpp:3544 @b1b770d90).
     pub fn isNormal(self: *const Vocab, id: Token) bool {
         self.assertNotNone(3545);
         return (self.id_to_token.items[@intCast(id)].attr & attr_normal) != 0;
     }
 
-    /// Ports `llama_vocab::impl`'s `is_unknown` (llama-vocab.cpp:3549 @cd959bae9).
+    /// Ports `llama_vocab::impl`'s `is_unknown` (llama-vocab.cpp:3549 @b1b770d90).
     pub fn isUnknown(self: *const Vocab, id: Token) bool {
         self.assertNotNone(3550);
         return (self.id_to_token.items[@intCast(id)].attr & attr_unknown) != 0;
     }
 
-    /// Ports `llama_vocab::impl`'s `is_control` (llama-vocab.cpp:3554 @cd959bae9).
+    /// Ports `llama_vocab::impl`'s `is_control` (llama-vocab.cpp:3554 @b1b770d90).
     pub fn isControl(self: *const Vocab, id: Token) bool {
         self.assertNotNone(3555);
         return (self.id_to_token.items[@intCast(id)].attr & attr_control) != 0;
     }
 
-    /// Ports `llama_vocab::impl`'s `is_byte` (llama-vocab.cpp:3559 @cd959bae9).
+    /// Ports `llama_vocab::impl`'s `is_byte` (llama-vocab.cpp:3559 @b1b770d90).
     pub fn isByte(self: *const Vocab, id: Token) bool {
         self.assertNotNone(3560);
         return (self.id_to_token.items[@intCast(id)].attr & attr_byte) != 0;
     }
 
-    /// Ports `llama_vocab::impl`'s `is_user_defined` (llama-vocab.cpp:3564 @cd959bae9).
+    /// Ports `llama_vocab::impl`'s `is_user_defined` (llama-vocab.cpp:3564 @b1b770d90).
     pub fn isUserDefined(self: *const Vocab, id: Token) bool {
         self.assertNotNone(3565);
         return (self.id_to_token.items[@intCast(id)].attr & attr_user_defined) != 0;
     }
 
-    /// Ports `llama_vocab::impl`'s `is_unused` (llama-vocab.cpp:3569 @cd959bae9).
+    /// Ports `llama_vocab::impl`'s `is_unused` (llama-vocab.cpp:3569 @b1b770d90).
     pub fn isUnused(self: *const Vocab, id: Token) bool {
         self.assertNotNone(3570);
         return (self.id_to_token.items[@intCast(id)].attr & attr_unused) != 0;
     }
 
-    /// Ports `llama_vocab::impl`'s `is_eog` (llama-vocab.cpp:3574 @cd959bae9).
+    /// Ports `llama_vocab::impl`'s `is_eog` (llama-vocab.cpp:3574 @b1b770d90).
     pub fn isEog(self: *const Vocab, id: Token) bool {
         return id != token_null and eogIndex(self.special_eog_ids.items, id) != null;
     }
 
-    /// Ports `llama_vocab`'s `text_to_token` (llama-vocab.cpp:4463 @cd959bae9).
+    /// Ports `llama_vocab`'s `text_to_token` (llama-vocab.cpp:4463 @b1b770d90).
     ///
     /// Return: the token whose text is `t`, or `token_null`.
     pub fn textToToken(self: *const Vocab, t: []const u8) Token {
@@ -448,19 +448,19 @@ pub const Vocab = struct {
         return self.id_to_token.items[@intCast(id)];
     }
 
-    /// Ports `llama_vocab`'s `get_token_data` (llama-vocab.cpp:4472 @cd959bae9).
+    /// Ports `llama_vocab`'s `get_token_data` (llama-vocab.cpp:4472 @b1b770d90).
     pub fn getTokenData(self: *const Vocab, id: Token, exc: *Exception) Thrown!TokenData {
         impl.assert(self.type != type_none, "llama-vocab.cpp", 4473, "pimpl->type != LLAMA_VOCAB_TYPE_NONE");
         return self.tokenDataAt(id, exc);
     }
 
-    /// Ports `llama_vocab::impl`'s `token_get_attr` (llama-vocab.cpp:3601 @cd959bae9).
+    /// Ports `llama_vocab::impl`'s `token_get_attr` (llama-vocab.cpp:3601 @b1b770d90).
     pub fn tokenGetAttr(self: *const Vocab, id: Token, exc: *Exception) Thrown!Attr {
         self.assertNotNone(3602);
         return (try self.tokenDataAt(id, exc)).attr;
     }
 
-    /// Ports `llama_vocab`'s `find_bpe_rank` (llama-vocab.cpp:4615 @cd959bae9).
+    /// Ports `llama_vocab`'s `find_bpe_rank` (llama-vocab.cpp:4615 @b1b770d90).
     ///
     /// Return: the merge's rank, or -1.
     pub fn findBpeRank(self: *const Vocab, left: []const u8, right: []const u8) i32 {
@@ -474,7 +474,7 @@ pub const Vocab = struct {
         return self.bpe_ranks.count();
     }
 
-    /// Ports `llama_vocab::impl`'s `token_to_byte` (llama-vocab.cpp:3578 @cd959bae9).
+    /// Ports `llama_vocab::impl`'s `token_to_byte` (llama-vocab.cpp:3578 @b1b770d90).
     ///
     /// Return: the byte a `<0xXX>` token stands for, or `error.Thrown`.
     pub fn tokenToByte(self: *const Vocab, id: Token, exc: *Exception) Thrown!u8 {
@@ -493,7 +493,7 @@ pub const Vocab = struct {
         }
     }
 
-    /// Ports `llama_vocab`'s `byte_to_token` (llama-vocab.cpp:4429 @cd959bae9).
+    /// Ports `llama_vocab`'s `byte_to_token` (llama-vocab.cpp:4429 @b1b770d90).
     ///
     /// Return: the token for byte `ch`, or `error.Thrown` with
     /// `unordered_map`'s `at`'s `std`'s `out_of_range`.
@@ -529,7 +529,7 @@ pub const Vocab = struct {
     // -------------------------------------------------------------------------
     // Loading
 
-    /// Ports `llama_vocab::impl`'s `load` (llama-vocab.cpp:2241 @cd959bae9).
+    /// Ports `llama_vocab::impl`'s `load` (llama-vocab.cpp:2241 @b1b770d90).
     ///
     /// Parameters:
     /// - `ml`: the metadata, as `llama_model_loader` reads it.
@@ -1148,7 +1148,7 @@ pub const Vocab = struct {
     }
 
     /// Ports `llama_vocab::impl`'s `init_tokenizer` (llama-vocab.cpp:3606
-    /// @cd959bae9). PLaMo-3 is PLaMo-2's tokenizer with pre-segmentation on.
+    /// @b1b770d90). PLaMo-3 is PLaMo-2's tokenizer with pre-segmentation on.
     fn initTokenizer(self: *Vocab, exc: *Exception) Thrown!void {
         impl.logDebug("%s: initializing tokenizer for type %d\n", .{ "init_tokenizer", @as(c_int, @intCast(self.type)) });
         self.tokenizer = switch (self.type) {
@@ -1514,7 +1514,7 @@ pub const Vocab = struct {
     }
 
     /// The piece cache: llama-vocab.cpp:3425-3440 (v0.8.0), through
-    /// `token_to_piece_for_cache` (llama-vocab.cpp:3764 @cd959bae9). The C++
+    /// `token_to_piece_for_cache` (llama-vocab.cpp:3764 @b1b770d90). The C++
     /// starts with a 22-byte buffer and retries at the size reported; the
     /// piece is the same either way, so here it is written once at full
     /// size.
@@ -1594,7 +1594,7 @@ pub const Vocab = struct {
     // Tokenizing
 
     /// Ports `llama_vocab::impl`'s `tokenizer_st_partition` (llama-vocab.cpp:3645
-    /// @cd959bae9): every special token, longest first, cut out of every
+    /// @b1b770d90): every special token, longest first, cut out of every
     /// raw-text fragment.
     ///
     /// The C++ edits a `std`'s `forward_list` in place; the effect is the
@@ -1659,7 +1659,7 @@ pub const Vocab = struct {
         }
     }
 
-    /// Ports `llama_vocab::impl`'s `tokenize` (llama-vocab.cpp:3809 @cd959bae9).
+    /// Ports `llama_vocab::impl`'s `tokenize` (llama-vocab.cpp:3809 @b1b770d90).
     ///
     /// Parameters:
     /// - `raw_text`: the text.
@@ -1839,7 +1839,7 @@ pub const Vocab = struct {
         return output;
     }
 
-    /// Ports `llama_vocab`'s `tokenize` (llama-vocab.cpp:4645 @cd959bae9), the
+    /// Ports `llama_vocab`'s `tokenize` (llama-vocab.cpp:4645 @b1b770d90), the
     /// C-buffer form.
     ///
     /// Return: the number of tokens written; minus the number needed when
@@ -1872,7 +1872,7 @@ pub const Vocab = struct {
     }
 
     /// Ports `llama_vocab::impl`'s `token_to_piece` (llama-vocab.cpp:4077
-    /// @cd959bae9). Writes no NUL.
+    /// @b1b770d90). Writes no NUL.
     ///
     /// Parameters:
     /// - `token`: the token.
@@ -1965,7 +1965,7 @@ pub const Vocab = struct {
     }
 
     /// Ports `llama_vocab::impl`'s one-argument `token_to_piece`
-    /// (llama-vocab.cpp:4206 @cd959bae9): the cached piece.
+    /// (llama-vocab.cpp:4206 @b1b770d90): the cached piece.
     ///
     /// Return: the piece, borrowed until `deinit`, or `error.Thrown`.
     pub fn cachedPiece(self: *const Vocab, token: Token, exc: *Exception) Thrown![]const u8 {
@@ -1975,7 +1975,7 @@ pub const Vocab = struct {
     }
 
     /// Ports `llama_vocab::impl`'s `detokenize` (llama-vocab.cpp:4210
-    /// @cd959bae9).
+    /// @b1b770d90).
     ///
     /// Parameters:
     /// - `tokens_in`: the tokens.
@@ -2094,7 +2094,7 @@ pub const Vocab = struct {
         return if (total <= text_len_max) total else -total;
     }
 
-    /// Ports `llama_vocab::impl`'s `print_info` (llama-vocab.cpp:4329 @cd959bae9).
+    /// Ports `llama_vocab::impl`'s `print_info` (llama-vocab.cpp:4329 @b1b770d90).
     ///
     /// Return: nothing, or `error.Thrown` with `std::out_of_range("vector")`
     /// for a token the vocabulary does not hold -- Soprano's EOS, out of
@@ -2220,7 +2220,7 @@ fn strtolHex(s: []const u8) i64 {
     return if (neg) -v else v;
 }
 
-/// Ports `replace_all` (llama-impl.cpp:101 @cd959bae9).
+/// Ports `replace_all` (llama-impl.cpp:101 @b1b770d90).
 pub fn replaceAll(s: *std.ArrayList(u8), search: []const u8, replace: []const u8) void {
     if (search.len == 0) return;
     if (std.mem.find(u8, s.items, search) == null) return;
@@ -2237,17 +2237,17 @@ pub fn replaceAll(s: *std.ArrayList(u8), search: []const u8, replace: []const u8
     s.* = builder;
 }
 
-/// Ports `llama_escape_whitespace` (llama-vocab.cpp:3780 @cd959bae9).
+/// Ports `llama_escape_whitespace` (llama-vocab.cpp:3780 @b1b770d90).
 pub fn escapeWhitespace(s: *std.ArrayList(u8)) void {
     replaceAll(s, " ", "\xe2\x96\x81");
 }
 
-/// Ports `llama_unescape_whitespace` (llama-vocab.cpp:3784 @cd959bae9).
+/// Ports `llama_unescape_whitespace` (llama-vocab.cpp:3784 @b1b770d90).
 pub fn unescapeWhitespace(s: *std.ArrayList(u8)) void {
     replaceAll(s, "\xe2\x96\x81", " ");
 }
 
-/// Ports `llama_decode_text` (llama-vocab.cpp:3788 @cd959bae9): each code
+/// Ports `llama_decode_text` (llama-vocab.cpp:3788 @b1b770d90): each code
 /// point of a byte-encoded token back to its byte, or an `[UNK_BYTE_0x..]`
 /// marker that also repeats the whole text.
 fn decodeText(t: []const u8, out: *std.ArrayList(u8), exc: *Exception) Thrown!void {

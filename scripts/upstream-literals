@@ -28,6 +28,10 @@ files = subprocess.check_output(
     "git ls-files 'src/*.zig' 'cli/*.zig' 'tools/*.zig'; "
     "git ls-files -o --exclude-standard 'src/*.zig' 'cli/*.zig' 'tools/*.zig'",
     shell=True, text=True).split()
+# A file deleted in the working tree but not yet from the index is still in
+# `git ls-files` (v1.0.0: `src/ggml/cuda/diagmask.zig`, which upstream's
+# `diagmask.cu` took with it); there is nothing in it to check.
+files = [f for f in files if os.path.exists(f)]
 index = collections.defaultdict(list)
 for d, _, fs in os.walk('llama.cpp'):
     if '/.git' in d or '/tests' in d:

@@ -566,8 +566,9 @@ const cuda_defines = [_][]const u8{
 
 /// The K and V types a FlashAttention vector kernel can be instantiated
 /// for, in the order `ggml_cuda_fattn_vec_instances`
-/// (ggml/cmake/common.cmake:53 @7fe450e19) iterates them: its `FA_TYPES`.
-const cuda_fa_types = [_][]const u8{ "q4_0", "q4_1", "q5_0", "q5_1", "q8_0", "bf16", "f16" };
+/// (ggml/cmake/common.cmake:60 @b1b770d90) iterates them: its `FA_TYPES`.
+/// `f8_e4m3` joined at v1.0.0 (CUDA's OCP FP8 support).
+const cuda_fa_types = [_][]const u8{ "q4_0", "q4_1", "q5_0", "q5_1", "q8_0", "bf16", "f16", "f8_e4m3" };
 
 /// What `cudaFaCombinations` derives from `Cuda.fa_quants`.
 const CudaFa = struct {
@@ -578,8 +579,8 @@ const CudaFa = struct {
     combinations: []const []const u8,
 };
 
-/// Mirrors `ggml_cuda_fattn_vec_instances` (ggml/cmake/common.cmake:53
-/// @7fe450e19): the K-V type combinations whose FlashAttention vector
+/// Mirrors `ggml_cuda_fattn_vec_instances` (ggml/cmake/common.cmake:60
+/// @b1b770d90): the K-V type combinations whose FlashAttention vector
 /// kernel instances `GGML_CUDA_FA_QUANTS` selects. `"all"` is every pair,
 /// V outermost; otherwise `f16-f16` and each listed combination, separated
 /// by `;` or `,`, duplicates dropped. A malformed list fails the build, as

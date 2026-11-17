@@ -14,8 +14,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/glm5-next.cpp` at v0.9.0
-//! (`cd959bae9`), with its declaration in `llama.cpp/src/models/models.h`:
+//! Ported from `llama.cpp/src/models/glm5-next.cpp` at v1.0.0
+//! (`b1b770d90`), with its declaration in `llama.cpp/src/models/models.h`:
 //! `llama_model_glm5_next`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, `glm5_conv1d`, the `llm_graph_input_kpool` input,
 //! the view and affine helpers, and its `graph` with `build_inp_kpool`, the
@@ -53,7 +53,7 @@ fn oom() noreturn {
     impl.abort(src, 0, "out of memory");
 }
 
-/// Ports `llama_model_glm5_next`'s `load_arch_hparams` (models/glm5-next.cpp:7 @cd959bae9).
+/// Ports `llama_model_glm5_next`'s `load_arch_hparams` (models/glm5-next.cpp:7 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -113,7 +113,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_glm5_next`'s `load_arch_tensors` (models/glm5-next.cpp:61 @cd959bae9).
+/// Ports `llama_model_glm5_next`'s `load_arch_tensors` (models/glm5-next.cpp:61 @b1b770d90).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -246,14 +246,14 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// `conv`, a lambda of `load_arch_tensors` (models/glm5-next.cpp:61
-/// @cd959bae9): a conv1d weight, 4D or else 3D.
+/// @b1b770d90): a conv1d weight, 4D or else 3D.
 fn loadConv(self: *Model, tid: arch.Tensor, il: i32, d_conv: i64, d_inner: i64, flags: u32, exc: *Exception) Thrown!?*Tensor {
     const t = try self.createTensor(.{ .tensor = tid, .suffix = "weight", .bid = il }, &.{ d_conv, 1, d_inner, 1 }, loader.tensor_not_required, exc);
     return t orelse try self.createTensor(.{ .tensor = tid, .suffix = "weight", .bid = il }, &.{ d_conv, 1, d_inner }, flags, exc);
 }
 
 /// Ports `llama_model_glm5_next`'s `build_arch_graph` (models/glm5-next.cpp:186
-/// @cd959bae9): the NextN draft head for an MTP context, else the trunk.
+/// @b1b770d90): the NextN draft head for an MTP context, else the trunk.
 pub fn buildArchGraph(model: *const Model, b: *const Builder, params: *const graph.Params) void {
     var g: Graph = .{ .model = model, .b = b };
     if (params.gtype == .decoder_mtp) {
@@ -263,11 +263,13 @@ pub fn buildArchGraph(model: *const Model, b: *const Builder, params: *const gra
     g.build();
 }
 
-/// Ports `glm5_conv1d` (models/glm5-next.cpp:194 @cd959bae9): the causal
-/// conv1d over one of Q (`qkv` 0), K (1) or V (2), writing `K_rs` conv
-/// windows back, group `s` the window `s` tokens back.
-fn conv1d(gf: *c.ggml_cgraph, ctx: *c.ggml_context, conv_states_all: *Tensor, conv_state_all: *Tensor, qkv: i64, x: *Tensor, proj_w: ?*Tensor, conv_w: ?*Tensor, d_conv: i64, head_dim: i64, n_head: i64, n_seq_tokens: i64, n_seqs: i64, n_tokens: i64, kv_head: i64, mem_size: i64, K_rs: i64) *Tensor {
-    const d_inner = head_dim * n_head;
+/// Ports `llama_model_glm5_next::graph`'s `build_kda_conv1d`
+/// (models/glm5-next.cpp:194 @b1b770d90): the causal conv1d over one of Q, K
+/// or V; `qkv` picks which third of the conv state. The conv history of the
+/// ubatch's cells is stored through `build_conv_state_store`.
+fn buildKdaConv1d(b: *const graph.Builder, inp_rs: *graph.InpRs, conv_states_all: *Tensor, conv_state_all: *Tensor, qkv: i64, x: *Tensor, proj_w: ?*Tensor, conv_w: ?*Tensor, d_conv: i64, head_dim: i64, n_head_kda: i64, n_seq_tokens: i64, n_seqs: i64) *Tensor {
+    const ctx = b.ctx0;
+    const d_inner = head_dim * n_head_kda;
     const conv_state_size = (d_conv - 1) * d_inner;
     const n_embd_r_total = 3 * conv_state_size;
 
@@ -278,27 +280,18 @@ fn conv1d(gf: *c.ggml_cgraph, ctx: *c.ggml_context, conv_states_all: *Tensor, co
     const x_3d = c.ggml_reshape_3d(ctx, x_proj, d_inner, n_seq_tokens, n_seqs);
     const conv_x: *Tensor = c.ggml_concat(ctx, conv_state_x, c.ggml_transpose(ctx, x_3d), 0);
 
-    // Group s holds the conv window s tokens back.
-    // [TAG_RECURRENT_ROLLBACK_SPLITS]: the last K_rs tokens must share one
-    // ubatch.
-    const es_all: usize = c.ggml_element_size(conv_states_all);
-    var s: i64 = 0;
-    while (s < K_rs) : (s += 1) {
-        const s_idx: i64 = @max(0, n_seq_tokens - s);
-        const conv_x_s = c.ggml_view_3d(ctx, conv_x, d_conv - 1, d_inner, n_seqs, conv_x.nb[1], conv_x.nb[2], @as(usize, @intCast(s_idx)) * conv_x.nb[0]);
-        c.ggml_build_forward_expand(gf, c.ggml_cpy(ctx, conv_x_s, c.ggml_view_3d(ctx, conv_states_all, d_conv - 1, d_inner, n_seqs, @as(usize, @intCast(d_conv - 1)) * es_all, @as(usize, @intCast(n_embd_r_total)) * es_all, @as(usize, @intCast((s * mem_size + kv_head) * n_embd_r_total + qkv * conv_state_size)) * es_all)));
-    }
+    b.buildConvStateStore(inp_rs, conv_states_all, conv_x, d_conv - 1, c.ggml_row_size(conv_states_all.type, qkv * conv_state_size));
 
     const conv_weight = c.ggml_reshape_2d(ctx, conv_w, d_conv, d_inner);
     var Xcur = c.ggml_ssm_conv(ctx, conv_x, conv_weight);
-    Xcur = c.ggml_reshape_2d(ctx, Xcur, d_inner, n_tokens);
+    Xcur = c.ggml_reshape_2d(ctx, Xcur, d_inner, b.n_tokens);
     Xcur = c.ggml_silu(ctx, Xcur);
 
-    return c.ggml_reshape_4d(ctx, Xcur, head_dim, n_head, n_seq_tokens, n_seqs);
+    return c.ggml_reshape_4d(ctx, Xcur, head_dim, n_head_kda, n_seq_tokens, n_seqs);
 }
 
-/// Ports `llama_model_glm5_next`'s `llm_graph_input_kpool` (models/glm5-next.cpp:237
-/// @cd959bae9): the k-pool indexer's inputs, which the memory's k-pool
+/// Ports `llama_model_glm5_next`'s `llm_graph_input_kpool` (models/glm5-next.cpp:224
+/// @b1b770d90): the k-pool indexer's inputs, which the memory's k-pool
 /// layout fills.
 pub const InpKpool = struct {
     /// I64 `[n_tokens]`.
@@ -327,14 +320,14 @@ pub const InpKpool = struct {
     n_sel: u32 = 0,
     n_kv: u32 = 0,
 
-    /// Ports `llm_graph_input_kpool`'s `set_input` (models/glm5-next.cpp:242 @cd959bae9).
+    /// Ports `llm_graph_input_kpool`'s `set_input` (models/glm5-next.cpp:229 @b1b770d90).
     pub fn setInput(self: *InpKpool, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         self.mctx.getIdx().?.setInputKIdxs(self.k_idxs.?, ubatch);
         self.mctx.setInputKpool(self.pool_cells.?, self.pool_idxs.?, self.pool_mask.?, self.tail_idxs.?, self.sel_mask, self.new_pool_idxs.?, self.new_pool_rep.?, ubatch, null);
     }
 
-    /// Ports `llm_graph_input_kpool`'s `can_reuse` (models/glm5-next.cpp:247 @cd959bae9).
+    /// Ports `llm_graph_input_kpool`'s `can_reuse` (models/glm5-next.cpp:234 @b1b770d90).
     pub fn canReuse(self: *InpKpool, params: *const graph.Params) bool {
         self.mctx = HybridIdxContext.fromBase(params.mctx.?.cast(HybridContext));
 
@@ -356,38 +349,38 @@ pub const InpKpool = struct {
     }
 };
 
-/// Ports `dsv4_elem_offset` (models/glm5-next.cpp:344 @cd959bae9).
+/// Ports `dsv4_elem_offset` (models/glm5-next.cpp:331 @b1b770d90).
 fn elemOffset(t: *const Tensor, i: i64) usize {
     return c.ggml_row_size(t.type, i);
 }
 
-/// Ports `dsv4_view_1d` (models/glm5-next.cpp:348 @cd959bae9).
+/// Ports `dsv4_view_1d` (models/glm5-next.cpp:335 @b1b770d90).
 fn view1d(ctx: *c.ggml_context, t: *Tensor, ne0: i64, j0: i64) *Tensor {
     return c.ggml_view_1d(ctx, t, ne0, elemOffset(t, j0));
 }
 
-/// Ports `dsv4_view_2d` (models/glm5-next.cpp:352 @cd959bae9).
+/// Ports `dsv4_view_2d` (models/glm5-next.cpp:339 @b1b770d90).
 fn view2d(ctx: *c.ggml_context, t: *Tensor, ne0: i64, ne1: i64, j0: i64) *Tensor {
     return c.ggml_view_2d(ctx, t, ne0, ne1, t.nb[1], elemOffset(t, j0));
 }
 
-/// Ports `dsv4_hc_affine` (models/glm5-next.cpp:371 @cd959bae9).
+/// Ports `dsv4_hc_affine` (models/glm5-next.cpp:358 @b1b770d90).
 fn hcAffine(ctx: *c.ggml_context, x_: *Tensor, scale: *Tensor, base: *Tensor) *Tensor {
     var x: *Tensor = c.ggml_mul(ctx, x_, scale);
     x = c.ggml_add(ctx, x, base);
     return x;
 }
 
-/// Mirrors `llama_model_glm5_next`'s `graph` (src/models/models.h:3082 @cd959bae9): the
+/// Mirrors `llama_model_glm5_next`'s `graph` (src/models/models.h:2988 @b1b770d90): the
 /// builder and the model. Its `no_build` constructor
-/// (src/models/models.h:3087 @cd959bae9), which builds nothing so that `graph_mtp` can reuse the
+/// (src/models/models.h:2993 @b1b770d90), which builds nothing so that `graph_mtp` can reuse the
 /// helpers, is this struct before `build` or `buildMtp` runs.
 const Graph = struct {
     model: *const Model,
     b: *const Builder,
 
     /// Ports `llama_model_glm5_next::graph`'s `build_inp_kpool`
-    /// (models/glm5-next.cpp:285 @cd959bae9).
+    /// (models/glm5-next.cpp:272 @b1b770d90).
     fn buildInpKpool(self: *const Graph, mctx_hyb: *const HybridIdxContext) *InpKpool {
         const b = self.b;
         const ctx = b.ctx0;
@@ -395,7 +388,7 @@ const Graph = struct {
         const n_tokens = b.n_tokens;
 
         const mctx_idx = mctx_hyb.getIdx();
-        impl.assert(mctx_idx != null, src, 287, "mctx_idx != nullptr");
+        impl.assert(mctx_idx != null, src, 274, "mctx_idx != nullptr");
 
         const kpool: u32 = hp.indexer_kpool;
         const n_pool: u32 = mctx_hyb.getNKpool();
@@ -458,7 +451,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_glm5_next::graph`'s `build_hc_mean`
-    /// (models/glm5-next.cpp:361 @cd959bae9): the mean over the
+    /// (models/glm5-next.cpp:348 @b1b770d90): the mean over the
     /// hyper-connection streams, `[n_embd, hc, n_tokens]` to `[n_embd,
     /// n_tokens]`.
     fn buildHcMean(self: *const Graph, x: *Tensor) *Tensor {
@@ -474,13 +467,13 @@ const Graph = struct {
     }
 
     /// Ports the overload of `llama_model_glm5_next::graph`'s `build_hc_pre`
-    /// that takes the weights (models/glm5-next.cpp:381 @cd959bae9): the
+    /// that takes the weights (models/glm5-next.cpp:368 @b1b770d90): the
     /// streams' weighted sum.
     fn buildHcPreWeighted(self: *const Graph, x: *Tensor, weights: *Tensor, il: c_int) *Tensor {
         const b = self.b;
         const ctx = b.ctx0;
-        impl.assert(x.ne[0] == b.n_embd, src, 385, "x->ne[0] == n_embd");
-        impl.assert(x.ne[1] == b.hparams.dsv4_hc_mult, src, 386, "x->ne[1] == hparams.dsv4_hc_mult");
+        impl.assert(x.ne[0] == b.n_embd, src, 372, "x->ne[0] == n_embd");
+        impl.assert(x.ne[1] == b.hparams.dsv4_hc_mult, src, 373, "x->ne[1] == hparams.dsv4_hc_mult");
 
         const hc: i64 = b.hparams.dsv4_hc_mult;
         const nt = x.ne[2];
@@ -505,7 +498,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_glm5_next::graph`'s `build_hc_sinkhorn`
-    /// (models/glm5-next.cpp:408 @cd959bae9). `comb` is `[dst_hc, src_hc,
+    /// (models/glm5-next.cpp:395 @b1b770d90). `comb` is `[dst_hc, src_hc,
     /// n_tokens]`: a row softmax over dst, one column normalization, then
     /// repeated row and column normalization.
     fn buildHcSinkhorn(self: *const Graph, comb_: *Tensor, il: c_int) *Tensor {
@@ -546,7 +539,7 @@ const Graph = struct {
         return comb;
     }
 
-    /// Mirrors the graph's `hc_pre` (src/models/models.h:3099 @cd959bae9):
+    /// Mirrors the graph's `hc_pre` (src/models/models.h:3005 @b1b770d90):
     /// `cur` is the collapsed input,
     /// `post` and `comb` feed `build_hc_post`.
     const HcPre = struct {
@@ -556,7 +549,7 @@ const Graph = struct {
     };
 
     /// Ports `llama_model_glm5_next::graph`'s `build_hc_pre`
-    /// (models/glm5-next.cpp:446 @cd959bae9): a hyper-connection's mixes --
+    /// (models/glm5-next.cpp:433 @b1b770d90): a hyper-connection's mixes --
     /// the pre weights it collapses the streams with, here; the post weights
     /// and the stream combination for `build_hc_post`.
     fn buildHcPre(self: *const Graph, x: *Tensor, hc_fn: *Tensor, hc_scale: *Tensor, hc_base: *Tensor, il: c_int) HcPre {
@@ -568,8 +561,8 @@ const Graph = struct {
         const hc_mix_dim = (2 + hc) * hc;
         const nt = x.ne[2];
 
-        impl.assert(hc == 4, src, 457, "hc == 4");
-        impl.assert(hc_fn.ne[1] == hc_mix_dim, src, 458, "hc_fn->ne[1] == hc_mix_dim");
+        impl.assert(hc == 4, src, 444, "hc == 4");
+        impl.assert(hc_fn.ne[1] == hc_mix_dim, src, 445, "hc_fn->ne[1] == hc_mix_dim");
 
         const flat: *Tensor = c.ggml_reshape_2d(ctx, x, hc_dim, nt);
         const flat_norm: *Tensor = c.ggml_rms_norm(ctx, flat, b.norm_rms_eps);
@@ -613,13 +606,13 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_glm5_next::graph`'s `build_hc_post`
-    /// (models/glm5-next.cpp:502 @cd959bae9): the block's output spread over
+    /// (models/glm5-next.cpp:489 @b1b770d90): the block's output spread over
     /// the streams by `post`, plus the residual streams mixed by `comb`.
     fn buildHcPost(self: *const Graph, x: *Tensor, residual: *Tensor, post: *Tensor, comb: *Tensor, il: c_int) *Tensor {
         const b = self.b;
         const ctx = b.ctx0;
-        impl.assert(x.ne[0] == b.n_embd, src, 508, "x->ne[0] == n_embd");
-        impl.assert(residual.ne[1] == b.hparams.dsv4_hc_mult, src, 509, "residual->ne[1] == hparams.dsv4_hc_mult");
+        impl.assert(x.ne[0] == b.n_embd, src, 495, "x->ne[0] == n_embd");
+        impl.assert(residual.ne[1] == b.hparams.dsv4_hc_mult, src, 496, "residual->ne[1] == hparams.dsv4_hc_mult");
 
         if (b.cparams.fused_dsv4_hc_post) {
             const result: *Tensor = c.ggml_dsv4_hc_post(ctx, x, residual, post, comb);
@@ -653,7 +646,7 @@ const Graph = struct {
     }
 
     /// Ports the constructor of `llama_model_glm5_next`'s `graph`
-    /// (models/glm5-next.cpp:674 @cd959bae9).
+    /// (models/glm5-next.cpp:659 @b1b770d90).
     fn build(self: *Graph) void {
         const model = self.model;
         const b = self.b;
@@ -682,9 +675,9 @@ const Graph = struct {
         const n_seqs: i64 = b.ubatch.n_seqs;
         const n_seq_tokens: i64 = b.ubatch.n_seq_tokens;
 
-        impl.assert(n_seqs != 0, src, 699, "n_seqs != 0");
-        impl.assert(b.ubatch.equalSeqs(), src, 700, "ubatch.equal_seqs()");
-        impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, src, 701, "ubatch.n_tokens == n_seq_tokens * n_seqs");
+        impl.assert(n_seqs != 0, src, 684, "n_seqs != 0");
+        impl.assert(b.ubatch.equalSeqs(), src, 685, "ubatch.equal_seqs()");
+        impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, src, 686, "ubatch.n_tokens == n_seq_tokens * n_seqs");
 
         const hc: i64 = hp.dsv4_hc_mult;
         var inpL: *Tensor = c.ggml_reshape_3d(ctx, inp, n_embd, 1, n_tokens);
@@ -785,7 +778,7 @@ const Graph = struct {
     }
 
     /// Ports the constructor of `llama_model_glm5_next`'s `graph_mtp`
-    /// (models/glm5-next.cpp:544 @cd959bae9): the NextN draft head, one DSA
+    /// (models/glm5-next.cpp:531 @b1b770d90): the NextN draft head, one DSA
     /// block after the trunk, fed by the trunk's post-norm hidden state.
     fn buildMtp(self: *Graph) void {
         const model = self.model;
@@ -795,17 +788,17 @@ const Graph = struct {
         const n_embd: i64 = b.n_embd;
         const n_tokens = b.n_tokens;
 
-        impl.assert(hp.n_layer_nextn > 0, src, 547, "hparams.n_layer_nextn > 0 && \"GLM5-Next MTP requires n_layer_nextn > 0\"");
-        impl.assert(hp.n_layer_nextn == 1, src, 548, "hparams.n_layer_nextn == 1 && \"GLM5-Next MTP currently supports a single NextN block\"");
+        impl.assert(hp.n_layer_nextn > 0, src, 534, "hparams.n_layer_nextn > 0 && \"GLM5-Next MTP requires n_layer_nextn > 0\"");
+        impl.assert(hp.n_layer_nextn == 1, src, 535, "hparams.n_layer_nextn == 1 && \"GLM5-Next MTP currently supports a single NextN block\"");
 
         const il: c_int = @as(c_int, @intCast(hp.nLayer())) + b.cparams.nextn_layer_offset;
-        impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), src, 553, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
+        impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), src, 540, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
 
         const layer = &model.layers[@intCast(il)];
 
-        impl.assert(layer.nextn.eh_proj != null and layer.nextn.enorm != null and layer.nextn.hnorm != null, src, 558, "layer.nextn.eh_proj && layer.nextn.enorm && layer.nextn.hnorm && \"GLM5-Next MTP block is missing - load the model with MTP enabled\"");
+        impl.assert(layer.nextn.eh_proj != null and layer.nextn.enorm != null and layer.nextn.hnorm != null, src, 545, "layer.nextn.eh_proj && layer.nextn.enorm && layer.nextn.hnorm && \"GLM5-Next MTP block is missing - load the model with MTP enabled\"");
 
-        impl.assert(hp.nEmbdOut() == @as(u32, @truncate(@as(u64, @bitCast(n_embd)))), src, 560, "hparams.n_embd_out() == (uint32_t) n_embd && \"GLM5-Next MTP hidden width mismatch\"");
+        impl.assert(hp.nEmbdOut() == @as(u32, @truncate(@as(u64, @bitCast(n_embd)))), src, 547, "hparams.n_embd_out() == (uint32_t) n_embd && \"GLM5-Next MTP hidden width mismatch\"");
 
         const inp_hyb = b.buildInpMemHybridK();
         const mctx_hyb = HybridIdxContext.fromBase(inp_hyb.mctx);
@@ -826,9 +819,7 @@ const Graph = struct {
         inp.embd = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, n_embd_inp, n_tokens);
         c.ggml_set_input(inp.embd);
 
-        inp.h = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, n_embd, n_tokens);
-        c.ggml_set_input(inp.h);
-        _ = c.ggml_set_name(inp.h, "mtp_h_input");
+        inp.h = b.buildInpEmbdState(inp, n_embd);
 
         var tok_embd: *Tensor = undefined;
         if (b.ubatch.token != null) {
@@ -899,7 +890,7 @@ const Graph = struct {
         b.cb(cur, "mtp_post_ffn", il);
 
         const head_norm = layer.nextn.shared_head_norm orelse model.output_norm;
-        impl.assert(head_norm != null, src, 655, "head_norm && \"GLM5-Next MTP: missing both nextn.shared_head_norm and output_norm\"");
+        impl.assert(head_norm != null, src, 640, "head_norm && \"GLM5-Next MTP: missing both nextn.shared_head_norm and output_norm\"");
         cur = b.buildNorm(cur, head_norm, null, .rms, -1);
         b.cb(cur, "h_nextn", -1);
         b.res.t_h_nextn = cur;
@@ -911,7 +902,7 @@ const Graph = struct {
 
         const head_w = if (layer.nextn.shared_head_head != null) layer.nextn.shared_head_head else model.output;
         const head_s = if (layer.nextn.shared_head_head != null) layer.nextn.shared_head_head_s else model.output_s;
-        impl.assert(head_w != null, src, 667, "head_w && \"GLM5-Next MTP: missing both nextn.shared_head_head and output\"");
+        impl.assert(head_w != null, src, 652, "head_w && \"GLM5-Next MTP: missing both nextn.shared_head_head and output\"");
         cur = b.buildLoraMm(head_w.?, cur, head_s);
         b.cb(cur, "result_output", -1);
 
@@ -919,7 +910,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_glm5_next::graph`'s `build_kda_layer`
-    /// (models/glm5-next.cpp:809 @cd959bae9): KDA with the g_a/g_b output
+    /// (models/glm5-next.cpp:794 @b1b770d90): KDA with the g_a/g_b output
     /// gate.
     fn buildKdaLayer(self: *const Graph, cur_: *Tensor, layer: *const Layer, inp_rs: *graph.InpRs, d_conv: i64, head_dim: i64, n_head_kda: i64, d_inner: i64, n_seq_tokens: i64, n_seqs: i64, il: c_int) *Tensor {
         const b = self.b;
@@ -929,17 +920,13 @@ const Graph = struct {
         var cur = cur_;
 
         const mctx_cur = inp_rs.mctx;
-        const kv_head: i64 = mctx_cur.getHead();
 
         const conv_states_all = mctx_cur.getRL(il);
         const conv_state_all = b.buildRs(inp_rs, conv_states_all, @intCast(hp.nEmbdR()), @intCast(n_seqs), null);
 
-        const mem_size: i64 = mctx_cur.getSize();
-        const K_rs: i64 = @as(i64, b.cparams.n_rs_seq) + 1;
-
-        var Qcur = conv1d(b.gf, ctx, conv_states_all, conv_state_all, 0, cur, layer.wq, layer.ssm_q_conv, d_conv, head_dim, n_head_kda, n_seq_tokens, n_seqs, n_tokens, kv_head, mem_size, K_rs);
-        var Kcur = conv1d(b.gf, ctx, conv_states_all, conv_state_all, 1, cur, layer.wk, layer.ssm_k_conv, d_conv, head_dim, n_head_kda, n_seq_tokens, n_seqs, n_tokens, kv_head, mem_size, K_rs);
-        const Vcur = conv1d(b.gf, ctx, conv_states_all, conv_state_all, 2, cur, layer.wv, layer.ssm_v_conv, d_conv, head_dim, n_head_kda, n_seq_tokens, n_seqs, n_tokens, kv_head, mem_size, K_rs);
+        var Qcur = buildKdaConv1d(b, inp_rs, conv_states_all, conv_state_all, 0, cur, layer.wq, layer.ssm_q_conv, d_conv, head_dim, n_head_kda, n_seq_tokens, n_seqs);
+        var Kcur = buildKdaConv1d(b, inp_rs, conv_states_all, conv_state_all, 1, cur, layer.wk, layer.ssm_k_conv, d_conv, head_dim, n_head_kda, n_seq_tokens, n_seqs);
+        const Vcur = buildKdaConv1d(b, inp_rs, conv_states_all, conv_state_all, 2, cur, layer.wv, layer.ssm_v_conv, d_conv, head_dim, n_head_kda, n_seq_tokens, n_seqs);
         b.cb(Qcur, "kda_q_conv", il);
         b.cb(Kcur, "kda_k_conv", il);
         b.cb(Vcur, "kda_v_conv", il);
@@ -1002,7 +989,7 @@ const Graph = struct {
     }
 
     /// Ports `llama_model_glm5_next::graph`'s `build_kpool_select`
-    /// (models/glm5-next.cpp:889 @cd959bae9): score the pools of kpool
+    /// (models/glm5-next.cpp:870 @b1b770d90): score the pools of kpool
     /// consecutive tokens, and expand the selected pools and the
     /// incomplete tail into an additive `[n_kv, n_tokens]` mask.
     fn buildKpoolSelect(self: *const Graph, cur: *Tensor, qr: *Tensor, layer: *const Layer, mctx_hyb: *const HybridIdxContext, inp_kpool: *InpKpool, il: c_int) *Tensor {
@@ -1103,7 +1090,7 @@ const Graph = struct {
             // the kq_mask is not needed.
             if (b.cparams.fused_top_k_mask) {
                 const tail: ?*Tensor = if (hp.indexer_kpool_select_tail) inp_kpool.tail_idxs else null;
-                impl.assert(kpool * n_top_pool + (if (tail) |t| t.ne[0] else 0) == @as(i64, inp_kpool.n_sel), src, 981, "kpool*n_top_pool + (tail ? tail->ne[0] : 0) == (int64_t) inp_kpool->n_sel");
+                impl.assert(kpool * n_top_pool + (if (tail) |t| t.ne[0] else 0) == @as(i64, inp_kpool.n_sel), src, 962, "kpool*n_top_pool + (tail ? tail->ne[0] : 0) == (int64_t) inp_kpool->n_sel");
 
                 const keep: *Tensor = c.ggml_fill(ctx, c.ggml_new_tensor_1d(ctx, type_mask, n_kv), 0.0);
                 const sel: *Tensor = c.ggml_top_k_mask(ctx, keep, top_k, score, inp_kpool.pool_idxs, tail); // [n_kv, n_tokens]
@@ -1130,7 +1117,7 @@ const Graph = struct {
             }
         }
         const n_sel = sel_idx.ne[0];
-        impl.assert(n_sel == @as(i64, inp_kpool.n_sel), src, 1011, "n_sel == (int64_t) inp_kpool->n_sel");
+        impl.assert(n_sel == @as(i64, inp_kpool.n_sel), src, 992, "n_sel == (int64_t) inp_kpool->n_sel");
 
         c.ggml_build_forward_expand(b.gf, sel_idx);
 
@@ -1149,7 +1136,7 @@ const Graph = struct {
         // token's scatter indices are unique: idx = dump + live*(idx - dump),
         // live = exp(mask).
         const sel_mask = inp_kpool.sel_mask.?;
-        impl.assert(sel_mask.ne[0] == n_sel and sel_mask.ne[3] == n_tokens, src, 1027, "inp_kpool->sel_mask->ne[0] == n_sel && inp_kpool->sel_mask->ne[3] == n_tokens");
+        impl.assert(sel_mask.ne[0] == n_sel and sel_mask.ne[3] == n_tokens, src, 1008, "inp_kpool->sel_mask->ne[0] == n_sel && inp_kpool->sel_mask->ne[3] == n_tokens");
         const live = c.ggml_reshape_2d(ctx, c.ggml_exp(ctx, sel_mask), n_sel, n_tokens);
         const dump = c.ggml_arange(ctx, @floatFromInt(n_kv), @floatFromInt(n_kv + n_sel), 1.0);
         var idx_f: *Tensor = c.ggml_cast(ctx, sel_idx, c.GGML_TYPE_F32);
@@ -1165,7 +1152,7 @@ const Graph = struct {
         return sel;
     }
 
-    /// Mirrors the graph's `dsa_out` (src/models/models.h:3136 @cd959bae9): the
+    /// Mirrors the graph's `dsa_out` (src/models/models.h:3045 @b1b770d90): the
     /// attention output and the
     /// selection to carry to the next shared layer.
     const DsaOut = struct {
@@ -1174,7 +1161,7 @@ const Graph = struct {
     };
 
     /// Ports `llama_model_glm5_next::graph`'s `build_dsa_layer`
-    /// (models/glm5-next.cpp:1046 @cd959bae9): nope-only MLA, attending
+    /// (models/glm5-next.cpp:1027 @b1b770d90): nope-only MLA, attending
     /// sparsely over the indexer's selection.
     fn buildDsaLayer(self: *const Graph, cur: *Tensor, layer: *const Layer, mctx_hyb: *const HybridIdxContext, inp_attn: *graph.InpAttnK, inp_kpool: *InpKpool, prev_sel: ?*Tensor, il: c_int) DsaOut {
         const b = self.b;
@@ -1190,7 +1177,7 @@ const Graph = struct {
         const n_embd_head_qk_nope = n_embd_head_k_mla - @as(i64, hp.nRot(0));
         const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head_k_mla));
 
-        impl.assert(hp.nRot(0) == 0, src, 1058, "hparams.n_rot() == 0 && \"GLM5-Next MLA is nope-only\"");
+        impl.assert(hp.nRot(0) == 0, src, 1039, "hparams.n_rot() == 0 && \"GLM5-Next MLA is nope-only\"");
 
         var qr: *Tensor = c.ggml_mul_mat(ctx, layer.wq_a, cur);
         qr = b.buildNorm(qr, layer.attn_q_a_norm, null, .rms, il);
@@ -1220,11 +1207,11 @@ const Graph = struct {
             // The selection replaces the kq_mask: split it into the streams
             // of the K view.
             const n_stream = k.ne[3];
-            impl.assert(sel_full.ne[0] == k.ne[2] and @rem(sel_full.ne[1], n_stream) == 0, src, 1087, "sel->ne[0] == k->ne[2] && sel->ne[1] % n_stream == 0");
+            impl.assert(sel_full.ne[0] == k.ne[2] and @rem(sel_full.ne[1], n_stream) == 0, src, 1068, "sel->ne[0] == k->ne[2] && sel->ne[1] % n_stream == 0");
             sel_full = c.ggml_reshape_4d(ctx, sel_full, sel_full.ne[0], @divTrunc(sel_full.ne[1], n_stream), 1, n_stream);
             sel_opt = sel_full;
         } else {
-            impl.assert(sel_opt != null, src, 1090, "sel != nullptr && \"shared indexer layer must follow a full indexer layer\"");
+            impl.assert(sel_opt != null, src, 1071, "sel != nullptr && \"shared indexer layer must follow a full indexer layer\"");
         }
         const sel = sel_opt.?;
 

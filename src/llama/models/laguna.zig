@@ -7,7 +7,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/laguna.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/laguna.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_laguna`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`.
 
@@ -22,9 +22,11 @@ const c = impl.c;
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
+const RopeParams = model_mod.RopeParams;
+const Cparams = @import("../cparams.zig").Cparams;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_laguna`'s `load_arch_hparams` (models/laguna.cpp:9 @cd959bae9).
+/// Ports `llama_model_laguna`'s `load_arch_hparams` (models/laguna.cpp:9 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -86,7 +88,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_laguna`'s `load_arch_tensors` (models/laguna.cpp:68 @cd959bae9).
+/// Ports `llama_model_laguna`'s `load_arch_tensors` (models/laguna.cpp:68 @b1b770d90).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -170,7 +172,30 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     }
 }
 
-/// Ports `llama_model_laguna`'s `build_arch_graph` (models/laguna.cpp:151 @cd959bae9).
+/// Ports `llama_model_laguna`'s `get_rope_params` (models/laguna.cpp:151
+/// @b1b770d90): plain RoPE on the SWA layers.
+///
+/// Parameters:
+/// - `model`: the model.
+/// - `cparams`: the context's parameters.
+/// - `il`: the layer.
+///
+/// Return: the layer's RoPE.
+pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+    var res = model.getRopeParamsBase(cparams, il);
+
+    if (model.hparams.isSwa(il)) {
+        res.n_ctx_orig = @bitCast(model.hparams.n_ctx_train);
+        res.ext_factor = 0.0;
+        res.attn_factor = 1.0;
+        res.beta_fast = 0.0;
+        res.beta_slow = 0.0;
+    }
+
+    return res;
+}
+
+/// Ports `llama_model_laguna`'s `build_arch_graph` (models/laguna.cpp:166 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     // XS.2 is hybrid SWA and takes the interleaved-SWA KV input; M.1 is
     // all full attention and takes the plain one. The C++ picks the input,
@@ -180,12 +205,12 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 }
 
 /// Ports the constructor of `llama_model_laguna`'s `graph`
-/// (models/laguna.cpp:155 @cd959bae9).
+/// (models/laguna.cpp:170 @b1b770d90).
 fn buildGraph(comptime has_swa: bool, model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/laguna.cpp", 157, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/laguna.cpp", 172, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
     // No MuP embedding scale: laguna omits it, where afmoe scales by
@@ -200,27 +225,11 @@ fn buildGraph(comptime has_swa: bool, model: *const Model, b: *const graph.Build
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
-        const is_swa_il = hp.isSwa(@intCast(il));
         const n_head_il: i64 = hp.nHead(@intCast(il));
         const n_head_kv_il: i64 = hp.nHeadKv(@intCast(il));
 
         // RoPE per layer type. The SWA layers run plain RoPE, without YaRN:
-        // their YaRN ext and beta parameters are zero.
-        const n_rot_l: c_int = if (is_swa_il) @intCast(hp.n_rot_swa) else @intCast(b.n_rot);
-        const freq_base_l = if (is_swa_il) hp.rope_freq_base_train_swa else b.freq_base;
-        const freq_scale_l = if (is_swa_il) hp.rope_freq_scale_train_swa else b.freq_scale;
-        const ext_factor_l: f32 = if (is_swa_il) 0.0 else b.ext_factor;
-        // The framework handles YaRN's magnitude scaling (mscale):
-        // llama_context divides cparams.yarn_attn_factor by
-        // 1 + 0.1*ln(factor) beforehand, cancelling ggml rope_yarn's own
-        // mscale *= 1 + 0.1*ln(1/freq_scale). attn_factor passes straight
-        // through, as in every other architecture; the SWA layers run plain
-        // RoPE (ext_factor 0, no mscale) and force 1.0.
-        const attn_factor_l: f32 = if (is_swa_il) 1.0 else b.attn_factor;
-        const beta_fast_l: f32 = if (is_swa_il) 0.0 else b.beta_fast;
-        const beta_slow_l: f32 = if (is_swa_il) 0.0 else b.beta_slow;
-        const n_ctx_orig_l: c_int = if (is_swa_il) @intCast(hp.n_ctx_train) else b.n_ctx_orig;
-
+        // their YaRN ext and beta parameters are zero (`getRopeParams`).
         var inpSA = inpL;
 
         // The pre-norm.
@@ -248,8 +257,8 @@ fn buildGraph(comptime has_swa: bool, model: *const Model, b: *const graph.Build
             b.cb(Qcur, "Qcur_normed", il);
             b.cb(Kcur, "Kcur_normed", il);
 
-            Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, n_rot_l, b.rope_type, n_ctx_orig_l, freq_base_l, freq_scale_l, ext_factor_l, attn_factor_l, beta_fast_l, beta_slow_l);
-            Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, n_rot_l, b.rope_type, n_ctx_orig_l, freq_base_l, freq_scale_l, ext_factor_l, attn_factor_l, beta_fast_l, beta_slow_l);
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
             b.cb(Qcur, "Qcur_rope", il);
             b.cb(Kcur, "Kcur_rope", il);
 

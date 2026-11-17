@@ -4,8 +4,8 @@
 #
 # No mmproj exists on this machine and upstream ships no generator, so
 # `harness/mmproj_fixtures.cpp` writes each from the keys and tensor shapes
-# `llama.cpp/tools/mtmd/clip.cpp` reads for that type (`load_hparams`,
-# `load_tensors`, `clip_n_mmproj_embd`) and its graph under `models/`. The
+# `llama.cpp/tools/mtmd/mtmd-model.cpp` reads for that type (`load_hparams`,
+# `load_tensors`, `mtmd_model::n_mmproj_embd`) and its graph under `models/`. The
 # text models are `scripts/gen-arch-fixtures`' models with an SPM vocabulary
 # written in, so prompts tokenize and every token mtmd looks up resolves.
 #

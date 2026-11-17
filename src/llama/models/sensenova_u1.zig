@@ -5,11 +5,11 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/sensenova-u1.cpp` at v0.9.0
-//! (`cd959bae9`): `llm_graph_input_pos_sensenova_u1`,
+//! Ported from `llama.cpp/src/models/sensenova-u1.cpp` at v1.0.0
+//! (`b1b770d90`): `llm_graph_input_pos_sensenova_u1`,
 //! `llama_model_sensenova_u1`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`. `rope_freq_base_spatial`, a member
-//! of the C++'s class (src/models/models.h:627 @cd959bae9), is a field of
+//! of the C++'s class (src/models/models.h:559 @b1b770d90), is a field of
 //! `Model`.
 
 const std = @import("std");
@@ -28,13 +28,13 @@ const Ubatch = batch.Ubatch;
 const allocator = impl.allocator;
 
 /// Ports `llm_graph_input_pos_sensenova_u1` (src/models/sensenova-u1.cpp:4
-/// @cd959bae9). The C++ derives from `llm_graph_input_pos`; here the base
+/// @b1b770d90). The C++ derives from `llm_graph_input_pos`; here the base
 /// is a member.
 const InpPosSensenovaU1 = struct {
     base: graph.InpPos = .{ .n_pos_per_embd = 4 },
 
     /// Ports `llm_graph_input_pos_sensenova_u1`'s `set_input`
-    /// (src/models/sensenova-u1.cpp:8 @cd959bae9).
+    /// (src/models/sensenova-u1.cpp:8 @b1b770d90).
     pub fn setInput(self: *InpPosSensenovaU1, ubatch_: ?*const Ubatch) void {
         const ubatch = ubatch_.?;
         const pos = self.base.pos;
@@ -65,7 +65,7 @@ const InpPosSensenovaU1 = struct {
     }
 };
 
-/// Ports `llama_model_sensenova_u1`'s `load_arch_hparams` (src/models/sensenova-u1.cpp:28 @cd959bae9).
+/// Ports `llama_model_sensenova_u1`'s `load_arch_hparams` (src/models/sensenova-u1.cpp:28 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -82,7 +82,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_sensenova_u1`'s `load_arch_tensors` (src/models/sensenova-u1.cpp:41 @cd959bae9).
+/// Ports `llama_model_sensenova_u1`'s `load_arch_tensors` (src/models/sensenova-u1.cpp:41 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const nr = loader.tensor_not_required;
@@ -116,7 +116,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_sensenova_u1`'s `build_arch_graph` (src/models/sensenova-u1.cpp:72 @cd959bae9).
+/// Ports `llama_model_sensenova_u1`'s `build_arch_graph` (src/models/sensenova-u1.cpp:72 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
@@ -150,17 +150,17 @@ fn normalizeAndRotate(model: *const Model, b: *const graph.Builder, pos: *const 
 }
 
 /// Ports the constructor of `llama_model_sensenova_u1`'s `graph`
-/// (src/models/sensenova-u1.cpp:76 @cd959bae9).
+/// (src/models/sensenova-u1.cpp:76 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/sensenova-u1.cpp", 79, "n_embd_head == hparams.n_embd_head_k()");
+    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/sensenova-u1.cpp", 81, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
 
-    const inp = allocator.create(InpPosSensenovaU1) catch impl.abort("models/sensenova-u1.cpp", 93, "out of memory");
+    const inp = allocator.create(InpPosSensenovaU1) catch impl.abort("models/sensenova-u1.cpp", 95, "out of memory");
     inp.* = .{};
     const inp_pos: *Tensor = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens * hp.nPosPerEmbd());
     inp.base.pos = inp_pos;

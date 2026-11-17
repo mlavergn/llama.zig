@@ -11,8 +11,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/deepseek2.cpp` at v0.9.0
-//! (`cd959bae9`): `llama_model_deepseek2`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/deepseek2.cpp` at v1.0.0
+//! (`b1b770d90`): `llama_model_deepseek2`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph` and
 //! `graph_mtp`. `graph` also carries DeepSeek-OCR's attention, which
 //! `llama_model_deepseek2ocr` (`deepseek2ocr.zig`) and
@@ -31,7 +31,7 @@ const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
-/// Ports `llama_model_deepseek2`'s `load_arch_hparams` (models/deepseek2.cpp:3 @cd959bae9).
+/// Ports `llama_model_deepseek2`'s `load_arch_hparams` (models/deepseek2.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -94,7 +94,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_deepseek2`'s `load_arch_tensors` (models/deepseek2.cpp:55 @cd959bae9).
+/// Ports `llama_model_deepseek2`'s `load_arch_tensors` (models/deepseek2.cpp:55 @b1b770d90).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -205,7 +205,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 // The graph
 
 /// Ports `llama_model_deepseek2`'s `build_arch_graph` (models/deepseek2.cpp:157
-/// @cd959bae9): the MTP draft head for that graph type, the main model
+/// @b1b770d90): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -222,7 +222,7 @@ fn mlaKqScale(b: *const graph.Builder, n_embd_head_k: i64) f32 {
 }
 
 /// Ports the constructor of `llama_model_deepseek2`'s `graph_mtp`
-/// (models/deepseek2.cpp:164 @cd959bae9).
+/// (models/deepseek2.cpp:164 @b1b770d90).
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -286,9 +286,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     }
     b.cb(tok_embd, "mtp_tok_embd", il);
 
-    inp.h = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, hp.n_embd, b.n_tokens);
-    c.ggml_set_input(inp.h);
-    _ = c.ggml_set_name(inp.h, "mtp_h_input");
+    inp.h = b.buildInpEmbdState(inp, hp.n_embd);
 
     const h_embd = inp.h.?;
 
@@ -343,14 +341,14 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     kv_cmpr = b.buildNorm(kv_cmpr, layer.attn_kv_a_norm, null, .rms, il);
     b.cb(kv_cmpr, "mtp_kv_cmpr_norm", il);
 
-    impl.assert(b.ext_factor >= 0.0, "models/deepseek2.cpp", 300, "ext_factor >= 0.0f");
+    impl.assert(b.ext_factor >= 0.0, "models/deepseek2.cpp", 298, "ext_factor >= 0.0f");
 
     const kq_scale = mlaKqScale(b, n_embd_head_k_mla);
 
-    q_pe = c.ggml_rope_ext(ctx, q_pe, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+    q_pe = b.buildRope(q_pe, inp_pos, il);
     b.cb(q_pe, "mtp_q_pe_rope", il);
 
-    k_pe = c.ggml_rope_ext(ctx, k_pe, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+    k_pe = b.buildRope(k_pe, inp_pos, il);
     b.cb(k_pe, "mtp_k_pe_rope", il);
 
     q_nope = c.ggml_permute(ctx, q_nope, 0, 2, 1, 3);
@@ -410,7 +408,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.cb(cur, "mtp_post_ffn", il);
 
     const head_norm_w = layer.nextn.shared_head_norm orelse model.output_norm;
-    impl.assert(head_norm_w != null, "models/deepseek2.cpp", 384, "head_norm_w && \"GLM4 MTP: missing both nextn.shared_head_norm and output_norm\"");
+    impl.assert(head_norm_w != null, "models/deepseek2.cpp", 378, "head_norm_w && \"GLM4 MTP: missing both nextn.shared_head_norm and output_norm\"");
 
     cur = b.buildNorm(cur, head_norm_w, null, .rms, -1);
     b.cb(cur, "h_nextn", -1);
@@ -422,7 +420,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const head_w = layer.nextn.shared_head_head orelse model.output;
     const head_s = if (layer.nextn.shared_head_head != null) layer.nextn.shared_head_head_s else model.output_s;
 
-    impl.assert(head_w != null, "models/deepseek2.cpp", 403, "head_w && \"GLM4 MTP: missing LM head (nextn.shared_head_head or model.output)\"");
+    impl.assert(head_w != null, "models/deepseek2.cpp", 397, "head_w && \"GLM4 MTP: missing LM head (nextn.shared_head_head or model.output)\"");
 
     cur = b.buildLoraMm(head_w.?, cur, head_s);
     b.cb(cur, "result_output", -1);
@@ -431,7 +429,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_deepseek2`'s `graph`
-/// (models/deepseek2.cpp:411 @cd959bae9).
+/// (models/deepseek2.cpp:405 @b1b770d90).
 pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -456,7 +454,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     // [TAG_DEEPSEEK2_YARN_LOG_MUL_FIX]): first the adjustment from
     // `llama_hparams`'s `yarn_attn_factor_adjust` is cancelled to recover
     // the original `attn_factor`, which then pre-scales `kq_scale`.
-    impl.assert(b.ext_factor >= 0.0, "models/deepseek2.cpp", 432, "ext_factor >= 0.0f");
+    impl.assert(b.ext_factor >= 0.0, "models/deepseek2.cpp", 426, "ext_factor >= 0.0f");
     const kq_scale = mlaKqScale(b, n_embd_head_k);
 
     // `{n_embd, n_tokens}`.
@@ -488,8 +486,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         // Self-attention.
         if (is_ocr) {
             const n_embed_head: c_int = @intCast(@divTrunc(hp.n_embd, hp.nHead(0)));
-            const ocr_rope_type: c_int = c.GGML_ROPE_TYPE_NEOX;
-            impl.assert(n_embed_head == n_embd_head_k and n_embed_head == n_embd_head_v, "models/deepseek2.cpp", 470, "n_embed_head == n_embd_head_k && n_embed_head == n_embd_head_v");
+            impl.assert(n_embed_head == n_embd_head_k and n_embed_head == n_embd_head_v, "models/deepseek2.cpp", 463, "n_embed_head == n_embd_head_k && n_embed_head == n_embd_head_v");
 
             const qkv = b.buildQkv(layer, cur, n_embed_head, b.n_head, b.n_head, il);
             var Qcur = qkv.q;
@@ -499,9 +496,9 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(Kcur, "k", il);
             b.cb(Vcur, "v", il);
 
-            impl.assert(@abs(@as(f64, b.freq_base) - 10000.0) < 1e-4, "models/deepseek2.cpp", 478, "fabs(freq_base - 10000.0) < 1e-4");
-            Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, null, n_embed_head, ocr_rope_type, 0, b.freq_base, 1, 0, 1, 0, 0);
-            Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, null, n_embed_head, ocr_rope_type, 0, b.freq_base, 1, 0, 1, 0, 0);
+            impl.assert(@abs(@as(f64, b.freq_base) - 10000.0) < 1e-4, "models/deepseek2.cpp", 471, "fabs(freq_base - 10000.0) < 1e-4");
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
             b.cb(Qcur, "q_pe", il);
             b.cb(Kcur, "k_pe", il);
 
@@ -540,7 +537,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             var k_pe: *Tensor = c.ggml_view_3d(ctx, kv_cmpr_pe, n_embd_head_qk_rope, 1, b.n_tokens, c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank + n_embd_head_qk_rope), c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank + n_embd_head_qk_rope), c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank));
             b.cb(k_pe, "k_pe", il);
 
-            k_pe = c.ggml_rope_ext(ctx, k_pe, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            k_pe = b.buildRope(k_pe, inp_pos, il);
             b.cb(k_pe, "k_pe", il);
 
             kv_cmpr = b.buildNorm(kv_cmpr, layer.attn_kv_a_norm, null, .rms, il);
@@ -555,7 +552,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 var q_pe: *Tensor = c.ggml_view_3d(ctx, q, n_embd_head_qk_rope, b.n_head, b.n_tokens, q.nb[1], q.nb[2], c.ggml_row_size(q.type, n_embd_head_qk_nope));
                 b.cb(q_pe, "q_pe", il);
 
-                q_pe = c.ggml_rope_ext(ctx, q_pe, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+                q_pe = b.buildRope(q_pe, inp_pos, il);
                 b.cb(q_pe, "q_pe", il);
 
                 // `{n_embd_head_qk_nope, n_tokens, n_head}`.
@@ -613,7 +610,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 b.cb(Vcur, "Vcur_cont", il);
 
                 // RoPE is applied to the trailing dimensions only.
-                var Qcur: *Tensor = c.ggml_rope_ext(ctx, q, inp_pos, null, @intCast(b.n_rot), b.rope_type, b.n_ctx_orig, b.freq_base, b.freq_scale, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+                var Qcur: *Tensor = b.buildRope(q, inp_pos, il);
                 Qcur = c.ggml_rope_set_offset(Qcur, @intCast(n_embd_head_qk_nope));
                 b.cb(Qcur, "Qcur", il);
 

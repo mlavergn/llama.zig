@@ -28,6 +28,15 @@
 !fail -m $VOCAB/ggml-vocab-llama-spm.gguf --repeat-penalty 0 -p x
 !fail -m $VOCAB/ggml-vocab-llama-spm.gguf --repeat-last-n -3 -p x
 !fail -m $VOCAB/ggml-vocab-llama-spm.gguf -ctk q9 -p x
+# v1.0.0: --defrag-thold is gone; --moe-cache-cpu-share takes 0 to 1;
+# --ple/--shard take extra shards; f8_e4m3 is a KV cache type
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf --defrag-thold 0.1 -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf --moe-cache-cpu-share 1.5 -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf --moe-cache-cpu-share -0.1 -p x
+!fail -m $VOCAB/ggml-vocab-llama-spm.gguf --moe-cache-cpu-share abc -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf --moe-cache-cpu-share 0.5 -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf --ple a.gguf,b.gguf --shard c.gguf -p x
+-m $VOCAB/ggml-vocab-llama-spm.gguf -ctk f8_e4m3 -ctv f8_e4m3 -p x
 !fail -m $VOCAB/ggml-vocab-llama-spm.gguf --rope-scaling sideways -p x
 !fail -m $VOCAB/ggml-vocab-llama-spm.gguf -lm wrong -p x
 !fail -m $VOCAB/ggml-vocab-llama-spm.gguf -lzm wrong -p x

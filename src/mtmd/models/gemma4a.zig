@@ -4,8 +4,15 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/gemma4a.cpp` at v0.9.0 (`cd959bae9`).
+//! Ports `llama.cpp/tools/mtmd/models/gemma4a.cpp` at v1.0.0 (`b1b770d90`).
 //! Each declaration names what it ports and the line it began at.
+//!
+//! Since v1.0.0 the encoder streams (20c2e9665): the subsampling convs'
+//! left column, each attention layer's last `max_past` K/V rows and each
+//! light conv's taps come from named state inputs and go out as state
+//! outputs; a zero state is a cold start. `state_in` is a `std::map` read
+//! only through `at()`, so a hash map stands in; `state_out` is a vector,
+//! iterated in insertion order, and stays a list.
 //!
 //! Upstream overrides the virtual `build_mm`; here `build` installs
 //! `buildMm` as the graph's `mm_hook`, so `graph.Graph.buildFfn` and the
@@ -15,7 +22,10 @@ const std = @import("std");
 const impl = @import("../impl.zig");
 const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
+const model_mod = @import("../model.zig");
+const module = @import("module.zig");
 const c = impl.c;
+const gpa = impl.gpa;
 const T = graph.T;
 const ne = graph.ne;
 const nb = graph.nb;
@@ -24,14 +34,72 @@ extern fn sqrtf(x: f32) f32;
 extern fn logf(x: f32) f32;
 extern fn expf(x: f32) f32;
 
-/// The `extract_blocks` lambda (gemma4a.cpp:122 @cd959bae9) of `build`:
-/// K/V block context through an overlapping view. Left pad by P and right
-/// pad to S*B elements, then view with stride C in the block dimension.
-fn extractBlocks(g: *const graph.Graph, t_in: T, S: i64, B: i64, P: i64, C: i64, n_pos: i64) T {
+/// `chunk_size` (mtmd/models/models.h:278 @b1b770d90), a static member of
+/// `mtmd_graph_gemma4a`: the model's `attention_chunk_size`.
+pub const chunk_size: i64 = 12;
+/// `max_past` (mtmd/models/models.h:279 @b1b770d90), a static member of
+/// `mtmd_graph_gemma4a`: the model's `attention_context_left - 1`.
+pub const max_past: i64 = 12;
+
+/// Ports `list_gemma4a_state_slots` (gemma4a.cpp:13 @b1b770d90): the state of
+/// the streaming encoder, a zero state is a cold start. The caller frees the
+/// slice with `module.freeSlots`.
+pub fn listStateSlots(hparams: *const model_mod.Hparams, model: *const model_mod.Model) clip.Error![]module.StateSlot {
+    var slots: std.ArrayList(module.StateSlot) = .empty;
+    errdefer {
+        for (slots.items) |sl| gpa.free(sl.name);
+        slots.deinit(gpa);
+    }
+
+    const n_mel: i64 = hparams.n_mel_bins;
+    const n_ch = ne(model.sscp_conv_w[0], 3);
+
+    try slots.append(gpa, .{ .name = try gpa.dupeSentinel(u8, "pos", 0), .ne0 = 1, .ne1 = 1 });
+    try slots.append(gpa, .{ .name = try gpa.dupeSentinel(u8, "sscp_0", 0), .ne0 = n_mel, .ne1 = 1 });
+    try slots.append(gpa, .{ .name = try gpa.dupeSentinel(u8, "sscp_1", 0), .ne0 = @divTrunc(n_mel - 1, 2) + 1, .ne1 = n_ch });
+    for (model.layers.items, 0..) |*layer, il| {
+        if (layer.q_w != null and layer.k_w != null and layer.v_w != null and layer.o_w != null) {
+            try slots.append(gpa, .{ .name = try impl.stringFormat(gpa, "k_%zu", .{il}), .ne0 = ne(layer.k_w, 1), .ne1 = max_past });
+            try slots.append(gpa, .{ .name = try impl.stringFormat(gpa, "v_%zu", .{il}), .ne0 = ne(layer.v_w, 1), .ne1 = max_past });
+        }
+        if (layer.norm_conv_w != null and layer.conv_pw1_w != null and layer.conv_dw_w != null and layer.conv_pw2_w != null) {
+            try slots.append(gpa, .{ .name = try impl.stringFormat(gpa, "conv_%zu", .{il}), .ne0 = ne(layer.conv_dw_w, 0) - 1, .ne1 = ne(layer.conv_dw_w, 1) });
+        }
+    }
+
+    return slots.toOwnedSlice(gpa);
+}
+
+/// A named `state_out` entry.
+const StateOut = struct { name: [:0]const u8, t: T };
+
+/// The graph's state tensors, as the C++'s `build` and its `extract_blocks`
+/// lambda capture them.
+const State = struct {
+    arena: std.mem.Allocator,
+    state_in: std.StringHashMapUnmanaged(T) = .empty,
+    state_out: std.ArrayList(StateOut) = .empty,
+
+    /// `std::map::at` on a missing key: an uncaught `std::out_of_range`.
+    fn at(self: *const State, name: []const u8) T {
+        return self.state_in.get(name) orelse impl.abortUncaught("std::out_of_range", "map::at:  key not found");
+    }
+
+    fn out(self: *State, name: [:0]const u8, t: T) clip.Error!void {
+        try self.state_out.append(self.arena, .{ .name = name, .t = t });
+    }
+};
+
+/// The `extract_blocks` lambda (gemma4a.cpp:163 @b1b770d90) of `build`:
+/// K/V block context through an overlapping view. The P cached positions go
+/// in front, the right is padded to S*B, then the view strides C in the
+/// block dimension.
+fn extractBlocks(g: *const graph.Graph, st: *State, t_in: T, name: [:0]const u8, S: i64, B: i64, P: i64, C: i64, n_pos: i64) clip.Error!T {
     const ctx0 = g.ctx0;
-    // [D, H, N] -> left pad by P, right pad to S*B
-    const pad_kv = S * B - n_pos;
-    var t = c.ggml_pad_ext(ctx0, t_in, 0, 0, 0, 0, @truncate(P), @truncate(pad_kv - P), 0, 0); // [D, H, S*B]
+    var t = c.ggml_concat(ctx0, c.ggml_reshape_3d(ctx0, st.at(name), g.d_head, g.n_head, P), t_in, 2);
+    const tail = c.ggml_view_3d(ctx0, t, g.d_head, g.n_head, P, nb(t, 1), nb(t, 2), @as(usize, @intCast(n_pos)) * nb(t, 2));
+    try st.out(name, c.ggml_reshape_2d(ctx0, c.ggml_cont(ctx0, tail), @as(i64, g.d_head) * g.n_head, P));
+    t = c.ggml_pad_ext(ctx0, t, 0, 0, 0, 0, 0, @truncate(S * B - P - n_pos), 0, 0); // [D, H, S*B]
     // Overlapping view: stride for B dim is C positions, not S
     // ne = [D, H, S, B], data_size = D*H*S*B*sizeof = source_nbytes (exact fit)
     // nb1=D*sizeof, nb2=D*H*sizeof, nb3=C*D*H*sizeof (overlap: C < S)
@@ -40,8 +108,8 @@ fn extractBlocks(g: *const graph.Graph, t_in: T, S: i64, B: i64, P: i64, C: i64,
     return t;
 }
 
-/// Ports `build` (gemma4a.cpp:11 @cd959bae9), a member of
-/// `clip_graph_gemma4a`.
+/// Ports `build` (gemma4a.cpp:36 @b1b770d90), a member of
+/// `mtmd_graph_gemma4a`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
     _ = params;
     g.mm_hook = buildMm;
@@ -54,14 +122,38 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     const res_weight: f32 = 0.5;
     const norm_eps: f32 = 1e-6;
 
+    var arena_state: std.heap.ArenaAllocator = .init(gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var st: State = .{ .arena = arena };
+    {
+        const slots = try listStateSlots(hparams, model);
+        defer module.freeSlots(slots);
+        for (slots) |slot| {
+            const t = c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_F32, slot.ne0, slot.ne1);
+            const name = try impl.stringFormat(arena, "state_in_%s", .{slot.name.ptr});
+            _ = c.ggml_set_name(t, name.ptr);
+            c.ggml_set_input(t);
+            try st.state_in.put(arena, try arena.dupe(u8, slot.name), t);
+        }
+    }
+
     // 1. Input
     const inp = g.buildInpRaw(1);
     var cur = c.ggml_cont(ctx0, c.ggml_transpose(ctx0, inp));
 
-    // 2. Subsampling Conv2D (symmetric padding=1, matching PyTorch)
+    // 2. Subsampling Conv2D (padding=1, matching PyTorch)
+    // in time, the left pad comes from the state
     {
         for (0..2) |i| {
-            cur = c.ggml_conv_2d(ctx0, model.sscp_conv_w[i], cur, 2, 2, 1, 1, 1, 1);
+            const name = try impl.stringFormat(arena, "sscp_%zu", .{i});
+            const left = c.ggml_reshape_3d(ctx0, st.at(name), ne(cur, 0), 1, ne(cur, 2));
+            cur = c.ggml_concat(ctx0, left, cur, 1);
+            const last = c.ggml_view_3d(ctx0, cur, ne(cur, 0), 1, ne(cur, 2), nb(cur, 1), nb(cur, 2), @as(usize, @intCast(ne(cur, 1) - 1)) * nb(cur, 1));
+            try st.out(name, c.ggml_reshape_2d(ctx0, c.ggml_cont(ctx0, last), ne(cur, 0), ne(cur, 2)));
+            cur = c.ggml_pad_ext(ctx0, cur, 0, 0, 0, 1, 0, 0, 0, 0);
+            cur = c.ggml_conv_2d(ctx0, model.sscp_conv_w[i], cur, 2, 2, 1, 0, 1, 1);
             if (model.sscp_conv_b[i] != null) {
                 cur = c.ggml_add(ctx0, cur, model.sscp_conv_b[i]);
             }
@@ -86,10 +178,11 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     }
 
     const n_pos = ne(cur, 1);
+    try st.out("pos", c.ggml_scale_bias(ctx0, st.at("pos"), 1.0, @floatFromInt(n_pos)));
 
     // Chunked local attention parameters
-    const C: i64 = 12; // chunk_size
-    const P: i64 = 12; // max_past_horizon (context_left - 1)
+    const C: i64 = chunk_size;
+    const P: i64 = max_past;
     const S: i64 = C + P; // context_size = 24
     const R: i64 = P + 1; // RPE positions = 13
     const B: i64 = @divTrunc(n_pos + C - 1, C); // num_blocks
@@ -155,11 +248,11 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
             Qcur = c.ggml_reshape_4d(ctx0, Qcur, d_head, n_head, C, B); // [D, H, C, B]
             Qcur = c.ggml_cont(ctx0, c.ggml_permute(ctx0, Qcur, 0, 3, 1, 2)); // [D, C, B, H]
 
-            var Kblk = extractBlocks(g, Kcur, S, B, P, C, n_pos);
+            var Kblk = try extractBlocks(g, &st, Kcur, try impl.stringFormat(arena, "k_%d", .{il}), S, B, P, C, n_pos);
             // [D, H, S, B] -> [D, S, B, H] via permute(0,3,1,2)
             Kblk = c.ggml_cont(ctx0, c.ggml_permute(ctx0, Kblk, 0, 3, 1, 2));
 
-            var Vblk = extractBlocks(g, Vcur, S, B, P, C, n_pos);
+            var Vblk = try extractBlocks(g, &st, Vcur, try impl.stringFormat(arena, "v_%d", .{il}), S, B, P, C, n_pos);
             // [D, H, S, B] -> [S, D, B, H] via permute(1,3,0,2)
             Vblk = c.ggml_cont(ctx0, c.ggml_permute(ctx0, Vblk, 1, 3, 0, 2));
 
@@ -238,8 +331,13 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
                 x = c.ggml_cont(ctx0, c.ggml_transpose(ctx0, x));
             }
 
-            // Causal depthwise Conv1D via ggml_ssm_conv, left padded only.
-            x = c.ggml_pad_ext(ctx0, x, 4, 0, 0, 0, 0, 0, 0, 0);
+            // Causal depthwise Conv1D via ggml_ssm_conv, the left context comes from the state
+            {
+                const d_conv = ne(layer.conv_dw_w, 0) - 1;
+                const name = try impl.stringFormat(arena, "conv_%d", .{il});
+                x = c.ggml_concat(ctx0, st.at(name), x, 0);
+                try st.out(name, c.ggml_cont(ctx0, c.ggml_view_2d(ctx0, x, d_conv, ne(x, 1), nb(x, 1), @as(usize, @intCast(n_pos)) * nb(x, 0))));
+            }
             x = c.ggml_ssm_conv(ctx0, x, layer.conv_dw_w);
             if (layer.conv_dw_b != null) {
                 x = c.ggml_add(ctx0, x, layer.conv_dw_b);
@@ -285,12 +383,20 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         cur = g.buildMm(model.mm_input_proj_w, cur);
     }
 
+    // the embeddings must stay the last node
+    for (st.state_out.items) |so| {
+        const name = try impl.stringFormat(arena, "state_out_%s", .{so.name.ptr});
+        _ = c.ggml_set_name(so.t, name.ptr);
+        c.ggml_set_output(so.t);
+        c.ggml_build_forward_expand(g.gf, so.t);
+    }
+
     c.ggml_build_forward_expand(g.gf, cur);
     return g.gf;
 }
 
-/// Ports `build_mm` (gemma4a.cpp:276 @cd959bae9), a member of
-/// `clip_graph_gemma4a`: a Gemma4ClippableLinear clamps its input and
+/// Ports `build_mm` (gemma4a.cpp:330 @b1b770d90), a member of
+/// `mtmd_graph_gemma4a`: a Gemma4ClippableLinear clamps its input and
 /// output to the bounds the model file records for that weight.
 ///
 /// Parameters:

@@ -8,7 +8,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/server/server-models.cpp` and
-//! `llama.cpp/tools/server/server-models.h` (v0.9.0, `cd959bae9`): the
+//! `llama.cpp/tools/server/server-models.h` (v1.0.0, `b1b770d90`): the
 //! monitor thread, `server_models`, `server_models_routes` with every
 //! handler, and the helpers above them; and `server_role`, the router's
 //! protocol with a child, from `llama.cpp/tools/server/server-common.cpp` and
@@ -64,27 +64,27 @@ const gpa = context.gpa;
 const Result = result_mod.Result;
 const ResultQueue = queue_mod.Response(*Result);
 
-/// Ports `DEFAULT_STOP_TIMEOUT` (server-models.cpp:40 @cd959bae9): seconds.
+/// Ports `DEFAULT_STOP_TIMEOUT` (server-models.cpp:40 @b1b770d90): seconds.
 const default_stop_timeout = 10;
 
 /// Ports `SERVER_ENV_ROUTER_PORT` and `SERVER_ENV_CHILD_ROLE`
-/// (server-common.h:765, 766 @cd959bae9): set by the router in the
+/// (server-common.h:781, 782 @b1b770d90): set by the router in the
 /// environment of every child. The first's presence makes the process a
 /// child; the second is `server_role_type_to_str`, an instance when unset.
 pub const env_router_port = "LLAMA_SERVER_ROUTER_PORT";
 pub const env_child_role = "LLAMA_SERVER_CHILD_ROLE";
 
 /// Ports `CMD_ROUTER_TO_CHILD_EXIT` and `CMD_CHILD_TO_ROUTER_STATE`
-/// (server-common.h:770, 771 @cd959bae9).
+/// (server-common.h:786, 787 @b1b770d90).
 const cmd_router_to_child_exit = "cmd_router_to_child:exit";
 const cmd_child_to_router_state = "cmd_child_to_router:state:"; // followed by json string
 
-/// Ports `CHILD_ADDR` (server-common.h:775 @cd959bae9): the address a child
+/// Ports `CHILD_ADDR` (server-common.h:791 @b1b770d90): the address a child
 /// binds to, as the router may listen on 0.0.0.0.
 // ref: https://github.com/ggml-org/llama.cpp/issues/17862
 const child_addr = "127.0.0.1";
 
-/// Ports `STREAM_LOOKUP_TIMEOUT_MS` (server-models.cpp:266 @cd959bae9): a short
+/// Ports `STREAM_LOOKUP_TIMEOUT_MS` (server-models.cpp:266 @b1b770d90): a short
 /// loopback budget for the resumable stream router to child JSON calls
 /// (probe, lookup, delete), distinct from `--timeout` which only applies to
 /// the generation proxy.
@@ -162,7 +162,7 @@ extern fn time(t: ?*i64) i64;
 extern fn fflush(stream: ?*anyopaque) c_int;
 extern fn fclose(stream: *anyopaque) c_int;
 
-/// Ports `request_child_exit` (server-models.cpp:43 @cd959bae9): the exit
+/// Ports `request_child_exit` (server-models.cpp:43 @b1b770d90): the exit
 /// command on the child's stdin. SIGPIPE is ignored by the server.
 fn requestChildExit(proc: *ServerSubproc) void {
     if (proc.sproc.stdinFile()) |stdin_file| {
@@ -174,7 +174,7 @@ fn requestChildExit(proc: *ServerSubproc) void {
 // -----------------------------------------------------------------------------
 // server_model_meta
 
-/// Ports `server_model_status` (server-models.h:35 @cd959bae9).
+/// Ports `server_model_status` (server-models.h:35 @b1b770d90).
 ///
 /// state diagram:
 ///
@@ -195,7 +195,7 @@ pub const Status = enum {
     sleeping,
 };
 
-/// Ports `server_model_status_to_string` (server-models.h:52 @cd959bae9).
+/// Ports `server_model_status_to_string` (server-models.h:52 @b1b770d90).
 pub fn statusToString(status: Status) []const u8 {
     return switch (status) {
         .downloading => "downloading",
@@ -208,10 +208,10 @@ pub fn statusToString(status: Status) []const u8 {
     };
 }
 
-/// Ports `server_model_source` (server-models.h:46 @cd959bae9).
+/// Ports `server_model_source` (server-models.h:46 @b1b770d90).
 pub const Source = enum { preset, models_dir, cache };
 
-/// Ports `server_model_source_to_string` (server-models.h:65 @cd959bae9).
+/// Ports `server_model_source_to_string` (server-models.h:65 @b1b770d90).
 pub fn sourceToString(source: Source) []const u8 {
     return switch (source) {
         .preset => "preset",
@@ -220,7 +220,7 @@ pub fn sourceToString(source: Source) []const u8 {
     };
 }
 
-/// Ports `server_role_type` (server-common.h:736 @cd959bae9): what this
+/// Ports `server_role_type` (server-common.h:752 @b1b770d90): what this
 /// llama-server process does. A router spawns the other roles as child
 /// processes and talks to them over their stdin/stdout.
 pub const RoleType = enum {
@@ -230,7 +230,7 @@ pub const RoleType = enum {
     measure, // child of a router: report the memory the model needs without loading it, exit
 };
 
-/// Ports `server_role_type_to_str` (server-common.h:743 @cd959bae9).
+/// Ports `server_role_type_to_str` (server-common.h:759 @b1b770d90).
 pub fn roleTypeToStr(role: RoleType) []const u8 {
     return switch (role) {
         .router => "router",
@@ -240,7 +240,7 @@ pub fn roleTypeToStr(role: RoleType) []const u8 {
     };
 }
 
-/// Ports `server_role_type_from_str` (server-common.h:754 @cd959bae9): the
+/// Ports `server_role_type_from_str` (server-common.h:770 @b1b770d90): the
 /// role a router asks of a child; anything it does not name is an instance.
 fn roleTypeFromStr(str: []const u8) RoleType {
     if (std.mem.eql(u8, str, "download")) return .download;
@@ -283,7 +283,7 @@ const StringSet = struct {
     }
 };
 
-/// Ports `server_model_meta` (server-models.h:74 @cd959bae9). Its strings
+/// Ports `server_model_meta` (server-models.h:74 @b1b770d90). Its strings
 /// live in the allocator it was built or cloned with. `architecture` is
 /// the C++'s default (`server_model_architecture_json(false, false, false,
 /// {"text"})`) from the first `update_caps`, which `add_model` always runs,
@@ -326,28 +326,28 @@ pub const Meta = struct {
         return out;
     }
 
-    /// Ports `is_ready` (server-models.h:95 @cd959bae9).
+    /// Ports `is_ready` (server-models.h:95 @b1b770d90).
     pub fn isReady(self: *const Meta) bool {
         return self.status == .loaded;
     }
 
-    /// Ports `is_running` (server-models.h:99 @cd959bae9).
+    /// Ports `is_running` (server-models.h:99 @b1b770d90).
     pub fn isRunning(self: *const Meta) bool {
         return self.status == .loaded or self.status == .loading or self.status == .sleeping;
     }
 
-    /// Ports `is_ready_or_sleep` (server-models.h:103 @cd959bae9).
+    /// Ports `is_ready_or_sleep` (server-models.h:103 @b1b770d90).
     pub fn isReadyOrSleep(self: *const Meta) bool {
         return self.status == .loaded or self.status == .sleeping;
     }
 
-    /// Ports `is_failed` (server-models.h:107 @cd959bae9).
+    /// Ports `is_failed` (server-models.h:107 @b1b770d90).
     pub fn isFailed(self: *const Meta) bool {
         return self.status == .unloaded and self.exit_code != 0;
     }
 
-    /// Ports `server_model_meta`'s `update_args` (server-models.cpp:312
-    /// @cd959bae9): the child's command line from the preset, with the
+    /// Ports `server_model_meta`'s `update_args` (server-models.cpp:330
+    /// @b1b770d90): the child's command line from the preset, with the
     /// router's host, the child's port, its name as alias and the router's
     /// log colours.
     pub fn updateArgs(self: *Meta, a: Allocator, ctx_preset: *const preset_mod.Context, bin_path: []const u8) Error!void {
@@ -373,8 +373,8 @@ pub const Meta = struct {
         self.args = args.items;
     }
 
-    /// Ports `server_model_meta`'s `update_caps` (server-models.cpp:332
-    /// @cd959bae9): the model's input modalities from its projector and
+    /// Ports `server_model_meta`'s `update_caps` (server-models.cpp:350
+    /// @b1b770d90): the model's input modalities from its projector and
     /// its output modalities from its GGUF metadata, resolved from the
     /// cache without downloading. `base` is the router's own parameters:
     /// its model and `--no-mmproj` apply to every child.
@@ -440,8 +440,8 @@ pub const Meta = struct {
     }
 };
 
-/// The `architecture` arm of `update_status` (server-models.cpp:1397
-/// @cd959bae9), from its line 1416: each of the loaded child's `input_modalities` and
+/// The `architecture` arm of `update_status` (server-models.cpp:1419
+/// @b1b770d90), from its line 1416: each of the loaded child's `input_modalities` and
 /// `output_modalities` that is an array of strings replaces the router's.
 fn mergeChildArchitecture(a: Allocator, arch: *Value, loaded_info: *const Value) !void {
     if (!loaded_info.contains("architecture") or !(try loaded_info.at("architecture")).isObject()) {
@@ -475,7 +475,30 @@ fn presetCall(r: anytype) Error!@typeInfo(@TypeOf(r)).error_union.payload {
     };
 }
 
-/// Ports `unset_reserved_args` (server-models.cpp:268 @cd959bae9): the
+/// Ports `is_browser_origin_header` (server-models.cpp:269 @b1b770d90): the
+/// router already checked the origin; a child sees a loopback Host, so the
+/// origin headers are not forwarded.
+fn isBrowserOriginHeader(key: []const u8) bool {
+    return std.ascii.eqlIgnoreCase(key, "origin") or
+        (key.len >= 10 and std.ascii.eqlIgnoreCase(key[0..10], "sec-fetch-"));
+}
+
+/// Ports `child_request_headers` (server-models.cpp:275 @b1b770d90):
+/// `headers` without the browser origin headers.
+///
+/// Return: borrows `headers`' strings; the map is `a`'s.
+fn childRequestHeaders(a: Allocator, headers: *const http.StringMap) !http.StringMap {
+    var out: http.StringMap = .{};
+    for (headers.entries.items) |e| {
+        if (!isBrowserOriginHeader(e.key)) {
+            // std::map::emplace: the first of equal keys stays
+            if (out.get(e.key) == null) try out.put(a, e.key, e.value);
+        }
+    }
+    return out;
+}
+
+/// Ports `unset_reserved_args` (server-models.cpp:285 @b1b770d90): the
 /// options a child must not inherit.
 fn unsetReservedArgs(a: Allocator, preset: *Preset, unset_model_args: bool) void {
     preset.unsetOption(a, "LLAMA_ARG_SSL_KEY_FILE");
@@ -491,6 +514,7 @@ fn unsetReservedArgs(a: Allocator, preset: *Preset, unset_model_args: bool) void
     preset.unsetOption(a, "LLAMA_ARG_CONNECT_CODE");
     if (unset_model_args) {
         preset.unsetOption(a, "LLAMA_ARG_MODEL");
+        preset.unsetOption(a, "LLAMA_ARG_SHARD");
         preset.unsetOption(a, "LLAMA_ARG_MMPROJ");
         preset.unsetOption(a, "LLAMA_ARG_ALIAS");
         preset.unsetOption(a, "LLAMA_ARG_HF_REPO");
@@ -501,7 +525,7 @@ extern fn _NSGetExecutablePath(buf: [*]u8, size: *u32) c_int;
 extern fn realpath(path: [*:0]const u8, resolved: ?[*]u8) ?[*:0]u8;
 extern fn readlink(path: [*:0]const u8, buf: [*]u8, len: usize) isize;
 
-/// Ports `get_server_exec_path` (server-common.cpp:52 @cd959bae9), its
+/// Ports `get_server_exec_path` (server-common.cpp:56 @b1b770d90), its
 /// macOS and Linux arms: this program's path, with symbolic links resolved
 /// on macOS.
 pub fn getServerExecPath(a: Allocator) Error![]const u8 {
@@ -542,7 +566,7 @@ pub fn getServerExecPath(a: Allocator) Error![]const u8 {
 
 extern var environ: [*:null]?[*:0]u8;
 
-/// Ports `get_environment` (server-models.cpp:288 @cd959bae9), its POSIX
+/// Ports `get_environment` (server-models.cpp:306 @b1b770d90), its POSIX
 /// arm.
 fn getEnvironment(a: Allocator) Allocator.Error![]const []const u8 {
     var env: std.ArrayList([]const u8) = .empty;
@@ -556,14 +580,14 @@ fn getEnvironment(a: Allocator) Allocator.Error![]const []const u8 {
 // -----------------------------------------------------------------------------
 // server_monitor
 
-/// Ports `server_monitor` (server-models.cpp:52 @cd959bae9): one thread
+/// Ports `server_monitor` (server-models.cpp:52 @b1b770d90): one thread
 /// watching every child at once -- forwarding its output, handing its state
 /// lines to the router, force-killing it past its stop deadline, and
 /// reaping it.
 const Monitor = struct {
     const max_line = 1024 * 1024;
 
-    /// Ports `child_t` (server-models.cpp:86 @cd959bae9).
+    /// Ports `child_t` (server-models.cpp:86 @b1b770d90).
     const Watched = struct {
         name: []const u8 = "",
         proc: *SharedProc,
@@ -580,7 +604,7 @@ const Monitor = struct {
         }
     };
 
-    /// Ports `cmd_t` (server-models.cpp:96 @cd959bae9).
+    /// Ports `cmd_t` (server-models.cpp:96 @b1b770d90).
     const Cmd = struct {
         type: enum { watch, stop, quit },
         child: ?Watched = null,
@@ -597,7 +621,7 @@ const Monitor = struct {
     th: ?std.Thread = null,
 
     /// Ports the constructor of `server_monitor` (server-models.cpp:53
-    /// @cd959bae9): starts the thread.
+    /// @b1b770d90): starts the thread.
     fn create(models: *Models) !*Monitor {
         const self = try gpa.create(Monitor);
         self.* = .{ .models = models, .waiter = subproc_mod.Waiter.init() };
@@ -606,7 +630,7 @@ const Monitor = struct {
     }
 
     /// Ports the destructor of `server_monitor` (server-models.cpp:57
-    /// @cd959bae9).
+    /// @b1b770d90).
     fn destroy(self: *Monitor) void {
         self.push(.{ .type = .quit }) catch |err| switch (err) {
             error.OutOfMemory => {},
@@ -619,7 +643,7 @@ const Monitor = struct {
         gpa.destroy(self);
     }
 
-    /// Ports `watch` (server-models.cpp:64 @cd959bae9), a member of
+    /// Ports `watch` (server-models.cpp:64 @b1b770d90), a member of
     /// `server_monitor`: thread-safe. `kill_after` above 0 force-kills the
     /// child after that many seconds.
     fn watch(self: *Monitor, name: []const u8, proc: *SharedProc, role: RoleType, port: c_int, kill_after: c_int) !void {
@@ -636,13 +660,13 @@ const Monitor = struct {
         try self.push(.{ .type = .watch, .child = ch });
     }
 
-    /// Ports `stop` (server-models.cpp:81 @cd959bae9), a member of
+    /// Ports `stop` (server-models.cpp:81 @b1b770d90), a member of
     /// `server_monitor`: thread-safe.
     fn stop(self: *Monitor, name: []const u8, stop_timeout: c_int, send_exit: bool) !void {
         try self.push(.{ .type = .stop, .name = try gpa.dupe(u8, name), .stop_timeout = stop_timeout, .send_exit = send_exit });
     }
 
-    /// Ports `push` (server-models.cpp:104 @cd959bae9), a member of
+    /// Ports `push` (server-models.cpp:104 @b1b770d90), a member of
     /// `server_monitor`.
     fn push(self: *Monitor, cmd: Cmd) !void {
         {
@@ -653,7 +677,7 @@ const Monitor = struct {
         self.waiter.wake();
     }
 
-    /// Ports `handle_commands` (server-models.cpp:113 @cd959bae9), a member
+    /// Ports `handle_commands` (server-models.cpp:113 @b1b770d90), a member
     /// of `server_monitor`.
     ///
     /// Return: true if the loop should exit.
@@ -700,7 +724,7 @@ const Monitor = struct {
         return quit;
     }
 
-    /// Ports `read_output` (server-models.cpp:146 @cd959bae9), a member of
+    /// Ports `read_output` (server-models.cpp:146 @b1b770d90), a member of
     /// `server_monitor`: what the child wrote on both pipes -- its commands
     /// handled and its logs forwarded, line by line.
     fn readOutput(self: *Monitor, ch: *Watched) void {
@@ -710,7 +734,7 @@ const Monitor = struct {
         ch.eof = ch.proc.proc.outputClosed();
     }
 
-    /// Ports `read_stream` (server-models.cpp:153 @cd959bae9), a member of
+    /// Ports `read_stream` (server-models.cpp:153 @b1b770d90), a member of
     /// `server_monitor`.
     fn readStream(self: *Monitor, ch: *Watched, which: subproc_mod.Stream) void {
         var chunk: [4096]u8 = undefined;
@@ -746,7 +770,7 @@ const Monitor = struct {
         }
     }
 
-    /// Ports `on_line` (server-models.cpp:187 @cd959bae9), a member of
+    /// Ports `on_line` (server-models.cpp:187 @b1b770d90), a member of
     /// `server_monitor`: stderr is the child's log, stdout its commands.
     fn onLine(self: *Monitor, ch: *Watched, which: subproc_mod.Stream, line: []const u8) void {
         const z = gpa.dupeSentinel(u8, line, 0) catch return;
@@ -761,7 +785,7 @@ const Monitor = struct {
         }
     }
 
-    /// Ports `run` (server-models.cpp:198 @cd959bae9), a member of
+    /// Ports `run` (server-models.cpp:198 @b1b770d90), a member of
     /// `server_monitor`.
     fn run(self: *Monitor) void {
         var procs: std.ArrayList(*ServerSubproc) = .empty;
@@ -842,13 +866,14 @@ const Monitor = struct {
 // -----------------------------------------------------------------------------
 // server_models
 
-/// Ports `instance_t` (server-models.h:169 @cd959bae9), a member of
+/// Ports `instance_t` (server-models.h:169 @b1b770d90), a member of
 /// `server_models`.
 pub const Instance = struct {
     arena: std.heap.ArenaAllocator,
     subproc: *SharedProc, // shared with the monitor thread
     meta: Meta,
     req_count: c_int = 0, // number of active proxy requests
+    download_stop_requested: bool = false, // a client asked the download to stop (pause or cancel)
 
     fn create(meta_src: *const Meta, subproc: *SharedProc) !*Instance {
         const self = try gpa.create(Instance);
@@ -876,7 +901,7 @@ pub const Instance = struct {
         return self.arena.allocator();
     }
 
-    /// Ports `request_exit` (server-models.cpp:425 @cd959bae9), a member of
+    /// Ports `request_exit` (server-models.cpp:443 @b1b770d90), a member of
     /// `instance_t`: ask the child to exit (it handles the command on its
     /// stdin, see `server_role::setup`).
     fn requestExit(self: *const Instance) void {
@@ -884,7 +909,7 @@ pub const Instance = struct {
     }
 };
 
-/// Ports `conv_model_tracker` (server-models.h:202 @cd959bae9): conv_id ->
+/// Ports `conv_model_tracker` (server-models.h:203 @b1b770d90): conv_id ->
 /// model name that currently serves its stream session, lets the resumable
 /// stream routes go straight to the owning child instead of polling every
 /// one. Populated when `proxy_request` forwards a POST carrying an
@@ -898,7 +923,7 @@ const ConvModelTracker = struct {
     next_ticket: u64 = 1,
     map: std.StringHashMapUnmanaged(EntryT) = .empty,
 
-    /// Ports `remember` (server-models.h:206 @cd959bae9), a member of
+    /// Ports `remember` (server-models.h:207 @b1b770d90), a member of
     /// `conv_model_tracker`: the ticket of this registration, 0 when nothing
     /// was registered. Erasing or replacing the entry invalidates the
     /// ticket, which is how a stop cancels a request parked in the model
@@ -921,7 +946,7 @@ const ConvModelTracker = struct {
         return ticket;
     }
 
-    /// Ports `alive` (server-models.h:217 @cd959bae9), a member of
+    /// Ports `alive` (server-models.h:218 @b1b770d90), a member of
     /// `conv_model_tracker`: false means a stop erased the entry or a newer
     /// request replaced it.
     fn alive(self: *ConvModelTracker, conv_id: []const u8, ticket: u64) bool {
@@ -931,7 +956,7 @@ const ConvModelTracker = struct {
         return e.ticket == ticket;
     }
 
-    /// Ports `lookup` (server-models.h:223 @cd959bae9), a member of
+    /// Ports `lookup` (server-models.h:224 @b1b770d90), a member of
     /// `conv_model_tracker`.
     ///
     /// Return: a copy owned by `a`, or null.
@@ -945,7 +970,7 @@ const ConvModelTracker = struct {
         return try a.dupe(u8, e.model);
     }
 
-    /// Ports `forget` (server-models.h:235 @cd959bae9), a member of
+    /// Ports `forget` (server-models.h:236 @b1b770d90), a member of
     /// `conv_model_tracker`.
     fn forget(self: *ConvModelTracker, conv_id: []const u8) void {
         if (conv_id.len == 0) {
@@ -960,7 +985,7 @@ const ConvModelTracker = struct {
     }
 };
 
-/// Ports `load_options` (server-models.h:322 @cd959bae9), a member of
+/// Ports `load_options` (server-models.h:323 @b1b770d90), a member of
 /// `server_models`.
 pub const LoadOptions = struct {
     role: RoleType = .instance,
@@ -972,7 +997,7 @@ pub const LoadOptions = struct {
     partials: []const download.Partial = &.{},
 };
 
-/// Ports `update_status_args` (server-models.h:339 @cd959bae9), a member of
+/// Ports `update_status_args` (server-models.h:340 @b1b770d90), a member of
 /// `server_models`.
 pub const UpdateStatusArgs = struct {
     status: Status,
@@ -982,7 +1007,7 @@ pub const UpdateStatusArgs = struct {
     memory: ?*const models_sched.ServerModelMemory = null, // what the instance allocated, sent with READY
 };
 
-/// Ports `server_unfinished_download` (server-models.h:117 @cd959bae9): a
+/// Ports `server_unfinished_download` (server-models.h:117 @b1b770d90): a
 /// download that never finished: the tag it was asked under, the sidecar
 /// kinds it pulls and the partial files its plan writes.
 pub const UnfinishedDownload = struct {
@@ -1000,13 +1025,13 @@ pub const UnfinishedDownload = struct {
     }
 };
 
-/// Ports `has_sidecar` (server-models.cpp:487 @cd959bae9).
+/// Ports `has_sidecar` (server-models.cpp:505 @b1b770d90).
 fn hasSidecar(sidecars: []const []const u8, kind: []const u8) bool {
     for (sidecars) |s| if (std.mem.eql(u8, s, kind)) return true;
     return false;
 }
 
-/// Ports `check_sidecar` (server-models.cpp:492 @cd959bae9): reject a
+/// Ports `check_sidecar` (server-models.cpp:510 @b1b770d90): reject a
 /// sidecar kind no download can pull.
 fn checkSidecar(a: Allocator, kind: []const u8) Error!void {
     var kinds: [download.sidecars.len][]const u8 = undefined;
@@ -1016,7 +1041,7 @@ fn checkSidecar(a: Allocator, kind: []const u8) Error!void {
     }
 }
 
-/// Ports `parse_sidecars` (server-models.cpp:503 @cd959bae9): the sidecars a
+/// Ports `parse_sidecars` (server-models.cpp:521 @b1b770d90): the sidecars a
 /// download asks for; by default the ones `-hf` pulls without a draft type.
 fn parseSidecars(a: Allocator, body: *const Value) Error![]const []const u8 {
     var defaults: std.ArrayList([]const u8) = .empty;
@@ -1041,7 +1066,7 @@ fn parseSidecars(a: Allocator, body: *const Value) Error![]const []const u8 {
     return sidecars;
 }
 
-/// Ports `sidecar_download_opts` (server-models.cpp:518 @cd959bae9): the
+/// Ports `sidecar_download_opts` (server-models.cpp:536 @b1b770d90): the
 /// download options of a model with its sidecars, the plan a removal purges
 /// partials from.
 fn sidecarDownloadOpts(params: *const Params, sidecars: []const []const u8) download.Opts {
@@ -1053,7 +1078,7 @@ fn sidecarDownloadOpts(params: *const Params, sidecars: []const []const u8) down
     return opts;
 }
 
-/// Ports `model_hf_repo` (server-models.cpp:529 @cd959bae9): the HF repo a
+/// Ports `model_hf_repo` (server-models.cpp:547 @b1b770d90): the HF repo a
 /// model resolves from: a preset names its own, a cached model is listed
 /// under it, and a local file or a models dir entry has none.
 fn modelHfRepo(meta: *const Meta) []const u8 {
@@ -1063,7 +1088,7 @@ fn modelHfRepo(meta: *const Meta) []const u8 {
     return if (meta.source == .cache) meta.name else "";
 }
 
-/// Ports `cached_sidecars` (server-models.cpp:538 @cd959bae9): the sidecar
+/// Ports `cached_sidecars` (server-models.cpp:556 @b1b770d90): the sidecar
 /// kinds of a HF repo present on disk, as the offline plan resolves them.
 fn cachedSidecars(a: Allocator, hf_repo: []const u8) Error![]const []const u8 {
     var model: tc.params.Model = .{};
@@ -1078,7 +1103,7 @@ fn cachedSidecars(a: Allocator, hf_repo: []const u8) Error![]const []const u8 {
     return download.planSidecars(a, &(try download.getHfPlan(a, &model, &opts)));
 }
 
-/// Ports `set_child_env` (server-models.cpp:552 @cd959bae9): replace any
+/// Ports `set_child_env` (server-models.cpp:570 @b1b770d90): replace any
 /// inherited value of `key` in a child environment.
 fn setChildEnv(a: Allocator, env: *std.ArrayList([]const u8), key: []const u8, value: []const u8) Allocator.Error!void {
     const prefix = try std.mem.concat(a, u8, &.{ key, "=" });
@@ -1093,13 +1118,13 @@ fn setChildEnv(a: Allocator, env: *std.ArrayList([]const u8), key: []const u8, v
     try env.append(a, try std.mem.concat(a, u8, &.{ prefix, value }));
 }
 
-/// Ports `unfinished_downloads_path` (server-models.cpp:560 @cd959bae9):
+/// Ports `unfinished_downloads_path` (server-models.cpp:578 @b1b770d90):
 /// where the unfinished downloads are remembered, inside the model cache.
 fn unfinishedDownloadsPath(a: Allocator) Error![]const u8 {
     return std.mem.concat(a, u8, &.{ try hf_cache.getCachePath(), "/unfinished-downloads.json" });
 }
 
-/// Ports `server_unfinished_downloads` (server-models.h:128 @cd959bae9): the
+/// Ports `server_unfinished_downloads` (server-models.h:128 @b1b770d90): the
 /// downloads that never finished, recorded next to the model cache. The
 /// cache names partial files after their content hash, so this record is the
 /// only trace of what is still incomplete: it lets a restarted router list,
@@ -1119,7 +1144,7 @@ pub const UnfinishedDownloads = struct {
         self.arena.deinit();
     }
 
-    /// Ports `load` (server-models.cpp:564 @cd959bae9), a member of
+    /// Ports `load` (server-models.cpp:582 @b1b770d90), a member of
     /// `server_unfinished_downloads`: read the record an earlier run left.
     fn load(self: *UnfinishedDownloads) !void {
         var scratch = std.heap.ArenaAllocator.init(gpa);
@@ -1171,7 +1196,7 @@ pub const UnfinishedDownloads = struct {
         }
     }
 
-    /// Ports `save` (server-models.cpp:589 @cd959bae9), a member of
+    /// Ports `save` (server-models.cpp:607 @b1b770d90), a member of
     /// `server_unfinished_downloads`: write the record back; the caller holds
     /// the mutex.
     fn save(self: *UnfinishedDownloads) void {
@@ -1205,7 +1230,7 @@ pub const UnfinishedDownloads = struct {
         try download.fsWriteAtomic(sa, try unfinishedDownloadsPath(sa), try json.dump(sa, &v, -1));
     }
 
-    /// Ports `delete_partials` (server-models.cpp:606 @cd959bae9), a member
+    /// Ports `delete_partials` (server-models.cpp:624 @b1b770d90), a member
     /// of `server_unfinished_downloads`: the partials of `parts` no recorded
     /// download writes; the caller holds the mutex.
     fn deletePartials(self: *UnfinishedDownloads, parts: []const download.Partial) void {
@@ -1230,7 +1255,7 @@ pub const UnfinishedDownloads = struct {
         return null;
     }
 
-    /// Ports `add` (server-models.cpp:621 @cd959bae9), a member of
+    /// Ports `add` (server-models.cpp:639 @b1b770d90), a member of
     /// `server_unfinished_downloads`: record a download that starts,
     /// replacing an earlier record of the same model, and delete the partials
     /// of that record the new plan no longer writes.
@@ -1249,7 +1274,7 @@ pub const UnfinishedDownloads = struct {
         self.deletePartials(stale);
     }
 
-    /// Ports `forget` (server-models.cpp:635 @cd959bae9), a member of
+    /// Ports `forget` (server-models.cpp:653 @b1b770d90), a member of
     /// `server_unfinished_downloads`: forget a download whose files are
     /// complete.
     fn forget(self: *UnfinishedDownloads, model: []const u8) void {
@@ -1261,7 +1286,7 @@ pub const UnfinishedDownloads = struct {
         }
     }
 
-    /// Ports `remove` (server-models.cpp:644 @cd959bae9), a member of
+    /// Ports `remove` (server-models.cpp:662 @b1b770d90), a member of
     /// `server_unfinished_downloads`: forget a download and delete its
     /// partials.
     ///
@@ -1277,7 +1302,7 @@ pub const UnfinishedDownloads = struct {
         return true;
     }
 
-    /// Ports `remove_sidecar` (server-models.cpp:657 @cd959bae9), a member of
+    /// Ports `remove_sidecar` (server-models.cpp:675 @b1b770d90), a member of
     /// `server_unfinished_downloads`: drop the sidecar `kind` from a download
     /// and delete its partials.
     ///
@@ -1309,7 +1334,7 @@ pub const UnfinishedDownloads = struct {
         return true;
     }
 
-    /// Ports `get_all` (server-models.cpp:678 @cd959bae9), a member of
+    /// Ports `get_all` (server-models.cpp:696 @b1b770d90), a member of
     /// `server_unfinished_downloads`: every recorded download.
     ///
     /// Return: a copy, owned by `a`.
@@ -1337,7 +1362,7 @@ fn readAll(a: Allocator, path: [:0]const u8) ?[]u8 {
     return out.items;
 }
 
-/// Ports `server_models` (server-models.h:163 @cd959bae9).
+/// Ports `server_models` (server-models.h:163 @b1b770d90).
 pub const Models = struct {
     mutex: Mutex = .{},
     cv: Cond = .{},
@@ -1384,8 +1409,8 @@ pub const Models = struct {
     /// Long-lived strings: the binary, the environment.
     arena: std.heap.ArenaAllocator = .init(std.heap.c_allocator),
 
-    /// Ports the constructor of `server_models` (server-models.cpp:393
-    /// @cd959bae9). `self` must not move afterwards.
+    /// Ports the constructor of `server_models` (server-models.cpp:411
+    /// @b1b770d90). `self` must not move afterwards.
     pub fn init(self: *Models, params: *const Params, argv: []const [:0]const u8) !void {
         self.* = .{
             .ctx_preset = try preset_mod.Context.create(gpa, .server),
@@ -1476,7 +1501,7 @@ pub const Models = struct {
         _ = self.mapping.orderedRemove(i);
     }
 
-    /// Ports `add_model` (server-models.cpp:429 @cd959bae9): not thread-safe,
+    /// Ports `add_model` (server-models.cpp:447 @b1b770d90): not thread-safe,
     /// the caller holds the mutex.
     fn addModel(self: *Models, meta: *Meta) Error!void {
         var scratch = std.heap.ArenaAllocator.init(gpa);
@@ -1535,7 +1560,7 @@ pub const Models = struct {
         try self.putInstance(inst.meta.name, inst);
     }
 
-    /// Ports `notify_sse` (server-models.cpp:714 @cd959bae9): an event to
+    /// Ports `notify_sse` (server-models.cpp:734 @b1b770d90): an event to
     /// every `/models/sse` client.
     pub fn notifySse(self: *Models, event: []const u8, model_id: []const u8, data: ?*const Value) void {
         self.notifySseImpl(event, model_id, data) catch |err| switch (err) {
@@ -1559,7 +1584,7 @@ pub const Models = struct {
         try self.sse.broadcast(result);
     }
 
-    /// Ports `load_models` (server-models.cpp:727 @cd959bae9): (re-)load the
+    /// Ports `load_models` (server-models.cpp:747 @b1b770d90): (re-)load the
     /// list of models from various sources and prepare the metadata
     /// mapping -- on the first call, simply populate it; on a later one, a
     /// running model whose source changed or went is unloaded, and the
@@ -1644,7 +1669,7 @@ pub const Models = struct {
         var hidden_models: StringSet = .{};
         {
             var preset_paths: StringSet = .{};
-            // the `add_hf_path` lambda (server-models.cpp:785 @cd959bae9)
+            // the `add_hf_path` lambda (server-models.cpp:805 @b1b770d90)
             const AddHfPath = struct {
                 fn f(ar: Allocator, paths: *StringSet, preset: *const Preset, repo_key: []const u8, file_key: []const u8) !void {
                     const hf_repo = preset.getOption(repo_key) orelse return;
@@ -1859,7 +1884,7 @@ pub const Models = struct {
         }
     }
 
-    /// The `log_available_models` (server-models.cpp:828 @cd959bae9) lambda
+    /// The `log_available_models` (server-models.cpp:848 @b1b770d90) lambda
     /// of `load_models`: each model with where it came from.
     fn logAvailableModels(self: *Models) !void {
         var scratch = std.heap.ArenaAllocator.init(gpa);
@@ -1885,7 +1910,7 @@ pub const Models = struct {
         }
     }
 
-    /// The `apply_stop_timeout` (server-models.cpp:844 @cd959bae9) lambda of
+    /// The `apply_stop_timeout` (server-models.cpp:864 @b1b770d90) lambda of
     /// `load_models`.
     fn applyStopTimeout(self: *Models) void {
         for (self.mapping.items) |inst| {
@@ -1900,7 +1925,7 @@ pub const Models = struct {
         }
     }
 
-    /// The `apply_hidden` (server-models.cpp:858 @cd959bae9) lambda of
+    /// The `apply_hidden` (server-models.cpp:878 @b1b770d90) lambda of
     /// `load_models`.
     fn applyHidden(self: *Models, hidden_models: *const StringSet) void {
         for (self.mapping.items) |inst| {
@@ -1908,7 +1933,7 @@ pub const Models = struct {
         }
     }
 
-    /// Ports `load_startup_models` (server-models.cpp:1064 @cd959bae9):
+    /// Ports `load_startup_models` (server-models.cpp:1084 @b1b770d90):
     /// lazy-load the models marked `load-on-startup`, after `main()`'s setup.
     pub fn loadStartupModels(self: *Models) !void {
         var to_load: std.ArrayList([]const u8) = .empty;
@@ -1933,7 +1958,7 @@ pub const Models = struct {
         }
     }
 
-    /// Ports `has_model` (server-models.cpp:1089 @cd959bae9): by name or
+    /// Ports `has_model` (server-models.cpp:1109 @b1b770d90): by name or
     /// alias (thread-safe).
     pub fn hasModel(self: *Models, name: []const u8) bool {
         self.mutex.lock();
@@ -1949,7 +1974,7 @@ pub const Models = struct {
         return false;
     }
 
-    /// Ports `get_meta` (server-models.cpp:1102 @cd959bae9): a copy of a
+    /// Ports `get_meta` (server-models.cpp:1122 @b1b770d90): a copy of a
     /// model's metadata, by name or alias, reloading the list first when a
     /// download finished (thread-safe).
     pub fn getMeta(self: *Models, a: Allocator, name: []const u8) !?Meta {
@@ -1972,7 +1997,7 @@ pub const Models = struct {
         return null;
     }
 
-    /// Ports `get_all_meta` (server-models.cpp:1122 @cd959bae9): a copy of
+    /// Ports `get_all_meta` (server-models.cpp:1142 @b1b770d90): a copy of
     /// every model's metadata (thread-safe).
     pub fn getAllMeta(self: *Models, a: Allocator) ![]Meta {
         self.mutex.lock();
@@ -1990,14 +2015,14 @@ pub const Models = struct {
         return result;
     }
 
-    /// Ports `unfinished_downloads_get` (server-models.cpp:683 @cd959bae9):
+    /// Ports `unfinished_downloads_get` (server-models.cpp:701 @b1b770d90):
     /// downloads that never finished, with their sidecar kinds (thread-safe).
     pub fn unfinishedDownloadsGet(self: *Models, a: Allocator) Allocator.Error![]UnfinishedDownload {
         return self.unfinished_downloads.getAll(a);
     }
 
-    /// Ports `unfinished_downloads_remove` (server-models.cpp:687
-    /// @cd959bae9): drop a download that will never be resumed, its record
+    /// Ports `unfinished_downloads_remove` (server-models.cpp:705
+    /// @b1b770d90): drop a download that will never be resumed, its record
     /// and its partial files; throws for a name that is not recorded
     /// (thread-safe).
     pub fn unfinishedDownloadsRemove(self: *Models, name: []const u8) !void {
@@ -2016,9 +2041,11 @@ pub const Models = struct {
         }
         const ok = try download.remove(sa, name);
         srv(.inf, "unfinished_downloads_remove", "removing unfinished download name=%s (%s)\n", .{ try zs(sa, name), @as([*:0]const u8, if (ok) "succeeded" else "nothing cached") });
+        // other clients still list it as a paused download
+        self.notifySse("model_remove", name, null);
     }
 
-    /// Ports `remove_sidecar` (server-models.cpp:701 @cd959bae9): the sidecar
+    /// Ports `remove_sidecar` (server-models.cpp:721 @b1b770d90): the sidecar
     /// `kind` of a model that is not in use, its files and partials
     /// (thread-safe).
     pub fn removeSidecar(self: *Models, name: []const u8, kind: []const u8) !bool {
@@ -2040,7 +2067,7 @@ pub const Models = struct {
         return ok;
     }
 
-    /// Ports `load` (server-models.cpp:1142 @cd959bae9), and the overload
+    /// Ports `load` (server-models.cpp:1162 @b1b770d90), and the overload
     /// without options: spawn a child for the model (thread-safe); a model
     /// not unloaded is left alone.
     pub fn load(self: *Models, name: []const u8, opts: LoadOptions) !void {
@@ -2210,7 +2237,7 @@ pub const Models = struct {
         self.cv.notifyAll();
     }
 
-    /// Ports `request_stop` (server-models.cpp:1301 @cd959bae9): ask the
+    /// Ports `request_stop` (server-models.cpp:1321 @b1b770d90): ask the
     /// monitor to stop a running instance; `send_exit` is false for a child
     /// already force-killed. The caller holds the mutex.
     pub fn requestStop(self: *Models, name: []const u8, send_exit: bool) void {
@@ -2224,14 +2251,14 @@ pub const Models = struct {
         };
     }
 
-    /// Ports `watch_child` (server-models.cpp:1310 @cd959bae9): let the
+    /// Ports `watch_child` (server-models.cpp:1330 @b1b770d90): let the
     /// monitor watch a child; `kill_after` above 0 force-kills it after that
     /// many seconds.
     pub fn watchChild(self: *Models, name: []const u8, proc: *SharedProc, role: RoleType, port: c_int, kill_after: c_int) !void {
         try self.monitor.?.watch(name, proc, role, port, kill_after);
     }
 
-    /// Ports `on_child_exit` (server-models.cpp:1314 @cd959bae9): called by
+    /// Ports `on_child_exit` (server-models.cpp:1334 @b1b770d90): called by
     /// the monitor once a child exited and was reaped. The name leaves
     /// `stopping_models` only once its entry is unloaded -- here for a
     /// download or a stale entry, in `update_status` otherwise -- so a
@@ -2275,7 +2302,7 @@ pub const Models = struct {
         }
     }
 
-    /// Ports `unload` (server-models.cpp:1340 @cd959bae9): stop the model's
+    /// Ports `unload` (server-models.cpp:1360 @b1b770d90): stop the model's
     /// child, or cancel its download (thread-safe).
     pub fn unload(self: *Models, name: []const u8) !void {
         self.mutex.lock();
@@ -2285,6 +2312,7 @@ pub const Models = struct {
         if (self.find(name)) |it| {
             if (it.meta.status == .downloading) {
                 srv(.inf, "unload", "cancelling download for model name=%s\n", .{z});
+                it.download_stop_requested = true;
                 it.requestExit();
                 // for convenience, we wait the status change here
                 self.waitLocked(name, struct {
@@ -2308,7 +2336,7 @@ pub const Models = struct {
         }
     }
 
-    /// Ports `unload_all` (server-models.cpp:1367 @cd959bae9): stop every
+    /// Ports `unload_all` (server-models.cpp:1388 @b1b770d90): stop every
     /// child and wait for each to exit; the monitor force-kills the ones
     /// that ignore the exit command.
     pub fn unloadAll(self: *Models) void {
@@ -2320,6 +2348,7 @@ pub const Models = struct {
             defer gpa.free(std.mem.span(z));
             if (inst.meta.status == .downloading) {
                 srv(.inf, "unload_all", "cancelling download for model name=%s\n", .{z});
+                inst.download_stop_requested = true;
                 inst.requestExit();
             } else if (inst.meta.isRunning()) {
                 srv(.inf, "unload_all", "stopping model instance name=%s\n", .{z});
@@ -2343,7 +2372,7 @@ pub const Models = struct {
         }
     }
 
-    /// Ports `update_status` (server-models.cpp:1397 @cd959bae9): a model's
+    /// Ports `update_status` (server-models.cpp:1419 @b1b770d90): a model's
     /// status, and the event on `/models/sse` (thread-safe).
     pub fn updateStatus(self: *Models, name: []const u8, args: UpdateStatusArgs) void {
         {
@@ -2406,7 +2435,7 @@ pub const Models = struct {
         self.mutex.unlock();
     }
 
-    /// Ports `update_download_progress` (server-models.cpp:1466 @cd959bae9):
+    /// Ports `update_download_progress` (server-models.cpp:1488 @b1b770d90):
     /// a download child's progress, or its end, which marks the instance to
     /// be erased on the next reload.
     pub fn updateDownloadProgress(self: *Models, name: []const u8, progress: *const download.Progress, done: bool, ok: bool) void {
@@ -2414,6 +2443,7 @@ pub const Models = struct {
         defer scratch.deinit();
         const sa = scratch.allocator();
         var curr: Value = .null;
+        var stopped = false;
         {
             self.mutex.lock();
             defer self.mutex.unlock();
@@ -2422,6 +2452,7 @@ pub const Models = struct {
                     // mark the instance to be erased on next load_models() call
                     it.meta.status = .downloaded;
                     self.need_reload = true;
+                    stopped = it.download_stop_requested;
 
                     // a download that failed keeps its tag: its partial files are still
                     // there and re-posting the tag resumes them
@@ -2457,14 +2488,26 @@ pub const Models = struct {
             self.mutex.lock();
             self.cv.notifyAll(); // notify in case unload() is waiting for download to be cancelled
             self.mutex.unlock();
-            // `{}` as a `const json &` is a null json: no "data"
-            self.notifySse(if (ok) "download_finished" else "download_failed", name, null);
+            // a stop a client asked for (pause or cancel) is no error: say so, so that every
+            // client, not only the one that asked, can tell it from a failed download
+            // (`{}` as a `const json &` is a null json: no "data")
+            if (ok) {
+                self.notifySse("download_finished", name, null);
+            } else if (stopped) {
+                var data = Value.emptyObject();
+                data.set(sa, "stopped", .{ .boolean = true }) catch |err| switch (err) {
+                    error.OutOfMemory, error.JsonError => {},
+                };
+                self.notifySse("download_failed", name, &data);
+            } else {
+                self.notifySse("download_failed", name, null);
+            }
         } else {
             self.notifySse("download_progress", name, &curr);
         }
     }
 
-    /// Ports `remove` (server-models.cpp:1503 @cd959bae9): a cached model off
+    /// Ports `remove` (server-models.cpp:1533 @b1b770d90): a cached model off
     /// the disk and out of the list; only cache models can be removed
     /// (thread-safe).
     pub fn remove(self: *Models, name: []const u8) !bool {
@@ -2488,6 +2531,7 @@ pub const Models = struct {
         if (it.meta.status == .downloading) {
             // cancel in-flight download
             srv(.inf, "remove", "cancelling download for model name=%s\n", .{z});
+            it.download_stop_requested = true;
             it.requestExit();
         } else if (it.meta.isRunning()) {
             // stop running instance
@@ -2521,7 +2565,7 @@ pub const Models = struct {
         return true;
     }
 
-    /// Ports `wait` (server-models.cpp:1554 @cd959bae9), the overload
+    /// Ports `wait` (server-models.cpp:1585 @b1b770d90), the overload
     /// taking a held lock: until `predicate` holds, or the model is gone.
     fn waitLocked(self: *Models, name: []const u8, comptime predicate: fn (*const Meta) bool) void {
         while (true) {
@@ -2536,7 +2580,7 @@ pub const Models = struct {
         }
     }
 
-    /// Ports `ensure_model_ready` (server-models.cpp:1567 @cd959bae9): load
+    /// Ports `ensure_model_ready` (server-models.cpp:1598 @b1b770d90): load
     /// the model if it is not, through the `models_max` queue -- whose entry
     /// protects it from eviction until its waiters leave -- and block until
     /// it is up (thread-safe). A stopping instance takes no new request: its
@@ -2599,7 +2643,7 @@ pub const Models = struct {
     }
 
     /// The waiting loop of `ensure_model_ready`, from `saw_loading`
-    /// (server-models.cpp:1608 @cd959bae9) on, with the mutex held.
+    /// (server-models.cpp:1639 @b1b770d90) on, with the mutex held.
     fn ensureWait(self: *Models, sa: Allocator, name: []const u8, should_stop: ?http.ShouldStop, queued: *bool, did_load: *bool) !void {
         const z = try zs(sa, name);
         var saw_loading = false;
@@ -2672,7 +2716,7 @@ pub const Models = struct {
         }
     }
 
-    /// Ports `proxy_request` (server-models.cpp:1686 @cd959bae9): the request
+    /// Ports `proxy_request` (server-models.cpp:1717 @b1b770d90): the request
     /// forwarded to the model's child; a detached request (one belonging to
     /// a replay session) ignores its client hanging up.
     pub fn proxyRequest(self: *Models, req: *const http.Req, method: []const u8, name: []const u8, update_last_used: bool, detached: bool) !*http.Res {
@@ -2698,7 +2742,7 @@ pub const Models = struct {
             // sleep after req_count++, so the model counts as busy while we wait here
             sleepMs(2000);
         }
-        srv(.inf, "proxy_request", "proxying request to model %s on port %d\n", .{ try zs(sa, name), meta.port });
+        srv(.trc, "proxy_request", "proxying request to model %s on port %d\n", .{ try zs(sa, name), meta.port });
         var proxy_path = try sa.dupe(u8, req.path);
         if (req.query_string.len != 0) {
             proxy_path = try std.mem.concat(sa, u8, &.{ proxy_path, "?", req.query_string });
@@ -2709,13 +2753,14 @@ pub const Models = struct {
             child_addr,
             meta.port,
             proxy_path,
-            &req.headers,
+            &(try childRequestHeaders(sa, &req.headers)),
             req.body,
             &req.files,
             // a detached request belongs to a replay session
             if (detached) .{ .req = null, .never = true } else req.should_stop,
             self.base_params.timeout_read,
             self.base_params.timeout_write,
+            "",
         );
 
         const cleanup = try gpa.create(ProxyCleanup);
@@ -2726,7 +2771,7 @@ pub const Models = struct {
         return res;
     }
 
-    /// Ports `proxy_ws` (server-models.cpp:1741 @cd959bae9): forward a
+    /// Ports `proxy_ws` (server-models.cpp:1772 @b1b770d90): forward a
     /// websocket connection to the child, returning when either side closes.
     pub fn proxyWs(self: *Models, req: *const http.Req, conn: *http.WsConn, name: []const u8) !void {
         var scratch = std.heap.ArenaAllocator.init(gpa);
@@ -2761,7 +2806,7 @@ pub const Models = struct {
             inst.meta.last_used = timeMs();
             inst.req_count += 1;
         }
-        srv(.inf, "proxy_ws", "proxying websocket to model %s on port %d\n", .{ try zs(sa, name), meta.?.port });
+        srv(.trc, "proxy_ws", "proxying websocket to model %s on port %d\n", .{ try zs(sa, name), meta.?.port });
 
         var url = try std.fmt.allocPrint(sa, "ws://{s}:{d}{s}", .{ child_addr, meta.?.port, req.path });
         if (req.query_string.len != 0) {
@@ -2772,7 +2817,9 @@ pub const Models = struct {
         for (req.headers.entries.items) |e| {
             const lower = try sa.dupe(u8, e.key);
             for (lower) |*ch| ch.* = std.ascii.toLower(ch.*);
-            if (std.mem.eql(u8, lower, "host") or std.mem.eql(u8, lower, "connection") or std.mem.eql(u8, lower, "upgrade") or std.mem.startsWith(u8, lower, "sec-websocket-")) {
+            if (std.mem.eql(u8, lower, "host") or std.mem.eql(u8, lower, "connection") or std.mem.eql(u8, lower, "upgrade") or std.mem.startsWith(u8, lower, "sec-websocket-") or
+                isBrowserOriginHeader(e.key))
+            {
                 continue;
             }
             _ = try headers.emplace(sa, e.key, e.value);
@@ -2825,7 +2872,7 @@ pub const Models = struct {
         }
     }
 
-    /// Ports `handle_child_state` (server-models.cpp:1816 @cd959bae9): a
+    /// Ports `handle_child_state` (server-models.cpp:1848 @b1b770d90): a
     /// state line from a child -- `CMD_CHILD_TO_ROUTER_STATE` and a JSON
     /// object -- called from the monitor thread.
     ///
@@ -2913,7 +2960,7 @@ pub const Models = struct {
         }
     }
 
-    /// The `request_exit` (server-models.cpp:1834 @cd959bae9) lambda of
+    /// The `request_exit` (server-models.cpp:1866 @b1b770d90) lambda of
     /// `handle_child_state`.
     fn requestExitLocked(self: *Models, name: []const u8) void {
         self.mutex.lock();
@@ -2924,7 +2971,7 @@ pub const Models = struct {
     }
 };
 
-/// The `cleanup` (server-models.cpp:1727 @cd959bae9) lambda `proxy_request`
+/// The `cleanup` (server-models.cpp:1758 @b1b770d90) lambda `proxy_request`
 /// gives the proxy: the request is over.
 const ProxyCleanup = struct {
     models: *Models,
@@ -2950,7 +2997,7 @@ const ProxyCleanup = struct {
     }
 };
 
-/// Ports `server_state_from_str` (server-common.h:797 @cd959bae9): an
+/// Ports `server_state_from_str` (server-common.h:813 @b1b770d90): an
 /// unknown name aborts.
 fn serverStateFromStr(str: []const u8) context.ServerState {
     if (std.mem.eql(u8, str, "downloading")) return .downloading;
@@ -2958,11 +3005,11 @@ fn serverStateFromStr(str: []const u8) context.ServerState {
     if (std.mem.eql(u8, str, "loading")) return .loading;
     if (std.mem.eql(u8, str, "ready")) return .ready;
     if (std.mem.eql(u8, str, "sleeping")) return .sleeping;
-    _ = c.ggml_abort("tools/server/server-common.h", 803, "GGML_ASSERT(%s) failed", "false && \"invalid server_state string\"");
+    _ = c.ggml_abort("tools/server/server-common.h", 819, "GGML_ASSERT(%s) failed", "false && \"invalid server_state string\"");
     unreachable;
 }
 
-/// The `preset_options_for_compare` (server-models.cpp:864 @cd959bae9)
+/// The `preset_options_for_compare` (server-models.cpp:884 @b1b770d90)
 /// lambda of `load_models`: `update_args()` injects HOST, PORT, ALIAS and
 /// LOG_COLORS, so they are stripped before comparing presets.
 fn presetOptionsEqualForCompare(a: Allocator, x: *const Preset, y: *const Preset) !bool {
@@ -2993,7 +3040,7 @@ fn sleepMs(ms: u64) void {
 // -----------------------------------------------------------------------------
 // server_role
 
-/// Ports `server_role` (server-common.h:807 @cd959bae9): the role of this
+/// Ports `server_role` (server-common.h:823 @b1b770d90): the role of this
 /// process and, when it is a child of a router, its side of the protocol.
 /// Construct it with `init` before anything is written to stdout, and
 /// `deinit` it.
@@ -3002,8 +3049,8 @@ pub const Role = struct {
     mtx_stdout: Mutex = .{},
     cmd_out: ?*anyopaque = null, // the stdout the router reads the commands from
 
-    /// Ports the constructor of `server_role` (server-common.cpp:2223
-    /// @cd959bae9): in a child, keeps stdout for the commands to the
+    /// Ports the constructor of `server_role` (server-common.cpp:2292
+    /// @b1b770d90): in a child, keeps stdout for the commands to the
     /// router, so it is created before anything is written; everything
     /// else written to stdout goes to stderr with the logs.
     pub fn init() Role {
@@ -3014,8 +3061,8 @@ pub const Role = struct {
         return self;
     }
 
-    /// Ports the destructor of `server_role` (server-common.cpp:2229
-    /// @cd959bae9).
+    /// Ports the destructor of `server_role` (server-common.cpp:2298
+    /// @b1b770d90).
     pub fn deinit(self: *Role) void {
         if (self.cmd_out) |f| {
             _ = fclose(f);
@@ -3023,13 +3070,13 @@ pub const Role = struct {
         }
     }
 
-    /// Ports `is_managed_by_router` (server-common.cpp:2235 @cd959bae9):
+    /// Ports `is_managed_by_router` (server-common.cpp:2304 @b1b770d90):
     /// true if the current process was spawned by a router.
     pub fn isManagedByRouter(_: *const Role) bool {
         return std.c.getenv(env_router_port) != null;
     }
 
-    /// Ports `get_role` (server-common.cpp:2239 @cd959bae9).
+    /// Ports `get_role` (server-common.cpp:2308 @b1b770d90).
     pub fn getRole(_: *const Role) RoleType {
         const role = std.c.getenv(env_child_role);
         return roleTypeFromStr(if (role) |r| std.mem.span(r) else "");
@@ -3041,7 +3088,7 @@ pub const Role = struct {
         func: *const fn (ctx: ?*anyopaque, signal: c_int) void,
     };
 
-    /// Ports `setup` (server-common.cpp:2244 @cd959bae9): a thread reading
+    /// Ports `setup` (server-common.cpp:2313 @b1b770d90): a thread reading
     /// stdin until the router's exit command, which calls the shutdown
     /// handler, or EOF, which exits.
     ///
@@ -3090,7 +3137,7 @@ pub const Role = struct {
         }.run, .{shutdown_handler}) catch null;
     }
 
-    /// Ports `notify_to_router` (server-common.cpp:2270 @cd959bae9): a state
+    /// Ports `notify_to_router` (server-common.cpp:2339 @b1b770d90): a state
     /// line on the reserved stdout, which the router reads.
     pub fn notifyToRouter(self: *Role, state: []const u8, payload: *const Value) void {
         var arena = std.heap.ArenaAllocator.init(gpa);
@@ -3109,7 +3156,7 @@ pub const Role = struct {
         _ = fflush(self.cmd_out);
     }
 
-    /// The `set_state_callback` (server.cpp:667 @cd959bae9) lambda a child
+    /// The `set_state_callback` (server.cpp:693 @b1b770d90) lambda a child
     /// gives its context: each state to the router.
     pub fn stateCallback(self: *Role) context.StateCallback {
         return .{ .ctx = self, .func = struct {
@@ -3124,10 +3171,10 @@ pub const Role = struct {
 // -----------------------------------------------------------------------------
 // server_models_routes
 
-/// Ports `sse_client_id_counter` (server-models.cpp:1904 @cd959bae9).
+/// Ports `sse_client_id_counter` (server-models.cpp:1936 @b1b770d90).
 var sse_client_id_counter: std.atomic.Value(c_int) = .init(0);
 
-/// Ports `server_models_sse_client` (server-models.cpp:1905 @cd959bae9): like
+/// Ports `server_models_sse_client` (server-models.cpp:1937 @b1b770d90): like
 /// `server_response_reader`, but without a task queue.
 const SseClient = struct {
     queue_results: *ResultQueue,
@@ -3149,7 +3196,7 @@ const SseClient = struct {
         self.ids.deinit();
     }
 
-    /// Ports `next` (server-models.cpp:1920 @cd959bae9), a member of
+    /// Ports `next` (server-models.cpp:1952 @b1b770d90), a member of
     /// `server_models_sse_client`.
     ///
     /// Return: null if `should_stop` holds before a result arrives.
@@ -3180,13 +3227,13 @@ const SseClient = struct {
     }
 };
 
-/// Ports `res_ok` (server-models.cpp:1939 @cd959bae9).
+/// Ports `res_ok` (server-models.cpp:1971 @b1b770d90).
 fn resOk(res: *http.Res, response_data: *const Value) !void {
     res.status = 200;
     try res.setData(try common.safeJsonToStr(res.allocator(), response_data));
 }
 
-/// Ports `res_err` (server-models.cpp:1944 @cd959bae9).
+/// Ports `res_err` (server-models.cpp:1976 @b1b770d90).
 fn resErr(res: *http.Res, error_data: *const Value) !void {
     const a = res.allocator();
     res.status = common.jsonValue(error_data, "code", c_int, 500);
@@ -3196,7 +3243,7 @@ fn resErr(res: *http.Res, error_data: *const Value) !void {
     try res.setData(try common.safeJsonToStr(a, &v));
 }
 
-/// Ports `router_validate_model` (server-models.cpp:1949 @cd959bae9): the
+/// Ports `router_validate_model` (server-models.cpp:1981 @b1b770d90): the
 /// name resolved to its model's, or an error response.
 fn routerValidateModel(name: *[]const u8, models: *Models, models_autoload: bool, res: *http.Res) !bool {
     const a = res.allocator();
@@ -3220,7 +3267,7 @@ fn routerValidateModel(name: *[]const u8, models: *Models, models_autoload: bool
     return true;
 }
 
-/// Ports `is_autoload` (server-models.cpp:1968 @cd959bae9).
+/// Ports `is_autoload` (server-models.cpp:2000 @b1b770d90).
 fn isAutoload(params: *const Params, req: *const http.Req) bool {
     const autoload = req.getParam("autoload", "");
     if (autoload.len == 0) {
@@ -3230,7 +3277,7 @@ fn isAutoload(params: *const Params, req: *const http.Req) bool {
     }
 }
 
-/// Ports `encode_qs` (server-models.cpp:1979 @cd959bae9): percent encode one
+/// Ports `encode_qs` (server-models.cpp:2011 @b1b770d90): percent encode one
 /// query or path component.
 fn encodeQs(a: Allocator, in: []const u8) ![]const u8 {
     var out: std.ArrayList(u8) = .empty;
@@ -3247,7 +3294,7 @@ fn encodeQs(a: Allocator, in: []const u8) ![]const u8 {
     return out.items;
 }
 
-/// Ports `resolve_child_for_conv` (server-models.cpp:2000 @cd959bae9): the
+/// Ports `resolve_child_for_conv` (server-models.cpp:2032 @b1b770d90): the
 /// ready child that owns a conversation's stream session, through the
 /// conv_id -> model map.
 fn resolveChildForConv(a: Allocator, models: *Models, conversation_id: []const u8) !?Meta {
@@ -3262,7 +3309,7 @@ fn resolveChildForConv(a: Allocator, models: *Models, conversation_id: []const u
     return null;
 }
 
-/// Ports `server_models_routes` (server-models.h:393 @cd959bae9).
+/// Ports `server_models_routes` (server-models.h:394 @b1b770d90).
 pub const ModelsRoutes = struct {
     params: Params,
     ui_settings: Value = Value.emptyObject(), // Primary: new name
@@ -3289,8 +3336,8 @@ pub const ModelsRoutes = struct {
     router_streams_lookup: http.Handler = undefined,
     router_stream_delete: http.Handler = undefined,
 
-    /// Ports the constructor of `server_models_routes` (server-models.h:393
-    /// @cd959bae9). `self` must not move afterwards.
+    /// Ports the constructor of `server_models_routes` (server-models.h:394
+    /// @b1b770d90). `self` must not move afterwards.
     pub fn init(self: *ModelsRoutes, params: *const Params, argv: []const [:0]const u8) !void {
         self.* = .{ .params = params.*, .models = undefined };
         try self.models.init(params, argv);
@@ -3320,7 +3367,7 @@ pub const ModelsRoutes = struct {
         }.call };
     }
 
-    /// Ports `init_routes` (server-models.cpp:2016 @cd959bae9).
+    /// Ports `init_routes` (server-models.cpp:2048 @b1b770d90).
     fn initRoutes(self: *ModelsRoutes) !void {
         if (!tc.subproc.Subproc.isSupported()) {
             return throw(error.RuntimeError, "subprocess is not enabled on this build", .{});
@@ -3341,7 +3388,7 @@ pub const ModelsRoutes = struct {
         self.router_stream_delete = self.handler(routerStreamDelete);
     }
 
-    /// The `get_router_props` lambda (server-models.cpp:2021 @cd959bae9).
+    /// The `get_router_props` lambda (server-models.cpp:2053 @b1b770d90).
     fn getRouterProps(self: *ModelsRoutes, req: *const http.Req) anyerror!*http.Res {
         const name = req.getParam("model", "");
         if (name.len == 0) {
@@ -3375,7 +3422,7 @@ pub const ModelsRoutes = struct {
         return self.proxyGet(req);
     }
 
-    /// The `proxy_get` lambda (server-models.cpp:2052 @cd959bae9).
+    /// The `proxy_get` lambda (server-models.cpp:2084 @b1b770d90).
     fn proxyGet(self: *ModelsRoutes, req: *const http.Req) anyerror!*http.Res {
         const method = "GET";
         var name: []const u8 = req.getParam("model", "");
@@ -3397,7 +3444,7 @@ pub const ModelsRoutes = struct {
         return self.models.proxyRequest(req, method, canonical, false, false);
     }
 
-    /// The `proxy_post` lambda (server-models.cpp:2084 @cd959bae9).
+    /// The `proxy_post` lambda (server-models.cpp:2116 @b1b770d90).
     fn proxyPost(self: *ModelsRoutes, req: *const http.Req) anyerror!*http.Res {
         const method = "POST";
         const error_res = try http.Res.create(gpa);
@@ -3435,7 +3482,7 @@ pub const ModelsRoutes = struct {
         return self.models.proxyRequest(req, method, canonical, true, waited and ticket != 0); // update last usage for POST request only
     }
 
-    /// The `proxy_ws` lambda (server-models.cpp:2066 @cd959bae9). The C++'s
+    /// The `proxy_ws` lambda (server-models.cpp:2098 @b1b770d90). The C++'s
     /// handler has no `ex_wrapper`: an exception ends the connection, as a
     /// return from here does.
     fn proxyWsRoute(ctx: ?*anyopaque, req: *const http.Req, conn: *http.WsConn) void {
@@ -3465,7 +3512,7 @@ pub const ModelsRoutes = struct {
         try self.models.proxyWs(req, conn, name);
     }
 
-    /// The `post_router_models_load` lambda (server-models.cpp:2115 @cd959bae9).
+    /// The `post_router_models_load` lambda (server-models.cpp:2147 @b1b770d90).
     fn postRouterModelsLoad(self: *ModelsRoutes, req: *const http.Req) anyerror!*http.Res {
         const res = try http.Res.create(gpa);
         errdefer res.destroy();
@@ -3490,7 +3537,7 @@ pub const ModelsRoutes = struct {
         return res;
     }
 
-    /// The `get_router_models` lambda (server-models.cpp:2133 @cd959bae9).
+    /// The `get_router_models` lambda (server-models.cpp:2165 @b1b770d90).
     fn getRouterModels(self: *ModelsRoutes, req: *const http.Req) anyerror!*http.Res {
         const reload = req.getParam("reload", "").len != 0;
         if (reload) {
@@ -3627,7 +3674,7 @@ pub const ModelsRoutes = struct {
         return res;
     }
 
-    /// The `post_router_models_unload` lambda (server-models.cpp:2263 @cd959bae9).
+    /// The `post_router_models_unload` lambda (server-models.cpp:2295 @b1b770d90).
     fn postRouterModelsUnload(self: *ModelsRoutes, req: *const http.Req) anyerror!*http.Res {
         const res = try http.Res.create(gpa);
         errdefer res.destroy();
@@ -3652,7 +3699,7 @@ pub const ModelsRoutes = struct {
         return res;
     }
 
-    /// The `get_router_models_sse` lambda (server-models.cpp:2281 @cd959bae9).
+    /// The `get_router_models_sse` lambda (server-models.cpp:2313 @b1b770d90).
     fn getRouterModelsSse(self: *ModelsRoutes, req: *const http.Req) anyerror!*http.Res {
         const sse = try gpa.create(SseRes);
         errdefer gpa.destroy(sse);
@@ -3668,7 +3715,7 @@ pub const ModelsRoutes = struct {
         return &sse.res;
     }
 
-    /// The `post_router_models` lambda (server-models.cpp:2299 @cd959bae9):
+    /// The `post_router_models` lambda (server-models.cpp:2331 @b1b770d90):
     /// download a model from the hub in a child, with its sidecars.
     fn postRouterModels(self: *ModelsRoutes, req: *const http.Req) anyerror!*http.Res {
         const res = try http.Res.create(gpa);
@@ -3717,7 +3764,7 @@ pub const ModelsRoutes = struct {
         return res;
     }
 
-    /// The `del_router_models` lambda (server-models.cpp:2344 @cd959bae9).
+    /// The `del_router_models` lambda (server-models.cpp:2376 @b1b770d90).
     fn delRouterModels(self: *ModelsRoutes, req: *const http.Req) anyerror!*http.Res {
         const res = try http.Res.create(gpa);
         errdefer res.destroy();
@@ -3759,7 +3806,7 @@ pub const ModelsRoutes = struct {
         return res;
     }
 
-    /// The `router_stream_get` lambda (server-models.cpp:2374 @cd959bae9):
+    /// The `router_stream_get` lambda (server-models.cpp:2406 @b1b770d90):
     /// `GET /v1/stream?conv_id=<id>&from=N`, proxied to the child that owns
     /// the conversation.
     fn routerStreamGet(self: *ModelsRoutes, req: *const http.Req) anyerror!*http.Res {
@@ -3801,19 +3848,20 @@ pub const ModelsRoutes = struct {
             child_addr,
             owner.port,
             child_path,
-            &req.headers,
+            &(try childRequestHeaders(a, &req.headers)),
             req.body,
             &req.files,
             req.should_stop,
             self.params.timeout_read,
             self.params.timeout_write,
+            "",
         );
         keep = false;
         return proxy;
     }
 
-    /// The `router_streams_lookup` lambda (server-models.cpp:2421
-    /// @cd959bae9): `POST /v1/streams/lookup`, each id asked of only the
+    /// The `router_streams_lookup` lambda (server-models.cpp:2453
+    /// @b1b770d90): `POST /v1/streams/lookup`, each id asked of only the
     /// child that owns it.
     fn routerStreamsLookup(self: *ModelsRoutes, req: *const http.Req) anyerror!*http.Res {
         const res = try http.Res.create(gpa);
@@ -3881,8 +3929,8 @@ pub const ModelsRoutes = struct {
         return res;
     }
 
-    /// The `router_stream_delete` lambda (server-models.cpp:2481
-    /// @cd959bae9): `DELETE /v1/stream?conv_id=<id>`, forwarded to the
+    /// The `router_stream_delete` lambda (server-models.cpp:2513
+    /// @b1b770d90): `DELETE /v1/stream?conv_id=<id>`, forwarded to the
     /// owning child only.
     fn routerStreamDelete(self: *ModelsRoutes, req: *const http.Req) anyerror!*http.Res {
         const res = try http.Res.create(gpa);
@@ -3936,7 +3984,7 @@ const SseRes = struct {
         gpa.destroy(self);
     }
 
-    /// The `next` (server-models.cpp:2286 @cd959bae9) lambda of
+    /// The `next` (server-models.cpp:2318 @b1b770d90) lambda of
     /// `get_router_models_sse`.
     fn next(ctx: ?*anyopaque, out: *std.ArrayList(u8), a: Allocator) anyerror!bool {
         const self: *SseRes = @ptrCast(@alignCast(ctx.?));

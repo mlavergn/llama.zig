@@ -5,7 +5,7 @@
 set -eu
 FX="$PWD/llama.cpp/tools/server/tests/fixtures"
 PROBE="$PWD/harness/server/mcp_probe_server.py"
-mkdir -p "$DATA/cwd_dir"
+mkdir -p "$DATA/cwd_dir" "$DATA/slowlog"
 cat > "$DATA/setup.env" <<ENV
 FIXTURES=$FX
 PROBE=$PROBE

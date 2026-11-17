@@ -6,8 +6,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/gated_delta_net.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/gated_delta_net.cuh` at v0.9.0
-//! (`cd959bae9`). The kernel, `gated_delta_net_cuda`, stays CUDA. Since
+//! `llama.cpp/ggml/src/ggml-cuda/gated_delta_net.cuh` at v1.0.0
+//! (`b1b770d90`). The kernel, `gated_delta_net_cuda`, stays CUDA. Since
 //! v0.7.0 each warp owns four state columns (#30087), and a long non-KDA
 //! prefill goes to the chunked kernel in `gated_delta_net_mma.zig` first
 //! (#29353).
@@ -23,7 +23,7 @@ const cu = common.cu;
 const Tensor = c.ggml_tensor;
 
 /// Ports `ggml_cuda_gated_delta_net_fused_cache` (gated_delta_net.cuh:5
-/// @cd959bae9): the fused kernel's recurrent-state output. Strides in
+/// @b1b770d90): the fused kernel's recurrent-state output. Strides in
 /// elements; the per-sequence stride is always `D`, set in-kernel.
 pub const FusedCache = struct {
     /// Rollback slot 0.
@@ -37,12 +37,12 @@ fn dim(x: i64) u32 {
     return @truncate(@as(u64, @bitCast(x)));
 }
 
-/// Ports `gdn_cols_per_warp` (gated_delta_net.cu:7 @cd959bae9): the state
+/// Ports `gdn_cols_per_warp` (gated_delta_net.cu:7 @b1b770d90): the state
 /// columns one warp owns, and the kernel's defaulted fourth template
 /// argument.
 const gdn_cols_per_warp = 4;
 
-/// Ports `launch_gated_delta_net` (gated_delta_net.cu:182 @cd959bae9).
+/// Ports `launch_gated_delta_net` (gated_delta_net.cu:182 @b1b770d90).
 fn launchGatedDeltaNet(
     comptime kda: bool,
     comptime keep_rs_t: bool,
@@ -104,7 +104,7 @@ fn launchGatedDeltaNet(
 }
 
 /// Ports `ggml_cuda_gdn_mma_args_from_tensor` (gated_delta_net.cu:242
-/// @cd959bae9): the chunked kernel's arguments; `state_out` is the
+/// @b1b770d90): the chunked kernel's arguments; `state_out` is the
 /// caller's.
 fn gdnMmaArgsFromTensor(dst: *const Tensor) gdn_mma.Args {
     const q = impl.one(Tensor, dst.src[0]);
@@ -146,7 +146,7 @@ fn gdnMmaArgsFromTensor(dst: *const Tensor) gdn_mma.Args {
 }
 
 /// Ports `ggml_cuda_op_gated_delta_net_impl` (gated_delta_net.cu:280
-/// @cd959bae9).
+/// @b1b770d90).
 fn opGatedDeltaNetImpl(ctx: *common.Context, dst: *Tensor, cache: ?*const FusedCache) void {
     const src_q = impl.one(Tensor, dst.src[0]);
     const src_k = impl.one(Tensor, dst.src[1]);
@@ -255,13 +255,13 @@ fn opGatedDeltaNetImpl(ctx: *common.Context, dst: *Tensor, cache: ?*const FusedC
     }
 }
 
-/// Ports `ggml_cuda_op_gated_delta_net` (gated_delta_net.cu:386 @cd959bae9).
+/// Ports `ggml_cuda_op_gated_delta_net` (gated_delta_net.cu:386 @b1b770d90).
 pub fn opGatedDeltaNet(ctx: *common.Context, dst: *Tensor) void {
     opGatedDeltaNetImpl(ctx, dst, null);
 }
 
 /// Ports `ggml_cuda_op_gated_delta_net_fused_cache` (gated_delta_net.cu:390
-/// @cd959bae9): the same op, writing the snapshot(s) into the cache
+/// @b1b770d90): the same op, writing the snapshot(s) into the cache
 /// instead of `dst`.
 pub fn opGatedDeltaNetFusedCache(ctx: *common.Context, dst: *Tensor, cache: FusedCache) void {
     opGatedDeltaNetImpl(ctx, dst, &cache);

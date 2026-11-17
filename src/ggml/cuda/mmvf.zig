@@ -1,9 +1,10 @@
-//! MMVF: matrix-vector products for `F32`, `F16` and `BF16` weights.
+//! MMVF: matrix-vector products for `F32`, `F16`, `BF16` and, since
+//! v1.0.0, `F8_E4M3` weights.
 //!
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/mmvf.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/mmvf.cuh` at v0.9.0 (`cd959bae9`), the host
+//! `llama.cpp/ggml/src/ggml-cuda/mmvf.cuh` at v1.0.0 (`b1b770d90`), the host
 //! half. The kernel, `mul_mat_vec_f`, stays CUDA.
 //!
 //! `ggml_cuda_op_mul_mat_vec_f`, the row-split entry point, is not ported:
@@ -20,8 +21,9 @@ const cu = common.cu;
 const Tensor = c.ggml_tensor;
 const half = kernels.half;
 const bf16 = kernels.bf16;
+const fp8_e4m3 = kernels.fp8_e4m3;
 
-/// Ports `MMVF_MAX_BATCH_SIZE` (mmvf.cuh:3 @cd959bae9).
+/// Ports `MMVF_MAX_BATCH_SIZE` (mmvf.cuh:3 @b1b770d90).
 pub const max_batch_size = 8;
 
 fn i32Of(x: i64) c_int {
@@ -61,12 +63,14 @@ fn mmvfKernel(comptime T: type, comptime A: type, comptime ncols_dst: comptime_i
     return kernels.get("mmvf", kernels.tmpl("mul_mat_vec_f", &.{ kernels.typeName(T), kernels.typeName(A), kernels.int(ncols_dst), kernels.int(block_size), kernels.boolean(has_fusion), kernels.boolean(is_multi_token_id) }));
 }
 
-/// Ports `mul_mat_vec_f_switch_fusion` (mmvf.cu:388 @cd959bae9).
+/// Ports `mul_mat_vec_f_switch_fusion` (mmvf.cu:443 @b1b770d90). Since
+/// v1.0.0 the FP8 weight scales count as a fusion too.
 fn switchFusion(comptime T: type, comptime A: type, comptime ncols_dst: comptime_int, comptime block_size: comptime_int, comptime is_multi_token_id: bool, a: *const Args, block_dims: kernels.Dim3, block_nums: kernels.Dim3, nbytes_shared: c_int, stream: cu.cudaStream_t) void {
     const p: kernels.LaunchParams = .{ .grid = block_nums, .block = block_dims, .shmem = @intCast(nbytes_shared), .stream = stream };
 
     const f = a.fusion;
-    const has_fusion = f.gate != null or f.x_bias != null or f.gate_bias != null;
+    const has_fusion = f.gate != null or f.x_bias != null or f.gate_bias != null or
+        f.x_scale != null or f.gate_scale != null;
     const args = .{
         a.x,               a.y,                a.ids,               a.fusion,             a.dst,
         a.ncols2,          a.nchannels_y,      a.stride_row,        a.stride_col_y2,      a.stride_col_dst,
@@ -85,7 +89,7 @@ fn switchFusion(comptime T: type, comptime A: type, comptime ncols_dst: comptime
     kernels.launchPdl(comptime mmvfKernel(T, A, ncols_dst, block_size, false, is_multi_token_id), p, args);
 }
 
-/// Ports `launch_mul_mat_vec_f_cuda` (mmvf.cu:419 @cd959bae9).
+/// Ports `launch_mul_mat_vec_f_cuda` (mmvf.cu:475 @b1b770d90).
 fn launchMulMatVecF(
     comptime T: type,
     comptime A: type,
@@ -179,7 +183,7 @@ fn launchMulMatVecF(
     }
 }
 
-/// Ports `mul_mat_vec_f_cuda_switch_ncols_dst` (mmvf.cu:513 @cd959bae9).
+/// Ports `mul_mat_vec_f_cuda_switch_ncols_dst` (mmvf.cu:569 @b1b770d90).
 fn switchNcolsDst(comptime T: type, comptime A: type, x: ?*const anyopaque, y: ?*const f32, ids: ?*const i32, fusion: common.MmFusionArgsDevice, dst: ?*f32, ncols: i64, nrows: i64, ncols_dst: i64, stride_row: i64, stride_col_y: i64, stride_col_dst: i64, nchannels_x: i64, nchannels_y: i64, nchannels_dst: i64, stride_channel_x: i64, stride_channel_y: i64, stride_channel_dst: i64, nsamples_x: i64, nsamples_dst: i64, stride_sample_x: i64, stride_sample_y: i64, stride_sample_dst: i64, ids_stride: i64, stream: cu.cudaStream_t) void {
     const has_ids = ids != null;
 
@@ -201,11 +205,11 @@ fn switchNcolsDst(comptime T: type, comptime A: type, x: ?*const anyopaque, y: ?
     }
 }
 
-/// Ports `mul_mat_vec_f_cuda` (mmvf.cu:609 @cd959bae9). Note its
+/// Ports `mul_mat_vec_f_cuda` (mmvf.cu:665 @b1b770d90). Note its
 /// `stride_col_dst` parameter is `int`, unlike its neighbours.
 fn mulMatVecFCuda(comptime T: type, x: ?*const anyopaque, y: ?*const f32, ids: ?*const i32, fusion: common.MmFusionArgsDevice, dst: ?*f32, ncols: i64, nrows: i64, ncols_dst: i64, stride_row: i64, stride_col_y: i64, stride_col_dst: c_int, nchannels_x: i64, nchannels_y: i64, nchannels_dst: i64, stride_channel_x: i64, stride_channel_y: i64, stride_channel_dst: i64, nsamples_x: i64, nsamples_dst: i64, stride_sample_x: i64, stride_sample_y: i64, stride_sample_dst: i64, ids_stride: i64, prec: c.enum_ggml_prec, stream: cu.cudaStream_t) void {
     if (T == half) {
-        if (prec == c.GGML_PREC_DEFAULT) {
+        if (prec == c.GGML_PREC_UNDEFINED) {
             switchNcolsDst(T, half, x, y, ids, fusion, dst, ncols, nrows, ncols_dst, stride_row, stride_col_y, stride_col_dst, nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y, stride_channel_dst, nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, ids_stride, stream);
             return;
         }
@@ -213,7 +217,7 @@ fn mulMatVecFCuda(comptime T: type, x: ?*const anyopaque, y: ?*const f32, ids: ?
     switchNcolsDst(T, f32, x, y, ids, fusion, dst, ncols, nrows, ncols_dst, stride_row, stride_col_y, stride_col_dst, nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y, stride_channel_dst, nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, ids_stride, stream);
 }
 
-/// Ports `ggml_cuda_mul_mat_vec_f` (mmvf.cu:633 @cd959bae9).
+/// Ports `ggml_cuda_mul_mat_vec_f` (mmvf.cu:689 @b1b770d90).
 pub fn mulMatVecF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, ids: ?*const Tensor, dst: *Tensor, fusion: ?*const common.MmFusionArgsHost) void {
     impl.assert(src1.type == c.GGML_TYPE_F32, "        src1->type == GGML_TYPE_F32");
     impl.assert(ids == null or ids.?.type == c.GGML_TYPE_I32, "!ids ||  ids->type == GGML_TYPE_I32");
@@ -241,9 +245,12 @@ pub fn mulMatVecF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor
     impl.assert(src1.nb[0] == ts_src1, "        nb10       == ts_src1");
     impl.assert(ids == null or ids.?.nb[0] == c.ggml_type_size(ids.?.type), "!ids || ids->nb[0] == ggml_type_size(ids->type)");
     impl.assert(dst.nb[0] == ts_dst, "        nb0        == ts_dst");
+    impl.assert(src0.type != c.GGML_TYPE_F8_E4M3 or @intFromPtr(src0.data) % @alignOf(u16) == 0, "src0->type != GGML_TYPE_F8_E4M3 || (uintptr_t) src0->data % alignof(uint16_t) == 0");
 
     const x = common.info().devices[@intCast(common.getDevice())].cc;
-    const prec: c.enum_ggml_prec = if (common.fastFp16Available(x)) @intCast(dst.op_params[0]) else c.GGML_PREC_F32;
+    // the fused GLU path gets the GLU node as dst, which carries no matmul precision, so it accumulates in F32
+    const fused_gate = if (fusion) |f| f.gate != null else false;
+    const prec: c.enum_ggml_prec = if (common.fastFp16Available(x) and !fused_gate) c.ggml_prec_get_acc(dst) else c.GGML_PREC_F32;
 
     const src1_d: ?*const f32 = @ptrCast(@alignCast(src1.data));
     const ids_d: ?*const i32 = if (ids) |i| @ptrCast(@alignCast(i.data)) else null;
@@ -254,6 +261,7 @@ pub fn mulMatVecF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor
     if (fusion) |f| {
         impl.assert(ids == null or dst.ne[2] == 1, " !ids || dst->ne[2] == 1");
         impl.assert(ids != null or dst.ne[1] == 1, "  ids || dst->ne[1] == 1");
+        impl.assert((f.x_scale == null and f.gate_scale == null) or src0.type == c.GGML_TYPE_F8_E4M3, "(fusion->x_scale == nullptr && fusion->gate_scale == nullptr) || src0->type == GGML_TYPE_F8_E4M3");
         if (f.x_bias) |b| {
             impl.assert(b.type == c.GGML_TYPE_F32, "fusion->x_bias->type == GGML_TYPE_F32");
             impl.assert(b.ne[0] == dst.ne[0], "fusion->x_bias->ne[0] == dst->ne[0]");
@@ -262,6 +270,7 @@ pub fn mulMatVecF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor
         }
         if (f.gate) |g| {
             impl.assert(g.type == src0.type and c.ggml_are_same_stride(g, src0), "fusion->gate->type == src0->type && ggml_are_same_stride(fusion->gate, src0)");
+            impl.assert(src0.type != c.GGML_TYPE_F8_E4M3 or @intFromPtr(g.data) % @alignOf(u16) == 0, "src0->type != GGML_TYPE_F8_E4M3 || (uintptr_t) fusion->gate->data % alignof(uint16_t) == 0");
             fusion_local.gate = g.data;
         }
         if (f.gate_bias) |b| {
@@ -269,6 +278,19 @@ pub fn mulMatVecF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor
             impl.assert(b.ne[0] == dst.ne[0], "fusion->gate_bias->ne[0] == dst->ne[0]");
             impl.assert(ids == null or b.ne[1] == src0.ne[2], "!ids || fusion->gate_bias->ne[1] == src0->ne[2]");
             fusion_local.gate_bias = b.data;
+        }
+        const n_scale: i64 = if (ids != null) src0.ne[2] else 1;
+        if (f.x_scale) |sc| {
+            impl.assert(sc.type == c.GGML_TYPE_F32, "fusion->x_scale->type == GGML_TYPE_F32");
+            impl.assert(c.ggml_is_contiguous(sc), "ggml_is_contiguous(fusion->x_scale)");
+            impl.assert(c.ggml_nelements(sc) == n_scale, "ggml_nelements(fusion->x_scale) == (ids ? src0->ne[2] : 1)");
+            fusion_local.x_scale = sc.data;
+        }
+        if (f.gate_scale) |sc| {
+            impl.assert(sc.type == c.GGML_TYPE_F32, "fusion->gate_scale->type == GGML_TYPE_F32");
+            impl.assert(c.ggml_is_contiguous(sc), "ggml_is_contiguous(fusion->gate_scale)");
+            impl.assert(c.ggml_nelements(sc) == n_scale, "ggml_nelements(fusion->gate_scale) == (ids ? src0->ne[2] : 1)");
+            fusion_local.gate_scale = sc.data;
         }
         fusion_local.glu_op = f.glu_op;
         fusion_local.glu_limit = f.glu_limit;
@@ -301,6 +323,7 @@ pub fn mulMatVecF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor
         c.GGML_TYPE_F32 => mulMatVecFCuda(f32, src0.data, src1_d, ids_d, fusion_local, dst_d, ne00, ne01, ncols_dst, s01, stride_col_y, i32Of(stride_col_dst), ne02, nchannels_y, nchannels_dst, s02, stride_channel_y, stride_channel_dst, ne03, ne3, s03, s13, s3, ids_stride, prec, stream),
         c.GGML_TYPE_F16 => mulMatVecFCuda(half, src0.data, src1_d, ids_d, fusion_local, dst_d, ne00, ne01, ncols_dst, s01, stride_col_y, i32Of(stride_col_dst), ne02, nchannels_y, nchannels_dst, s02, stride_channel_y, stride_channel_dst, ne03, ne3, s03, s13, s3, ids_stride, prec, stream),
         c.GGML_TYPE_BF16 => mulMatVecFCuda(bf16, src0.data, src1_d, ids_d, fusion_local, dst_d, ne00, ne01, ncols_dst, s01, stride_col_y, i32Of(stride_col_dst), ne02, nchannels_y, nchannels_dst, s02, stride_channel_y, stride_channel_dst, ne03, ne3, s03, s13, s3, ids_stride, prec, stream),
+        c.GGML_TYPE_F8_E4M3 => mulMatVecFCuda(fp8_e4m3, src0.data, src1_d, ids_d, fusion_local, dst_d, ne00, ne01, ncols_dst, s01, stride_col_y, i32Of(stride_col_dst), ne02, nchannels_y, nchannels_dst, s02, stride_channel_y, stride_channel_dst, ne03, ne3, s03, s13, s3, ids_stride, prec, stream),
         else => {
             impl.logError("unsupported type: %s\n", .{c.ggml_type_name(src0.type)});
             impl.abort("unsupported type");
@@ -308,22 +331,23 @@ pub fn mulMatVecF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor
     }
 }
 
-/// Ports `ggml_cuda_should_use_mmvf` (mmvf.cu:791 @cd959bae9), NVIDIA arms;
-/// every other vendor's arm ends in `ne11 <= MMVF_MAX_BATCH_SIZE`. Since
-/// v0.6.0 it takes the warp size, to ask `mmf.zig` whether MMF can take a
-/// small F16 or BF16 matrix: MMF needs whole row tiles, and where it
-/// cannot, MMVF still beats cuBLAS at a small batch.
-pub fn shouldUseMmvf(ty: c.enum_ggml_type, x: c_int, warp_size: c_int, src0_ne: *const [4]i64, src0_nb: *const [4]usize, ne11: i64) bool {
+/// Ports `ggml_cuda_should_use_mmvf` (mmvf.cu:869 @b1b770d90), NVIDIA arms;
+/// every other vendor's arm ends in `ne11 <= MMVF_MAX_BATCH_SIZE`. It takes
+/// the warp size to ask `mmf.zig` whether MMF can take a small F16 or BF16
+/// matrix: MMF needs whole row tiles, and where it cannot, MMVF still beats
+/// cuBLAS at a small batch. Since v1.0.0 it takes the tensor, and asks
+/// `ggml_cuda_is_aligned` about its data pointer as well as its strides.
+pub fn shouldUseMmvf(src0: *const Tensor, x: c_int, warp_size: c_int, ne11: i64) bool {
+    const ty = src0.type;
+    const src0_ne = &src0.ne;
+    const src0_nb = &src0.nb;
+
     if (@rem(src0_ne[0], 2) != 0) return false;
 
     const ts = c.ggml_type_size(ty);
     if (src0_nb[0] != ts) return false;
 
-    // Pointers not aligned to the size of half2/nv_bfloat162/float2 would
-    // result in a crash:
-    for (1..c.GGML_MAX_DIMS) |i| {
-        if (src0_nb[i] % (2 * ts) != 0) return false;
-    }
+    if (!common.isAligned(src0, 2 * ts)) return false;
 
     switch (ty) {
         c.GGML_TYPE_F32 => {
@@ -355,6 +379,18 @@ pub fn shouldUseMmvf(ty: c.enum_ggml_type, x: c_int, warp_size: c_int, src0_ne: 
                 if (src0_small and !mmf.shouldUseMmf(ty, x, warp_size, src0_ne, src0_nb, @truncate(ne11), false)) {
                     return ne11 <= max_batch_size;
                 }
+                // MMF tiles 32 rows per block, so a matrix of few rows leaves most SMs idle while MMVF runs a block
+                // per row: with a long enough K, MMVF wins for the small batches of speculative decoding as long as
+                // its work (rows x batch) stays small relative to the SM count, with a budget that grows with K
+                if (src0_small and src0_ne[0] >= 1024) {
+                    const blackwell = x >= common.cc.blackwell;
+                    const nsm: i64 = common.info().devices[@intCast(common.getDevice())].nsm;
+                    const max_ncols: i64 = if (blackwell) max_batch_size else 5;
+                    const max_k: i64 = if (blackwell) 6144 else 4096;
+                    if (ne11 <= max_ncols and src0_ne[1] * ne11 * 256 <= nsm * @min(src0_ne[0], max_k)) {
+                        return true;
+                    }
+                }
                 if (common.ampereMmaAvailable(x)) return src0_small and ne11 == 1;
                 if (x >= common.cc.ada_lovelace) return src0_small and ne11 <= 4;
                 if (common.bf16MmaHardwareAvailable(x)) return src0_small and ne11 <= 3;
@@ -362,6 +398,7 @@ pub fn shouldUseMmvf(ty: c.enum_ggml_type, x: c_int, warp_size: c_int, src0_ne: 
             }
             return ne11 <= max_batch_size;
         },
+        c.GGML_TYPE_F8_E4M3 => return ne11 <= max_batch_size,
         else => return false,
     }
 }

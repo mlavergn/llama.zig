@@ -1,0 +1,1 @@
+{% macro m(a, b) %}[{{ a }}|{{ b }}|{{ caller() }}]{% endmacro %}{% call m(*['x'], **{'b': 'y'}) %}body{% endcall %}

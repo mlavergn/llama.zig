@@ -5,7 +5,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/common/speculative.cpp` and
-//! `llama.cpp/common/speculative.h` (v0.9.0, `cd959bae9`): the type names,
+//! `llama.cpp/common/speculative.h` (v1.0.0, `b1b770d90`): the type names,
 //! the parameters' helpers, the four n-gram drafters, the driver and its
 //! statistics. The four drafters that run a second model are
 //! `speculative_draft.zig`; the n-gram stores under them are
@@ -104,7 +104,7 @@ pub const ext = struct {
 };
 
 // Ports `SPC_DBG`, `SPC_TRC`, `SPC_INF`, `SPC_WRN`, `SPC_ERR`
-// (speculative.cpp:25, 26, 27, 28, 29 @cd959bae9): the `LOG_*` macros with
+// (speculative.cpp:23, 24, 25, 26, 27 @b1b770d90): the `LOG_*` macros with
 // the calling function's name, as `spec %12.*s: `.
 
 pub fn spcDbg(comptime func: [*:0]const u8, comptime fmt: []const u8, args: anytype) void {
@@ -146,8 +146,8 @@ fn throwInvalid(comptime fmt: [*:0]const u8, args: anytype) InitError {
     return error.InvalidArgument;
 }
 
-/// Ports `common_speculative_type_from_name_map` (speculative.cpp:74
-/// @cd959bae9), a `std::map`: sorted by name.
+/// Ports `common_speculative_type_from_name_map` (speculative.cpp:72
+/// @b1b770d90), a `std::map`: sorted by name.
 const type_from_name_map = [_]struct { [:0]const u8, Type }{
     .{ "draft-dflash", .draft_dflash },
     .{ "draft-dspark", .draft_dspark },
@@ -169,8 +169,8 @@ fn findType(name: []const u8) ?Type {
     return null;
 }
 
-/// Ports `common_speculative_get_devices_str` (speculative.cpp:88
-/// @cd959bae9): the named devices, or `default`.
+/// Ports `common_speculative_get_devices_str` (speculative.cpp:86
+/// @b1b770d90): the named devices, or `default`.
 ///
 /// Return: the text, NUL-terminated, `c_allocator`'s.
 pub fn devicesStr(devices: []const c.ggml_backend_dev_t) [:0]u8 {
@@ -184,8 +184,8 @@ pub fn devicesStr(devices: []const c.ggml_backend_dev_t) [:0]u8 {
     return result.toOwnedSliceSentinel(gpa, 0) catch oom();
 }
 
-/// Ports `common_speculative_are_compatible` (speculative.cpp:108
-/// @cd959bae9), exported from `speculative.h` since v0.6.0: the draft's vocabulary must be the target's, give or take
+/// Ports `common_speculative_are_compatible` (speculative.cpp:106
+/// @b1b770d90), exported from `speculative.h` since v0.6.0: the draft's vocabulary must be the target's, give or take
 /// `SPEC_VOCAB_MAX_SIZE_DIFFERENCE` tokens at the end.
 pub fn areCompatible(model_tgt: ?*const c.llama_model, model_dft: ?*const c.llama_model) bool {
     const func = "common_speculative_are_compatible";
@@ -285,7 +285,7 @@ pub fn freeCandidates(q: *Candidates) void {
     q.deinit(gpa);
 }
 
-/// Ports `common_speculative_draft_params` (speculative.h:56 @cd959bae9):
+/// Ports `common_speculative_draft_params` (speculative.h:56 @b1b770d90):
 /// what one sequence asks of a `draft` call.
 pub const DraftParams = struct {
     // this flag is used to chain the drafts through all the available implementations
@@ -315,7 +315,7 @@ pub const DraftParams = struct {
     seed: u32 = c.LLAMA_DEFAULT_SEED,
 };
 
-/// Ports `common_speculative_impl` (speculative.cpp:179 @cd959bae9): what
+/// Ports `common_speculative_impl` (speculative.cpp:177 @b1b770d90): what
 /// every drafter shares -- its type, its limit and its statistics.
 pub const Base = struct {
     type: Type,
@@ -341,13 +341,13 @@ pub const Base = struct {
     t_accept_us: i64 = 0, // total time spent in accumulation of this implementation in microseconds.
 };
 
-/// `common_time_meas` (common/common.cpp:70 @cd959bae9): the start, or -1
+/// `common_time_meas` (common/common.cpp:70 @b1b770d90): the start, or -1
 /// when disabled.
 fn timeStart(disable: bool) i64 {
     return if (disable) -1 else c.ggml_time_us();
 }
 
-/// The `common_time_meas` destructor (common/common.cpp:72 @cd959bae9).
+/// The `common_time_meas` destructor (common/common.cpp:72 @b1b770d90).
 fn timeEnd(t_start_us: i64, t_acc: *i64) void {
     if (t_start_us >= 0) t_acc.* += c.ggml_time_us() - t_start_us;
 }
@@ -355,8 +355,8 @@ fn timeEnd(t_start_us: i64, t_acc: *i64) void {
 // -----------------------------------------------------------------------------
 // the n-gram drafters
 
-/// Ports `common_speculative_impl_ngram_simple` (speculative.cpp:2008
-/// @cd959bae9): self-speculation by looking the last n-gram up in the
+/// Ports `common_speculative_impl_ngram_simple` (speculative.cpp:2059
+/// @b1b770d90): self-speculation by looking the last n-gram up in the
 /// history.
 pub const NgramSimple = struct {
     params: params_mod.SpeculativeNgramMap,
@@ -364,8 +364,8 @@ pub const NgramSimple = struct {
     // shared across all sequences
     config: ngram_map.SimpleConfig,
 
-    /// Ports `common_speculative_impl_ngram_simple` (speculative.cpp:2014
-    /// @cd959bae9), the constructor.
+    /// Ports `common_speculative_impl_ngram_simple` (speculative.cpp:2065
+    /// @b1b770d90), the constructor.
     fn init(params: *const SpecParams, config: ngram_map.SimpleConfig) NgramSimple {
         const func = "common_speculative_impl_ngram_simple";
         const p = params.ngram_simple;
@@ -376,15 +376,15 @@ pub const NgramSimple = struct {
 
     fn deinit(_: *NgramSimple) void {}
 
-    /// Ports `begin` (speculative.cpp:2026 @cd959bae9): nothing to do.
+    /// Ports `begin` (speculative.cpp:2077 @b1b770d90): nothing to do.
     fn begin(_: *NgramSimple, _: *Base, _: c.llama_seq_id, _: []const c.llama_token) void {}
 
-    /// Ports `process` (speculative.cpp:2030 @cd959bae9): nothing to do.
+    /// Ports `process` (speculative.cpp:2081 @b1b770d90): nothing to do.
     fn process(_: *NgramSimple, _: *Base, _: *const common.Batch) bool {
         return true;
     }
 
-    /// Ports `draft` (speculative.cpp:2035 @cd959bae9).
+    /// Ports `draft` (speculative.cpp:2086 @b1b770d90).
     fn draft(self: *NgramSimple, base: *Base, dparams: []DraftParams) void {
         std.debug.assert(dparams.len == base.n_seq);
         for (dparams) |*dp| {
@@ -396,18 +396,18 @@ pub const NgramSimple = struct {
         }
     }
 
-    /// Ports `accept` (speculative.cpp:2048 @cd959bae9): nothing to do.
+    /// Ports `accept` (speculative.cpp:2099 @b1b770d90): nothing to do.
     fn accept(_: *NgramSimple, _: *Base, _: c.llama_seq_id, _: u16, _: bool) void {}
 };
 
-/// Ports `common_speculative_impl_ngram_map_k` (speculative.cpp:2053
-/// @cd959bae9): `ngram-map-k` and `ngram-map-k4v`, one map per sequence.
+/// Ports `common_speculative_impl_ngram_map_k` (speculative.cpp:2104
+/// @b1b770d90): `ngram-map-k` and `ngram-map-k4v`, one map per sequence.
 pub const NgramMapK = struct {
     // n_seq configs
     config: []ngram_map.Map,
 
-    /// Ports `common_speculative_impl_ngram_map_k` (speculative.cpp:2057
-    /// @cd959bae9), the constructor: `n_seq` copies of `config`.
+    /// Ports `common_speculative_impl_ngram_map_k` (speculative.cpp:2108
+    /// @b1b770d90), the constructor: `n_seq` copies of `config`.
     fn init(base: *const Base, config: *const ngram_map.Map) NgramMapK {
         const func = "common_speculative_impl_ngram_map_k";
         const maps = gpa.alloc(ngram_map.Map, base.n_seq) catch oom();
@@ -423,19 +423,19 @@ pub const NgramMapK = struct {
         gpa.free(self.config);
     }
 
-    /// Ports `begin` (speculative.cpp:2072 @cd959bae9).
+    /// Ports `begin` (speculative.cpp:2123 @b1b770d90).
     fn begin(self: *NgramMapK, base: *Base, seq_id: c.llama_seq_id, prompt: []const c.llama_token) void {
         assertC(seq_id < @as(c.llama_seq_id, @intCast(base.n_seq)), 2073, "seq_id < (llama_seq_id) n_seq");
 
         ngram_map.begin(&self.config[@intCast(seq_id)], prompt);
     }
 
-    /// Ports `process` (speculative.cpp:2078 @cd959bae9): nothing to do.
+    /// Ports `process` (speculative.cpp:2129 @b1b770d90): nothing to do.
     fn process(_: *NgramMapK, _: *Base, _: *const common.Batch) bool {
         return true;
     }
 
-    /// Ports `draft` (speculative.cpp:2083 @cd959bae9).
+    /// Ports `draft` (speculative.cpp:2134 @b1b770d90).
     fn draft(self: *NgramMapK, base: *Base, dparams: []DraftParams) void {
         std.debug.assert(dparams.len == base.n_seq);
         for (dparams, 0..) |*dp, s| {
@@ -444,7 +444,7 @@ pub const NgramMapK = struct {
         }
     }
 
-    /// Ports `accept` (speculative.cpp:2096 @cd959bae9).
+    /// Ports `accept` (speculative.cpp:2147 @b1b770d90).
     fn accept(self: *NgramMapK, _: *Base, seq_id: c.llama_seq_id, n_accepted: u16, is_other: bool) void {
         assertC(seq_id < @as(c.llama_seq_id, @intCast(self.config.len)), 2097, "(seq_id < (llama_seq_id) config.size())");
 
@@ -454,8 +454,8 @@ pub const NgramMapK = struct {
     }
 };
 
-/// Ports `common_speculative_impl_ngram_mod` (speculative.cpp:2107
-/// @cd959bae9): one hashed n-gram table shared by every sequence.
+/// Ports `common_speculative_impl_ngram_mod` (speculative.cpp:2158
+/// @b1b770d90): one hashed n-gram table shared by every sequence.
 pub const NgramMod = struct {
     params: params_mod.SpeculativeNgramMod,
 
@@ -467,7 +467,7 @@ pub const NgramMod = struct {
 
     sinfos: []SeqInfo,
 
-    /// Ports `seq_info` (speculative.cpp:2116 @cd959bae9), a member of
+    /// Ports `seq_info` (speculative.cpp:2167 @b1b770d90), a member of
     /// `common_speculative_impl_ngram_mod`.
     const SeqInfo = struct {
         // the last position in the prompt that was added to the ngram container
@@ -480,8 +480,8 @@ pub const NgramMod = struct {
         n_low: c_int = 0,
     };
 
-    /// Ports `common_speculative_impl_ngram_mod` (speculative.cpp:2129
-    /// @cd959bae9), the constructor.
+    /// Ports `common_speculative_impl_ngram_mod` (speculative.cpp:2180
+    /// @b1b770d90), the constructor.
     fn init(base: *const Base, params: *const SpecParams) NgramMod {
         const func = "common_speculative_impl_ngram_mod";
         const p = params.ngram_mod;
@@ -507,7 +507,7 @@ pub const NgramMod = struct {
         gpa.free(self.sinfos);
     }
 
-    /// Ports `begin` (speculative.cpp:2152 @cd959bae9): the prompt's
+    /// Ports `begin` (speculative.cpp:2203 @b1b770d90): the prompt's
     /// n-grams into the table, which resets past a quarter full.
     fn begin(self: *NgramMod, _: *Base, seq_id: c.llama_seq_id, prompt: []const c.llama_token) void {
         const sinfo = &self.sinfos[@intCast(seq_id)];
@@ -534,7 +534,7 @@ pub const NgramMod = struct {
         }
     }
 
-    /// Ports `draft_one` (speculative.cpp:2180 @cd959bae9), a member of
+    /// Ports `draft_one` (speculative.cpp:2231 @b1b770d90), a member of
     /// `common_speculative_impl_ngram_mod`.
     fn draftOne(self: *NgramMod, seq_id: usize, dparams: *DraftParams) void {
         const sinfo = &self.sinfos[seq_id];
@@ -588,12 +588,12 @@ pub const NgramMod = struct {
         sinfo.n_draft_last = result.items.len;
     }
 
-    /// Ports `process` (speculative.cpp:2236 @cd959bae9): nothing to do.
+    /// Ports `process` (speculative.cpp:2287 @b1b770d90): nothing to do.
     fn process(_: *NgramMod, _: *Base, _: *const common.Batch) bool {
         return true;
     }
 
-    /// Ports `draft` (speculative.cpp:2241 @cd959bae9).
+    /// Ports `draft` (speculative.cpp:2292 @b1b770d90).
     fn draft(self: *NgramMod, base: *Base, dparams: []DraftParams) void {
         std.debug.assert(dparams.len == base.n_seq);
         for (dparams, 0..) |*dp, s| {
@@ -602,7 +602,7 @@ pub const NgramMod = struct {
         }
     }
 
-    /// Ports `accept` (speculative.cpp:2254 @cd959bae9): five rounds in a
+    /// Ports `accept` (speculative.cpp:2305 @b1b770d90): five rounds in a
     /// row under a quarter accepted reset the table.
     fn accept(self: *NgramMod, _: *Base, seq_id: c.llama_seq_id, n_accepted: u16, is_other: bool) void {
         if (is_other) return;
@@ -630,8 +630,8 @@ pub const NgramMod = struct {
     }
 };
 
-/// Ports `common_speculative_impl_ngram_cache` (speculative.cpp:2282
-/// @cd959bae9): the three-level n-gram cache -- context, dynamic, static.
+/// Ports `common_speculative_impl_ngram_cache` (speculative.cpp:2333
+/// @b1b770d90): the three-level n-gram cache -- context, dynamic, static.
 pub const NgramCache = struct {
     params: params_mod.SpeculativeNgramCache,
 
@@ -639,7 +639,7 @@ pub const NgramCache = struct {
 
     sinfos: []SeqInfo,
 
-    /// Ports `seq_info` (speculative.cpp:2287 @cd959bae9), a member of
+    /// Ports `seq_info` (speculative.cpp:2338 @b1b770d90), a member of
     /// `common_speculative_impl_ngram_cache`.
     const SeqInfo = struct {
         cache_size: usize = 0, // number of tokens in n-gram cache
@@ -649,8 +649,8 @@ pub const NgramCache = struct {
         ngram_cache_static: ngram_cache.Cache,
     };
 
-    /// Ports `common_speculative_impl_ngram_cache` (speculative.cpp:2297
-    /// @cd959bae9), the constructor: each sequence gets a copy of the
+    /// Ports `common_speculative_impl_ngram_cache` (speculative.cpp:2348
+    /// @b1b770d90), the constructor: each sequence gets a copy of the
     /// static and dynamic caches the paths name; a dynamic cache that does
     /// not exist yet starts empty, and the destructor creates it.
     fn init(base: *const Base, params: *const SpecParams, n_draft: u16) NgramCache {
@@ -677,7 +677,7 @@ pub const NgramCache = struct {
             var loaded = ngram_cache.load(gpa, path) catch |e| switch (e) {
                 error.OpenFailed => {
                     spcErr(func, "failed to open static lookup cache: %s\n", .{path.ptr});
-                    _ = c.ggml_abort("speculative.cpp", 2324, "Couldn't read static lookup cache");
+                    _ = c.ggml_abort("speculative.cpp", 2375, "Couldn't read static lookup cache");
                     unreachable;
                 },
                 error.OutOfMemory => oom(),
@@ -711,7 +711,7 @@ pub const NgramCache = struct {
                         spcWrn(func, "dynamic lookup cache file does not exist: %s, starting with empty cache\n", .{path.ptr});
                     } else {
                         spcErr(func, "failed to open dynamic lookup cache: %s\n", .{path.ptr});
-                        _ = c.ggml_abort("speculative.cpp", 2344, "Couldn't read dynamic lookup cache");
+                        _ = c.ggml_abort("speculative.cpp", 2395, "Couldn't read dynamic lookup cache");
                         unreachable;
                     }
                 },
@@ -722,8 +722,8 @@ pub const NgramCache = struct {
         return .{ .params = params.ngram_cache, .n_draft = n_draft, .sinfos = sinfos };
     }
 
-    /// Ports the destructor of `common_speculative_impl_ngram_cache` (speculative.cpp:2350
-    /// @cd959bae9): the sequences' contexts merged into the dynamic cache,
+    /// Ports the destructor of `common_speculative_impl_ngram_cache` (speculative.cpp:2401
+    /// @b1b770d90): the sequences' contexts merged into the dynamic cache,
     /// which is saved, when a path names it.
     fn deinit(self: *NgramCache) void {
         if (self.params.lookup_cache_dynamic.len != 0 and self.sinfos.len != 0) {
@@ -746,12 +746,12 @@ pub const NgramCache = struct {
         gpa.free(self.sinfos);
     }
 
-    /// Ports `begin` (speculative.cpp:2364 @cd959bae9).
+    /// Ports `begin` (speculative.cpp:2415 @b1b770d90).
     fn begin(self: *NgramCache, _: *Base, seq_id: c.llama_seq_id, _: []const c.llama_token) void {
         self.sinfos[@intCast(seq_id)].cache_size = 0;
     }
 
-    /// Ports `draft_one` (speculative.cpp:2368 @cd959bae9), a member of
+    /// Ports `draft_one` (speculative.cpp:2419 @b1b770d90), a member of
     /// `common_speculative_impl_ngram_cache`.
     fn draftOne(self: *NgramCache, seq_id: usize, dparams: *DraftParams) void {
         const sinfo = &self.sinfos[seq_id];
@@ -782,12 +782,12 @@ pub const NgramCache = struct {
         }
     }
 
-    /// Ports `process` (speculative.cpp:2407 @cd959bae9): nothing to do.
+    /// Ports `process` (speculative.cpp:2458 @b1b770d90): nothing to do.
     fn process(_: *NgramCache, _: *Base, _: *const common.Batch) bool {
         return true;
     }
 
-    /// Ports `draft` (speculative.cpp:2412 @cd959bae9).
+    /// Ports `draft` (speculative.cpp:2463 @b1b770d90).
     fn draft(self: *NgramCache, base: *Base, dparams: []DraftParams) void {
         std.debug.assert(dparams.len == base.n_seq);
         for (dparams, 0..) |*dp, s| {
@@ -796,7 +796,7 @@ pub const NgramCache = struct {
         }
     }
 
-    /// Ports `accept` (speculative.cpp:2425 @cd959bae9): nothing to do.
+    /// Ports `accept` (speculative.cpp:2476 @b1b770d90): nothing to do.
     fn accept(_: *NgramCache, _: *Base, _: c.llama_seq_id, _: u16, _: bool) void {}
 };
 
@@ -852,7 +852,7 @@ pub const Impl = struct {
         }
     }
 
-    /// `get_state` (speculative.cpp:216 @cd959bae9): only EAGLE3 and MTP
+    /// `get_state` (speculative.cpp:214 @b1b770d90): only EAGLE3 and MTP
     /// have one.
     fn getState(self: *Impl, seq_id: c.llama_seq_id, data: *std.ArrayList(u8)) bool {
         return switch (self.kind) {
@@ -862,7 +862,7 @@ pub const Impl = struct {
         };
     }
 
-    /// `set_state` (speculative.cpp:217 @cd959bae9).
+    /// `set_state` (speculative.cpp:215 @b1b770d90).
     fn setState(self: *Impl, seq_id: c.llama_seq_id, data: []const u8) void {
         switch (self.kind) {
             .eagle3 => |*k| k.setState(&self.base, seq_id, data),
@@ -872,7 +872,7 @@ pub const Impl = struct {
     }
 };
 
-/// Ports `common_speculative` (speculative.cpp:2430 @cd959bae9).
+/// Ports `common_speculative` (speculative.cpp:2481 @b1b770d90).
 pub const Speculative = struct {
     dparams: []DraftParams,
 
@@ -885,7 +885,7 @@ pub const Speculative = struct {
     synth_probs: std.ArrayList(f64) = .empty,
 };
 
-/// Ports `get_common_ngram_map` (speculative.cpp:2442 @cd959bae9).
+/// Ports `get_common_ngram_map` (speculative.cpp:2493 @b1b770d90).
 fn getCommonNgramMap(t: Type, config: params_mod.SpeculativeNgramMap) ngram_map.Map {
     const size_key = config.size_n;
     const size_value = config.size_m;
@@ -895,15 +895,15 @@ fn getCommonNgramMap(t: Type, config: params_mod.SpeculativeNgramMap) ngram_map.
     return ngram_map.Map.init(gpa, size_key, size_value, key_only, min_hits) catch oom();
 }
 
-/// Ports `create_state_ngram_cache` (speculative.cpp:2453 @cd959bae9).
+/// Ports `create_state_ngram_cache` (speculative.cpp:2504 @b1b770d90).
 fn createStateNgramCache(base: *const Base, params: *const SpecParams) NgramCache {
     const n_draft: u16 = 8; // TODO get from config?
 
     return NgramCache.init(base, params, n_draft);
 }
 
-/// Ports `common_speculative_type_name_str` (speculative.cpp:2461
-/// @cd959bae9): the types, comma-separated.
+/// Ports `common_speculative_type_name_str` (speculative.cpp:2512
+/// @b1b770d90): the types, comma-separated.
 ///
 /// Return: the text, the allocator's.
 pub fn typeNameStr(a: std.mem.Allocator, types: []const Type) ![:0]u8 {
@@ -915,8 +915,8 @@ pub fn typeNameStr(a: std.mem.Allocator, types: []const Type) ![:0]u8 {
     return result.toOwnedSliceSentinel(a, 0);
 }
 
-/// Ports `common_speculative_all_types_str` (speculative.cpp:2473
-/// @cd959bae9): every type, `none` included, comma-separated.
+/// Ports `common_speculative_all_types_str` (speculative.cpp:2524
+/// @b1b770d90): every type, `none` included, comma-separated.
 pub fn allTypesStr() [:0]const u8 {
     return comptime blk: {
         var s: [:0]const u8 = "";
@@ -929,7 +929,7 @@ pub fn allTypesStr() [:0]const u8 {
     };
 }
 
-/// Ports `common_speculative_type_to_str` (speculative.cpp:2485 @cd959bae9).
+/// Ports `common_speculative_type_to_str` (speculative.cpp:2536 @b1b770d90).
 pub fn typeToStr(t: Type) [:0]const u8 {
     return switch (t) {
         .none => "none",
@@ -947,8 +947,8 @@ pub fn typeToStr(t: Type) [:0]const u8 {
     };
 }
 
-/// Ports `common_speculative_types_from_names` (speculative.cpp:2502
-/// @cd959bae9): `none` anywhere means `{ none }`; an unknown name throws
+/// Ports `common_speculative_types_from_names` (speculative.cpp:2553
+/// @b1b770d90): `none` anywhere means `{ none }`; an unknown name throws
 /// `std::invalid_argument`.
 ///
 /// Return: the types, the allocator's.
@@ -973,16 +973,16 @@ pub fn typesFromNames(a: std.mem.Allocator, names: []const []const u8) ![]Type {
     return types.toOwnedSlice(a);
 }
 
-/// Ports `common_speculative_type_from_name` (speculative.cpp:2521
-/// @cd959bae9).
+/// Ports `common_speculative_type_from_name` (speculative.cpp:2572
+/// @b1b770d90).
 ///
 /// Return: the type, or `.count` for an unknown name.
 pub fn typeFromName(name: []const u8) Type {
     return findType(name) orelse .count;
 }
 
-/// Ports `common_speculative_types_from_gguf` (speculative.cpp:2529
-/// @cd959bae9): the speculative type a draft model's metadata implies --
+/// Ports `common_speculative_types_from_gguf` (speculative.cpp:2580
+/// @b1b770d90): the speculative type a draft model's metadata implies --
 /// MTP for a model with next-token prediction layers, DFlash or DSpark for
 /// a `dflash` model -- or none.
 ///
@@ -1015,15 +1015,15 @@ pub fn typesFromGguf(a: std.mem.Allocator, path: [:0]const u8) ![]Type {
     return a.dupe(Type, &.{t});
 }
 
-/// Ports `common_get_enabled_speculative_configs` (speculative.cpp:2566
-/// @cd959bae9): the types as a bit set.
+/// Ports `common_get_enabled_speculative_configs` (speculative.cpp:2617
+/// @b1b770d90): the types as a bit set.
 fn getEnabledConfigs(configs: []const Type) u32 {
     var result: u32 = 0;
     for (configs) |t| result |= @as(u32, 1) << @intCast(@backingInt(t));
     return result;
 }
 
-/// Ports `common_speculative_n_max` (speculative.cpp:2574 @cd959bae9), the
+/// Ports `common_speculative_n_max` (speculative.cpp:2625 @b1b770d90), the
 /// overload over parameters: the longest draft any configured type asks for.
 pub fn nMaxParams(spec: *const SpecParams) i32 {
     var n_max: i32 = 0;
@@ -1043,7 +1043,7 @@ pub fn nMaxParams(spec: *const SpecParams) i32 {
     return n_max;
 }
 
-/// Ports `common_speculative_n_max` (speculative.cpp:2610 @cd959bae9), the
+/// Ports `common_speculative_n_max` (speculative.cpp:2661 @b1b770d90), the
 /// overload over a context: the longest draft any drafter will produce.
 pub fn nMax(spec: ?*const Speculative) i32 {
     var n_max: i32 = 0;
@@ -1055,8 +1055,8 @@ pub fn nMax(spec: ?*const Speculative) i32 {
     return n_max;
 }
 
-/// Ports `common_speculative_synth_rates_resolve` (speculative.cpp:2624
-/// @cd959bae9): the unconditional synthetic acceptance rates, given as a
+/// Ports `common_speculative_synth_rates_resolve` (speculative.cpp:2675
+/// @b1b770d90): the unconditional synthetic acceptance rates, given as a
 /// list or solved from a mean length by bisection.
 ///
 /// Return: the rates, the allocator's; empty when synthetic acceptance is
@@ -1129,17 +1129,17 @@ pub fn synthRatesResolve(a: std.mem.Allocator, spec: *const SpecParams, n_max: i
     return rates;
 }
 
-/// Ports `common_speculative_get_synth_probs` (speculative.cpp:2700
-/// @cd959bae9): the conditional synthetic acceptance probabilities.
+/// Ports `common_speculative_get_synth_probs` (speculative.cpp:2751
+/// @b1b770d90): the conditional synthetic acceptance probabilities.
 ///
 /// Return: borrowed from `spec`.
 pub fn getSynthProbs(spec: ?*const Speculative) []const f64 {
-    assertC(spec != null, 2701, "spec");
+    assertC(spec != null, 2752, "spec");
     return spec.?.synth_probs.items;
 }
 
-/// Ports `common_base_params_to_speculative` (speculative.cpp:2705
-/// @cd959bae9): the parameters a draft model and its context load with.
+/// Ports `common_base_params_to_speculative` (speculative.cpp:2756
+/// @b1b770d90): the parameters a draft model and its context load with.
 ///
 /// Return: a copy of `params`; its lists are shared with `params`.
 pub fn baseParamsToSpeculative(params: *const Params) Params {
@@ -1199,15 +1199,15 @@ pub fn baseParamsToSpeculative(params: *const Params) Params {
     return result;
 }
 
-/// Ports `common_speculative_init_result` (speculative.h:111 @cd959bae9):
+/// Ports `common_speculative_init_result` (speculative.h:111 @b1b770d90):
 /// the draft model and context, owned. The context frees first, as the
 /// C++'s member order decides.
 pub const InitResult = struct {
     model_: ?*c.llama_model = null,
     context_: ?*c.llama_context = null,
 
-    /// Ports `common_speculative_init_result` (speculative.cpp:2778
-    /// @cd959bae9), the constructor: a draft model and its context, or an
+    /// Ports `common_speculative_init_result` (speculative.cpp:2829
+    /// @b1b770d90), the constructor: a draft model and its context, or an
     /// MTP context over the target model.
     pub fn init(params: *Params, model_tgt: ?*c.llama_model, ctx_tgt: ?*c.llama_context) !InitResult {
         const func: [*:0]const u8 = "common_speculative_init_result";
@@ -1236,7 +1236,10 @@ pub const InitResult = struct {
             defer gpa.free(model_path);
             log.inf("%s: loading draft model '%s'\n", .{ func, model_path.ptr });
 
-            const model_dft = c.llama_model_load_from_file(model_path.ptr, mparams) orelse {
+            var paths_arena = std.heap.ArenaAllocator.init(gpa);
+            defer paths_arena.deinit();
+            const paths = try common.modelPaths(paths_arena.allocator(), &params.speculative.draft.mparams);
+            const model_dft = common.modelLoad(paths, mparams) orelse {
                 log.err("%s: failed to load draft model, '%s'\n", .{ func, model_path.ptr });
                 return self;
             };
@@ -1266,40 +1269,40 @@ pub const InitResult = struct {
     }
 
     /// Ports the destructor of `common_speculative_init_result`
-    /// (speculative.cpp:2838 @cd959bae9): context, then model.
+    /// (speculative.cpp:2889 @b1b770d90): context, then model.
     pub fn deinit(self: *InitResult) void {
         if (self.context_) |ctx| c.llama_free(ctx);
         if (self.model_) |m| c.llama_model_free(m);
         self.* = .{};
     }
 
-    /// Ports `model` (speculative.cpp:2840 @cd959bae9), a member of
+    /// Ports `model` (speculative.cpp:2891 @b1b770d90), a member of
     /// `common_speculative_init_result`.
     pub fn model(self: *const InitResult) ?*c.llama_model {
         return self.model_;
     }
 
-    /// Ports `context` (speculative.cpp:2844 @cd959bae9), a member of
+    /// Ports `context` (speculative.cpp:2895 @b1b770d90), a member of
     /// `common_speculative_init_result`.
     pub fn context(self: *const InitResult) ?*c.llama_context {
         return self.context_;
     }
 };
 
-/// Ports `common_speculative_init_from_params` (speculative.cpp:2848
-/// @cd959bae9).
+/// Ports `common_speculative_init_from_params` (speculative.cpp:2899
+/// @b1b770d90).
 pub fn initFromParams(params: *Params, model_tgt: ?*c.llama_model, ctx_tgt: ?*c.llama_context) !InitResult {
     return InitResult.init(params, model_tgt, ctx_tgt);
 }
 
-/// Ports `common_speculative_output_limits` (speculative.h:40 @cd959bae9).
+/// Ports `common_speculative_output_limits` (speculative.h:40 @b1b770d90).
 pub const OutputLimits = struct {
     total: i32,
     per_seq: i32,
 };
 
-/// Ports `common_speculative_get_output_limits` (speculative.cpp:2852
-/// @cd959bae9): how many outputs a batch and a sequence need when every
+/// Ports `common_speculative_get_output_limits` (speculative.cpp:2903
+/// @b1b770d90): how many outputs a batch and a sequence need when every
 /// sequence verifies a draft of `n_draft`.
 pub fn getOutputLimits(n_batch: i32, n_parallel: i32, n_draft: i32) OutputLimits {
     const per_seq: i64 = 1 + @as(i64, @max(0, n_draft));
@@ -1311,7 +1314,7 @@ pub fn getOutputLimits(n_batch: i32, n_parallel: i32, n_draft: i32) OutputLimits
     };
 }
 
-/// Ports `common_speculative_init` (speculative.cpp:2865 @cd959bae9): every
+/// Ports `common_speculative_init` (speculative.cpp:2916 @b1b770d90): every
 /// configured drafter, in order of preference -- the n-gram ones first,
 /// then those that run a model -- and the synthetic acceptance rates.
 ///
@@ -1459,7 +1462,7 @@ pub fn init(params: *SpecParams, n_seq: u32) InitError!?*Speculative {
 
 extern fn snprintf(buf: [*]u8, size: usize, format: [*:0]const u8, ...) c_int;
 
-/// Ports `common_speculative_free` (speculative.cpp:3006 @cd959bae9).
+/// Ports `common_speculative_free` (speculative.cpp:3057 @b1b770d90).
 pub fn free(spec: ?*Speculative) void {
     const s = spec orelse return;
 
@@ -1471,16 +1474,16 @@ pub fn free(spec: ?*Speculative) void {
     gpa.destroy(s);
 }
 
-/// Ports `common_speculative_get_draft_params` (speculative.cpp:3014
-/// @cd959bae9): the slot a caller fills before `draft`.
+/// Ports `common_speculative_get_draft_params` (speculative.cpp:3065
+/// @b1b770d90): the slot a caller fills before `draft`.
 pub fn getDraftParams(spec: ?*Speculative, seq_id: c.llama_seq_id) *DraftParams {
-    assertC(spec != null, 3017, "spec");
+    assertC(spec != null, 3068, "spec");
     assertC(seq_id < @as(c.llama_seq_id, @intCast(spec.?.dparams.len)), 3018, "seq_id < (llama_seq_id) spec->dparams.size()");
 
     return &spec.?.dparams[@intCast(seq_id)];
 }
 
-/// Ports `common_speculative_begin` (speculative.cpp:3023 @cd959bae9):
+/// Ports `common_speculative_begin` (speculative.cpp:3074 @b1b770d90):
 /// optionally called once at the start of a generation.
 pub fn begin(spec: ?*Speculative, seq_id: c.llama_seq_id, prompt: []const c.llama_token) void {
     const s = spec orelse return;
@@ -1493,7 +1496,7 @@ pub fn begin(spec: ?*Speculative, seq_id: c.llama_seq_id, prompt: []const c.llam
     }
 }
 
-/// Ports `common_speculative_process` (speculative.cpp:3035 @cd959bae9):
+/// Ports `common_speculative_process` (speculative.cpp:3086 @b1b770d90):
 /// the target's batch through every drafter that keeps state.
 ///
 /// Return: false once one fails; the rest are skipped, as `&&` skips them.
@@ -1507,7 +1510,7 @@ pub fn process(spec: ?*Speculative, batch: *const common.Batch) bool {
     return result;
 }
 
-/// Ports `common_speculative_draft` (speculative.cpp:3049 @cd959bae9): each
+/// Ports `common_speculative_draft` (speculative.cpp:3100 @b1b770d90): each
 /// drafting sequence asks the drafters in order until one produces a draft.
 pub fn draft(spec: ?*Speculative) void {
     const func = "common_speculative_draft";
@@ -1519,7 +1522,7 @@ pub fn draft(spec: ?*Speculative) void {
         var n_drafting: c_int = 0;
 
         for (dparams) |*dp| {
-            assertC(!dp.drafting or dp.result.?.items.len == 0, 3060, "!dp.drafting || dp.result->empty()");
+            assertC(!dp.drafting or dp.result.?.items.len == 0, 3111, "!dp.drafting || dp.result->empty()");
 
             if (dp.drafting) n_drafting += 1;
         }
@@ -1581,11 +1584,11 @@ pub fn draft(spec: ?*Speculative) void {
     }
 }
 
-/// Ports `common_speculative_accept` (speculative.cpp:3139 @cd959bae9):
+/// Ports `common_speculative_accept` (speculative.cpp:3190 @b1b770d90):
 /// `n_accepted` tokens of the last draft were accepted by the target.
 pub fn accept(spec: *Speculative, seq_id: c.llama_seq_id, n_accepted: u16) void {
     const impl = spec.impl_last[@intCast(seq_id)] orelse {
-        assertC(n_accepted == 0, 3143, "n_accepted == 0");
+        assertC(n_accepted == 0, 3194, "n_accepted == 0");
         return;
     };
 
@@ -1616,7 +1619,7 @@ pub fn accept(spec: *Speculative, seq_id: c.llama_seq_id, n_accepted: u16) void 
     }
 }
 
-/// Ports `common_speculative_get_state` (speculative.cpp:3176 @cd959bae9):
+/// Ports `common_speculative_get_state` (speculative.cpp:3227 @b1b770d90):
 /// the first drafter's per-sequence state, if any has one.
 ///
 /// Return: whether `data` was filled; grown with `c_allocator`.
@@ -1630,15 +1633,15 @@ pub fn getState(spec: ?*Speculative, seq_id: c.llama_seq_id, data: *std.ArrayLis
     return false;
 }
 
-/// Ports `common_speculative_set_state` (speculative.cpp:3190 @cd959bae9).
+/// Ports `common_speculative_set_state` (speculative.cpp:3241 @b1b770d90).
 pub fn setState(spec: ?*Speculative, seq_id: c.llama_seq_id, data: []const u8) void {
     const s = spec orelse return;
 
     for (s.impls) |impl| impl.setState(seq_id, data);
 }
 
-/// Ports `common_speculative_print_stats` (speculative.cpp:3200
-/// @cd959bae9): one line per drafter -- calls, drafts, tokens, the mean
+/// Ports `common_speculative_print_stats` (speculative.cpp:3251
+/// @b1b770d90): one line per drafter -- calls, drafts, tokens, the mean
 /// accepted length, the acceptance rate per position, the time spent.
 pub fn printStats(spec: ?*const Speculative) void {
     const s = spec orelse return;

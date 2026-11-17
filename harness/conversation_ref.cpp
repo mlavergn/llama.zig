@@ -42,7 +42,7 @@
 //   - the cache report our CLI writes under `LLAMAZIG_CNV_TRACE` -- tokens
 //     kept and tokens decoded, per turn -- the one place prefix reuse shows;
 //   - `--fit`, as upstream's `common_init_result` runs it before loading:
-//     `common_fit_params` (common/fit.cpp:879 @620d2225c) over the buffers
+//     `common_fit_params` (common/fit.cpp:980 @b1b770d90) over the buffers
 //     `common_params` lends the model parameters, at `llama-cli`'s log
 //     verbosity, its error line flushed to stderr before the load; and the
 //     context size and GPU layers it left, which the trace reports once;
@@ -328,7 +328,7 @@ int main(int argc, char ** argv) {
         const char *        target_env = getenv("CNV_REF_FIT_TARGET_MIB");
         const size_t        target_mib = target_env ? strtoull(target_env, nullptr, 10) : 1024;
         std::vector<size_t> margins(llama_max_devices(), target_mib * 1024 * 1024);
-        common_fit_params(model_path, &mp, &cp, tensor_split.data(), tbo.data(), margins.data(),
+        common_fit_params({ model_path }, &mp, &cp, tensor_split.data(), tbo.data(), margins.data(),
             n_ctx_set && n_ctx_arg == 0 ? UINT32_MAX : 4096, nullptr, GGML_LOG_LEVEL_ERROR);
         common_log_flush(common_log_main());
     }
@@ -367,11 +367,16 @@ int main(int argc, char ** argv) {
 
     std::vector<common_chat_msg> history;
     std::vector<llama_token>     decoded;
+    // upstream's CLI sends the request as `body.dump_safe()` (cli-context.cpp:365
+    // @b1b770d90): invalid UTF-8 in a message reaches the server as U+FFFD
+    auto dump_safe_text = [](const std::string & text) {
+        return json::parse(json(text).dump_safe()).get<std::string>();
+    };
     auto add_system = [&]() {
         if (!system.empty()) {
             common_chat_msg m;
             m.role    = "system";
-            m.content = system;
+            m.content = dump_safe_text(system);
             history.push_back(m);
         }
     };
@@ -414,11 +419,11 @@ int main(int argc, char ** argv) {
         } else {
             common_chat_msg m;
             m.role    = "user";
-            m.content = turn;
+            m.content = dump_safe_text(turn);
             history.push_back(m);
         }
 
-        // The request (server-common.cpp:1270 @620d2225c).
+        // The request (server-common.cpp:1413 @b1b770d90).
         common_chat_templates_inputs inputs;
         inputs.messages              = history;
         inputs.use_jinja             = true;

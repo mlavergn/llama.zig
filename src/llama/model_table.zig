@@ -8,13 +8,13 @@
 //! - `llama.cpp/src/llama-model.cpp` -- the switches of `llm_type_name`
 //!   and `llama_model_rope_type`
 //!
-//! Both at v0.9.0 (`cd959bae9`). **Do not edit**: regenerate after moving the
+//! Both at v1.0.0 (`b1b770d90`). **Do not edit**: regenerate after moving the
 //! pin. The rope rules marked `.conditional` read the hyperparameters and are
 //! ported by hand in `model.zig`.
 
 const c = @import("impl.zig").c;
 
-/// Mirrors `llm_type` (llama-model.h:23 @cd959bae9).
+/// Mirrors `llm_type` (llama-model.h:23 @b1b770d90).
 pub const Type = enum(c_int) {
     unknown,
     @"14m",
@@ -157,7 +157,7 @@ pub const Type = enum(c_int) {
     e4b,
 };
 
-/// Ports `llm_type_name` (llama-model.cpp:998 @cd959bae9), by `Type` ordinal; the
+/// Ports `llm_type_name` (llama-model.cpp:1016 @b1b770d90), by `Type` ordinal; the
 /// switch's default where it names none.
 pub const type_names = [_][:0]const u8{
     "?B",
@@ -310,7 +310,7 @@ pub const RopeRule = union(enum) {
     abort,
 };
 
-/// Ports the switch of `llama_model_rope_type` (llama-model.cpp:3601 @cd959bae9), by
+/// Ports the switch of `llama_model_rope_type` (llama-model.cpp:3651 @b1b770d90), by
 /// `arch.Arch` ordinal. An architecture the switch does not name falls out of
 /// it to `LLAMA_ROPE_TYPE_NONE`.
 pub const rope_rules = [_]RopeRule{
@@ -325,7 +325,7 @@ pub const rope_rules = [_]RopeRule{
     .{ .fixed = c.LLAMA_ROPE_TYPE_NONE }, // LLM_ARCH_GPTJ
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_GPTNEOX
     .{ .fixed = c.LLAMA_ROPE_TYPE_NONE }, // LLM_ARCH_MPT
-    .{ .fixed = c.LLAMA_ROPE_TYPE_NORM }, // LLM_ARCH_STARCODER
+    .{ .fixed = c.LLAMA_ROPE_TYPE_NONE }, // LLM_ARCH_STARCODER
     .{ .fixed = c.LLAMA_ROPE_TYPE_NONE }, // LLM_ARCH_REFACT
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_BERT
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_MODERN_BERT
@@ -397,6 +397,7 @@ pub const rope_rules = [_]RopeRule{
     .{ .fixed = c.LLAMA_ROPE_TYPE_NORM }, // LLM_ARCH_DEEPSEEK32
     .{ .fixed = c.LLAMA_ROPE_TYPE_NORM }, // LLM_ARCH_DEEPSEEK4
     .{ .fixed = c.LLAMA_ROPE_TYPE_NORM }, // LLM_ARCH_DEEPSEEK41
+    .{ .fixed = c.LLAMA_ROPE_TYPE_NORM }, // LLM_ARCH_XING4_0
     .{ .fixed = c.LLAMA_ROPE_TYPE_NORM }, // LLM_ARCH_CHATGLM
     .conditional, // LLM_ARCH_GLM4
     .conditional, // LLM_ARCH_GLM4_MOE
@@ -468,6 +469,7 @@ pub const rope_rules = [_]RopeRule{
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_MAION_CODER
     .{ .fixed = c.LLAMA_ROPE_TYPE_NONE }, // LLM_ARCH_KIMI_LINEAR
     .{ .fixed = c.LLAMA_ROPE_TYPE_NONE }, // LLM_ARCH_KIMI_K3
+    .{ .fixed = c.LLAMA_ROPE_TYPE_NONE }, // LLM_ARCH_KIMI_K31
     .{ .fixed = c.LLAMA_ROPE_TYPE_NONE }, // LLM_ARCH_GLM5_NEXT
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_TALKIE
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_MELLUM
@@ -483,10 +485,11 @@ pub const rope_rules = [_]RopeRule{
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_BEAM
     .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_KOLIBRI1
     .{ .fixed = c.LLAMA_ROPE_TYPE_NORM }, // LLM_ARCH_LIMITE
+    .{ .fixed = c.LLAMA_ROPE_TYPE_NEOX }, // LLM_ARCH_RICURSIVE
     .abort, // LLM_ARCH_UNKNOWN
 };
 
-/// Ports the cases of `llama_model_mapping` (llama-model.cpp:43 @cd959bae9), by
+/// Ports the cases of `llama_model_mapping` (llama-model.cpp:43 @b1b770d90), by
 /// `arch.Arch` ordinal: whether the architecture has a model class. One that
 /// does not is `unsupported model architecture`.
 pub const mapped = [_]bool{
@@ -573,6 +576,7 @@ pub const mapped = [_]bool{
     true, // LLM_ARCH_DEEPSEEK32
     true, // LLM_ARCH_DEEPSEEK4
     true, // LLM_ARCH_DEEPSEEK41
+    true, // LLM_ARCH_XING4_0
     true, // LLM_ARCH_CHATGLM
     true, // LLM_ARCH_GLM4
     true, // LLM_ARCH_GLM4_MOE
@@ -644,6 +648,7 @@ pub const mapped = [_]bool{
     true, // LLM_ARCH_MAION_CODER
     true, // LLM_ARCH_KIMI_LINEAR
     true, // LLM_ARCH_KIMI_K3
+    true, // LLM_ARCH_KIMI_K31
     true, // LLM_ARCH_GLM5_NEXT
     true, // LLM_ARCH_TALKIE
     true, // LLM_ARCH_MELLUM
@@ -659,5 +664,6 @@ pub const mapped = [_]bool{
     true, // LLM_ARCH_BEAM
     true, // LLM_ARCH_KOLIBRI1
     true, // LLM_ARCH_LIMITE
+    true, // LLM_ARCH_RICURSIVE
     false, // LLM_ARCH_UNKNOWN
 };

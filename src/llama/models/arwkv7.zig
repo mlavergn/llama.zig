@@ -4,7 +4,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/arwkv7.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/arwkv7.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_arwkv7`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, and its `graph`. The time mix is in
 //! `rwkv7_base.zig`.
@@ -24,12 +24,12 @@ const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
 /// Ports `llama_model_arwkv7`'s `load_arch_hparams` (models/arwkv7.cpp:3
-/// @cd959bae9): the same keys and size table as RWKV-7.
+/// @b1b770d90): the same keys and size table as RWKV-7.
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     try rwkv7.loadHparams(self, ml, exc);
 }
 
-/// Ports `llama_model_arwkv7`'s `load_arch_tensors` (models/arwkv7.cpp:46 @cd959bae9).
+/// Ports `llama_model_arwkv7`'s `load_arch_tensors` (models/arwkv7.cpp:46 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -79,13 +79,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 }
 
-/// Ports `llama_model_arwkv7`'s `build_arch_graph` (models/arwkv7.cpp:116 @cd959bae9).
+/// Ports `llama_model_arwkv7`'s `build_arch_graph` (models/arwkv7.cpp:116 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_arwkv7`'s `graph`
-/// (models/arwkv7.cpp:120 @cd959bae9): one token shift, before the time
+/// (models/arwkv7.cpp:120 @b1b770d90): one token shift, before the time
 /// mix only.
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;

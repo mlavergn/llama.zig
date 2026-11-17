@@ -6,7 +6,7 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/step35.cpp` at v0.9.0 (`cd959bae9`):
+//! Ported from `llama.cpp/src/models/step35.cpp` at v1.0.0 (`b1b770d90`):
 //! `llama_model_step35`'s `load_arch_hparams`, `load_arch_tensors` and
 //! `build_arch_graph`, its `graph` and its `graph_mtp`.
 
@@ -22,8 +22,10 @@ const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
+const Cparams = @import("../cparams.zig").Cparams;
+const RopeParams = model_mod.RopeParams;
 
-/// Ports `llama_model_step35`'s `load_arch_hparams` (models/step35.cpp:3 @cd959bae9).
+/// Ports `llama_model_step35`'s `load_arch_hparams` (models/step35.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -61,7 +63,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     };
 }
 
-/// Ports `llama_model_step35`'s `load_arch_tensors` (models/step35.cpp:37 @cd959bae9).
+/// Ports `llama_model_step35`'s `load_arch_tensors` (models/step35.cpp:37 @b1b770d90).
 pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -102,7 +104,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// Ports `load_arch_tensors`'s `load_block_trunk` lambda
-/// (models/step35.cpp:60 @cd959bae9).
+/// (models/step35.cpp:60 @b1b770d90).
 fn loadBlockTrunk(self: *Model, l: *const Model.Locals, n_rot_max: u32, i: i32, flags: u32, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const nr = loader.tensor_not_required;
@@ -154,7 +156,7 @@ fn loadBlockTrunk(self: *Model, l: *const Model.Locals, n_rot_max: u32, i: i32, 
 }
 
 /// Ports `load_arch_tensors`'s `load_block_mtp` lambda
-/// (models/step35.cpp:106 @cd959bae9).
+/// (models/step35.cpp:106 @b1b770d90).
 fn loadBlockMtp(self: *Model, l: *const Model.Locals, n_rot_max: u32, mtp_flags: u32, i: i32, exc: *Exception) Thrown!void {
     const hp = &self.hparams;
     const nr = loader.tensor_not_required;
@@ -215,8 +217,27 @@ fn loadBlockMtp(self: *Model, l: *const Model.Locals, n_rot_max: u32, mtp_flags:
     layer.nextn.shared_head_norm = try self.createTensor(.{ .tensor = .nextn_shared_head_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, nr, exc);
 }
 
-/// Ports `llama_model_step35`'s `build_arch_graph` (models/step35.cpp:175
-/// @cd959bae9): the MTP draft head for that graph type, the main model
+/// Ports `llama_model_step35`'s `get_rope_params` (models/step35.cpp:175
+/// @b1b770d90): the sliding-window layers take no frequency factors.
+///
+/// Parameters:
+/// - `model`: the model.
+/// - `cparams`: the context's parameters.
+/// - `il`: the layer.
+///
+/// Return: the layer's RoPE parameters.
+pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+    var res = model.getRopeParamsBase(cparams, il);
+
+    if (model.hparams.isSwa(il)) {
+        res.factors = null;
+    }
+
+    return res;
+}
+
+/// Ports `llama_model_step35`'s `build_arch_graph` (models/step35.cpp:185
+/// @b1b770d90): the MTP draft head for that graph type, the main model
 /// otherwise.
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
@@ -246,7 +267,7 @@ fn headGate(b: *const graph.Builder, wqkv_gate: *Tensor, cur: *Tensor, attn_out:
 }
 
 /// Ports the constructor of `llama_model_step35`'s `graph`
-/// (models/step35.cpp:182 @cd959bae9).
+/// (models/step35.cpp:192 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -265,9 +286,6 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
         const n_head_l: i64 = hp.nHead(@intCast(il));
         const n_head_kv_l: i64 = hp.nHeadKv(@intCast(il));
-
-        const freq_base_l = model.getRopeFreqBase(b.cparams, @intCast(il));
-        const freq_scale_l = model.getRopeFreqScale(b.cparams, @intCast(il));
 
         var cur = inpL;
 
@@ -302,11 +320,8 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             }
 
             // RoPE, with partial rotary factors per layer.
-            const is_swa = hp.isSwa(@intCast(il));
-            const rope_factors = if (is_swa) null else model.getRopeFactors(b.cparams, @intCast(il));
-            const n_rot_l: i64 = hp.nRot(@intCast(il));
-            Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, rope_factors, @intCast(n_rot_l), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-            Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, rope_factors, @intCast(n_rot_l), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+            Qcur = b.buildRope(Qcur, inp_pos, il);
+            Kcur = b.buildRope(Kcur, inp_pos, il);
             b.cb(Qcur, "Qcur_pos", il);
             b.cb(Kcur, "Kcur_pos", il);
 
@@ -391,32 +406,29 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 }
 
 /// Ports the constructor of `llama_model_step35`'s `graph_mtp`
-/// (models/step35.cpp:357 @cd959bae9): the `LLM_GRAPH_TYPE_DECODER_MTP`
+/// (models/step35.cpp:353 @b1b770d90): the `LLM_GRAPH_TYPE_DECODER_MTP`
 /// draft head for Step3p5.
 fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
-    impl.assert(hp.n_layer_nextn > 0, "models/step35.cpp", 359, "hparams.n_layer_nextn > 0 && \"STEP35 MTP requires n_layer_nextn > 0\"");
+    impl.assert(hp.n_layer_nextn > 0, "models/step35.cpp", 355, "hparams.n_layer_nextn > 0 && \"STEP35 MTP requires n_layer_nextn > 0\"");
 
     // Multi-block MTP: the graph runs the MTP head that
     // cparams.nextn_layer_offset selects (0 is the first trained head). The
     // speculative driver bumps the offset per draft step to chain heads
     // 45, 46 and 47; offset 0 behaves as a single block.
     const il: c_int = @as(c_int, @intCast(hp.nLayer())) + b.cparams.nextn_layer_offset;
-    impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/step35.cpp", 368, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
+    impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/step35.cpp", 364, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
     const layer = &model.layers[@intCast(il)];
 
-    impl.assert(layer.nextn.eh_proj != null, "models/step35.cpp", 371, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
-    impl.assert(layer.nextn.enorm != null, "models/step35.cpp", 372, "layer.nextn.enorm   && \"MTP block missing nextn.enorm\"");
-    impl.assert(layer.nextn.hnorm != null, "models/step35.cpp", 373, "layer.nextn.hnorm   && \"MTP block missing nextn.hnorm\"");
+    impl.assert(layer.nextn.eh_proj != null, "models/step35.cpp", 367, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
+    impl.assert(layer.nextn.enorm != null, "models/step35.cpp", 368, "layer.nextn.enorm   && \"MTP block missing nextn.enorm\"");
+    impl.assert(layer.nextn.hnorm != null, "models/step35.cpp", 369, "layer.nextn.hnorm   && \"MTP block missing nextn.hnorm\"");
 
     const n_head_l: i64 = hp.nHead(@intCast(il));
     const n_head_kv_l: i64 = hp.nHeadKv(@intCast(il));
 
-    const freq_base_l = model.getRopeFreqBase(b.cparams, @intCast(il));
-    const freq_scale_l = model.getRopeFreqScale(b.cparams, @intCast(il));
-
-    const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("models/step35.cpp", 381, "out of memory");
+    const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("models/step35.cpp", 374, "out of memory");
     inp.* = .{ .n_embd = hp.nEmbdInp(), .n_embd_state = hp.n_embd };
 
     inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens);
@@ -425,9 +437,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     inp.embd = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
     c.ggml_set_input(inp.embd);
 
-    inp.h = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, hp.n_embd, b.n_tokens);
-    c.ggml_set_input(inp.h);
-    _ = c.ggml_set_name(inp.h, "mtp_h_input");
+    inp.h = b.buildInpEmbdState(inp, hp.n_embd);
 
     const tok_embd_w = layer.nextn.embed_tokens orelse model.tok_embd.?;
 
@@ -480,12 +490,8 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
         b.cb(Kcur, "mtp_Kcur_normed", il);
     }
 
-    const is_swa = hp.isSwa(@intCast(il));
-    const rope_factors = if (is_swa) null else model.getRopeFactors(b.cparams, @intCast(il));
-    const n_rot_l: i64 = hp.nRot(@intCast(il));
-
-    Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, rope_factors, @intCast(n_rot_l), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
-    Kcur = c.ggml_rope_ext(ctx, Kcur, inp_pos, rope_factors, @intCast(n_rot_l), b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+    Qcur = b.buildRope(Qcur, inp_pos, il);
+    Kcur = b.buildRope(Kcur, inp_pos, il);
     b.cb(Qcur, "mtp_Qcur_pos", il);
     b.cb(Kcur, "mtp_Kcur_pos", il);
 
@@ -546,12 +552,12 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.res.t_h_nextn = cur;
 
     const head_norm_w = layer.nextn.shared_head_norm orelse model.output_norm;
-    impl.assert(head_norm_w != null, "models/step35.cpp", 541, "head_norm_w && \"STEP35 MTP: missing both nextn.shared_head_norm and output_norm\"");
+    impl.assert(head_norm_w != null, "models/step35.cpp", 522, "head_norm_w && \"STEP35 MTP: missing both nextn.shared_head_norm and output_norm\"");
     cur = b.buildNorm(cur, head_norm_w, null, .rms, -1);
     b.cb(cur, "mtp_shared_head_norm", -1);
 
     const head_w = layer.nextn.shared_head_head orelse model.output;
-    impl.assert(head_w != null, "models/step35.cpp", 546, "head_w && \"STEP35 MTP: missing LM head (nextn.shared_head_head or model.output)\"");
+    impl.assert(head_w != null, "models/step35.cpp", 527, "head_w && \"STEP35 MTP: missing LM head (nextn.shared_head_head or model.output)\"");
     cur = b.buildLoraMm(head_w.?, cur, null);
     b.cb(cur, "result_output", -1);
 

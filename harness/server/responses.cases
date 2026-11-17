@@ -38,6 +38,16 @@ POST /v1/responses {"input": [{"type": "function_call_output", "call_id": "c", "
 POST /v1/responses {"input": "x", "tools": {"a": 1}}
 POST /v1/responses {not json
 
+# v1.0.0 (711f9f4c1): text.format as the chat request's response_format
+POST /v1/responses {"input": "An integer between 1 and 9?", "text": {"format": {"type": "json_schema", "name": "n", "strict": true, "schema": {"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]}}}, "max_output_tokens": 48, "temperature": 0}
+POST /v1/responses {"input": "Give me a JSON object.", "text": {"format": {"type": "json_object"}}, "max_output_tokens": 24, "temperature": 0}
+POST /v1/responses {"input": "Hi", "text": {"format": {"type": "text"}, "verbosity": "low"}, "max_output_tokens": 4, "temperature": 0}
+POST /v1/responses {"input": "Hi", "text": {"format": {"type": "json_schema", "schema": {"type": "string"}}}, "max_output_tokens": 8, "temperature": 0, "stream": true}
+POST /v1/responses {"input": "Hi", "text": {"format": {"type": "xml"}}}
+POST /v1/responses {"input": "Hi", "text": {"format": "json"}}
+POST /v1/responses {"input": "Hi", "text": "json"}
+POST /responses/input_tokens {"input": "Hi", "text": {"format": {"type": "json_object"}}}
+
 # token counting
 POST /v1/responses/input_tokens {"input": "How many tokens is this?"}
 POST /responses/input_tokens {"input": [{"role": "user", "content": "Hi"}], "instructions": "Be brief.", "tools": [{"type": "function", "name": "f"}]}

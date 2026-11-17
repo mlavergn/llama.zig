@@ -6,8 +6,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/src/models/gemma4-assistant.cpp` at v0.9.0
-//! (`cd959bae9`): `llama_model_gemma4_assistant`'s `load_arch_hparams`,
+//! Ported from `llama.cpp/src/models/gemma4-assistant.cpp` at v1.0.0
+//! (`b1b770d90`): `llama_model_gemma4_assistant`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
@@ -25,7 +25,7 @@ const Model = model_mod.Model;
 const Tensor = c.ggml_tensor;
 
 /// Ports `llama_model_gemma4_assistant`'s `load_arch_hparams`
-/// (models/gemma4-assistant.cpp:3 @cd959bae9).
+/// (models/gemma4-assistant.cpp:3 @b1b770d90).
 pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
@@ -48,7 +48,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_gemma4_assistant`'s `load_arch_tensors`
-/// (models/gemma4-assistant.cpp:21 @cd959bae9).
+/// (models/gemma4-assistant.cpp:21 @b1b770d90).
 pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -113,13 +113,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_gemma4_assistant`'s `build_arch_graph`
-/// (models/gemma4-assistant.cpp:80 @cd959bae9).
+/// (models/gemma4-assistant.cpp:80 @b1b770d90).
 pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_gemma4_assistant`'s `graph`
-/// (models/gemma4-assistant.cpp:84 @cd959bae9).
+/// (models/gemma4-assistant.cpp:84 @b1b770d90).
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
@@ -145,15 +145,14 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         inp_embd = inp.embd.?;
         b.res.t_inp_embd = inp.embd;
 
-        inp.h = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, n_embd_backbone, b.ubatch.n_tokens);
+        inp.h = b.buildInpEmbdState(inp, n_embd_backbone);
         b.cb(inp.h.?, "inp_h", -1);
-        c.ggml_set_input(inp.h);
         inp_h = inp.h.?;
 
         _ = b.res.addInput(graph.InpEmbdH, inp);
     }
 
-    impl.assert(cp.ctx_other != null, "models/gemma4-assistant.cpp", 114, "cparams.ctx_other != nullptr");
+    impl.assert(cp.ctx_other != null, "models/gemma4-assistant.cpp", 113, "cparams.ctx_other != nullptr");
     const ctx_other: *const context_mod.Context = @ptrCast(@alignCast(cp.ctx_other.?));
     const model_other = ctx_other.getModel();
 
@@ -177,14 +176,9 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     while (il < b.n_layer_nextn) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
         const ilu: u32 = @intCast(il);
-        const is_swa = hp.isSwa(ilu);
 
         const n_embd_head: i64 = hp.nEmbdHeadK(ilu);
         const n_head: i64 = hp.nHead(ilu);
-
-        const freq_base_l = model.getRopeFreqBase(cp, ilu);
-        const freq_scale_l = model.getRopeFreqScale(cp, ilu);
-        const n_rot_l: c_int = @intCast(hp.nRot(ilu));
 
         const cur_norm = b.buildNorm(inpL, layer.attn_norm, null, .rms, il);
         b.cb(cur_norm, "attn_norm", il);
@@ -194,8 +188,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         Qcur = b.buildNorm(Qcur, layer.attn_q_norm, null, .rms, il);
         b.cb(Qcur, "Qcur_normed", il);
 
-        const freq_factors: ?*Tensor = if (is_swa) null else layer.rope_freqs;
-        Qcur = c.ggml_rope_ext(ctx, Qcur, inp_pos, freq_factors, n_rot_l, b.rope_type, b.n_ctx_orig, freq_base_l, freq_scale_l, b.ext_factor, b.attn_factor, b.beta_fast, b.beta_slow);
+        Qcur = b.buildRope(Qcur, inp_pos, il);
         b.cb(Qcur, "Qcur_pos", il);
 
         cur = b.buildAttn(inp_attn, layer.wo, null, null, Qcur, null, null, null, null, null, hp.f_attention_scale, il);

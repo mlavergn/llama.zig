@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v0.9.0
-//! (`cd959bae9`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v1.0.0
+//! (`b1b770d90`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # Six functions, two bodies
@@ -44,7 +44,7 @@ const QK8_0 = 32;
 
 /// Ports `ggml_gemv_q4_0_4x4_q8_0_generic`,
 /// `ggml_gemv_q4_0_4x8_q8_0_generic` and `ggml_gemv_q4_0_8x8_q8_0_generic`
-/// (ggml-cpu/repack.cpp:754, 799, 843 @cd959bae9).
+/// (ggml-cpu/repack.cpp:754, 799, 843 @b1b770d90).
 fn gemv(
     comptime ncols_interleaved: i32,
     comptime blocklen: i32,
@@ -99,7 +99,7 @@ fn gemv(
 
 /// Ports `ggml_gemm_q4_0_4x4_q8_0_generic`,
 /// `ggml_gemm_q4_0_4x8_q8_0_generic` and `ggml_gemm_q4_0_8x8_q8_0_generic`
-/// (ggml-cpu/repack.cpp:1785, 1841, 1895 @cd959bae9).
+/// (ggml-cpu/repack.cpp:1785, 1841, 1895 @b1b770d90).
 fn gemm(
     comptime ncols_interleaved: i32,
     comptime blocklen: i32,

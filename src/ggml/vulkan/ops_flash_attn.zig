@@ -6,8 +6,8 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` and
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v0.9.0
-//! (`cd959bae9`). Upstream split `ggml-vulkan.cpp` into those files at
+//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v1.0.0
+//! (`b1b770d90`). Upstream split `ggml-vulkan.cpp` into those files at
 //! v0.5.0.
 
 const std = @import("std");
@@ -24,6 +24,8 @@ const Subbuffer = m.buffer.Subbuffer;
 const Pipeline = m.pipeline.Pipeline;
 const FaCodePath = m.device.FaCodePath;
 const FaPipelineState = m.device.FaPipelineState;
+const XeFaPipelineState = m.device.XeFaPipelineState;
+const XeFaTuningParams = m.device.XeFaTuningParams;
 const push = m.push;
 const ops = m.ops;
 const ceilDiv = ops.ceilDiv;
@@ -38,7 +40,7 @@ const vendor_id_amd = 0x1002;
 const vendor_id_intel = 0x8086;
 const vendor_id_nvidia = 0x10de;
 
-/// Ports `vk_fa_tuning_params` (ggml-vulkan-types.h:1359 @cd959bae9).
+/// Ports `vk_fa_tuning_params` (ggml-vulkan-types.h:1409 @b1b770d90).
 pub const FaTuningParams = struct {
     path: FaCodePath = .scalar,
     workgroup_size: u32 = 0,
@@ -52,12 +54,169 @@ pub const FaTuningParams = struct {
     limit_occupancy_shmem: u32 = 0,
 };
 
+/// Ports `get_xe_fa_tuning_params` (ggml-vulkan.cpp:1437 @b1b770d90): the
+/// tile shape, workgroup and subgroup sizes, specialization values and
+/// shared-memory footprint of the Intel Xe flash-attention kernels -- the
+/// prefill kernel when `use_prefill`, the two decode phases otherwise.
+pub fn xeFaTuningParams(device: *const Device, pipeline_state: XeFaPipelineState, use_prefill: bool) XeFaTuningParams {
+    var params: XeFaTuningParams = .{};
+    var shmem_sz: usize = 0;
+    var sg_sz: u32 = 32;
+    var matrix_mnk = [3]u32{ 16, 16, 16 };
+    const intel_gpu = device.vendor_id == vendor_id_intel;
+
+    if (device.architecture == .intel_xe1) {
+        sg_sz = 8;
+        matrix_mnk = .{ 8, 8, 16 };
+    } else if (device.architecture == .intel_xe2) {
+        sg_sz = 16;
+        matrix_mnk = .{ 8, 16, 16 };
+    }
+
+    const tm = matrix_mnk[0];
+    const tn = matrix_mnk[1];
+    const tk = matrix_mnk[2];
+    const hsk = pipeline_state.HSK;
+    const hsv = pipeline_state.HSV;
+    const qk_ratio = pipeline_state.qk_ratio;
+    const pv_ratio = pipeline_state.pv_ratio;
+    var sg_per_gw: u32 = undefined;
+    const fp16: usize = @sizeOf(c.ggml_fp16_t);
+    const f32sz: usize = @sizeOf(f32);
+
+    params.tm = tm;
+    params.tn = tn;
+    params.tk = tk;
+    impl.assert(hsv % tm == 0, "hsv % tm == 0");
+
+    if (use_prefill) {
+        sg_per_gw = if (sg_sz == 8) 32 else 16;
+        const wg_sz = sg_per_gw * sg_sz;
+        const output_div: u32 = if (hsk > 256) 8 else if (hsk > 160) 4 else if (hsk > 64) 2 else 1;
+        const p_per_iter: u32 = if (intel_gpu) (if (hsk > 256) 16 else 32) else 16;
+        const q_in_reg: u32 = if (hsk > 512) hsk - 384 else @min(128, hsk);
+        const q_in_shmem = hsk - q_in_reg;
+        const wg_row = 256 / output_div;
+        var gqa_fold: u32 = if (pipeline_state.multi_head_mask or qk_ratio != pv_ratio) 1 else 16;
+        const max_fold_rows: u32 = if (sg_sz <= 16) 16 else 8;
+
+        while (gqa_fold > 1 and (qk_ratio % gqa_fold != 0 or gqa_fold * output_div > max_fold_rows)) {
+            gqa_fold = gqa_fold / 2;
+        }
+
+        const mask_row = wg_row / gqa_fold;
+        const k_col: u32 = if (hsk % 64 == 0 and hsk <= 512 and wg_sz <= 256) 8 else 4;
+        const k_loops = ceilDiv(hsk * p_per_iter, k_col * wg_sz);
+
+        const k_in_shmem = hsk <= 576;
+        const v_in_shmem = hsk <= 128 and hsv <= 128;
+        const emf_in_shmem = wg_row / matrix_mnk[1] != sg_per_gw;
+        const mask_in_shmem = mask_row <= 64;
+        const shmem_q_sz: usize = @as(usize, q_in_shmem) * wg_row * fp16;
+        const shmem_oob_staging_sz: usize = @as(usize, sg_per_gw) * tm * tk * fp16;
+        const shmem_mask_sz: usize = if (mask_in_shmem) @as(usize, mask_row) * p_per_iter * fp16 else 0;
+        const shmem_k_sz: usize = if (k_in_shmem) @as(usize, k_loops) * k_col * wg_sz * fp16 else shmem_oob_staging_sz;
+        const shmem_v_sz: usize = if (v_in_shmem) @as(usize, hsv) * p_per_iter * fp16 else 0;
+        const shmem_p_sz: usize = @as(usize, wg_row) * p_per_iter * f32sz;
+        const shmem_emf_sz: usize = if (emf_in_shmem) @as(usize, wg_row) * f32sz else 0;
+        const shmem_pv_sz: usize = if (intel_gpu) 0 else @as(usize, sg_per_gw) * tm * tn * f32sz;
+
+        // Reuse section sits at tail of shmem, reused with k + mask/kv oob staging/pv staging
+        var shmem_reuse_sz = shmem_k_sz + shmem_mask_sz;
+        // When v is not in shmem, its staging reuses the k + mask region; size the reuse section to the larger of the two
+        shmem_reuse_sz = if (v_in_shmem) shmem_reuse_sz else @max(shmem_reuse_sz, shmem_oob_staging_sz);
+        shmem_reuse_sz = @max(shmem_pv_sz, shmem_reuse_sz);
+
+        // Q shmem size check for prologue staging is safe to bypass:
+        // 1. Prologue q staging shmem is released right after prologue, so it never overlaps other shmem sections
+        // 2. Extreme large hsk one-time q staging is capped within shader (max_q_reg_staging = shmem_size / 2 / Wr)
+        shmem_sz = shmem_q_sz + shmem_reuse_sz + shmem_v_sz + shmem_p_sz + shmem_emf_sz;
+
+        var sg_col = hsv / tm;
+        var pipeline_flag: u32 = 0;
+        sg_col = (sg_col + output_div - 1) / output_div;
+        sg_col = sg_col * tm;
+        if (pipeline_state.unaligned_seq_len) pipeline_flag |= 1 << 0;
+        if (pipeline_state.unaligned_q) pipeline_flag |= 1 << 1;
+        if (pipeline_state.partial_row_mask) pipeline_flag |= 1 << 2;
+        if (intel_gpu) pipeline_flag |= 1 << 3;
+
+        params.workgroup_size = .{ wg_sz, 0 };
+        params.subgroup_size = .{ sg_sz, 0 };
+        params.shmem_sz = shmem_sz;
+        params.prefill_params.pipeline_flag = pipeline_flag;
+        params.prefill_params.wg_row = wg_row;
+        params.prefill_params.gqa_fold = gqa_fold;
+        params.prefill_params.q_in_reg = q_in_reg;
+        params.prefill_params.p_per_iter = p_per_iter;
+        params.prefill_params.sg_col = sg_col;
+        params.prefill_params.acc_count = if (tm == 8) (if (sg_col % 16 == 0) 2 else 1) else 1;
+    } else {
+        // Phase 1 shmem size calculation
+        const p_chunk_ph1: u32 = 32;
+        // Phase 1 k shmem staging for extreme large hsk is capped within shader, bypass that check
+        const pmat_row = ceilDiv(qk_ratio, tn);
+        const aligned_q_len = upperPowerOf2(pipeline_state.decode_n);
+        const group_sz_ph1 = @min(@max(aligned_q_len *% sg_sz, 64), 256);
+        const out_per_wg_ph1 = @min(pipeline_state.decode_n, 256 / sg_sz);
+        const shmem_k_sz: usize = @as(usize, group_sz_ph1 / sg_sz) * tm * tk * fp16;
+        const shmem_mask_sz: usize = @as(usize, out_per_wg_ph1) * p_chunk_ph1 * f32sz;
+        var shmem_p_sz: usize = @as(usize, p_chunk_ph1) * pmat_row * tn * f32sz;
+        // K shmem is reused with mask/p, calculate the max size
+        const shmem_ph1_sz = @max(shmem_k_sz, shmem_mask_sz + shmem_p_sz);
+
+        // Phase 2 shmem size calculation
+        const aligned_pv_ratio = upperPowerOf2(pv_ratio);
+        const split_p_per_iter_ph2: u32 = if (pv_ratio <= 32) 256 else 128;
+        const out_col_per_wg_ph2: u32 = if (intel_gpu) (if (pv_ratio > 16) 8 else 16) else 16;
+        const split_p_per_warp: u32 = 16;
+        const group_sz_ph2 = (split_p_per_iter_ph2 / split_p_per_warp) * sg_sz;
+        sg_per_gw = group_sz_ph2 / sg_sz;
+        const out_row_per_wg_ph2 = @min(@max(16 / aligned_pv_ratio, 1), pipeline_state.decode_n);
+        const o_row = pv_ratio * out_row_per_wg_ph2;
+        const omat_row = ceilDiv(o_row, tn) * tn;
+        const global_max_loops = ceilDiv(o_row, sg_per_gw);
+        const shmem_global_max_sz: usize = @as(usize, ceilDiv(global_max_loops * sg_per_gw, sg_sz)) * sg_sz * f32sz;
+
+        const size_max = o_row * split_p_per_iter_ph2 / p_chunk_ph1;
+        const shmem_group_max_sz: usize = @as(usize, ceilDiv(size_max, group_sz_ph2)) * group_sz_ph2 * f32sz;
+
+        const p_loop_col = group_sz_ph2 * 4;
+        const p_loops = ceilDiv(o_row * split_p_per_iter_ph2, p_loop_col);
+        shmem_p_sz = @max(@as(usize, p_loop_col) * p_loops * fp16, @as(usize, omat_row) * split_p_per_iter_ph2 * fp16);
+
+        const shmem_lf_sz: usize = @as(usize, ceilDiv(sg_per_gw * p_loops, sg_sz)) * sg_sz * f32sz;
+        const shmem_oob_staging_sz: usize = @as(usize, sg_per_gw) * tm * tk * fp16;
+        const shmem_o_sz: usize = @as(usize, sg_per_gw) * out_col_per_wg_ph2 * omat_row * f32sz;
+        const shmem_reuse_sz = 2 * shmem_group_max_sz + @max(shmem_oob_staging_sz, 2 * shmem_p_sz);
+
+        var shmem_ph2_sz = shmem_lf_sz + shmem_global_max_sz;
+        // Shmem of p/group max is reused with output accumulation, calculate the max size
+        shmem_ph2_sz += @max(shmem_reuse_sz, shmem_o_sz);
+        shmem_sz = @max(shmem_ph1_sz, shmem_ph2_sz);
+
+        params.workgroup_size = .{ group_sz_ph1, group_sz_ph2 };
+        params.subgroup_size = .{ sg_sz, sg_sz };
+        params.shmem_sz = shmem_sz;
+        params.decode_params.p_chunk_ph1 = p_chunk_ph1;
+        params.decode_params.out_per_wg_ph1 = out_per_wg_ph1;
+        params.decode_params.split_p_per_iter_ph2 = split_p_per_iter_ph2;
+        params.decode_params.out_row_per_wg_ph2 = out_row_per_wg_ph2;
+        params.decode_params.out_col_per_wg_ph2 = out_col_per_wg_ph2;
+        params.decode_params.pipeline_flag_ph2 = if (pipeline_state.unaligned_seq_len) 1 << 0 else 0;
+    }
+
+    // The C++ reports a footprint past maxComputeSharedMemorySize through
+    // `VK_LOG_DEBUG`, which is empty without `GGML_VULKAN_DEBUG`.
+    return params;
+}
+
 /// `D ^ (D & (D-1))`: the lowest set bit.
 fn lowestBit(d: u32) u32 {
     return d ^ (d & (d -% 1));
 }
 
-/// Ports `get_fa_tuning_params_scalar` (ggml-vulkan.cpp:1207 @cd959bae9).
+/// Ports `get_fa_tuning_params_scalar` (ggml-vulkan.cpp:1209 @b1b770d90).
 fn tuningScalar(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, n_kv: u32, k_type: c.ggml_type, v_type: c.ggml_type, f32acc: bool) FaTuningParams {
     var r: FaTuningParams = .{ .path = .scalar };
 
@@ -105,6 +264,13 @@ fn tuningScalar(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, n_kv: u32, 
 
     if (!reduce_block_rows and !scalarShmemSupport(dev, &r, hsk, hsv, f32acc, k_type, v_type)) r.block_rows /= 2;
 
+    // With head sizes above 128, 16 rows per workgroup spill registers on
+    // Qualcomm and run about 40x slower; at large KV a single dispatch can
+    // then exceed the Windows GPU timeout.
+    if (dev.vendor_id == m.common.vendor_id.qualcomm and (hsk > 128 or hsv > 128)) {
+        r.block_rows = @min(r.block_rows, 8);
+    }
+
     // On AMD RDNA, small head sizes with a big batch schedule too many
     // subgroups and thrash the cache; an unused shmem buffer limits occupancy.
     if (dev.vendor_id == vendor_id_amd and dev.properties.limits.maxComputeSharedMemorySize == 65536) {
@@ -119,7 +285,7 @@ fn tuningScalar(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, n_kv: u32, 
     return r;
 }
 
-/// Ports `get_fa_tuning_params_coopmat1` (ggml-vulkan.cpp:1282 @cd959bae9).
+/// Ports `get_fa_tuning_params_coopmat1` (ggml-vulkan.cpp:1290 @b1b770d90).
 fn tuningCoopmat1(dev: *const Device, hsk: u32, hsv: u32) FaTuningParams {
     var r: FaTuningParams = .{ .path = .coopmat1 };
     const D = hsk | hsv;
@@ -137,7 +303,7 @@ fn tuningCoopmat1(dev: *const Device, hsk: u32, hsv: u32) FaTuningParams {
     return r;
 }
 
-/// Ports `get_fa_tuning_params_coopmat2` (ggml-vulkan.cpp:1313 @cd959bae9).
+/// Ports `get_fa_tuning_params_coopmat2` (ggml-vulkan.cpp:1321 @b1b770d90).
 fn tuningCoopmat2(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, k_type: c.ggml_type, v_type: c.ggml_type) FaTuningParams {
     var r: FaTuningParams = .{ .path = .coopmat2 };
     const D = hsk | hsv;
@@ -157,7 +323,7 @@ fn tuningCoopmat2(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, k_type: c
     return r;
 }
 
-/// Ports `get_fa_tuning_params` (ggml-vulkan.cpp:1341 @cd959bae9).
+/// Ports `get_fa_tuning_params` (ggml-vulkan.cpp:1349 @b1b770d90).
 pub fn tuningParams(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, n_kv: u32, k_type: c.ggml_type, v_type: c.ggml_type, f32acc: bool) FaTuningParams {
     var path: FaCodePath = if (dev.coopmat2) .coopmat2 else if (dev.coopmat1_fa_support) .coopmat1 else .scalar;
 
@@ -184,7 +350,7 @@ pub fn tuningParams(dev: *const Device, hsk: u32, hsv: u32, n_rows: u32, n_kv: u
     };
 }
 
-/// Ports `get_fa_pipeline_state` (ggml-vulkan.cpp:1385 @cd959bae9).
+/// Ports `get_fa_pipeline_state` (ggml-vulkan.cpp:1393 @b1b770d90).
 pub fn pipelineState(dev: *const Device, params: *const FaTuningParams, hsk: u32, hsv: u32, aligned: bool, f32acc: bool, use_mask: bool, use_mask_opt: bool, use_logit_softcap: bool, use_sparse: bool, k_type: c.ggml_type, v_type: c.ggml_type) FaPipelineState {
     const old_amd_windows = dev.vendor_id == vendor_id_amd and dev.driver_id == vk.VK_DRIVER_ID_AMD_PROPRIETARY and
         (dev.architecture == .amd_gcn or dev.architecture == .amd_rdna1 or dev.architecture == .amd_rdna2);
@@ -214,7 +380,7 @@ pub fn pipelineState(dev: *const Device, params: *const FaTuningParams, hsk: u32
     };
 }
 
-/// Ports `ggml_vk_flash_attn_scalar_shmem_support` (ggml-vulkan.cpp:8047 @cd959bae9).
+/// Ports `ggml_vk_flash_attn_scalar_shmem_support` (ggml-vulkan.cpp:8313 @b1b770d90).
 /// Must track the shader; it overestimates `tmpsh` slightly.
 pub fn scalarShmemSupport(dev: *const Device, params: *const FaTuningParams, hsk: u32, hsv: u32, f32acc: bool, k_type: c.ggml_type, v_type: c.ggml_type) bool {
     _ = f32acc;
@@ -255,7 +421,7 @@ pub fn scalarShmemSupport(dev: *const Device, params: *const FaTuningParams, hsk
     return total_size <= dev.properties.limits.maxComputeSharedMemorySize;
 }
 
-/// Ports `ggml_vk_flash_attn_coopmat_shmem_support` (ggml-vulkan.cpp:8098 @cd959bae9).
+/// Ports `ggml_vk_flash_attn_coopmat_shmem_support` (ggml-vulkan.cpp:8364 @b1b770d90).
 pub fn coopmatShmemSupport(dev: *const Device, params: *const FaTuningParams, hsk: u32, hsv: u32, f32acc: bool, k_type: c.ggml_type) bool {
     const Br = params.block_rows;
     const Bc = params.block_cols;
@@ -312,7 +478,7 @@ fn isDenseKvCache(t: *const Tensor) bool {
         (t.ne[3] == 1 or t.nb[3] == t.nb[1] * @as(usize, @intCast(t.ne[1])));
 }
 
-/// Ports `ggml_vk_flash_attn` (ggml-vulkan.cpp:8146 @cd959bae9).
+/// Ports `ggml_vk_flash_attn` (ggml-vulkan.cpp:8412 @b1b770d90).
 pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const Tensor, v: *const Tensor, mask: ?*const Tensor, sinks: ?*const Tensor, dst: *Tensor) void {
     const dev = ctx.device;
     const limits = &dev.properties.limits;
@@ -370,17 +536,24 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
             v.nb[1] != @as(u64, HSV) * c.ggml_type_size(v.type)) and
         (HSK % 8) == 0 and (HSV % 8) == 0;
     const kv_scratch_ts: u64 = if (kv_raw_strided) c.ggml_type_size(k.type) else fp16sz;
+    // K and V share one scratch buffer, so the sum must fit in one allocation
+    const dequant_kv_sz: u64 = (@as(u64, @intCast(c.ggml_nelements(k))) + @as(u64, @intCast(c.ggml_nelements(v)))) *% kv_scratch_ts;
+    const cm2_min_queries: u32 = if (KV >= 8192) 512 else 1024;
+    const cm2_min_reuse: u32 = if (KV >= 8192) 4096 else 8192;
+    // Query reuse must cover the conversion and synchronization cost.
+    const cm2_dequant_kv = KV >= 4096 and q.ne[1] >= cm2_min_queries and @as(u64, @bitCast(q.ne[1])) *% qk_ratio >= cm2_min_reuse;
     const use_dequant_kv = ((k_quant and v_quant) or kv_raw_strided) and q.ne[1] >= 64 and
         isDenseKvCache(k) and isDenseKvCache(v) and
         @as(u64, @intCast(c.ggml_nelements(k))) * kv_scratch_ts <= limits.maxStorageBufferRange and
         @as(u64, @intCast(c.ggml_nelements(v))) * kv_scratch_ts <= limits.maxStorageBufferRange and
+        dequant_kv_sz <= dev.max_buffer_size and
+        dequant_kv_sz <= dev.max_memory_allocation_size and
         (kv_raw_strided or
             (dev.pipeline_dequant_transpose[@intCast(k.type)] != null and
                 dev.pipeline_dequant_transpose[@intCast(v.type)] != null)) and
-        // coopmat2 path does not benefit from the f16 scratch
-        !dev.coopmat2 and
         // Intel Xe1 regresses, see PR 25494
-        (dev.vendor_id != vendor_id_intel or (dev.coopmat_support and dev.architecture != .intel_xe1));
+        (dev.vendor_id != vendor_id_intel or (dev.coopmat_support and dev.architecture != .intel_xe1)) and
+        (!dev.coopmat2 or cm2_dequant_kv);
 
     const k_type_eff: c.ggml_type = if (use_dequant_kv and !kv_raw_strided) c.GGML_TYPE_F16 else k.type;
     const v_type_eff: c.ggml_type = if (use_dequant_kv and !kv_raw_strided) c.GGML_TYPE_F16 else v.type;
@@ -430,6 +603,7 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
         (gqa_ratio > 1 or (tuning.path == .scalar and N == 1));
 
     const q_stride: u32 = @truncate(q.nb[1] / c.ggml_type_size(q.type));
+    const q_stride_eff: u32 = if (gqa_ratio > 1) @truncate(q.nb[2] / c.ggml_type_size(q.type)) else q_stride;
     var k_stride: u32 = @truncate(k.nb[1] / c.ggml_type_size(k.type));
     var v_stride: u32 = @truncate(v.nb[1] / c.ggml_type_size(v.type));
     // For F32, the shader treats it as a block of size 4 (for vec4 loads)
@@ -450,9 +624,13 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
     }
 
     const alignment = tuning.block_cols;
-    // The "aligned" shader variant forcibly aligns strides, for performance.
-    var aligned = (KV % alignment) == 0 and
-        (q_stride & 7) == 0 and (k_stride & 7) == 0 and (v_stride & 7) == 0;
+    // CM2 decoded K/V strides count whole blocks and do not need to be multiples of eight blocks.
+    const cm2_decode_k = tuning.path == .coopmat2 and
+        k_type_eff != c.GGML_TYPE_F16 and k_type_eff != c.GGML_TYPE_BF16;
+    const cm2_decode_v = tuning.path == .coopmat2 and
+        v_type_eff != c.GGML_TYPE_F16 and v_type_eff != c.GGML_TYPE_BF16;
+    var aligned = (KV % alignment) == 0 and (q_stride_eff & 7) == 0 and
+        (cm2_decode_k or (k_stride & 7) == 0) and (cm2_decode_v or (v_stride & 7) == 0);
     // coopmat2 needs the variant that clamps loads when HSK/HSV aren't sufficiently aligned.
     if (((HSK | HSV) % 16) != 0 and tuning.path == .coopmat2) aligned = false;
 
@@ -462,22 +640,95 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
 
     const state = pipelineState(dev, &tuning, HSK, HSV, aligned, f32acc, mask != null, use_mask_opt, logit_softcap != 0, use_sparse, k_type_eff, v_type_eff);
 
-    // Intel Xe's two-phase decode path: its platforms, shapes and types.
+    // Intel Xe's flash attention: a prefill kernel, and a two-phase decode.
+    const tensorAlignedWith = struct {
+        fn f(bctx: *const BackendCtx, t: *const Tensor, in: u32) bool {
+            impl.assert(in != 0, "t != nullptr && in != 0");
+            return t.nb[1] % in == 0 and t.nb[2] % in == 0 and t.nb[3] % in == 0 and m.context.tensorBufferOffset(bctx, t) % in == 0;
+        }
+    }.f;
     var xe_fa_opt = false;
-    var fa_copy_qstate = false;
-    const xe_fa_supported_platform =
-        (dev.architecture == .intel_xe2 and dev.properties.deviceID != 0xFD80 and dev.properties.deviceID != 0xFD81) or
-        (dev.architecture == .intel_xe1 and dev.coopmat_support and dev.uma);
-    const xe_fa_supported_usage = @mod(q.ne[0], 32) == 0 and @mod(v.ne[0], 16) == 0 and q.nb[1] > q.nb[2] and k.nb[1] > k.nb[2] and v.nb[1] > v.nb[2] and mask != null;
-    const xe_fa_supported_dtype = q.type == c.GGML_TYPE_F32 and k.type == c.GGML_TYPE_F16 and v.type == c.GGML_TYPE_F16 and (mask != null and mask.?.type == c.GGML_TYPE_F16);
+    var xe_fa_use_2phases = false;
+    const xe_fa_supported_platform = dev.xe_fa_support and dev.properties.deviceID != 0xFD80 and dev.properties.deviceID != 0xFD81;
+    const xe_fa_supported_usage = @mod(q.ne[0], 32) == 0 and @mod(v.ne[0], 16) == 0 and mask != null and !use_sparse and max_bias == 0.0 and logit_softcap == 0.0 and
+        tensorAlignedWith(ctx, k, 16) and tensorAlignedWith(ctx, v, 16);
+    const xe_fa_supported_dtype = q.type == c.GGML_TYPE_F32 and k.type == c.GGML_TYPE_F16 and v.type == c.GGML_TYPE_F16 and
+        mask != null and mask.?.type == c.GGML_TYPE_F16;
+    xe_fa_opt = xe_fa_supported_platform and xe_fa_supported_usage and xe_fa_supported_dtype;
     var xe_fa_pipeline_dual_phases: m.device.XeFaDecodePipelines = .{};
+    var xe_fa_pipeline: ?*Pipeline = null;
+    var size_q_staging: u64 = 0;
     var size_p: u64 = 0;
     var size_group_max: u64 = 0;
+    var size_decode_temp: u64 = 0;
+    const pv_ratio: u32 = @truncate(@as(u64, @bitCast(@divTrunc(q.ne[2], v.ne[2]))));
+    var xe_fa_params: XeFaTuningParams = .{};
 
-    const pipeline = dynamicPipeline(ctx, &dev.pipeline_flash_attn_f32_f16, state);
+    var pipeline_: ?*Pipeline = null;
+    {
+        _ = std.c.pthread_mutex_lock(&dev.compile_mutex);
+        defer _ = std.c.pthread_mutex_unlock(&dev.compile_mutex);
+        if (xe_fa_opt) {
+            const neq1: i64 = q.ne[1];
+            const nek1: i64 = k.ne[1];
+            if (neq1 > 8 or pv_ratio > 64) {
+                const head_stride_q: u32 = @truncate(q.nb[2] / c.ggml_type_size(q.type));
+                const batch_stride_q: u32 = @truncate(q.nb[3] / c.ggml_type_size(q.type));
+                var prefill_state: XeFaPipelineState = .{ .HSK = u(q.ne[0]), .HSV = u(v.ne[0]), .qk_ratio = qk_ratio, .pv_ratio = pv_ratio, .decode_n = 0 };
+                prefill_state.unaligned_seq_len = @rem(nek1, 32) != 0;
+                prefill_state.unaligned_q = head_stride_q % 8 != 0 or q_stride % 8 != 0 or batch_stride_q % 8 != 0;
+                prefill_state.partial_row_mask = neq1 > nem1;
+                prefill_state.multi_head_mask = nem2 > 1;
+                xe_fa_params = xeFaTuningParams(dev, prefill_state, true);
+                if (xe_fa_params.shmem_sz <= limits.maxComputeSharedMemorySize) {
+                    const gop = dev.pipeline_xe_fa_prefill.getOrPut(m.common.allocator, prefill_state) catch impl.abort("ggml_vulkan: out of memory");
+                    if (!gop.found_existing) gop.value_ptr.* = Pipeline.create();
+                    xe_fa_pipeline = gop.value_ptr.*;
+                } else {
+                    xe_fa_opt = false;
+                }
+            } else {
+                var decode_state: XeFaPipelineState = .{ .HSK = u(q.ne[0]), .HSV = u(v.ne[0]), .qk_ratio = qk_ratio, .pv_ratio = pv_ratio, .decode_n = @truncate(@as(u64, @bitCast(neq1))) };
+                decode_state.unaligned_seq_len = @rem(nek1, 256) != 0;
+                xe_fa_params = xeFaTuningParams(dev, decode_state, false);
+                const split_p_size = xe_fa_params.decode_params.p_chunk_ph1;
+                const max_dim: u64 = @max(@as(u64, @bitCast(@divTrunc(nek1 + split_p_size - 1, split_p_size))), 1);
+                const p_dim = max_dim *% split_p_size;
+                const q_head_padding: u64 = 16;
+                const neq0u: u64 = @bitCast(q.ne[0]);
+                const neq1u: u64 = @bitCast(q.ne[1]);
+                const neq2u: u64 = @bitCast(q.ne[2]);
+                const neq3u: u64 = @bitCast(q.ne[3]);
+                size_q_staging = neq0u *% neq1u *% (neq2u *% neq3u +% q_head_padding) *% @sizeOf(c.ggml_fp16_t);
+                size_p = neq1u *% neq2u *% p_dim *% neq3u *% @sizeOf(c.ggml_fp16_t);
+                size_group_max = neq1u *% neq2u *% max_dim *% neq3u *% @sizeOf(f32);
+                size_decode_temp = size_q_staging +% size_p +% size_group_max;
+                const ph1_wg1: u32 = @truncate(@as(u64, @bitCast(@divTrunc(nek1 + xe_fa_params.decode_params.p_chunk_ph1 - 1, xe_fa_params.decode_params.p_chunk_ph1))));
+                if (xe_fa_params.shmem_sz <= limits.maxComputeSharedMemorySize and
+                    ph1_wg1 <= limits.maxComputeWorkGroupCount[1] and
+                    size_decode_temp <= limits.maxStorageBufferRange)
+                {
+                    const gop = dev.pipeline_xe_fa_decode_dual_phases.getOrPut(m.common.allocator, decode_state) catch impl.abort("ggml_vulkan: out of memory");
+                    if (!gop.found_existing) gop.value_ptr.* = .{ .first = Pipeline.create(), .second = Pipeline.create() };
+                    xe_fa_pipeline_dual_phases = gop.value_ptr.*;
+                    xe_fa_use_2phases = true;
+                } else {
+                    xe_fa_opt = false;
+                }
+            }
+        }
 
-    // Compile early to initialize wg_denoms.
-    m.context.requestDescriptorSets(ctx, pipeline, 1);
+        if (!xe_fa_opt) {
+            const gop = dev.pipeline_flash_attn_f32_f16.getOrPut(m.common.allocator, state) catch impl.abort("ggml_vulkan: out of memory");
+            if (!gop.found_existing or gop.value_ptr.* == null) gop.value_ptr.* = Pipeline.create();
+            pipeline_ = gop.value_ptr.*;
+        }
+    }
+
+    if (!xe_fa_opt) {
+        // Compile early to initialize wg_denoms.
+        m.context.requestDescriptorSets(ctx, pipeline_.?, 1);
+    }
 
     var split_kv = KV;
     var split_k: u32 = 1;
@@ -489,7 +740,9 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
 
     const Br = state.Br;
     const Bc = state.Bc;
-    impl.assert(Br == pipeline.wg_denoms[0], "Br == pipeline->wg_denoms[0]");
+    if (!xe_fa_opt) {
+        impl.assert(Br == pipeline_.?.wg_denoms[0], "Br == pipeline->wg_denoms[0]");
+    }
     const Tr = ceilDiv(N, Br);
 
     // Try to use split_k when KV is large enough to be worth the overhead.
@@ -516,48 +769,21 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
         // alignment, and recompute split_k from that.
         split_kv = @intCast(roundupPow2(@max(1, KV / split_k), alignment));
         split_k = ceilDiv(KV, split_kv);
-        xe_fa_opt = xe_fa_supported_platform and xe_fa_supported_usage and xe_fa_supported_dtype;
-        if (xe_fa_opt) {
-            const split_p_size: u64 = 32;
-            const nek1: u64 = @intCast(k.ne[1]);
-            const max_dim = (nek1 +% split_p_size -% 1) / split_p_size;
-            const p_dim = max_dim *% split_p_size;
-            // The two-phase pipelines exist only where glslc took coopmat
-            // (`fa_decode_ph1`/`ph2` are generated under it); the C++ holds
-            // `compile_mutex` for the rest of this block when it does.
-            const have_xe_pipelines = comptime m.instance.glslc.coopmat;
-            if (have_xe_pipelines) _ = std.c.pthread_mutex_lock(&dev.compile_mutex);
-            defer if (have_xe_pipelines) {
-                _ = std.c.pthread_mutex_unlock(&dev.compile_mutex);
-            };
-            if (have_xe_pipelines) {
-                const xe_key: m.device.XeFaDecodeKey = .{ u(q.ne[0]), u(v.ne[0]), qk_ratio, u(q.ne[1]) };
-                const gop = dev.pipeline_xe_fa_decode_dual_phases.getOrPut(m.common.allocator, xe_key) catch impl.abort("ggml_vulkan: out of memory");
-                if (!gop.found_existing) gop.value_ptr.* = .{ .first = Pipeline.create(), .second = Pipeline.create() };
-                xe_fa_pipeline_dual_phases = gop.value_ptr.*;
-            }
-            if (xe_fa_pipeline_dual_phases.first == null or xe_fa_pipeline_dual_phases.second == null) {
-                xe_fa_opt = false;
-                fa_copy_qstate = false;
-            } else {
-                const neq1: u64 = @intCast(q.ne[1]);
-                const neq2: u64 = @intCast(q.ne[2]);
-                const neq3: u64 = @intCast(q.ne[3]);
-                size_p = neq1 *% neq2 *% p_dim *% neq3 *% @sizeOf(c.ggml_fp16_t);
-                size_group_max = neq1 *% neq2 *% max_dim *% neq3 *% @sizeOf(f32);
-                const temp_size = @as(u64, @intCast(c.ggml_nelements(q))) *% @sizeOf(c.ggml_fp16_t) +% size_p +% size_group_max;
-                fa_copy_qstate = true;
-                if (ctx.prealloc_size_x < temp_size) {
-                    ctx.prealloc_size_x = temp_size;
-                    m.nodes.preallocateBuffers(ctx, subctx);
-                }
-
-                if (ctx.prealloc_x_need_sync) m.context.syncBuffers(ctx, subctx);
-            }
-        }
     }
 
-    if (xe_fa_opt) use_mask_opt = false;
+    if (xe_fa_opt) {
+        // Bypass mask_opt and split_k buffer grow when they are not in use
+        use_mask_opt = false;
+        split_k = 1;
+        if (xe_fa_use_2phases) {
+            if (ctx.prealloc_size_x < size_decode_temp) {
+                ctx.prealloc_size_x = size_decode_temp;
+                m.nodes.preallocateBuffers(ctx, subctx);
+            }
+
+            if (ctx.prealloc_x_need_sync) m.context.syncBuffers(ctx, subctx);
+        }
+    }
 
     const ne1: u64 = @intCast(dst.ne[1]);
     const ne2: u64 = @intCast(dst.ne[2]);
@@ -764,14 +990,21 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
         .k_num = split_k,
     };
 
-    if (xe_fa_opt and split_k > 1) {
-        xeFaDecode(ctx, subctx, q, k, v, mask, sinks, dst, .{
+    if (xe_fa_opt) {
+        xeFa(ctx, subctx, q, k, v, dst, .{
+            .use_2phases = xe_fa_use_2phases,
             .pipelines = xe_fa_pipeline_dual_phases,
-            .qk_ratio = qk_ratio,
+            .pipeline = xe_fa_pipeline,
+            .params = xe_fa_params,
+            .q_stride = q_stride,
             .k_stride = k_stride,
             .v_stride = v_stride,
+            .nem1 = nem1,
+            .nem2 = nem2,
+            .nem3 = nem3,
+            .sinks = sinks != null,
             .scale = scale,
-            .fa_copy_qstate = fa_copy_qstate,
+            .size_q_staging = size_q_staging,
             .size_p = size_p,
             .size_group_max = size_group_max,
             .q_buf = q_buf,
@@ -782,6 +1015,7 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
             .dst_buf = dst_buf,
         });
     } else if (split_k > 1) {
+        const pipeline = pipeline_.?;
         const reduce = dev.pipeline_flash_attn_split_k_reduce.?;
         m.context.requestDescriptorSets(ctx, reduce, 1);
         if (ctx.prealloc_split_k_need_sync) m.context.syncBuffers(ctx, subctx);
@@ -803,6 +1037,7 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
         m.context.dispatch(ctx, subctx, reduce, &.{ split_k_buf, sinks_buf, dst_buf }, &pc2, .{ @truncate(ne1), HSV, @truncate(ne2 *% ne3) });
         ctx.prealloc_split_k_need_sync = true;
     } else {
+        const pipeline = pipeline_.?;
         // With gqa, one actual workgroup per batch: cancel out wg_denoms
         if (gqa_ratio > 1) workgroups_x *%= pipeline.wg_denoms[0];
         m.context.dispatch(ctx, subctx, pipeline, &.{ q_buf, k_buf, v_buf, mask_buf, sinks_buf, dst_buf, mask_opt_buf, sparse_buf }, &pc, .{ workgroups_x, workgroups_y, workgroups_z });
@@ -812,7 +1047,7 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
     if (use_mask_opt or use_sparse) ctx.prealloc_y_need_sync = true;
 }
 
-/// The function-static `disable_sparse` (ggml-vulkan.cpp:8270 @cd959bae9):
+/// The function-static `disable_sparse` (ggml-vulkan.cpp:8543 @b1b770d90):
 /// whether `GGML_VK_FA_SPARSE_DISABLE` is set, read once, on first use.
 const DisableSparse = struct {
     /// 0 unread, 1 false, 2 true.
@@ -827,14 +1062,21 @@ const DisableSparse = struct {
     }
 };
 
-/// What `xeFaDecode` takes from `flashAttn`'s locals.
+/// What `xeFa` takes from `flashAttn`'s locals.
 const XeFaArgs = struct {
+    use_2phases: bool,
     pipelines: m.device.XeFaDecodePipelines,
-    qk_ratio: u32,
+    pipeline: ?*Pipeline,
+    params: XeFaTuningParams,
+    q_stride: u32,
     k_stride: u32,
     v_stride: u32,
+    nem1: u32,
+    nem2: u32,
+    nem3: u32,
+    sinks: bool,
     scale: f32,
-    fa_copy_qstate: bool,
+    size_q_staging: u64,
     size_p: u64,
     size_group_max: u64,
     q_buf: Subbuffer,
@@ -845,10 +1087,8 @@ const XeFaArgs = struct {
     dst_buf: Subbuffer,
 };
 
-/// The `upper_power_of_2` and `upper_power_of_2` lambdas
-/// (ggml-vulkan.cpp:8622, 3187 @cd959bae9), one in `ggml_vk_flash_attn` and
-/// one in `ggml_vk_load_shaders`, which are the same: the next power of two
-/// at or above `in`.
+/// The `upper_power_of_2` lambda (ggml-vulkan.cpp:1540 @b1b770d90) of
+/// `get_xe_fa_tuning_params`: the next power of two at or above `in`.
 pub fn upperPowerOf2(in: u32) u32 {
     impl.assert(in != 0, "in != 0");
     if (in <= 1) return 1;
@@ -861,74 +1101,80 @@ pub fn upperPowerOf2(in: u32) u32 {
     return ret +% 1;
 }
 
-/// The `xe_fa_opt` arm (ggml-vulkan.cpp:8621 @cd959bae9) of
-/// `ggml_vk_flash_attn`, taken when `split_k > 1`: Intel Xe's two-phase decode -- Q copied
-/// to fp16 into `prealloc_x`, phase 1 writing P and each group's max beside
-/// it, phase 2 reducing them against V into `dst`.
-fn xeFaDecode(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const Tensor, v: *const Tensor, mask: ?*const Tensor, sinks: ?*const Tensor, dst: *const Tensor, a: XeFaArgs) void {
-    const dev = ctx.device;
+/// The `xe_fa_opt` arm (ggml-vulkan.cpp:8946 @b1b770d90) of
+/// `ggml_vk_flash_attn`: Intel Xe's flash attention. Prefill is one
+/// dispatch; decode copies Q to contiguous fp16 in `prealloc_x`, then phase
+/// 1 writes P and each group's max beside it and phase 2 reduces them
+/// against V into `dst`.
+fn xeFa(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const Tensor, v: *const Tensor, dst: *const Tensor, a: XeFaArgs) void {
     const u = ops.u32Of;
-    const to_fp16_vk_0 = m.ops_matmul.getToFp16(ctx, q.type);
-    const out_dim_per_wg: i64 = if (a.qk_ratio > 16) 8 else 16;
-    const x_ne: u64 = @intCast(c.ggml_nelements(q));
-    var temp_buf_offset: u64 = 0;
+    const head_stride_q: u32 = @truncate(q.nb[2] / c.ggml_type_size(q.type));
     const head_stride_k: u32 = @truncate(k.nb[2] / c.ggml_type_size(k.type));
     const head_stride_v: u32 = @truncate(v.nb[2] / c.ggml_type_size(v.type));
     const batch_stride_q: u32 = @truncate(q.nb[3] / c.ggml_type_size(q.type));
     const batch_stride_k: u32 = @truncate(k.nb[3] / c.ggml_type_size(k.type));
     const batch_stride_v: u32 = @truncate(v.nb[3] / c.ggml_type_size(v.type));
-    const batch_stride_m: u32 = if (mask) |mk| @truncate(mk.nb[3] / c.ggml_type_size(mk.type)) else 0;
     const batch_stride_o: u32 = @truncate(dst.nb[3] / c.ggml_type_size(dst.type));
-    const pc_ph1: push.FaXeOpt = .{
-        .kv_seq_len = u(k.ne[1]),
-        .activation_length = u(q.ne[1]),
-        .q_head = u(q.ne[2]),
-        .kv_head = u(k.ne[2]),
-        .qk_ratio = a.qk_ratio,
-        .qk_sub_groups = 1,
-        .flag = @intFromBool(sinks != null),
-        .nbkv_tok = a.k_stride,
-        .nbkv_head = head_stride_k,
-        .batch_stride_q = batch_stride_q,
-        .batch_stride_k = batch_stride_k,
-        .batch_stride_v = batch_stride_v,
-        .batch_stride_m = batch_stride_m,
-        .batch_stride_o = batch_stride_o,
-        .softmax_scale = a.scale,
+
+    var pc_xe_fa: push.XeFa = .{
+        .neq1 = u(q.ne[1]),
+        .neq2 = u(q.ne[2]),
+        .neq3 = u(q.ne[3]),
+        .nek1 = u(k.ne[1]),
+        .nek2 = u(k.ne[2]),
+        .nek3 = u(k.ne[3]),
+        .nev2 = u(v.ne[2]),
+        .nev3 = u(v.ne[3]),
+        .nem1 = a.nem1,
+        .nem2 = a.nem2,
+        .nem3 = a.nem3,
+        .nbq1 = a.q_stride,
+        .nbq2 = head_stride_q,
+        .nbk1 = a.k_stride,
+        .nbk2 = head_stride_k,
+        .nbv1 = a.v_stride,
+        .nbv2 = head_stride_v,
+        .nbq3 = batch_stride_q,
+        .nbk3 = batch_stride_k,
+        .nbv3 = batch_stride_v,
+        .nb3 = batch_stride_o,
+        .flag = if (a.sinks) 1 << 16 else 0,
+        .scale = a.scale,
     };
-    var pc_ph2 = pc_ph1;
-    pc_ph2.nbkv_tok = a.v_stride;
-    pc_ph2.nbkv_head = head_stride_v;
-    const q_temp_buf = if (a.fa_copy_qstate) m.context.subbuffer(ctx, ctx.prealloc_x.?, temp_buf_offset) else a.q_buf;
-    temp_buf_offset += if (a.fa_copy_qstate) x_ne * @sizeOf(c.ggml_fp16_t) else 0;
-    const p_temp_buf = m.context.subbuffer(ctx, ctx.prealloc_x.?, temp_buf_offset);
-    temp_buf_offset += a.size_p;
-    const max_temp_buf = m.context.subbuffer(ctx, ctx.prealloc_x.?, temp_buf_offset);
-    temp_buf_offset += a.size_group_max;
-    const xe_native_sub_group_size: u32 = if (dev.architecture == .intel_xe1) 8 else 16;
-    const aligned_gqa_ratio = upperPowerOf2(a.qk_ratio);
-    const neq1: u32 = u(q.ne[1]);
-    const out_per_wg_ph1 = @min(256 / xe_native_sub_group_size, neq1);
-    const out_per_wg_ph2 = @min(@max(16 / aligned_gqa_ratio, 1), neq1);
-    // int64_t arithmetic in the C++: neq1, nek2 and ne0 are int64_t.
-    const ph1_wg: u32 = @truncate(@as(u64, @bitCast(@divTrunc(q.ne[1] + out_per_wg_ph1 - 1, out_per_wg_ph1) * k.ne[2])));
-    const ph2_wg: u32 = @truncate(@as(u64, @bitCast(@divTrunc(@divTrunc(q.ne[1] + out_per_wg_ph2 - 1, out_per_wg_ph2) * dst.ne[0], out_dim_per_wg))));
-    if (a.fa_copy_qstate) {
-        const pc_cpy_fp16 = [5]u32{ u(q.ne[0]), u(q.ne[1]), u(q.ne[2]), u(q.ne[3]), @truncate(x_ne) };
+
+    if (a.use_2phases) {
+        const to_fp16_vk_0 = m.op_pipeline.getCpyPipeline(ctx, q, null, c.GGML_TYPE_F16).?;
+        var temp_buf_offset: u64 = 0;
+        const q_temp_buf = m.context.subbuffer(ctx, ctx.prealloc_x.?, temp_buf_offset);
+        temp_buf_offset += a.size_q_staging;
+        const p_temp_buf = m.context.subbuffer(ctx, ctx.prealloc_x.?, temp_buf_offset);
+        temp_buf_offset += a.size_p;
+        const max_temp_buf = m.context.subbuffer(ctx, ctx.prealloc_x.?, temp_buf_offset);
+        temp_buf_offset += a.size_group_max;
+        // int64_t arithmetic in the C++: neq1, nek2 and ne0 are int64_t.
+        const dp = a.params.decode_params;
+        const ph1_wg: u32 = @truncate(@as(u64, @bitCast(@divTrunc(q.ne[1] + dp.out_per_wg_ph1 - 1, dp.out_per_wg_ph1) * k.ne[2])));
+        const ph2_wg: u32 = @truncate(@as(u64, @bitCast(@divTrunc(@divTrunc(q.ne[1] + dp.out_row_per_wg_ph2 - 1, dp.out_row_per_wg_ph2) * dst.ne[0], dp.out_col_per_wg_ph2))));
+
+        pc_xe_fa.nbq1 = @truncate(@as(u64, @bitCast(q.ne[0])));
+        pc_xe_fa.nbq2 = @truncate(@as(u64, @bitCast(q.ne[0] * q.ne[1])));
+        pc_xe_fa.nbq3 = @truncate(@as(u64, @bitCast(q.ne[0] * q.ne[1] * q.ne[2])));
+
+        m.context.requestDescriptorSets(ctx, to_fp16_vk_0, 1);
+        m.ops_matmul.cpyToContiguous(ctx, subctx, to_fp16_vk_0, q, a.q_buf, q_temp_buf);
+
+        m.context.requestDescriptorSets(ctx, a.pipelines.first.?, 1);
+        m.context.dispatch(ctx, subctx, a.pipelines.first.?, &.{ q_temp_buf, a.k_buf, a.mask_buf, p_temp_buf, max_temp_buf }, &pc_xe_fa, .{ ph1_wg, u(k.ne[1]), u(q.ne[3]) });
+
         m.context.syncBuffers(ctx, subctx);
-        m.context.requestDescriptorSets(ctx, to_fp16_vk_0.?, 1);
-        m.context.dispatch(ctx, subctx, to_fp16_vk_0.?, &.{ a.q_buf, q_temp_buf }, &pc_cpy_fp16, .{ @truncate(x_ne), 1, 1 });
+        m.context.requestDescriptorSets(ctx, a.pipelines.second.?, 1);
+        m.context.dispatch(ctx, subctx, a.pipelines.second.?, &.{ p_temp_buf, a.v_buf, max_temp_buf, a.sinks_buf, a.dst_buf }, &pc_xe_fa, .{ ph2_wg, u(v.ne[2]), u(q.ne[3]) });
+
+        ctx.prealloc_x_need_sync = true;
+    } else {
+        m.context.requestDescriptorSets(ctx, a.pipeline.?, 1);
+        m.context.dispatch(ctx, subctx, a.pipeline.?, &.{ a.q_buf, a.k_buf, a.v_buf, a.mask_buf, a.sinks_buf, a.dst_buf }, &pc_xe_fa, .{ u(q.ne[2]), u(q.ne[1]), u(q.ne[3]) });
     }
-
-    m.context.syncBuffers(ctx, subctx);
-    m.context.requestDescriptorSets(ctx, a.pipelines.first.?, 1);
-    m.context.dispatch(ctx, subctx, a.pipelines.first.?, &.{ q_temp_buf, a.k_buf, a.mask_buf, p_temp_buf, max_temp_buf }, &pc_ph1, .{ ph1_wg, u(k.ne[1]), u(q.ne[3]) });
-
-    m.context.syncBuffers(ctx, subctx);
-    m.context.requestDescriptorSets(ctx, a.pipelines.second.?, 1);
-    m.context.dispatch(ctx, subctx, a.pipelines.second.?, &.{ p_temp_buf, a.v_buf, max_temp_buf, a.sinks_buf, a.dst_buf }, &pc_ph2, .{ ph2_wg, u(v.ne[2]), u(q.ne[3]) });
-
-    ctx.prealloc_x_need_sync = true;
 }
 
 // -----------------------------------------------------------------------------

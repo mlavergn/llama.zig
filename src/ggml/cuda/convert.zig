@@ -4,7 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/convert.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/convert.cuh` at v0.9.0 (`cd959bae9`). The
+//! `llama.cpp/ggml/src/ggml-cuda/convert.cuh` at v1.0.0 (`b1b770d90`). The
 //! `dequantize_block*`, `convert_unary` and `convert_unary_cont_vec4`
 //! kernels stay CUDA.
 //!
@@ -24,17 +24,18 @@ const c = impl.c;
 const cu = common.cu;
 const half = kernels.half;
 const bf16 = kernels.bf16;
+const fp8_e4m3 = kernels.fp8_e4m3;
 
-/// Ports `CUDA_DEQUANTIZE_BLOCK_SIZE` (convert.cuh:4 @cd959bae9).
+/// Ports `CUDA_DEQUANTIZE_BLOCK_SIZE` (convert.cuh:4 @b1b770d90).
 const dequantize_block_size = 256;
 
-/// Ports `CUDA_Q8_0_NE_ALIGN` (convert.cu:6 @cd959bae9).
+/// Ports `CUDA_Q8_0_NE_ALIGN` (convert.cu:6 @b1b770d90).
 const q8_0_ne_align = 2048;
 
-/// Ports `to_t_cuda_t` (convert.cuh:7 @cd959bae9), with the element type erased.
+/// Ports `to_t_cuda_t` (convert.cuh:7 @b1b770d90), with the element type erased.
 pub const ToFn = *const fn (x: ?*const anyopaque, y: ?*anyopaque, k: i64, stream: cu.cudaStream_t) void;
 
-/// Ports `to_t_nc_cuda_t` (convert.cuh:22 @cd959bae9), with the element type erased.
+/// Ports `to_t_nc_cuda_t` (convert.cuh:22 @b1b770d90), with the element type erased.
 pub const ToNcFn = *const fn (x: ?*const anyopaque, y: ?*anyopaque, ne00: i64, ne01: i64, ne02: i64, ne03: i64, s01: i64, s02: i64, s03: i64, stream: cu.cudaStream_t) void;
 
 /// The `dequantize_kernel_t` a `dequantize_block` is instantiated with:
@@ -53,7 +54,7 @@ fn i32Of(x: i64) c_int {
     return @truncate(x);
 }
 
-/// Ports `dequantize_block_cuda` (convert.cu:252 @cd959bae9).
+/// Ports `dequantize_block_cuda` (convert.cu:252 @b1b770d90).
 fn DequantizeBlock(comptime d: Deq, comptime T: type) type {
     return struct {
         const k = kernels.get("convert", kernels.tmpl("dequantize_block", &.{ kernels.int(d.qk), kernels.int(d.qr), "&" ++ d.name, kernels.typeName(T) }));
@@ -72,14 +73,14 @@ fn DequantizeBlock(comptime d: Deq, comptime T: type) type {
             }, .{ vx, y, ne00, ne01, ne0203, ne02_fdv, s01, s02, s03 });
         }
 
-        /// Ports `dequantize_block_cont_cuda` (convert.cu:263 @cd959bae9).
+        /// Ports `dequantize_block_cont_cuda` (convert.cu:263 @b1b770d90).
         fn cont(vx: ?*const anyopaque, y: ?*anyopaque, kk: i64, stream: cu.cudaStream_t) void {
             nc(vx, y, kk, 1, 1, 1, @divTrunc(kk, d.qk), @divTrunc(kk, d.qk), @divTrunc(kk, d.qk), stream);
         }
     };
 }
 
-/// Ports `dequantize_block_q8_0_f16_cuda` (convert.cu:267 @cd959bae9).
+/// Ports `dequantize_block_q8_0_f16_cuda` (convert.cu:267 @b1b770d90).
 fn dequantizeBlockQ8_0F16(vx: ?*const anyopaque, y: ?*anyopaque, k: i64, stream: cu.cudaStream_t) void {
     const num_blocks: c_int = @truncate(@divTrunc(k + q8_0_ne_align - 1, q8_0_ne_align));
     const p: kernels.LaunchParams = .{ .grid = .{ .x = @bitCast(num_blocks) }, .block = .{ .x = common.warp_size }, .stream = stream };
@@ -104,9 +105,9 @@ const RowGrid = enum {
 };
 
 /// Ports the `dequantize_row_*_cuda` launchers from `dequantize_row_q2_K_cuda`
-/// (convert.cu:279 @cd959bae9) to `dequantize_row_mxfp4_cuda` (convert.cu:378
-/// @cd959bae9): one `<<<nb, threads>>>` launch of `dequantize_block_<name>`.
-/// `dequantize_row_iq4_nl_cuda` (convert.cu:359 @cd959bae9) passes its
+/// (convert.cu:279 @b1b770d90) to `dequantize_row_mxfp4_cuda` (convert.cu:378
+/// @b1b770d90): one `<<<nb, threads>>>` launch of `dequantize_block_<name>`.
+/// `dequantize_row_iq4_nl_cuda` (convert.cu:359 @b1b770d90) passes its
 /// block count since v0.6.0, so the kernel can stop at a row's end.
 fn DequantizeRow(comptime name: []const u8, comptime threads: comptime_int, comptime grid: RowGrid, comptime T: type) type {
     return struct {
@@ -137,7 +138,7 @@ fn DequantizeRow(comptime name: []const u8, comptime threads: comptime_int, comp
     };
 }
 
-/// Ports `dequantize_row_nvfp4_cuda` (convert.cu:413 @cd959bae9).
+/// Ports `dequantize_row_nvfp4_cuda` (convert.cu:413 @b1b770d90).
 fn DequantizeRowNvfp4(comptime T: type) type {
     return struct {
         const k = kernels.get("convert", kernels.tmpl("dequantize_block_nvfp4", &.{kernels.typeName(T)}));
@@ -150,11 +151,11 @@ fn DequantizeRowNvfp4(comptime T: type) type {
     };
 }
 
-/// Ports `convert_unary_cuda` (convert.cu:472 @cd959bae9) and
-/// `convert_unary_cont_cuda` (convert.cu:483 @cd959bae9). A contiguous
+/// Ports `convert_unary_cuda` (convert.cu:472 @b1b770d90) and
+/// `convert_unary_cont_cuda` (convert.cu:483 @b1b770d90). A contiguous
 /// conversion whose length is a multiple of four and whose two buffers are
 /// aligned to four elements (`alignof(cvt_vec4<T>)`, convert.cu:448
-/// @cd959bae9) moves four elements per thread.
+/// @b1b770d90) moves four elements per thread.
 fn ConvertUnary(comptime S: type, comptime T: type) type {
     return struct {
         const k = kernels.get("convert", kernels.tmpl("convert_unary", &.{ kernels.typeName(S), kernels.typeName(T) }));
@@ -225,31 +226,35 @@ fn quantizedTo(comptime T: type, t: c.enum_ggml_type) ?ToFn {
     };
 }
 
-/// Ports `ggml_get_to_bf16_cuda` (convert.cu:496 @cd959bae9).
+/// Ports `ggml_get_to_bf16_cuda` (convert.cu:496 @b1b770d90). Every getter
+/// below takes `F8_E4M3` since v1.0.0.
 pub fn getToBf16(t: c.enum_ggml_type) ?ToFn {
     return switch (t) {
+        c.GGML_TYPE_F8_E4M3 => ConvertUnary(fp8_e4m3, bf16).cont,
         c.GGML_TYPE_F32 => ConvertUnary(f32, bf16).cont,
         c.GGML_TYPE_F16 => ConvertUnary(half, bf16).cont,
         else => quantizedTo(bf16, t),
     };
 }
 
-/// Ports `ggml_get_to_fp16_cuda` (convert.cu:553 @cd959bae9).
+/// Ports `ggml_get_to_fp16_cuda` (convert.cu:555 @b1b770d90).
 pub fn getToFp16(t: c.enum_ggml_type) ?ToFn {
     return switch (t) {
         c.GGML_TYPE_Q8_0 => if (common.fp16Available(common.info().devices[@intCast(common.getDevice())].cc))
             dequantizeBlockQ8_0F16
         else
             DequantizeBlock(q8_0, half).cont,
+        c.GGML_TYPE_F8_E4M3 => ConvertUnary(fp8_e4m3, half).cont,
         c.GGML_TYPE_F32 => ConvertUnary(f32, half).cont,
         c.GGML_TYPE_BF16 => ConvertUnary(bf16, half).cont,
         else => quantizedTo(half, t),
     };
 }
 
-/// Ports `ggml_get_to_fp32_cuda` (convert.cu:613 @cd959bae9).
+/// Ports `ggml_get_to_fp32_cuda` (convert.cu:617 @b1b770d90).
 pub fn getToFp32(t: c.enum_ggml_type) ?ToFn {
     return switch (t) {
+        c.GGML_TYPE_F8_E4M3 => ConvertUnary(fp8_e4m3, f32).cont,
         c.GGML_TYPE_F16 => ConvertUnary(half, f32).cont,
         c.GGML_TYPE_BF16 => ConvertUnary(bf16, f32).cont,
         else => quantizedTo(f32, t),
@@ -270,27 +275,30 @@ fn quantizedNcTo(comptime T: type, t: c.enum_ggml_type) ?ToNcFn {
     };
 }
 
-/// Ports `ggml_get_to_fp16_nc_cuda` (convert.cu:670 @cd959bae9).
+/// Ports `ggml_get_to_fp16_nc_cuda` (convert.cu:676 @b1b770d90).
 pub fn getToFp16Nc(t: c.enum_ggml_type) ?ToNcFn {
     return switch (t) {
+        c.GGML_TYPE_F8_E4M3 => ConvertUnary(fp8_e4m3, half).nc,
         c.GGML_TYPE_F32 => ConvertUnary(f32, half).nc,
         c.GGML_TYPE_BF16 => ConvertUnary(bf16, half).nc,
         else => quantizedNcTo(half, t),
     };
 }
 
-/// Ports `ggml_get_to_bf16_nc_cuda` (convert.cu:695 @cd959bae9).
+/// Ports `ggml_get_to_bf16_nc_cuda` (convert.cu:703 @b1b770d90).
 pub fn getToBf16Nc(t: c.enum_ggml_type) ?ToNcFn {
     return switch (t) {
+        c.GGML_TYPE_F8_E4M3 => ConvertUnary(fp8_e4m3, bf16).nc,
         c.GGML_TYPE_F32 => ConvertUnary(f32, bf16).nc,
         c.GGML_TYPE_F16 => ConvertUnary(half, bf16).nc,
         else => quantizedNcTo(bf16, t),
     };
 }
 
-/// Ports `ggml_get_to_fp32_nc_cuda` (convert.cu:720 @cd959bae9).
+/// Ports `ggml_get_to_fp32_nc_cuda` (convert.cu:730 @b1b770d90).
 pub fn getToFp32Nc(t: c.enum_ggml_type) ?ToNcFn {
     return switch (t) {
+        c.GGML_TYPE_F8_E4M3 => ConvertUnary(fp8_e4m3, f32).nc,
         c.GGML_TYPE_F16 => ConvertUnary(half, f32).nc,
         c.GGML_TYPE_BF16 => ConvertUnary(bf16, f32).nc,
         else => quantizedNcTo(f32, t),

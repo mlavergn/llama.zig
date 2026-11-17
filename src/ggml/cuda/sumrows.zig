@@ -3,7 +3,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/sumrows.cu` and
-//! `llama.cpp/ggml/src/ggml-cuda/sumrows.cuh` at v0.9.0 (`cd959bae9`). The
+//! `llama.cpp/ggml/src/ggml-cuda/sumrows.cuh` at v1.0.0 (`b1b770d90`). The
 //! kernels, `reduce_rows_f32<false>` and `reduce_rows_f32_strided<false>`
 //! from `reduce_rows.cuh`, stay CUDA.
 //!
@@ -22,7 +22,7 @@ const Tensor = c.ggml_tensor;
 const kernel = kernels.get("sumrows", "reduce_rows_f32<(bool)0>");
 const kernel_strided = kernels.get("sumrows", "reduce_rows_f32_strided<(bool)0>");
 
-/// Ports `sum_rows_f32_cuda` (sumrows.cu:4 @cd959bae9).
+/// Ports `sum_rows_f32_cuda` (sumrows.cu:4 @b1b770d90).
 pub fn sumRowsF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, ncols: c_int, nrows: c_int, stream: cu.cudaStream_t) void {
     const id = common.getDevice();
     const nsm = common.info().devices[@intCast(id)].nsm;
@@ -36,7 +36,7 @@ pub fn sumRowsF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, ncols: c_int, nrow
     }
 }
 
-/// Ports `ggml_cuda_op_sum_rows` (sumrows.cu:19 @cd959bae9). A source with
+/// Ports `ggml_cuda_op_sum_rows` (sumrows.cu:19 @b1b770d90). A source with
 /// contiguous rows but gaps between them takes the strided kernel, which
 /// reads each row through `nb[1..3]`.
 pub fn opSumRows(ctx: *common.Context, dst: *Tensor) void {

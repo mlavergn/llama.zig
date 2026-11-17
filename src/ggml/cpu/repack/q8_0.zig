@@ -2,8 +2,8 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v0.9.0
-//! (`cd959bae9`). Each declaration below names the C++ it replaces and the
+//! Ported from `llama.cpp/ggml/src/ggml-cpu/repack.cpp` at v1.0.0
+//! (`b1b770d90`). Each declaration below names the C++ it replaces and the
 //! line it began at.
 //!
 //! # The same skeleton as `q4_0.zig`, without the nibble split
@@ -27,7 +27,7 @@ const QK8_0 = 32;
 
 /// Ports `ggml_gemv_q8_0_4x4_q8_0_generic` and
 /// `ggml_gemv_q8_0_4x8_q8_0_generic`
-/// (ggml-cpu/repack.cpp:1274, 1321 @cd959bae9).
+/// (ggml-cpu/repack.cpp:1274, 1321 @b1b770d90).
 fn gemv(
     comptime ncols_interleaved: i32,
     comptime blocklen: i32,
@@ -79,7 +79,7 @@ fn gemv(
 
 /// Ports `ggml_gemm_q8_0_4x4_q8_0_generic` and
 /// `ggml_gemm_q8_0_4x8_q8_0_generic`
-/// (ggml-cpu/repack.cpp:2407, 2461 @cd959bae9).
+/// (ggml-cpu/repack.cpp:2407, 2461 @b1b770d90).
 fn gemm(
     comptime ncols_interleaved: i32,
     comptime blocklen: i32,

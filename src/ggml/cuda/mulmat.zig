@@ -4,10 +4,11 @@
 //!
 //! # Provenance
 //!
-//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v0.9.0
-//! (`cd959bae9`): `batched_mul_mat_traits`, `ggml_cuda_mul_mat_cublas_impl`,
+//! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v1.0.0
+//! (`b1b770d90`): `batched_mul_mat_traits`, `ggml_cuda_mul_mat_cublas_impl`,
 //! `ggml_cuda_mul_mat_cublas`, `ggml_cuda_should_fuse_mul_mat`,
 //! `ggml_cuda_should_fuse_mul_mat_vec_{f,q}`,
+//! `ggml_cuda_get_mul_mat_scale`, `ggml_cuda_get_mul_mat_id_scale`,
 //! `ggml_cuda_mul_mat_q_fusion_matches`, `ggml_cuda_should_fuse_mul_mat_q`,
 //! `ggml_cuda_mul_mat`,
 //! `ggml_cuda_mul_mat_id_needs_sync` and `ggml_cuda_mul_mat_id`. The kernel
@@ -24,6 +25,8 @@ const mmq = @import("mmq.zig");
 const mmf = @import("mmf.zig");
 const fwht = @import("fwht.zig");
 const getrows = @import("getrows.zig");
+const fp8 = @import("fp8.zig");
+const mmq_few = @import("mmq_few.zig");
 
 const c = impl.c;
 const cu = common.cu;
@@ -35,7 +38,7 @@ fn i32Of(x: i64) c_int {
     return @truncate(x);
 }
 
-/// Ports `batched_mul_mat_traits` (ggml-cuda.cu:1612 @cd959bae9), for each `T`.
+/// Ports `batched_mul_mat_traits` (ggml-cuda.cu:1786 @b1b770d90), for each `T`.
 const Traits = struct {
     cuda_type_size: usize,
     compute_type: cu.cublasComputeType_t,
@@ -62,7 +65,7 @@ fn traitsOf(comptime t: c.enum_ggml_type) Traits {
     };
 }
 
-/// Ports `ggml_cuda_mul_mat_cublas_impl` (ggml-cuda.cu:1657 @cd959bae9).
+/// Ports `ggml_cuda_mul_mat_cublas_impl` (ggml-cuda.cu:1831 @b1b770d90).
 /// Since v0.7.0 `dst`'s leading dimension is `nb1 / sizeof(float)`, not
 /// `ne0`: an F32 chunk from `mulMatCublas` keeps the full destination's row
 /// stride.
@@ -264,14 +267,16 @@ fn mulMatCublasImpl(comptime compute_type: c.enum_ggml_type, ctx: *common.Contex
     }
 }
 
-/// Ports `ggml_cuda_mul_mat_cublas` (ggml-cuda.cu:1870 @cd959bae9). Since
+/// Ports `ggml_cuda_mul_mat_cublas` (ggml-cuda.cu:2044 @b1b770d90). Since
 /// v0.7.0 an F32 product over an F16 or BF16 `src0` whose F32 copy would
 /// pass 512 MiB is done in chunks of `src0` rows, each converted on its own.
+/// Since v1.0.0 the precision is `ggml_prec_get_acc`'s and an `F8_E4M3`
+/// weight converts as a quantized one does.
 pub fn mulMatCublas(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     const x = common.info().devices[@intCast(ctx.device)].cc;
-    const prec: c.enum_ggml_prec = @bitCast(impl.getOpParamsI32(dst, 0));
+    const prec: c.enum_ggml_prec = c.ggml_prec_get_acc(dst);
     var compute_type = src0.type;
-    if (c.ggml_is_quantized(compute_type)) {
+    if (c.ggml_is_quantized(compute_type) or compute_type == c.GGML_TYPE_F8_E4M3) {
         compute_type = if (common.fastFp16HardwareAvailable(x)) c.GGML_TYPE_F16 else c.GGML_TYPE_F32;
     } else if (compute_type == c.GGML_TYPE_F16 and !common.fastFp16HardwareAvailable(x)) {
         compute_type = c.GGML_TYPE_F32;
@@ -347,7 +352,7 @@ pub fn mulMatCublas(ctx: *common.Context, src0: *const Tensor, src1: *const Tens
     }
 }
 
-/// Ports `ggml_cuda_should_fuse_mul_mat` (ggml-cuda.cu:1951 @cd959bae9).
+/// Ports `ggml_cuda_should_fuse_mul_mat` (ggml-cuda.cu:2125 @b1b770d90).
 pub fn shouldFuseMulMat(ffn_up: *const Tensor, ffn_gate: *const Tensor, glu: *const Tensor, ffn_up_bias: ?*const Tensor, ffn_gate_bias: ?*const Tensor, ffn_up_scale: ?*const Tensor, ffn_gate_scale: ?*const Tensor) bool {
     const has_bias = ffn_up_bias != null or ffn_gate_bias != null;
     const has_scale = ffn_up_scale != null or ffn_gate_scale != null;
@@ -410,20 +415,28 @@ pub fn shouldFuseMulMat(ffn_up: *const Tensor, ffn_gate: *const Tensor, glu: *co
     return true;
 }
 
-/// Ports `ggml_cuda_should_fuse_mul_mat_vec_f` (ggml-cuda.cu:2045 @cd959bae9).
-pub fn shouldFuseMulMatVecF(tensor: *const Tensor) bool {
+/// Ports `ggml_cuda_should_fuse_mul_mat_vec_f` (ggml-cuda.cu:2219 @b1b770d90).
+/// Since v1.0.0 an `F8_E4M3` weight qualifies, and the gate's weight, when
+/// given, must take MMVF too.
+pub fn shouldFuseMulMatVecF(tensor: *const Tensor, gate: ?*const Tensor) bool {
     const src0 = impl.one(Tensor, tensor.src[0]);
     const src1 = impl.one(Tensor, tensor.src[1]);
     const dst = tensor;
 
     const is_mul_mat_id = tensor.op == c.GGML_OP_MUL_MAT_ID;
 
-    var use_mul_mat_vec_f = (src0.type == c.GGML_TYPE_F32 or src0.type == c.GGML_TYPE_F16 or src0.type == c.GGML_TYPE_BF16) and
+    var use_mul_mat_vec_f = (src0.type == c.GGML_TYPE_F32 or src0.type == c.GGML_TYPE_F16 or src0.type == c.GGML_TYPE_BF16 or
+        src0.type == c.GGML_TYPE_F8_E4M3) and
         src1.type == c.GGML_TYPE_F32 and dst.type == c.GGML_TYPE_F32;
 
     const x = common.info().devices[@intCast(common.getDevice())].cc;
     const warp_size = common.info().devices[@intCast(common.getDevice())].warp_size;
-    use_mul_mat_vec_f = use_mul_mat_vec_f and mmvf.shouldUseMmvf(src0.type, x, warp_size, &src0.ne, &src0.nb, if (is_mul_mat_id) src1.ne[2] else src1.ne[1]);
+    const ncols: i64 = if (is_mul_mat_id) src1.ne[2] else src1.ne[1];
+    use_mul_mat_vec_f = use_mul_mat_vec_f and mmvf.shouldUseMmvf(src0, x, warp_size, ncols);
+
+    if (gate) |g| {
+        if (!mmvf.shouldUseMmvf(impl.one(Tensor, g.src[0]), x, warp_size, ncols)) return false;
+    }
 
     //we only support fusion for ncols_dst = 1
     if (tensor.op == c.GGML_OP_MUL_MAT and dst.ne[1] != 1) return false;
@@ -432,7 +445,8 @@ pub fn shouldFuseMulMatVecF(tensor: *const Tensor) bool {
     return use_mul_mat_vec_f;
 }
 
-/// Ports `ggml_cuda_should_fuse_mul_mat_vec_q` (ggml-cuda.cu:2073 @cd959bae9).
+/// Ports `ggml_cuda_should_fuse_mul_mat_vec_q` (ggml-cuda.cu:2252 @b1b770d90).
+/// Since v1.0.0 it asks `ggml_cuda_should_use_mmvq` for the batch limit.
 pub fn shouldFuseMulMatVecQ(tensor: *const Tensor) bool {
     const src0 = impl.one(Tensor, tensor.src[0]);
     const src1 = impl.one(Tensor, tensor.src[1]);
@@ -441,11 +455,11 @@ pub fn shouldFuseMulMatVecQ(tensor: *const Tensor) bool {
     const bad_padding_clear = c.ggml_backend_buffer_get_usage(src0.buffer) == c.GGML_BACKEND_BUFFER_USAGE_COMPUTE and
         c.ggml_nbytes(src0) != c.ggml_backend_buffer_get_alloc_size(src0.buffer, src0) and src0.view_src != null;
 
-    const use_mul_mat_vec_q = c.ggml_is_quantized(src0.type) and !bad_padding_clear and src1.type == c.GGML_TYPE_F32 and
-        dst.type == c.GGML_TYPE_F32 and src1.ne[1] <= mmvq.max_batch_size;
+    const x = common.info().devices[@intCast(common.getDevice())].cc;
+    const use_mul_mat_vec_q = mmvq.shouldUseMmvq(src0.type, x, src1.ne[1]) and !bad_padding_clear and
+        src1.type == c.GGML_TYPE_F32 and dst.type == c.GGML_TYPE_F32;
 
     // fusion is not universally faster on Pascal
-    const x = common.info().devices[@intCast(common.getDevice())].cc;
     if (x <= common.cc.pascal) return false;
     //we only support fusion for ncols_dst = 1
     if (tensor.op == c.GGML_OP_MUL_MAT and dst.ne[1] != 1) return false;
@@ -454,13 +468,50 @@ pub fn shouldFuseMulMatVecQ(tensor: *const Tensor) bool {
     return use_mul_mat_vec_q;
 }
 
-/// Ports `ggml_cuda_mul_mat_q_fusion_matches` (ggml-cuda.cu:2155 @cd959bae9),
+/// Ports `ggml_cuda_get_mul_mat_scale` (ggml-cuda.cu:2335 @b1b770d90): the
+/// weight scale that `scale_node` (`MUL`) applies to the output of `mm_node`
+/// (`MUL_MAT`), or null. A lambda in `ggml_cuda_try_fuse` until v1.0.0,
+/// which shares it with `graph_optimize` and accepts `F8_E4M3` weights too.
+pub fn getMulMatScale(scale_node: *const Tensor, mm_node: *const Tensor) ?*const Tensor {
+    const scale_lhs_mm = scale_node.src[0] == mm_node;
+    const scale_rhs_mm = scale_node.src[1] == mm_node;
+    if (!scale_lhs_mm and !scale_rhs_mm) return null;
+
+    const scale = impl.one(Tensor, if (scale_lhs_mm) scale_node.src[1] else scale_node.src[0]);
+    const w = impl.one(Tensor, mm_node.src[0]);
+    if ((w.type != c.GGML_TYPE_NVFP4 and w.type != c.GGML_TYPE_F8_E4M3) or scale_node.type != c.GGML_TYPE_F32 or
+        scale.type != c.GGML_TYPE_F32 or !c.ggml_is_contiguous(scale) or c.ggml_nelements(scale) != 1 or
+        !c.ggml_are_same_shape(scale_node, mm_node)) return null;
+
+    return scale;
+}
+
+/// Ports `ggml_cuda_get_mul_mat_id_scale` (ggml-cuda.cu:2353 @b1b770d90): the
+/// same for `MUL_MAT_ID` with one scale per expert -- `RESHAPE`, `REPEAT`
+/// and `GET_ROWS` (by the ids) of the scales, then the `MUL`.
+pub fn getMulMatIdScale(reshape: *const Tensor, repeat: *const Tensor, getrows_n: *const Tensor, scale_node: *const Tensor, mm_node: *const Tensor) ?*const Tensor {
+    if (repeat.src[0] != reshape or getrows_n.src[0] != repeat or getrows_n.src[1] != mm_node.src[2]) return null;
+    if (!((scale_node.src[0] == mm_node and scale_node.src[1] == getrows_n) or
+        (scale_node.src[0] == getrows_n and scale_node.src[1] == mm_node))) return null;
+
+    const scale = impl.one(Tensor, reshape.src[0]);
+    const w = impl.one(Tensor, mm_node.src[0]);
+    if ((w.type != c.GGML_TYPE_NVFP4 and w.type != c.GGML_TYPE_F8_E4M3) or scale_node.type != c.GGML_TYPE_F32 or
+        scale.type != c.GGML_TYPE_F32 or !c.ggml_is_contiguous(scale) or c.ggml_nelements(scale) != w.ne[2] or
+        !c.ggml_are_same_shape(scale_node, mm_node)) return null;
+
+    return scale;
+}
+
+/// Ports `ggml_cuda_mul_mat_q_fusion_matches` (ggml-cuda.cu:2375 @b1b770d90),
 /// new at v0.8.0: whether gate/up/GLU has a fused MMQ kernel at all. Buffer-
 /// and batch-size independent, so `graph_optimize` produces the same graph
 /// topology for every ubatch size. `up` may be any node here, so its sources
 /// are not read until its op says they exist. Since v0.9.0 `up` may be a
-/// `MUL_MAT_ID` too (the MoE gate/up/GLU).
-pub fn mulMatQFusionMatches(up: *const Tensor, gate: *const Tensor, glu: *const Tensor, device: c_int) bool {
+/// `MUL_MAT_ID` too (the MoE gate/up/GLU). Since v1.0.0 `up_scale` and
+/// `gate_scale` are the `MUL` nodes applying the NVFP4 weight scales between
+/// the matmuls and the GLU, and both matmuls must ask one `src1` precision.
+pub fn mulMatQFusionMatches(up: *const Tensor, gate: *const Tensor, glu: *const Tensor, device: c_int, up_scale: ?*const Tensor, gate_scale: ?*const Tensor) bool {
     if (up.op != c.GGML_OP_MUL_MAT and up.op != c.GGML_OP_MUL_MAT_ID) return false;
 
     const x_up = impl.one(Tensor, up.src[0]);
@@ -471,7 +522,10 @@ pub fn mulMatQFusionMatches(up: *const Tensor, gate: *const Tensor, glu: *const 
     // The fused kernel is only compiled for weights whose rows fill whole tiles (no fallback).
     if (mmq.needsFallback(x_up.ne[1])) return false;
 
-    if (!shouldFuseMulMat(up, gate, glu, null, null, null, null)) return false;
+    if (!shouldFuseMulMat(up, gate, glu, null, null, up_scale, gate_scale)) return false;
+
+    // The fused kernel runs both MUL_MATs at one src1 precision, see ggml_cuda_mul_mat_q.
+    if (c.ggml_prec_get_src(up, 1) != c.ggml_prec_get_src(gate, 1)) return false;
 
     // The fused write-back applies SWIGLU_OAI with the default alpha and limit of ggml_cuda_op_swiglu_oai_single.
     if (c.ggml_get_glu_op(glu) == c.GGML_GLU_OP_SWIGLU_OAI and (impl.getOpParamsF32(glu, 2) != 1.702 or impl.getOpParamsF32(glu, 3) != 7.0)) return false;
@@ -488,16 +542,17 @@ fn badPaddingClear(x: *const Tensor) bool {
         c.ggml_nbytes(x) != c.ggml_backend_buffer_get_alloc_size(x.buffer, x) and x.view_src != null;
 }
 
-/// Ports `ggml_cuda_should_fuse_mul_mat_q` (ggml-cuda.cu:2181 @cd959bae9),
+/// Ports `ggml_cuda_should_fuse_mul_mat_q` (ggml-cuda.cu:2407 @b1b770d90),
 /// new at v0.8.0: `mulMatQFusionMatches` and the checks that depend on the
 /// buffers and the batch. For `MUL_MAT_ID` (v0.9.0) the kernel choice is
-/// `ggml_cuda_mul_mat_id`'s, with the nominal tiles of all experts.
-pub fn shouldFuseMulMatQ(up: *const Tensor, gate: *const Tensor, glu: *const Tensor) bool {
+/// `ggml_cuda_mul_mat_id`'s, with the nominal tiles of all experts. Since
+/// v1.0.0 a `MUL_MAT` that few-row MMQ takes is not fused.
+pub fn shouldFuseMulMatQ(up: *const Tensor, gate: *const Tensor, glu: *const Tensor, up_scale: ?*const Tensor, gate_scale: ?*const Tensor) bool {
     // A hinted matmul can be fused, but its unfused path may be faster (e.g. FWHT for GGML_HINT_SRC0_IS_HADAMARD).
     if (impl.getOpParamsI32(up, 1) != c.GGML_HINT_NONE or impl.getOpParamsI32(gate, 1) != c.GGML_HINT_NONE) return false;
 
     const device = common.getDevice();
-    if (!mulMatQFusionMatches(up, gate, glu, device) or badPaddingClear(impl.one(Tensor, up.src[0])) or badPaddingClear(impl.one(Tensor, gate.src[0]))) return false;
+    if (!mulMatQFusionMatches(up, gate, glu, device, up_scale, gate_scale) or badPaddingClear(impl.one(Tensor, up.src[0])) or badPaddingClear(impl.one(Tensor, gate.src[0]))) return false;
 
     // The batch size checks are done here, not in ggml_cuda_mul_mat_q_fusion_matches.
     const x_up = impl.one(Tensor, up.src[0]);
@@ -509,13 +564,18 @@ pub fn shouldFuseMulMatQ(up: *const Tensor, gate: *const Tensor, glu: *const Ten
     const ncols: i64 = if (is_id) y.ne[2] else y.ne[1];
     const nchannels: i64 = if (is_id) x_up.ne[2] else y.ne[2] * y.ne[3];
     const use_mmvq = if (is_id) ncols <= mmvq.getMmidMaxBatch(x_up.type, x) else mmvq.shouldUseMmvq(x_up.type, x, ncols);
+    // do not fuse the matmuls that few-row MMQ takes in ggml_cuda_mul_mat
+    if (!is_id and mmq_few.shouldUseMmqFew(x_up, y, x)) return false;
     if (use_mmvq or !mmq.shouldUseMmq(x_up.type, x, ncols, if (is_id) x_up.ne[2] else 0)) return false;
 
     // The fused kernel needs one block per tile (no stream-k split), so only fuse if the tiling is efficient.
-    return mmq.fusionIsEfficient(x_up.type, x_up.ne[1], ncols, nchannels, device);
+    return mmq.fusionIsEfficient(x_up.type, c.ggml_prec_get_src(up, 1), x_up.ne[1], ncols, nchannels, device);
 }
 
-/// Ports `ggml_cuda_mul_mat` (ggml-cuda.cu:2215 @cd959bae9).
+/// Ports `ggml_cuda_mul_mat` (ggml-cuda.cu:2446 @b1b770d90). Since v1.0.0
+/// few-row MMQ takes a per-type number of `src1` columns up to 24 ahead of
+/// MMVQ and MMQ, and an `F8_E4M3` weight tries cuBLASLt's FP8 GEMM before
+/// cuBLAS.
 pub fn mulMat(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     const ne01 = src0.ne[1];
     const ne11 = src1.ne[1];
@@ -538,16 +598,17 @@ pub fn mulMat(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, ds
     const x = common.info().devices[@intCast(ctx.device)].cc;
     const warp_size = common.info().devices[@intCast(ctx.device)].warp_size;
 
-    if (mmvf.shouldUseMmvf(src0.type, x, warp_size, &src0.ne, &src0.nb, ne11)) {
-        // The custom F16 vector kernel can be used over batched cuBLAS GEMM.
+    if (mmvf.shouldUseMmvf(src0, x, warp_size, ne11)) {
+        // The custom vector kernel can be used over batched cuBLAS GEMM.
+        // But this is only faster for GPUs without tensor cores or with a thin src0 matrix (particularly KQV in attention)
         mmvf.mulMatVecF(ctx, src0, src1, null, dst, null);
         return;
     }
-    // A transposed vector can still use MMVQ (i.e. ne01 == 1)
+    // A transposed vector can still use MMVF (i.e. ne01 == 1)
     if (ne01 == 1 and ne11 > mmvf.max_batch_size and ne2 == 1 and ne3 == 1 and
         src0.type == c.GGML_TYPE_F32 and
         c.ggml_is_contiguous(src0) and c.ggml_is_contiguous(src1) and c.ggml_is_contiguous(dst) and
-        mmvf.shouldUseMmvf(src1.type, x, warp_size, &src1.ne, &src1.nb, 1))
+        mmvf.shouldUseMmvf(src1, x, warp_size, 1))
     {
         var dst_vec = dst.*;
         dst_vec.ne[0] = ne11;
@@ -562,18 +623,25 @@ pub fn mulMat(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, ds
         mmf.mulMatF(ctx, src0, src1, null, dst);
         return;
     }
-    if (mmvq.shouldUseMmvq(src0.type, x, ne11)) {
+    // from a per-type number of src1 columns up to 24, few-row MMQ is faster than MMVQ and MMQ
+    const use_mmq_few = mmq_few.shouldUseMmqFew(src0, src1, x);
+    if (!use_mmq_few and mmvq.shouldUseMmvq(src0.type, x, ne11)) {
         mmvq.mulMatVecQ(ctx, src0, src1, null, dst, null);
+        return;
+    }
+    if (use_mmq_few) {
+        mmq_few.mulMatQFew(ctx, src0, src1, dst);
         return;
     }
     if (mmq.shouldUseMmq(src0.type, x, ne11, 0)) {
         mmq.mulMatQ(ctx, src0, src1, null, dst, null);
         return;
     }
+    if (src0.type == c.GGML_TYPE_F8_E4M3 and fp8.mulMatFp8(ctx, src0, src1, dst, null)) return;
     mulMatCublas(ctx, src0, src1, dst);
 }
 
-/// Ports `ggml_cuda_mul_mat_id_needs_sync` (ggml-cuda.cu:2272 @cd959bae9).
+/// Ports `ggml_cuda_mul_mat_id_needs_sync` (ggml-cuda.cu:2512 @b1b770d90).
 pub fn mulMatIdNeedsSync(dst: *const Tensor, x: c_int) bool {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -585,7 +653,9 @@ pub fn mulMatIdNeedsSync(dst: *const Tensor, x: c_int) bool {
     if (dst.ne[2] <= mmvq.max_batch_size) {
         if (c.ggml_is_quantized(src0.type)) {
             if (dst.ne[2] <= mmvq.getMmidMaxBatch(src0.type, x)) return false;
-        } else if (common.cc.isAmd(x)) {
+        } else if (src0.type == c.GGML_TYPE_F8_E4M3 and mmvf.shouldUseMmvf(src0, x, warp_size, dst.ne[2])) {
+            return false;
+        } else if (src0.type != c.GGML_TYPE_F8_E4M3 and common.cc.isAmd(x)) {
             return false;
         }
     }
@@ -597,7 +667,8 @@ pub fn mulMatIdNeedsSync(dst: *const Tensor, x: c_int) bool {
     return true;
 }
 
-/// Ports `ggml_cuda_mul_mat_id` (ggml-cuda.cu:2303 @cd959bae9).
+/// Ports `ggml_cuda_mul_mat_id` (ggml-cuda.cu:2545 @b1b770d90). Since v1.0.0
+/// an `F8_E4M3` weight takes MMVF at a small batch on every vendor.
 pub fn mulMatId(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);
@@ -633,8 +704,11 @@ pub fn mulMatId(ctx: *common.Context, dst: *Tensor) void {
                     mmvq.mulMatVecQ(ctx, src0, src1, ids, dst, null);
                     return;
                 }
+            } else if (src0.type == c.GGML_TYPE_F8_E4M3 and mmvf.shouldUseMmvf(src0, x, warp_size, ne2)) {
+                mmvf.mulMatVecF(ctx, src0, src1, ids, dst, null);
+                return;
             } else {
-                if (common.cc.isAmd(x)) {
+                if (src0.type != c.GGML_TYPE_F8_E4M3 and common.cc.isAmd(x)) {
                     mmvf.mulMatVecF(ctx, src0, src1, ids, dst, null);
                     return;
                 }
@@ -661,7 +735,7 @@ pub fn mulMatId(ctx: *common.Context, dst: *Tensor) void {
     impl.assert(nb2 % nb1 == 0, "nb2  % nb1  == 0");
 
     const type_src1_sorted: c.enum_ggml_type = if ((src0.type == c.GGML_TYPE_F16 and !common.fastFp16HardwareAvailable(x)) or
-        c.ggml_is_quantized(src0.type)) c.GGML_TYPE_F32 else src0.type;
+        c.ggml_is_quantized(src0.type) or src0.type == c.GGML_TYPE_F8_E4M3) c.GGML_TYPE_F32 else src0.type;
     const type_dst_sorted: c.enum_ggml_type = c.GGML_TYPE_F32;
     const ts_src1_sorted = c.ggml_type_size(type_src1_sorted);
     const ts_dst_sorted = c.ggml_type_size(type_dst_sorted);

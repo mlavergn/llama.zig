@@ -1,7 +1,8 @@
 // Not a port. Writes fixtures for the five architectures upstream's
 // `test-llama-archs.cpp` cannot: graniteswitch, eagle3, dflash, clef and
 // vllm-decision2 -- and variants of architectures it can: Qwen3.5 with fused
-// QKV, a ModernBERT and an LFM2 decision model. Clef is built as the qwen35 it
+// QKV and with merged linear-attention weights, a ModernBERT and an LFM2
+// decision model. Clef is built as the qwen35 it
 // extends and written under its own name (`rename_prefix`), its decision
 // head added as extra tensors, because its `load_arch_tensors` sizes the
 // head from tensors it finds in the file; vllm-decision2 likewise over
@@ -135,7 +136,7 @@ static bool decode_check(const std::string & path, bool embeddings = false) {
     return ok;
 }
 
-// LiliCorr's lattice (models/dflash.cpp:756 @cd959bae9) builds only for a
+// LiliCorr's lattice (models/dflash.cpp:756 @b1b770d90) builds only for a
 // token batch of exactly one block per sequence that carries state
 // embeddings, as common/speculative.cpp drafts: so a LiliCorr fixture is
 // also run that way once, and must produce the lattice.
@@ -389,7 +390,7 @@ int main(int argc, char ** argv) {
     // Since v0.9.0 every one drops `attention.kv_lora_rank` too, which the
     // recipe writes for every architecture: its presence alone selects the
     // Mistral Large 4 DSpark branch of load_arch_hparams (models/dflash.cpp:7
-    // @cd959bae9), which then requires the MLA head sizes.
+    // @b1b770d90), which then requires the MLA head sizes.
     auto df_meta = [&](gguf_context * m) {
         const int32_t tl[2] = {1, 2};
         gguf_set_arr_data(m, kv(df, "target_layers").c_str(), GGUF_TYPE_INT32, tl, 2);
@@ -415,7 +416,7 @@ int main(int argc, char ** argv) {
     // candidates, blocks of 4. The selector tensors are extra tensors:
     // load_arch_tensors creates them only when the file already has
     // `selector_hidden.weight`. Since v0.7.0 it creates the conv tensors
-    // from the conv keys alone (models/dflash.cpp:190, 392 @cd959bae9), so
+    // from the conv keys alone (models/dflash.cpp:190, 392 @b1b770d90), so
     // the user-data path builds those.
     run([&] {
         return write_fixture(df, "dflash2", seed, dir, [&](gguf_context * m) {
@@ -436,7 +437,7 @@ int main(int argc, char ** argv) {
     });
     // DFlash2's dynamic convolution without the selector: since v0.7.0 the
     // conv keys alone make load_arch_tensors create the conv tensors
-    // (models/dflash.cpp:190, 392 @cd959bae9), where before they needed
+    // (models/dflash.cpp:190, 392 @b1b770d90), where before they needed
     // `selector_hidden.weight` in the file.
     run([&] {
         return write_fixture(df, "dflash2-conv", seed, dir, [&](gguf_context * m) {
@@ -447,7 +448,7 @@ int main(int argc, char ** argv) {
             gguf_set_val_u32(m, kv(df, "conv_group_size").c_str(), 64);
         }, none_tensors);
     });
-    // LiliCorr, new at v0.7.0 (models/dflash.cpp:7, 155, 756 @cd959bae9): a
+    // LiliCorr, new at v0.7.0 (models/dflash.cpp:7, 155, 756 @b1b770d90): a
     // lattice scorer over each block's top-4 candidates, blocks of 4. Its
     // keys are all it needs: load_arch_tensors creates every lilicorr.* and
     // blk.{n_layer_all + i}.* tensor from them, so the user-data path builds
@@ -475,7 +476,7 @@ int main(int argc, char ** argv) {
     run([&] { return lilicorr("dflash-lilicorr", 64, 2, 1, 4, 4); });
     run([&] { return lilicorr("dflash-lilicorr-wide", 256, 4, 2, 3, 5); });
     // A Gemma-style DFlash backbone, new at v0.5.0 (models/dflash.cpp:7, 155,
-    // 922 @cd959bae9): an embedding and an attention scale, a GELU FFN, K
+    // 922 @b1b770d90): an embedding and an attention scale, a GELU FFN, K
     // and V sharing one projection (no attn_v, V RMS-normed bare). The
     // recipe already writes the post norms, the per-layer output scale and
     // rope_freqs, so every DFlash fixture has those. Since v0.6.0 it also
@@ -503,7 +504,7 @@ int main(int argc, char ** argv) {
         });
     });
     // A DFlash with token embeddings and no output head (#30111,
-    // models/dflash.cpp:284 @cd959bae9): its decoder takes the target's
+    // models/dflash.cpp:284 @b1b770d90): its decoder takes the target's
     // head through ctx_other and asserts on one (dflash.cpp:1170) without
     // it. Until v0.7.0 its own token embedding stood in. A token decode
     // without a target aborts in the C++, so it gets no decode check.
@@ -518,7 +519,7 @@ int main(int argc, char ** argv) {
     // Qwen3.5 with its full-attention layers' Q (and Q gate), K and V fused
     // into one attn_qkv, which create_tensor_qkv takes when the file has it.
     // v0.5.0 splits that tensor across devices by its own segments
-    // (llama-model.cpp:639, 729 @cd959bae9): the recipe writes the three
+    // (llama-model.cpp:647, 745 @b1b770d90): the recipe writes the three
     // separately, so without this no fixture reaches them.
     run([&] {
         return write_fixture(LLM_ARCH_QWEN35, "qwen35-fusedqkv", seed, dir, [&](gguf_context *) {
@@ -598,7 +599,7 @@ int main(int argc, char ** argv) {
         }, none_tensors, true);
     });
     // DeepSeek-V4.1's DSpark draft, new at v0.8.0 (models/dflash.cpp:1395
-    // @cd959bae9): the same backbone with single-pass hyper-connections, no
+    // @b1b770d90): the same backbone with single-pass hyper-connections, no
     // hc_head, and a window one wider. With a Markov head in `-dspark`.
     auto dsv41 = [&](const char * name, bool markov) {
         return write_fixture(df, name, seed, dir, [&](gguf_context * m) {
@@ -637,11 +638,11 @@ int main(int argc, char ** argv) {
     run([&] { return dsv41("dflash-dsv41-moe", false); });
     run([&] { return dsv41("dflash-dsv41-dspark-moe", true); });
     // Mistral Large 4's DSpark draft, new at v0.9.0 (models/dflash.cpp:1622
-    // @cd959bae9): dense MLA stages over a 64-wide latent with a 32-wide RoPE
+    // @b1b770d90): dense MLA stages over a 64-wide latent with a 32-wide RoPE
     // tail, one sliding window, mask embeddings for the block's draft slots.
     // `-dspark` adds the Markov head in its RNN form -- the joint projection
     // that carries a gated state across block positions (models/dflash.cpp:455
-    // @cd959bae9), which only this graph reaches, since it alone passes the
+    // @b1b770d90), which only this graph reaches, since it alone passes the
     // hidden state.
     auto ml4 = [&](const char * name, bool markov) {
         return write_fixture(df, name, seed, dir, [&](gguf_context * m) {
@@ -674,7 +675,7 @@ int main(int argc, char ** argv) {
     run([&] { return dspark("dflash-dspark", false); });
     run([&] { return dspark("dflash-dspark-noconf", false, false); });
 
-    // clef, new at v0.6.0 (models/clef.cpp:8, 26 @cd959bae9): a Qwen3.5
+    // clef, new at v0.6.0 (models/clef.cpp:8, 26 @b1b770d90): a Qwen3.5
     // backbone with a joint decision head. Upstream's recipe skips it ("TODO
     // decision head tensors") and the user-data path cannot build it, since
     // load_arch_tensors sizes the head from tensors it finds in the file. So
@@ -739,7 +740,7 @@ int main(int argc, char ** argv) {
     });
 
     // vllm-decision2, new at v0.7.0 (models/vllm-decision2.cpp:7, 17
-    // @cd959bae9): a Qwen3 backbone with a decision head. Upstream's recipe
+    // @b1b770d90): a Qwen3 backbone with a decision head. Upstream's recipe
     // skips it ("TODO decision head tensors"), and its load_arch_tensors
     // sizes the head from `decision.key` in the file, so it is built as
     // qwen3 -- whose recipe keys, layer_norm_epsilon among them, it reads
@@ -772,7 +773,7 @@ int main(int argc, char ** argv) {
     });
 
     // A ModernBERT decision model, new at v0.6.0 (models/modern-bert.cpp:6,
-    // 61, 248 @cd959bae9): the recipe's second block becomes the head's --
+    // 61, 237 @b1b770d90): the recipe's second block becomes the head's --
     // LayerNorms, QKV, output and FFN all with biases, the FFN not gated --
     // over three token types, scored through the classifier. The user-data
     // path builds all of it from the keys.
@@ -790,7 +791,7 @@ int main(int argc, char ** argv) {
     });
 
     // An LFM2 decision model (LiquidAI's d1-omni), new at v0.7.0
-    // (models/lfm2.cpp:29, 53, 317 @cd959bae9): four blocks, the first two
+    // (models/lfm2.cpp:29, 53, 325 @b1b770d90): four blocks, the first two
     // -- an attention and a short convolution, as the recipe has them --
     // the non-causal trunk, the last two the head: LayerNorms, fused QKV,
     // output and an ungated FFN narrower than the trunk's, all with biases,
@@ -821,7 +822,7 @@ int main(int argc, char ** argv) {
     });
 
     // Voxtral Realtime's adaptive RMS norm, new at v0.8.0 (models/mistral3.cpp:58,
-    // 99, 227 @cd959bae9): Mistral 3 with a per-layer two-matrix MLP over a
+    // 99, 215 @b1b770d90): Mistral 3 with a per-layer two-matrix MLP over a
     // sinusoid of the output delay. load_arch_tensors finds it in the file,
     // so the tensors are extra.
     run([&] {
@@ -839,7 +840,7 @@ int main(int argc, char ** argv) {
     });
 
     // Qwen4exp with the merged weights the converter writes since v0.8.0
-    // (`create_merged`, models/qwen4exp.cpp:235 @cd959bae9): each pair of
+    // (`create_merged`, models/qwen4exp.cpp:235 @b1b770d90): each pair of
     // matmuls that read one input in one tensor, the rows split in the graph.
     // The user-data path skips them, being virtual there.
     run([&] {
@@ -869,6 +870,40 @@ int main(int argc, char ** argv) {
                 merge(blk + "hc_ffn_down_inject",  blk + "hc_ffn_down",  blk + "hc_ffn_inject");
                 merge(blk + "attn_qkv_gate",       blk + "attn_qkv",     blk + "attn_gate");
                 merge(blk + "ssm_beta_alpha",      blk + "ssm_beta",     blk + "ssm_alpha");
+            }
+        }, true);
+    });
+
+    // Qwen3.5 with the merged linear-attention weights the converter writes
+    // since v1.0.0 (3ba1ce0e2, models/qwen35.cpp:33 @b1b770d90): `attn_qkv`
+    // and `attn_gate` in one `attn_qkv_gate`, `ssm_beta` and `ssm_alpha` in
+    // one `ssm_beta_alpha`, the rows split in the graph (build_qkvz, and the
+    // beta/alpha views in build_layer_attn_linear). Built as qwen4exp-merged
+    // is: the user-data path skips them, being virtual there.
+    run([&] {
+        return write_fixture(LLM_ARCH_QWEN35, "qwen35-merged", seed, dir, [&](gguf_context *) {
+        }, [&](Extra & x, llama_model * model) {
+            const auto & tmap = llama_internal_get_tensor_map(model);
+            auto find = [&](const std::string & n) -> ggml_tensor * {
+                for (const auto & [tname, t] : tmap) {
+                    if (tname == n) return t;
+                }
+                return nullptr;
+            };
+            const int n_layer = llama_model_n_layer(model);
+            auto merge = [&](const std::string & merged, const std::string & a, const std::string & b) {
+                ggml_tensor * ta = find(a + ".weight");
+                ggml_tensor * tb = find(b + ".weight");
+                if (!ta || !tb) return;
+                for (const auto & [tname, t] : tmap) {
+                    if (tname.rfind(a + ".", 0) == 0 || tname.rfind(b + ".", 0) == 0) x.replaces.insert(tname);
+                }
+                x.f32((merged + ".weight").c_str(), {ta->ne[0], ta->ne[1] + tb->ne[1]}, seed);
+            };
+            for (int il = 0; il < n_layer; il++) {
+                const std::string blk = "blk." + std::to_string(il) + ".";
+                merge(blk + "attn_qkv_gate",  blk + "attn_qkv", blk + "attn_gate");
+                merge(blk + "ssm_beta_alpha", blk + "ssm_beta", blk + "ssm_alpha");
             }
         }, true);
     });
