@@ -2,7 +2,9 @@
 //! `tools/server/`'s ports of `server-common`, `server-task` and
 //! `server-schema` -- its unit tests (`zig build test-server-data`) and the
 //! port's half of the `server-task-diff` gate (`zig build
-//! server-task-diff-bins`, into `zig-out/server-task-diff/`).
+//! server-task-diff-bins`, into `zig-out/server-task-diff/`). Also the
+//! module tree `build/tools.zig` builds `llama-server`, `llama-server-core`
+//! and the tools over (`modules`, `serverModule`).
 //!
 //! **Not a port.** This is build description.
 //!
@@ -36,21 +38,28 @@ fn buildTarget(b: *std.Build, target: std.Build.ResolvedTarget) []const u8 {
     return b.fmt("{s}-{s}", .{ @tagName(target.result.cpu.arch), @tagName(target.result.os.tag) });
 }
 
-/// The modules the data layer is compiled against.
+/// The modules the data layer, `llama-server`, `llama-server-core` and the
+/// tools are compiled against.
 pub const Modules = struct {
     tools_h: *std.Build.Module,
     tools_common: *std.Build.Module,
     cli_fit: *std.Build.Module,
     json: *std.Build.Module,
+    peg: *std.Build.Module,
     common_chat: *std.Build.Module,
     mtmd: *std.Build.Module,
-    data: *std.Build.Module,
 };
 
-/// The module tree: `tools_common` and `cli_fit` as the tools have them,
-/// `json` (`tools/server/json_module.zig`, `cli_fit`'s `cli/json/` under
-/// the name `cli/common_chat/` imports), `common_chat`, libmtmd's port,
-/// and the data layer itself rooted at `tools/server/module.zig`.
+/// The module tree: `tools_common`, `cli_fit`, `json`, `peg`,
+/// `common_chat` and libmtmd's port.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `opts`: target, libraries and `zigjinja`; `opts.optimize` builds the
+///   translated headers and libmtmd.
+/// - `optimize`: the mode of the Zig modules themselves.
+///
+/// Return: the modules, owned by `b`.
 pub fn modules(b: *std.Build, opts: Options, optimize: std.builtin.OptimizeMode) Modules {
     const tools_h = b.addTranslateC(.{
         .root_source_file = b.path("tools/common/c_import.h"),
@@ -68,6 +77,7 @@ pub fn modules(b: *std.Build, opts: Options, optimize: std.builtin.OptimizeMode)
     build_info.addOption([]const u8, "compiler", "Zig " ++ builtin.zig_version_string ++ " clang");
     build_info.addOption([]const u8, "build_target", buildTarget(b, opts.target));
 
+    // `cli/fit.zig`, the port of `common/fit.cpp`, shared with the CLI.
     const fit_module = b.createModule(.{ .root_source_file = b.path("cli/fit.zig"), .target = opts.target, .optimize = optimize, .link_libc = true });
     fit_module.addImport("llama", opts.reference.llama.root_module);
 
@@ -75,8 +85,12 @@ pub fn modules(b: *std.Build, opts: Options, optimize: std.builtin.OptimizeMode)
     common_module.addImport("tools_h", tools_h_module);
     common_module.addOptions("build_info", build_info);
     common_module.addImport("cli_fit", fit_module);
+    // libllama's module, for what `common/speculative.cpp` reaches through
+    // `llama-ext.h` (C++ linkage, so not in `tools_h`) and for `libcxx`.
     common_module.addImport("llama", opts.reference.llama.root_module);
 
+    // `json` is `cli_fit`'s `cli/json/` under the name `cli/common_chat/`
+    // imports (`tools/server/json_module.zig` says why).
     const json_module = b.createModule(.{ .root_source_file = b.path("tools/server/json_module.zig"), .target = opts.target, .optimize = optimize, .link_libc = true });
     json_module.addImport("cli_fit", fit_module);
 
@@ -91,6 +105,8 @@ pub fn modules(b: *std.Build, opts: Options, optimize: std.builtin.OptimizeMode)
     chat_module.addImport("llama", opts.reference.llama.root_module);
     if (opts.jinja) |j| chat_module.addImport("zigjinja", j);
 
+    // libmtmd's port: its `exports.zig` gives the mtmd tools and the server
+    // the `mtmd.h` and `mtmd-helper.h` symbols they call through `tools_h`.
     const mtmd_module = mtmd_build.module(b, .{
         .target = opts.target,
         .optimize = opts.optimize,
@@ -98,27 +114,50 @@ pub fn modules(b: *std.Build, opts: Options, optimize: std.builtin.OptimizeMode)
         .reference = opts.reference,
     });
 
-    const data = b.createModule(.{ .root_source_file = b.path("tools/server/module.zig"), .target = opts.target, .optimize = optimize, .link_libc = true });
-    data.addImport("tools_common", common_module);
-    data.addImport("tools_h", tools_h_module);
-    data.addImport("cli_fit", fit_module);
-    data.addImport("llama", opts.reference.llama.root_module);
-    data.addImport("sync", llamacpp.syncOf(opts.reference.llama.root_module));
-    data.addImport("json", json_module);
-    data.addImport("common_chat", chat_module);
-    data.addImport("peg", peg_module);
-    data.addImport("mtmd", mtmd_module);
-    data.addOptions("build_info", build_info);
-
     return .{
         .tools_h = tools_h_module,
         .tools_common = common_module,
         .cli_fit = fit_module,
         .json = json_module,
+        .peg = peg_module,
         .common_chat = chat_module,
         .mtmd = mtmd_module,
-        .data = data,
     };
+}
+
+/// A module of `llama-server`'s files over `m`, with everything they
+/// import: rooted at `tools/server/main.zig` it is the executable, at
+/// `tools/server/core.zig` it is `llama-server-core`. `context.zig` reaches
+/// `http.zig`, which imports `ui_assets`, so both need it.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `opts`: target, mode, SDK and libllama's module.
+/// - `m`: the module tree from `modules`.
+/// - `root_source_file`: the module's root.
+/// - `ui_assets`: the embedded web UI (`build/ui.zig`'s `port_module`).
+///
+/// Return: the module, owned by `b`.
+pub fn serverModule(b: *std.Build, opts: Options, m: Modules, root_source_file: std.Build.LazyPath, ui_assets: *std.Build.Module) *std.Build.Module {
+    const mod = b.createModule(.{
+        .root_source_file = root_source_file,
+        .target = opts.target,
+        .optimize = opts.optimize,
+        .link_libc = true,
+    });
+    mod.addImport("tools_common", m.tools_common);
+    mod.addImport("tools_h", m.tools_h);
+    mod.addImport("cli_fit", m.cli_fit);
+    mod.addImport("llama", opts.reference.llama.root_module);
+    mod.addImport("sync", llamacpp.syncOf(opts.reference.llama.root_module));
+    mod.addImport("mtmd", m.mtmd);
+    mod.addImport("ui_assets", ui_assets);
+    mod.addImport("json", m.json);
+    mod.addImport("common_chat", m.common_chat);
+    mod.addImport("peg", m.peg);
+    llamacpp.addSdkPaths(b, mod, opts.sdk);
+    llamacpp.addLibgcc(b, mod);
+    return mod;
 }
 
 /// Adds `test-server-data` and `server-task-diff-bins`.
@@ -128,14 +167,26 @@ pub fn add(b: *std.Build, opts: Options) void {
     const safe: std.builtin.OptimizeMode = if (opts.optimize == .debug) .debug else .safe;
     const m = modules(b, opts, safe);
 
-    const tests = b.addTest(.{ .root_module = m.data });
-    llamacpp.addSdkPaths(b, m.data, opts.sdk);
+    // The data layer itself, rooted at `tools/server/module.zig`.
+    const data = b.createModule(.{ .root_source_file = b.path("tools/server/module.zig"), .target = opts.target, .optimize = safe, .link_libc = true });
+    data.addImport("tools_common", m.tools_common);
+    data.addImport("tools_h", m.tools_h);
+    data.addImport("cli_fit", m.cli_fit);
+    data.addImport("llama", opts.reference.llama.root_module);
+    data.addImport("sync", llamacpp.syncOf(opts.reference.llama.root_module));
+    data.addImport("json", m.json);
+    data.addImport("common_chat", m.common_chat);
+    data.addImport("peg", m.peg);
+    data.addImport("mtmd", m.mtmd);
+
+    const tests = b.addTest(.{ .root_module = data });
+    llamacpp.addSdkPaths(b, data, opts.sdk);
     const test_step = b.step("test-server-data", "Run the server data layer's unit tests (tools/server/common, tokens, oaicompat, task, result, schema)");
     test_step.dependOn(&b.addRunArtifact(tests).step);
 
     const step = b.step("server-task-diff-bins", "Build the port's server-task-diff harness into zig-out/server-task-diff");
     const port_mod = b.createModule(.{ .root_source_file = b.path("harness/server_task_diff.zig"), .target = opts.target, .optimize = safe, .link_libc = true, .link_libcpp = true });
-    port_mod.addImport("server_data", m.data);
+    port_mod.addImport("server_data", data);
     port_mod.addImport("tools_common", m.tools_common);
     port_mod.addImport("tools_h", m.tools_h);
     port_mod.addImport("llama", opts.reference.llama.root_module);

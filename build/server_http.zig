@@ -51,10 +51,11 @@ fn buildTarget(b: *std.Build, target: std.Build.ResolvedTarget) []const u8 {
     return b.fmt("{s}-{s}", .{ @tagName(target.result.cpu.arch), @tagName(target.result.os.tag) });
 }
 
-/// Every `.cpp` directly under `llama.cpp/<dir>`, sorted.
+/// Every `.cpp` directly under `llama.cpp/<dir>`, sorted. Read from the
+/// build root, not the working directory, so a consumer's build finds it.
 fn globCpp(b: *std.Build, dir_path: []const u8) []const []const u8 {
     var out: std.ArrayList([]const u8) = .empty;
-    var dir = std.Io.Dir.cwd().openDir(b.graph.io, b.fmt(root ++ "/{s}", .{dir_path}), .{ .iterate = true }) catch @panic("cannot open a common/ directory");
+    var dir = b.root.openDir(b.graph.io, b.fmt(root ++ "/{s}", .{dir_path}), .{ .iterate = true }) catch @panic("cannot open a common/ directory");
     defer dir.close(b.graph.io);
     var it = dir.iterate();
     while (it.next(b.graph.io) catch null) |e| {

@@ -12,7 +12,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const llamacpp = @import("llamacpp.zig");
 const upstream = @import("upstream.zig");
-const mtmd_build = @import("mtmd.zig");
+const server_task = @import("server_task.zig");
 
 const root = "llama.cpp";
 
@@ -154,75 +154,46 @@ fn buildTarget(b: *std.Build, target: std.Build.ResolvedTarget) []const u8 {
     return b.fmt("{s}-{s}", .{ @tagName(target.result.cpu.arch), @tagName(target.result.os.tag) });
 }
 
+/// The modules `add` builds that `build.zig` exports to consumers.
+pub const Exports = struct {
+    /// `llama-server-core` (`tools/server/core.zig`): the server minus its
+    /// HTTP front, over the same module tree as `llama-server`.
+    server_core: *std.Build.Module,
+    /// `tools/common/c_import.h` translated: the one `llama.h` (with
+    /// `ggml.h` and `mtmd.h`) `server_core` speaks, as `tools_common.c`.
+    llama_h: *std.Build.Module,
+};
+
 /// Adds `tools` (our ports, into `zig-out/bin`) and `tools-ref` (upstream's,
 /// into `zig-out/tools-ref/bin`).
-pub fn add(b: *std.Build, opts: Options) !void {
+///
+/// Return: the modules `build.zig` exports; propagates errors from listing
+/// upstream's sources.
+pub fn add(b: *std.Build, opts: Options) !Exports {
     // Every upstream executable embeds this manifest on Windows
     // (`cmake/win-app.cmake`): a UTF-8 active code page, which replaced
     // `common_params_parse`'s wide-argv repair, and long paths. Zig ignores
     // it on other targets.
     const win_app_manifest = b.path("llama.cpp/common/win-app.manifest");
-    const tools_h = b.addTranslateC(.{
-        .root_source_file = b.path("tools/common/c_import.h"),
-        .target = opts.target,
-        .optimize = opts.optimize,
-    });
-    tools_h.addIncludePath(b.path(root ++ "/include"));
-    tools_h.addIncludePath(b.path(root ++ "/ggml/include"));
-    tools_h.addIncludePath(b.path(root ++ "/tools/mtmd"));
-    const tools_h_module = tools_h.createModule();
 
-    const build_info = b.addOptions();
-    build_info.addOption(u32, "build_number", build_number);
-    build_info.addOption([]const u8, "commit", commit);
-    build_info.addOption([]const u8, "compiler", "Zig " ++ builtin.zig_version_string ++ " clang");
-    build_info.addOption([]const u8, "build_target", buildTarget(b, opts.target));
-
-    // `cli/fit.zig`, the port of `common/fit.cpp`, shared with the CLI.
-    const fit_module = b.createModule(.{
-        .root_source_file = b.path("cli/fit.zig"),
-        .target = opts.target,
-        .optimize = opts.optimize,
-        .link_libc = true,
-    });
-    fit_module.addImport("llama", opts.reference.llama.root_module);
-
-    const common_module = b.createModule(.{
-        .root_source_file = b.path("tools/common/module.zig"),
-        .target = opts.target,
-        .optimize = opts.optimize,
-        .link_libc = true,
-    });
-    common_module.addImport("tools_h", tools_h_module);
-    common_module.addOptions("build_info", build_info);
-    common_module.addImport("cli_fit", fit_module);
-    // libllama's module, for what `common/speculative.cpp` reaches through
-    // `llama-ext.h` (C++ linkage, so not in `tools_h`) and for `libcxx`.
-    common_module.addImport("llama", opts.reference.llama.root_module);
-
-    const tools_step = b.step("tools", "Build the ported upstream tools");
-    // libmtmd's port, for the mtmd tools: its `exports.zig` gives them the
-    // `mtmd.h` and `mtmd-helper.h` symbols they call through `tools_h`.
-    const mtmd_module = mtmd_build.module(b, .{
+    // The module tree `llama-server` and `llama-server-core` share with the
+    // tools: `tools_common`, `cli_fit`, libmtmd's port and the chat modules.
+    const server_opts: server_task.Options = .{
         .target = opts.target,
         .optimize = opts.optimize,
         .sdk = opts.sdk,
         .reference = opts.reference,
-    });
-    // The chat modules, for the server's data layer (`tools/server/module.zig`)
-    // and `llama-mtmd-cli`'s chat templates (`common_chat_templates_init`):
-    // `json` is `cli_fit`'s `cli/json/` under the name `cli/common_chat/`
-    // imports (`tools/server/json_module.zig` says why).
-    const json_module = b.createModule(.{ .root_source_file = b.path("tools/server/json_module.zig"), .target = opts.target, .optimize = opts.optimize, .link_libc = true });
-    json_module.addImport("cli_fit", fit_module);
-    const peg_module = b.createModule(.{ .root_source_file = b.path("cli/peg/module.zig"), .target = opts.target, .optimize = opts.optimize, .link_libc = true });
-    peg_module.addImport("json", json_module);
-    peg_module.addImport("llama", opts.reference.llama.root_module);
-    const chat_module = b.createModule(.{ .root_source_file = b.path("cli/common_chat/module.zig"), .target = opts.target, .optimize = opts.optimize, .link_libc = true });
-    chat_module.addImport("json", json_module);
-    chat_module.addImport("peg", peg_module);
-    chat_module.addImport("llama", opts.reference.llama.root_module);
-    if (opts.jinja) |j| chat_module.addImport("zigjinja", j);
+        .cuda = opts.cuda,
+        .jinja = opts.jinja,
+    };
+    const m = server_task.modules(b, server_opts, opts.optimize);
+    const tools_h_module = m.tools_h;
+    const fit_module = m.cli_fit;
+    const common_module = m.tools_common;
+    const mtmd_module = m.mtmd;
+    const chat_module = m.common_chat;
+
+    const tools_step = b.step("tools", "Build the ported upstream tools");
     for (tools ++ mtmd_tools, 0..) |t, ti| {
         const mod = b.createModule(.{
             .root_source_file = b.path(t.port),
@@ -253,24 +224,7 @@ pub fn add(b: *std.Build, opts: Options) !void {
     // the mtmd tools: it takes images and audio once step 8 lands. Not built
     // for Windows: its port there is out of scope.
     if (opts.target.result.os.tag != .windows) {
-        const mod = b.createModule(.{
-            .root_source_file = b.path("tools/server/main.zig"),
-            .target = opts.target,
-            .optimize = opts.optimize,
-            .link_libc = true,
-        });
-        mod.addImport("tools_common", common_module);
-        mod.addImport("tools_h", tools_h_module);
-        mod.addImport("cli_fit", fit_module);
-        mod.addImport("llama", opts.reference.llama.root_module);
-        mod.addImport("sync", llamacpp.syncOf(opts.reference.llama.root_module));
-        mod.addImport("mtmd", mtmd_module);
-        mod.addImport("ui_assets", opts.ui.port_module);
-        mod.addImport("json", json_module);
-        mod.addImport("common_chat", chat_module);
-        mod.addImport("peg", peg_module);
-        llamacpp.addSdkPaths(b, mod, opts.sdk);
-        llamacpp.addLibgcc(b, mod);
+        const mod = server_task.serverModule(b, server_opts, m, b.path("tools/server/main.zig"), opts.ui.port_module);
         const exe = b.addExecutable(.{ .name = "llama-server", .root_module = mod });
         tools_step.dependOn(&b.addInstallArtifact(exe, .{}).step);
         // The router, the downloader and --connect, which no other step's
@@ -279,6 +233,11 @@ pub fn add(b: *std.Build, opts: Options) !void {
         const host_test_step = b.step("test-server-host", "Run the unit tests of the router, the downloader and --connect (tools/server/models*.zig, download.zig, connect.zig)");
         host_test_step.dependOn(&b.addRunArtifact(host_test).step);
     }
+    // `llama-server-core`, for a consumer that drives `ServerContext`
+    // in-process: `llama-server`'s module minus its HTTP front. Nothing here
+    // compiles it; `build.zig` exports it.
+    const server_core = server_task.serverModule(b, server_opts, m, b.path("tools/server/core.zig"), opts.ui.port_module);
+    llamacpp.addCudaRuntime(b, server_core, opts.cuda);
 
     const ref_step = b.step("tools-ref", "Build upstream's tools over libllama-ref, the tool gates' references");
     const common_ref = addCommonRef(b, opts);
@@ -392,6 +351,7 @@ pub fn add(b: *std.Build, opts: Options) !void {
         const exe = b.addExecutable(.{ .name = b.fmt("llama-{s}", .{t.name}), .root_module = mod, .win32_manifest = win_app_manifest });
         ref_step.dependOn(&b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .{ .custom = "tools-ref/bin" } } }).step);
     }
+    return .{ .server_core = server_core, .llama_h = m.tools_h };
 }
 
 fn refModule(b: *std.Build, opts: anytype) *std.Build.Module {
@@ -456,7 +416,8 @@ pub fn addMtmdRef(b: *std.Build, opts: anytype) *std.Build.Step.Compile {
     mod.addIncludePath(b.path(root ++ "/vendor/hash"));
     mod.addCSourceFiles(.{ .root = b.path(root), .files = &mtmd_sources, .flags = &cxx_flags });
     var models: std.ArrayList([]const u8) = .empty;
-    var dir = std.Io.Dir.cwd().openDir(b.graph.io, root ++ "/tools/mtmd/models", .{ .iterate = true }) catch @panic("cannot open tools/mtmd/models");
+    // From the build root, not the working directory, so a consumer's build finds it.
+    var dir = b.root.openDir(b.graph.io, root ++ "/tools/mtmd/models", .{ .iterate = true }) catch @panic("cannot open tools/mtmd/models");
     defer dir.close(b.graph.io);
     var it = dir.iterate();
     while (it.next(b.graph.io) catch null) |e| {

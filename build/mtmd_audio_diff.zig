@@ -66,7 +66,8 @@ fn logMelSource(b: *std.Build) []const u8 {
     const path = root ++ "/tools/mtmd/mtmd-subcontext.cpp";
     // A failure here must break this gate's build alone, not every `zig
     // build`: it becomes an `#error` in the generated file.
-    const text = std.Io.Dir.cwd().readFileAlloc(b.graph.io, path, b.allocator, .unlimited) catch
+    // From the build root, not the working directory, so a consumer's build finds it.
+    const text = std.Io.Dir.cwd().readFileAlloc(b.graph.io, b.root.joinString(b.allocator, path) catch @panic("OOM"), b.allocator, .unlimited) catch
         return "#error \"mtmd-audio-diff: cannot read tools/mtmd/mtmd-subcontext.cpp\"\n";
     var out: std.ArrayList(u8) = .empty;
     out.appendSlice(b.allocator,

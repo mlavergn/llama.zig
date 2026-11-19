@@ -651,7 +651,7 @@ pub fn build(b: *std.Build) !void {
     // The web UI both llama-servers embed under -Dui (build/ui.zig).
     const ui = try ui_build.add(b);
 
-    try tools_build.add(b, .{
+    const exports = try tools_build.add(b, .{
         .target = cfg.target,
         .optimize = cfg.optimize,
         .sdk = sdk,
@@ -668,6 +668,19 @@ pub fn build(b: *std.Build) !void {
     // The server's data layer, its tests and the
     // server-task-diff harness (build/server_task.zig).
     server_task_build.add(b, .{ .target = cfg.target, .optimize = cfg.optimize, .sdk = sdk, .reference = reference, .cuda = cuda, .jinja = jinja_module });
+
+    // -------------------------------------------------------------------------
+    // Exported modules
+    //
+    // For a package that takes llama.zig as a dependency and runs inference
+    // in-process (zigllm): libllama's module, which links `libggml` itself;
+    // `llama.h` translated, the same translation `llama-server-core`'s
+    // `tools_common.c` is (two would give incompatible `*llama_model`); and
+    // `llama-server-core`, the server minus its HTTP front
+    // (`tools/server/core.zig`).
+    b.modules.put(b.graph.arena, "llama", reference.llama.root_module) catch @panic("OOM");
+    b.modules.put(b.graph.arena, "llama_h", exports.llama_h) catch @panic("OOM");
+    b.modules.put(b.graph.arena, "llama-server-core", exports.server_core) catch @panic("OOM");
 
     const mtmd_module = mtmd_build.add(b, .{
         .target = cfg.target,
