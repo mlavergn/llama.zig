@@ -133,8 +133,8 @@ const Xcode = struct {
     /// framework search path they need to link against system frameworks.
     /// An Apple target gets its own SDK -- macOS, or the iOS, tvOS or visionOS
     /// device or simulator SDK -- which is what lets `xcframework/` build its
-    /// slices.
-    /// Anything else falls back to the Apple Silicon macOS SDK, as before.
+    /// slices. Only an Apple target is resolved: `appleSdk` gives any other
+    /// none.
     /// Must be called exactly once after `init` and before `target` or `sdk`
     /// are read; on success both fields are valid for the handle's lifetime.
     ///
@@ -147,19 +147,12 @@ const Xcode = struct {
     /// Parameters:
     /// - `self`: the handle to populate; mutated in place.
     /// - `b`: the build graph, which records the SDK as a configure input.
-    /// - `target`: the build target; selects which SDK.
+    /// - `target`: the build target, an Apple OS; selects which SDK.
     ///
     /// Return: nothing on success; returns `error.FailedToResolveSDK` when no
-    /// SDK can be located, and propagates target-resolution errors.
+    /// SDK can be located.
     pub fn resolve(self: *Self, b: *std.Build, target: std.Target) !void {
-        const query = std.Target.Query{
-            .cpu_arch = .aarch64,
-            .os_tag = .macos,
-        };
-        self.target = if (target.os.tag.isDarwin())
-            target
-        else
-            try std.zig.system.resolveTargetQuery(self.io, query);
+        self.target = target;
         self.sdk = std.zig.system.darwin.getSdk(
             self.allocator,
             self.io,
@@ -168,6 +161,24 @@ const Xcode = struct {
         b.dependOnFileMetadata(b.graph.cwdRelativePath(b.pathJoin(&.{ self.sdk, "SDKSettings.json" })));
     }
 };
+
+/// The Apple SDK to search for frameworks and libraries.
+///
+/// Only a macOS host building for an Apple OS has one: a Windows or Linux
+/// target must not link against the macOS SDK's frameworks and libraries.
+///
+/// Parameters:
+/// - `b`: the build graph, which records the SDK as a configure input.
+/// - `target`: the build target.
+///
+/// Return: the SDK root, owned by `b`, or null; propagates
+/// `Xcode.resolve`'s errors.
+fn appleSdk(b: *std.Build, target: std.Target) !?[]const u8 {
+    if (builtin.os.tag != .macos or !target.os.tag.isDarwin()) return null;
+    var xcode = try Xcode.init(b.allocator, b.graph.io);
+    try xcode.resolve(b, target);
+    return xcode.sdk;
+}
 
 const Config = struct {
     name: []const u8,
@@ -385,11 +396,7 @@ pub fn build(b: *std.Build) !void {
     lib.root_module.addOptions("config", options);
     lib.root_module.addIncludePath(b.path("src"));
 
-    if (builtin.os.tag == .macos) {
-        var xcode = try Xcode.init(b.allocator, b.graph.io);
-        try xcode.resolve(b, cfg.target.result);
-        llamacpp.addSdkPaths(b, lib.root_module, xcode.sdk);
-    }
+    llamacpp.addSdkPaths(b, lib.root_module, try appleSdk(b, cfg.target.result));
 
     const lib_install = b.addInstallArtifact(lib, .{});
     const lib_step = b.step("lib", "Build static library");
@@ -402,11 +409,7 @@ pub fn build(b: *std.Build) !void {
     // These are reference artifacts, not the port: nothing under `llama.cpp/`
     // is modified, and the sources compile exactly as upstream ships them.
 
-    const sdk: ?[]const u8 = if (builtin.os.tag == .macos) blk: {
-        var xcode = try Xcode.init(b.allocator, b.graph.io);
-        try xcode.resolve(b, cfg.target.result);
-        break :blk xcode.sdk;
-    } else null;
+    const sdk = try appleSdk(b, cfg.target.result);
 
     // A named Apple `-Dtarget` -- every `xcframework/` slice -- is a cross-compile
     // to Zig and needs the SDK described to it. A native build does not, and
@@ -682,6 +685,25 @@ pub fn build(b: *std.Build) !void {
     b.modules.put(b.graph.arena, "llama_h", exports.llama_h) catch @panic("OOM");
     b.modules.put(b.graph.arena, "llama-server-core", exports.server_core) catch @panic("OOM");
 
+    // llama-server-core's tests (harness/server_core_test.zig): the entry
+    // points a consumer calls, compiled, and a completion on a tiny model,
+    // run in-process. They import the exports by name, as a consumer does,
+    // so a renamed or dropped export fails here. For a target the host
+    // cannot run (-Dtarget=x86_64-windows-gnu) they are compiled only.
+    const core_test = b.createModule(.{
+        .root_source_file = b.path("harness/server_core_test.zig"),
+        .target = cfg.target,
+        .optimize = cfg.optimize,
+        .link_libc = true,
+    });
+    for ([_][2][]const u8{ .{ "llama_server", "llama-server-core" }, .{ "llama_h", "llama_h" } }) |imp| {
+        core_test.addImport(imp[0], b.modules.get(imp[1]) orelse std.debug.panic("test-server-core: no exported module '{s}'", .{imp[1]}));
+    }
+    const core_run = b.addRunArtifact(b.addTest(.{ .root_module = core_test }));
+    core_run.skip_foreign_checks = true;
+    const core_test_step = b.step("test-server-core", "Run llama-server-core's tests (harness/server_core_test.zig): its API compiled, a completion run in-process; compile only for a foreign -Dtarget");
+    core_test_step.dependOn(&core_run.step);
+
     const mtmd_module = mtmd_build.add(b, .{
         .target = cfg.target,
         .optimize = cfg.optimize,
@@ -818,11 +840,7 @@ pub fn build(b: *std.Build) !void {
         .linkage = .static,
     });
 
-    if (builtin.os.tag == .macos) {
-        var docs_xcode = try Xcode.init(b.allocator, b.graph.io);
-        try docs_xcode.resolve(b, cfg.target.result);
-        llamacpp.addSdkPaths(b, docs_lib.root_module, docs_xcode.sdk);
-    }
+    llamacpp.addSdkPaths(b, docs_lib.root_module, try appleSdk(b, cfg.target.result));
 
     const docs = b.addInstallDirectory(.{
         .source_dir = docs_lib.getEmittedDocs(),

@@ -47,7 +47,8 @@ Exactly four markdown files. Never add another.
 - **`llama.cpp.zmake`** is modified only under a grant: Zig 0.17, `arch/x86`, Vulkan, Windows, and the standing sync grant (its `build.zig`, `build.zig.zon`, `Makefile`, for that release only).
 - **No dependencies.** One exception: `mlavergn/zigjinja` (`../zigjinja`, path dependency), confined to `cli/` and the server's `cli/common_chat`. Pin an exact commit.
 - **`LICENSE` carries both copyrights** (this project, the ggml authors). Every file under `src/` is a translation of MIT C; keep the provenance headers.
-- **Out of scope, by decision:** `llama-server` on Windows; any BLAS but Accelerate (zDNN, ZenDNN, OpenBLAS... are vendor libraries); x86 below `x86_64_v3`; Apple OS below 26.0 on any platform.
+- **Out of scope, by decision:** `llama-server`'s executable and HTTP front on Windows; any BLAS but Accelerate (zDNN, ZenDNN, OpenBLAS... are vendor libraries); x86 below `x86_64_v3`; Apple OS below 26.0 on any platform.
+- **`llama-server-core` is in scope on Windows** (zigllm drives it in-process): `ServerContext`, its queues and the data layer build there. MCP, the server-side tools, `subproc`'s waiter and `oaicompat`'s media loading (`download.zig`, httplib's client) are POSIX only until their `_WIN32` arms are ported; `harness/server_core_test.zig` lists both sets.
 - **`llama-cli` refuses what it does not support** (non-zero exit, clear error), never ignores it; flags keep upstream's names and defaults.
 - **Never `@panic`, `std.debug.print` or `std.log` in library code**; abort with `impl.abort`. A `@panic` pulls in `compiler_rt`, whose `expf`/`logf` shadow libm's.
 - **Keep upstream's `GGML_ASSERT` in every build mode**; port a C `assert` as nothing (`NDEBUG` in the reference) and its following unsigned arithmetic as `-%`/`+%`.
@@ -133,6 +134,7 @@ Exactly four markdown files. Never add another.
 | `mtmd-diff` (+ `-image-`, `-audio-`, `-decode-diff`, `mtmd-exports`) | libmtmd on mmproj fixtures, preprocessors, decoders |
 | `spec-diff` | Speculative drafters, n-gram stores |
 | `server-task-diff`, `http-diff`, `server-diff` | Server data layer; HTTP on the wire; whole server on transcripts (`--self` first) |
+| `server-core-consumer` (`test-server-core`) | `llama-server-core` as a consumer builds it: exported names, one `llama.h`, the API compiled, a completion run; Windows compiled |
 | `blas-diff`, `blas-node-diff` | BLAS backend |
 | `adapter-`, `quant-`, `opt-`, `opt-llama-`, `meta-`, `batch-`, `chat-diff` | LoRA/control vectors, quantizer, optimizer, meta backend, batch, chat API |
 | `host-arms-diff` | Thread priority, affinity, NUMA, default seed |
@@ -225,7 +227,7 @@ make zmake                # build the reference through llama.cpp.zmake
 - zmake compiles the release tarball named in its `build.zig.zon` (fetched into `zig-pkg/`); the nested `llama.cpp.zmake/llama.cpp` checkout remains for `types-golden` and `check-reference-pin`.
 - `make ref-chat` runs upstream's REPL `llama-cli`, which has no raw-completion mode; it will not match `make port`.
 - Timings from `make port`/`make ref` are not a port-vs-C comparison (`make ref` links Apple-clang libraries; prompt figures swing).
-- macOS SDK resolution: `build.zig`'s `Xcode` helper.
+- macOS SDK resolution: `build.zig`'s `Xcode` helper; `appleSdk` gives it to Apple targets only, never to a Windows or Linux one.
 
 ## Code conventions
 

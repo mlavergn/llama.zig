@@ -234,8 +234,8 @@ pub fn add(b: *std.Build, opts: Options) !Exports {
         host_test_step.dependOn(&b.addRunArtifact(host_test).step);
     }
     // `llama-server-core`, for a consumer that drives `ServerContext`
-    // in-process: `llama-server`'s module minus its HTTP front. Nothing here
-    // compiles it; `build.zig` exports it.
+    // in-process: `llama-server`'s module minus its HTTP front. `build.zig`
+    // exports it.
     const server_core = server_task.serverModule(b, server_opts, m, b.path("tools/server/core.zig"), opts.ui.port_module);
     llamacpp.addCudaRuntime(b, server_core, opts.cuda);
 

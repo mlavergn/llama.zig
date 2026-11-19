@@ -25,7 +25,7 @@ LINT_FILES := $(filter-out $(LINT_EXCLUDE),build.zig $(shell find $(LINT_DIRS) -
 
 .DEFAULT_GOAL := build
 
-.PHONY: test distclean build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-toolchain vk-repro vk-builds vk-backend-diff vk-node-diff vk-ops-diff vk-push-layout vk-parity-cli blas-builds blas-diff blas-node-diff x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates win-host-diffs libcxx-diff regex-diff json-diff schema-diff peg-diff chat-msg-diff chat-parse-diff spec-diff server-diff server-task-diff http-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff jinja-diff context-diff moe-slru-diff arch-fixtures arch-model-diff mtp-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff metal-ops-diff backend-ops parity-cli cnv-diff fit-diff tools-diff parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port oneshot chat ref ref-chat web ui validate xcframework xcframework-check perf perf-cpu
+.PHONY: test distclean build cli llama.cpp probe graph-diff sched-diff ops-diff repack-diff sampler-diff host-arms-diff vk-toolchain vk-repro vk-builds vk-backend-diff vk-node-diff vk-ops-diff vk-push-layout vk-parity-cli blas-builds blas-diff blas-node-diff x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff x86-gates win-host-diffs libcxx-diff regex-diff json-diff schema-diff peg-diff chat-msg-diff chat-parse-diff spec-diff server-diff server-task-diff server-core-consumer http-diff unicode-diff vocab-diff arch-diff loader-diff batch-diff chat-diff jinja-diff context-diff moe-slru-diff arch-fixtures arch-model-diff mtp-diff gemma4-assistant-diff adapter-diff api-diff abi-check tuning-diff struct-layout metal-diff metal-ops-diff backend-ops parity-cli cnv-diff fit-diff tools-diff parity-port parity-port-cpu node-diff cuda-ops-diff cuda-node-diff cuda-backend-diff cuda-parity-cli cuda-require-linux port oneshot chat ref ref-chat web ui validate xcframework xcframework-check perf perf-cpu
 
 # $(shell), not $(wildcard): make splits a function's arguments on spaces, and
 # the checkout may live under a path with one ("/Volumes/Macintosh HD").
@@ -221,6 +221,8 @@ test:
 	@# The xcframework's iOS device slice: libggml with BLAS, libmtmd with
 	@# libllama inside, for the A7 upstream's framework is built for.
 	zig build xcframework -Dblas -Dtarget=aarch64-ios.26.0 -Dcpu=apple_a7 --release=fast --prefix zig-out/ios-check
+	@printf '\n== llama-server-core as a consumer builds it (host, Windows) ==\n'
+	./scripts/server-core-consumer
 	@printf '\n== upstream citations ==\n'
 	./scripts/port-links
 	@printf '\n== scheduler diff vs reference ==\n'
@@ -506,6 +508,13 @@ chat-parse-diff:
 # transcripts and logs. See the header of scripts/server-task-diff.
 server-task-diff:
 	./scripts/server-task-diff
+
+# llama-server-core as a consumer builds it: `zig build test-server-core`
+# (harness/server_core_test.zig over the exports, by name) from another
+# directory; its API compiled and a completion on a tiny model run on the
+# host, compiled for Windows. See the header of scripts/server-core-consumer.
+server-core-consumer:
+	./scripts/server-core-consumer
 
 # Our llama-server against upstream's on request transcripts
 # (harness/server/<name>.cases), every case file or SERVER_CASES="core ...".

@@ -1,0 +1,25 @@
+#!/bin/bash
+# llama-server-core as a consumer builds it: `zig build test-server-core`
+# (harness/server_core_test.zig over the exports, imported by name) run
+# from a scratch directory through --build-file, so the build root is this
+# repository and the working directory is not, as in a package that takes
+# llama.zig as a dependency. A read relative to the working directory
+# instead of the build root fails here and nowhere else.
+#
+# Runs the tests on the host, then compiles them for Windows at X86_CPU
+# (`run test` is skipped there: the host cannot run it).
+#
+# Usage: scripts/server-core-consumer
+#   X86_CPU=x86_64_v3   the Windows level, as scripts/win-target has it
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+X86_CPU="${X86_CPU:-x86_64_v3}"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+cd "$tmp" || exit 2
+
+zig build --build-file "$ROOT/build.zig" test-server-core --summary all \
+    || { echo "server-core-consumer: FAIL (host)" >&2; exit 1; }
+zig build --build-file "$ROOT/build.zig" test-server-core -Dtarget=x86_64-windows-gnu -Dcpu="$X86_CPU" --summary all \
+    || { echo "server-core-consumer: FAIL (x86_64-windows-gnu, $X86_CPU)" >&2; exit 1; }
+echo "server-core-consumer: OK (host run, x86_64-windows-gnu $X86_CPU compiled)"
