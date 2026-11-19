@@ -20,6 +20,7 @@
 //! `set_proxy*`, TLS and `set_*timeout` setters are not ported.
 
 const std = @import("std");
+const sync = @import("sync");
 const builtin = @import("builtin");
 const detail = @import("detail.zig");
 const socket = @import("socket.zig");
@@ -282,9 +283,6 @@ pub fn websocketAcceptKey(client_key: []const u8, out: *[28]u8) []const u8 {
     return std.base64.standard.Encoder.encode(out, &digest);
 }
 
-/// `pthread_mutex_trylock`, which `std.c` does not name: 0 when taken.
-extern "c" fn pthread_mutex_trylock(mutex: *std.c.pthread_mutex_t) c_int;
-
 /// Ports `WebSocket` (httplib.h:4659 @b1b770d90).
 pub const WebSocket = struct {
     a: std.mem.Allocator,
@@ -292,14 +290,14 @@ pub const WebSocket = struct {
     is_server: bool,
     ping_interval_sec: i64 = ping_interval_second,
     closed: std.atomic.Value(bool) = .init(false),
-    write_mutex: std.c.pthread_mutex_t = .{},
+    write_mutex: sync.Mutex = .{},
     /// Owned by whichever thread is parsing frames off `strm`. Only one
     /// thread may do so: a second parser stealing bytes silently corrupts
     /// the message the first one is assembling.
-    read_mutex: std.c.pthread_mutex_t = .{},
+    read_mutex: sync.Mutex = .{},
     ping_thread: ?std.Thread = null,
-    ping_mutex: std.c.pthread_mutex_t = .{},
-    ping_cv: std.c.pthread_cond_t = .{},
+    ping_mutex: sync.Mutex = .{},
+    ping_cv: sync.Condition = .{},
 
     /// Ports `WebSocket` (httplib.h:4689 @b1b770d90), the constructor,
     /// into `self`, which its ping thread points at.
@@ -311,11 +309,11 @@ pub const WebSocket = struct {
     /// Ports the destructor of `WebSocket` (httplib.cpp:18892 @b1b770d90).
     pub fn deinit(self: *WebSocket) void {
         {
-            _ = std.c.pthread_mutex_lock(&self.ping_mutex);
-            defer _ = std.c.pthread_mutex_unlock(&self.ping_mutex);
+            self.ping_mutex.lock();
+            defer self.ping_mutex.unlock();
             self.closed.store(true, .seq_cst);
         }
-        _ = std.c.pthread_cond_broadcast(&self.ping_cv);
+        self.ping_cv.broadcast();
         if (self.ping_thread) |t| t.join();
         self.ping_thread = null;
         // A server's stream outlives this object
@@ -325,8 +323,8 @@ pub const WebSocket = struct {
     /// Ports `send_frame` (httplib.cpp:18712 @b1b770d90), a member of
     /// `WebSocket`.
     fn sendFrame(self: *WebSocket, op: Opcode, data: []const u8) bool {
-        _ = std.c.pthread_mutex_lock(&self.write_mutex);
-        defer _ = std.c.pthread_mutex_unlock(&self.write_mutex);
+        self.write_mutex.lock();
+        defer self.write_mutex.unlock();
         if (self.closed.load(.seq_cst)) return false;
         return writeWebsocketFrame(self.strm, op, data, true, !self.is_server);
     }
@@ -338,8 +336,8 @@ pub const WebSocket = struct {
     fn handleControl(self: *WebSocket, op: Opcode, payload: []const u8) bool {
         switch (op) {
             .ping => {
-                _ = std.c.pthread_mutex_lock(&self.write_mutex);
-                defer _ = std.c.pthread_mutex_unlock(&self.write_mutex);
+                self.write_mutex.lock();
+                defer self.write_mutex.unlock();
                 _ = writeWebsocketFrame(self.strm, .pong, payload, true, !self.is_server);
                 return true;
             },
@@ -352,8 +350,8 @@ pub const WebSocket = struct {
                 const code: u16 = @backingInt(CloseStatus.protocol_error);
                 const protocol_error: [2]u8 = .{ @intCast(code >> 8), @intCast(code & 0xff) };
                 if (!isValidClosePayload(payload)) reply = &protocol_error;
-                _ = std.c.pthread_mutex_lock(&self.write_mutex);
-                defer _ = std.c.pthread_mutex_unlock(&self.write_mutex);
+                self.write_mutex.lock();
+                defer self.write_mutex.unlock();
                 _ = writeWebsocketFrame(self.strm, .close, reply, true, !self.is_server);
                 return false;
             },
@@ -371,10 +369,10 @@ pub const WebSocket = struct {
         var payload: std.ArrayList(u8) = .empty;
         defer payload.deinit(a);
 
-        _ = std.c.pthread_mutex_lock(&self.read_mutex);
+        self.read_mutex.lock();
         var read_locked = true;
         defer if (read_locked) {
-            _ = std.c.pthread_mutex_unlock(&self.read_mutex);
+            self.read_mutex.unlock();
         };
 
         while (!self.closed.load(.seq_cst)) {
@@ -430,7 +428,7 @@ pub const WebSocket = struct {
                         // close() takes the read lock to wait for the peer's Close reply, so
                         // it must not run while this thread still holds it.
                         read_locked = false;
-                        _ = std.c.pthread_mutex_unlock(&self.read_mutex);
+                        self.read_mutex.unlock();
                         self.close(.invalid_payload, "invalid UTF-8");
                         return .fail;
                     }
@@ -460,7 +458,7 @@ pub const WebSocket = struct {
     /// Ports `close` (httplib.cpp:18847 @b1b770d90), a member of `WebSocket`.
     pub fn close(self: *WebSocket, status: CloseStatus, reason: []const u8) void {
         if (self.closed.swap(true, .seq_cst)) return;
-        _ = std.c.pthread_cond_broadcast(&self.ping_cv);
+        self.ping_cv.broadcast();
         var payload_buf: [125]u8 = undefined;
         const code: u16 = @backingInt(status);
         payload_buf[0] = @intCast((code >> 8) & 0xFF);
@@ -475,8 +473,8 @@ pub const WebSocket = struct {
         // A code that may not be sent, such as NoStatus, goes without a payload
         if (!isValidClosePayload(payload)) payload = "";
         {
-            _ = std.c.pthread_mutex_lock(&self.write_mutex);
-            defer _ = std.c.pthread_mutex_unlock(&self.write_mutex);
+            self.write_mutex.lock();
+            defer self.write_mutex.unlock();
             _ = writeWebsocketFrame(self.strm, .close, payload, true, !self.is_server);
         }
 
@@ -487,8 +485,8 @@ pub const WebSocket = struct {
         // thread positioned to see the peer's reply, and reading here would take
         // bytes out of the message it is assembling. Bailing out also leaves the
         // stream, including its read timeout, entirely to that thread.
-        if (pthread_mutex_trylock(&self.read_mutex) != 0) return;
-        defer _ = std.c.pthread_mutex_unlock(&self.read_mutex);
+        if (!self.read_mutex.tryLock()) return;
+        defer self.read_mutex.unlock();
 
         // Use a short timeout to avoid hanging if the peer doesn't respond.
         self.strm.setReadTimeout(close_timeout_second, 0);
@@ -516,20 +514,20 @@ pub const WebSocket = struct {
     }
 
     fn pingLoop(self: *WebSocket) void {
-        _ = std.c.pthread_mutex_lock(&self.ping_mutex);
-        defer _ = std.c.pthread_mutex_unlock(&self.ping_mutex);
+        self.ping_mutex.lock();
+        defer self.ping_mutex.unlock();
         while (true) {
-            var deadline: std.c.timespec = undefined;
-            _ = std.c.clock_gettime(std.c.CLOCK.REALTIME, &deadline);
-            deadline.sec += @intCast(self.ping_interval_sec);
+            const deadline = socket.steadyNowUs() + @as(i64, @intCast(self.ping_interval_sec)) * std.time.us_per_s;
             // The predicate keeps a spurious wakeup from sending a ping early
             while (!self.closed.load(.seq_cst)) {
-                if (std.c.pthread_cond_timedwait(&self.ping_cv, &self.ping_mutex, &deadline) == .TIMEDOUT) break;
+                const now = socket.steadyNowUs();
+                if (now >= deadline) break;
+                if (!self.ping_cv.timedWait(&self.ping_mutex, @as(u64, @intCast(deadline - now)) * std.time.ns_per_us)) break;
             }
             if (self.closed.load(.seq_cst)) return;
-            _ = std.c.pthread_mutex_unlock(&self.ping_mutex);
+            self.ping_mutex.unlock();
             const ok = self.sendFrame(.ping, "");
-            _ = std.c.pthread_mutex_lock(&self.ping_mutex);
+            self.ping_mutex.lock();
             if (!ok) {
                 self.closed.store(true, .seq_cst);
                 return;

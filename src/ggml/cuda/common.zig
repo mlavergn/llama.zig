@@ -21,6 +21,7 @@
 //! their `#if` arms are cited nowhere below.
 
 const std = @import("std");
+const sync = @import("sync");
 const builtin = @import("builtin");
 const config = @import("config");
 const impl = @import("../impl.zig");
@@ -247,12 +248,12 @@ pub fn cuCheck(err: cu.CUresult, stmt: [*:0]const u8, src: std.builtin.SourceLoc
 pub fn Once(comptime f: fn () void) type {
     return struct {
         var done: std.atomic.Value(bool) = .init(false);
-        var mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER;
+        var mutex: sync.Mutex = .{};
 
         pub fn call() void {
             if (done.load(.acquire)) return;
-            _ = std.c.pthread_mutex_lock(&mutex);
-            defer _ = std.c.pthread_mutex_unlock(&mutex);
+            mutex.lock();
+            defer mutex.unlock();
             if (done.load(.monotonic)) return;
             f();
             done.store(true, .release);
@@ -1393,30 +1394,30 @@ pub const Context = struct {
 /// is being captured in another thread can be a CUDA error, so the context
 /// destructor waits until no capture is in progress.
 pub const lock = struct {
-    var mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER;
-    var cv: std.c.pthread_cond_t = std.c.PTHREAD_COND_INITIALIZER;
+    var mutex: sync.Mutex = .{};
+    var cv: sync.Condition = .{};
     pub var counter: std.atomic.Value(c_int) = .init(0);
 
     fn waitIdle() void {
-        _ = std.c.pthread_mutex_lock(&mutex);
-        defer _ = std.c.pthread_mutex_unlock(&mutex);
-        while (counter.load(.monotonic) != 0) _ = std.c.pthread_cond_wait(&cv, &mutex);
+        mutex.lock();
+        defer mutex.unlock();
+        while (counter.load(.monotonic) != 0) cv.wait(&mutex);
     }
 
     /// Ends a capture: `ggml_cuda_lock_counter.fetch_sub(1)` and, at zero,
     /// `notify_all` under the mutex.
     pub fn release() void {
         if (counter.fetchSub(1, .monotonic) == 1) {
-            _ = std.c.pthread_mutex_lock(&mutex);
-            defer _ = std.c.pthread_mutex_unlock(&mutex);
-            _ = std.c.pthread_cond_broadcast(&cv);
+            mutex.lock();
+            defer mutex.unlock();
+            cv.broadcast();
         }
     }
 
     /// Begins a capture.
     pub fn acquire() void {
-        _ = std.c.pthread_mutex_lock(&mutex);
-        defer _ = std.c.pthread_mutex_unlock(&mutex);
+        mutex.lock();
+        defer mutex.unlock();
         _ = counter.fetchAdd(1, .monotonic);
     }
 };

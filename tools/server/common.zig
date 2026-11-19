@@ -26,6 +26,7 @@
 //! gate masks them (`server-task-diff` and `server-diff` both do).
 
 const std = @import("std");
+const sync = @import("sync");
 const json = @import("json");
 const chat = @import("common_chat");
 const tools = @import("tools_common");
@@ -385,7 +386,7 @@ pub fn genToolCallId(a: Allocator) Error![]u8 {
     return randomString(a);
 }
 
-var media_marker_mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER;
+var media_marker_mutex: sync.Mutex = .{};
 var media_marker_done = false;
 var media_marker_buf: [64]u8 = undefined;
 var media_marker: [:0]const u8 = "";
@@ -409,8 +410,8 @@ fn initMediaMarker() void {
 /// process's life, from `LLAMA_MEDIA_MARKER` when set.
 pub fn getMediaMarker() [:0]const u8 {
     // a function-local static: initialized once, thread-safe
-    _ = std.c.pthread_mutex_lock(&media_marker_mutex);
-    defer _ = std.c.pthread_mutex_unlock(&media_marker_mutex);
+    media_marker_mutex.lock();
+    defer media_marker_mutex.unlock();
     if (!media_marker_done) {
         initMediaMarker();
         media_marker_done = true;
@@ -1229,8 +1230,8 @@ pub fn Pipe(comptime T: type) type {
     return struct {
         const Self = @This();
 
-        mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
-        cv: std.c.pthread_cond_t = std.c.PTHREAD_COND_INITIALIZER,
+        mutex: sync.Mutex = .{},
+        cv: sync.Condition = .{},
         queue: std.ArrayList(T) = .empty,
         head: usize = 0,
         writer_closed: std.atomic.Value(bool) = .init(false),
@@ -1272,13 +1273,13 @@ pub fn Pipe(comptime T: type) type {
         /// Ports `close_write` (server-common.h:644 @b1b770d90).
         pub fn closeWrite(self: *Self) void {
             self.writer_closed.store(true, .monotonic);
-            _ = std.c.pthread_cond_broadcast(&self.cv);
+            self.cv.broadcast();
         }
 
         /// Ports `close_read` (server-common.h:649 @b1b770d90).
         pub fn closeRead(self: *Self) void {
             self.reader_closed.store(true, .monotonic);
-            _ = std.c.pthread_cond_broadcast(&self.cv);
+            self.cv.broadcast();
         }
 
         /// Ports `read` (server-common.h:656 @b1b770d90). `close_on_stop`:
@@ -1287,8 +1288,8 @@ pub fn Pipe(comptime T: type) type {
         ///
         /// Return: true with `output` set; false at a clean EOF or a stop.
         pub fn read(self: *Self, output: *T, should_stop: ?ShouldStop, close_on_stop: bool) bool {
-            _ = std.c.pthread_mutex_lock(&self.mutex);
-            defer _ = std.c.pthread_mutex_unlock(&self.mutex);
+            self.mutex.lock();
+            defer self.mutex.unlock();
             const poll_interval_ns: u64 = 500 * std.time.ns_per_ms;
             while (true) {
                 if (self.len() != 0) {
@@ -1306,12 +1307,7 @@ pub fn Pipe(comptime T: type) type {
                         return false; // cancelled / deadline reached
                     }
                 }
-                var ts: std.c.timespec = undefined;
-                _ = std.c.clock_gettime(std.c.CLOCK.REALTIME, &ts);
-                const ns = @as(u64, @intCast(ts.nsec)) + poll_interval_ns;
-                ts.sec += @intCast(ns / std.time.ns_per_s);
-                ts.nsec = @intCast(ns % std.time.ns_per_s);
-                _ = std.c.pthread_cond_timedwait(&self.cv, &self.mutex, &ts);
+                _ = self.cv.timedWait(&self.mutex, poll_interval_ns);
             }
         }
 
@@ -1319,8 +1315,8 @@ pub fn Pipe(comptime T: type) type {
         ///
         /// Return: false when the reader is gone (a broken pipe).
         pub fn write(self: *Self, data: T) Error!bool {
-            _ = std.c.pthread_mutex_lock(&self.mutex);
-            defer _ = std.c.pthread_mutex_unlock(&self.mutex);
+            self.mutex.lock();
+            defer self.mutex.unlock();
             if (self.reader_closed.load(.seq_cst)) {
                 return false; // broken pipe
             }
@@ -1330,7 +1326,7 @@ pub fn Pipe(comptime T: type) type {
                 }
             }
             try self.queue.append(self.gpa, data);
-            _ = std.c.pthread_cond_signal(&self.cv);
+            self.cv.signal();
             return true;
         }
     };

@@ -13,10 +13,10 @@
 //! The C carries a page of `#define ggml_mutex_lock(m)` shims so one body can
 //! drive pthreads on Unix and SRW locks on Windows, plus its own atomic
 //! wrappers for MSVC. The shims are ported as the inline functions `lock`,
-//! `lockShared`, `condWait` and the rest, both arms each; `std.atomic.Value`
-//! replaces the atomic wrappers. The `_shared` variants are the same calls as
-//! the plain ones on pthreads, and a reader's hold on Windows -- which is why
-//! they stay distinct here.
+//! `lockShared`, `condWait` and the rest, over the port's futex `Mutex` and
+//! `Condition` (`src/sync/`) on every target; `std.atomic.Value` replaces the
+//! atomic wrappers. The `_shared` variants are the plain ones, as on the C's
+//! pthread arm, and stay distinct so each call site reads against the C's.
 //!
 //! What does survive exactly is the *protocol* -- which counter is bumped with
 //! which ordering, and in what sequence. `ggml_barrier` in particular is
@@ -383,11 +383,6 @@ const SchedParam = if (is_linux) extern struct {
 extern fn pthread_self() std.c.pthread_t;
 extern fn pthread_setschedparam(thread: std.c.pthread_t, policy: c_int, param: *const SchedParam) c_int;
 
-/// What `ggml_mutex_init` and `ggml_cond_init` expand to in the pthread arm
-/// (ggml-cpu.c:462, 479 @b1b770d90): these two calls with a null attribute.
-extern fn pthread_mutex_init(mutex: *std.c.pthread_mutex_t, attr: ?*const anyopaque) c_int;
-extern fn pthread_cond_init(cond: *std.c.pthread_cond_t, attr: ?*const anyopaque) c_int;
-
 /// `_WIN32`, which selects the C's SRW-lock threading defs and the Windows
 /// arms of thread affinity and priority.
 const is_windows = builtin.os.tag == .windows;
@@ -588,46 +583,35 @@ fn cpumaskNext(
 
 /// Ports `ggml_mutex_lock`, `ggml_mutex_lock` (ggml-cpu.c:444, 464 @b1b770d90).
 inline fn lock(threadpool: *Threadpool) void {
-    if (comptime is_windows) return win32.AcquireSRWLockExclusive(&threadpool.mutex);
-    _ = std.c.pthread_mutex_lock(&threadpool.mutex);
+    threadpool.mutex.lock();
 }
 
 /// Ports `ggml_mutex_unlock`, `ggml_mutex_unlock` (ggml-cpu.c:445, 465 @b1b770d90).
 inline fn unlock(threadpool: *Threadpool) void {
-    if (comptime is_windows) return win32.ReleaseSRWLockExclusive(&threadpool.mutex);
-    _ = std.c.pthread_mutex_unlock(&threadpool.mutex);
+    threadpool.mutex.unlock();
 }
 
 /// Ports `ggml_mutex_lock_shared`, `ggml_mutex_lock_shared` (ggml-cpu.c:446,
-/// 466 @b1b770d90). The same call as `lock` on pthreads; a reader's hold on
-/// the SRW lock on Windows, which is what the C's two waits take.
+/// 466 @b1b770d90). The same as `lock`, as on the C's pthread arm: the lock
+/// has no shared mode.
 inline fn lockShared(threadpool: *Threadpool) void {
-    if (comptime is_windows) return win32.AcquireSRWLockShared(&threadpool.mutex);
-    _ = std.c.pthread_mutex_lock(&threadpool.mutex);
+    threadpool.mutex.lock();
 }
 
 /// Ports `ggml_mutex_unlock_shared`, `ggml_mutex_unlock_shared`
 /// (ggml-cpu.c:447, 467 @b1b770d90).
 inline fn unlockShared(threadpool: *Threadpool) void {
-    if (comptime is_windows) return win32.ReleaseSRWLockShared(&threadpool.mutex);
-    _ = std.c.pthread_mutex_unlock(&threadpool.mutex);
+    threadpool.mutex.unlock();
 }
 
 /// Ports `ggml_cond_wait`, `ggml_cond_wait` (ggml-cpu.c:451, 481 @b1b770d90).
-/// On Windows the wait releases and retakes the lock in shared mode, matching
-/// `lockShared` around it.
 inline fn condWait(threadpool: *Threadpool) void {
-    if (comptime is_windows) {
-        _ = win32.SleepConditionVariableSRW(&threadpool.cond, &threadpool.mutex, win32.INFINITE, win32.CONDITION_VARIABLE_LOCKMODE_SHARED);
-        return;
-    }
-    _ = std.c.pthread_cond_wait(&threadpool.cond, &threadpool.mutex);
+    threadpool.cond.wait(&threadpool.mutex);
 }
 
 /// Ports `ggml_cond_broadcast`, `ggml_cond_broadcast` (ggml-cpu.c:452, 482 @b1b770d90).
 inline fn condBroadcast(threadpool: *Threadpool) void {
-    if (comptime is_windows) return win32.WakeAllConditionVariable(&threadpool.cond);
-    _ = std.c.pthread_cond_broadcast(&threadpool.cond);
+    threadpool.cond.broadcast();
 }
 
 /// Ports `ggml_threadpool_new_impl` (ggml-cpu.c:3323 @b1b770d90).
@@ -682,13 +666,8 @@ fn threadpoolNewImpl(
 
     // `ggml_mutex_init`, `ggml_cond_init`, `ggml_mutex_init`, `ggml_cond_init`
     // (ggml-cpu.c:442, 449, 462, 479 @b1b770d90): both arms.
-    if (comptime is_windows) {
-        win32.InitializeSRWLock(&threadpool.mutex);
-        win32.InitializeConditionVariable(&threadpool.cond);
-    } else {
-        _ = pthread_mutex_init(&threadpool.mutex, null);
-        _ = pthread_cond_init(&threadpool.cond, null);
-    }
+    threadpool.mutex = .{};
+    threadpool.cond = .{};
 
     // Spin up the workers and place them. The main thread is placed last, so
     // it lands on the higher-numbered cores.
@@ -744,12 +723,8 @@ pub export fn ggml_threadpool_free(threadpool_opt: ?*Threadpool) void {
     for (1..n) |j| workers[j].thrd.join();
 
     // `ggml_mutex_destroy`, `ggml_cond_destroy`, `ggml_mutex_destroy`,
-    // `ggml_cond_destroy` (ggml-cpu.c:443, 450, 463, 480 @b1b770d90): empty on
-    // Windows.
-    if (comptime !is_windows) {
-        _ = std.c.pthread_mutex_destroy(&threadpool.mutex);
-        _ = std.c.pthread_cond_destroy(&threadpool.cond);
-    }
+    // `ggml_cond_destroy` (ggml-cpu.c:443, 450, 463, 480 @b1b770d90): nothing
+    // to release.
 
     ggml_aligned_free(workers, @sizeOf(ComputeState) * n);
     ggml_aligned_free(threadpool, @sizeOf(Threadpool));

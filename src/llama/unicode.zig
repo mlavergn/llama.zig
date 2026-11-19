@@ -232,7 +232,7 @@ const wchar_bits = if (@import("builtin").os.tag == .windows) 16 else 32;
 /// function-local `static` is.
 var flags_table: [max_codepoints]CptFlags = undefined;
 var flags_ready: std.atomic.Value(bool) = .init(false);
-var flags_mutex: impl.CxxMutex = .{};
+var flags_mutex: impl.Mutex = .{};
 
 /// Ports `unicode_cpt_flags_array` (src/unicode.cpp:125 @b1b770d90): each
 /// range's flags, then the whitespace bit, then the case and NFD bits on

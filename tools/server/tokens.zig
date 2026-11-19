@@ -26,6 +26,7 @@
 //! three statics.
 
 const std = @import("std");
+const sync = @import("sync");
 const json = @import("json");
 const chat = @import("common_chat");
 const tools = @import("tools_common");
@@ -1045,14 +1046,14 @@ pub fn tokenizeInputPrompts(
 /// The function-local `static`s of `format_prompt_infill`: tokenized once,
 /// with the first call's vocabulary.
 const InfillStatics = struct {
-    mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
+    mutex: sync.Mutex = .{},
     k_fim_repo: ?[]Token = null,
     k_chunk_prefix_tokens: ?[]Token = null,
     k_fim_file: ?[]Token = null,
 
     fn get(self: *InfillStatics, slot: *?[]Token, vocab: ?*const c.llama_vocab, text: []const u8) Error![]const Token {
-        _ = std.c.pthread_mutex_lock(&self.mutex);
-        defer _ = std.c.pthread_mutex_unlock(&self.mutex);
+        self.mutex.lock();
+        defer self.mutex.unlock();
         if (slot.* == null) slot.* = try common.tokenize(std.heap.c_allocator, vocab, text, false, false);
         return slot.*.?;
     }

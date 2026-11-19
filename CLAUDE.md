@@ -31,6 +31,7 @@ Exactly four markdown files. Never add another.
 | `src/ggml/{cpu,metal,cuda,vulkan}/` | CPU backend and GPU host layers |
 | `src/llama/` | libllama. `api/` holds every `llama.h` function (unexported); `exports.zig` exports them; `harness_root.zig` re-exports without exports |
 | `src/mtmd/` | libmtmd; same wiring (`exports.zig`, `harness_root.zig`) |
+| `src/sync/` | The futex `Mutex` and `Condition` every module locks with; its own module (`build/llamacpp.zig`'s `syncModule`) |
 | `cli/` | `llama-cli`: `args.zig`, `fit.zig`, `session.zig`, `conversation.zig`, `common_chat/`, `json/`, `peg/` |
 | `tools/` | `llama-server` (`tools/server/`), the ten tools, `llama-tts`, `llama-mtmd-cli`, shared `tools/common/` |
 | `harness/` | Gate drivers and reference-side code |
@@ -64,6 +65,7 @@ Exactly four markdown files. Never add another.
 - **`zig translate-c` output is a draft to read, never to commit.**
 - **Metal kernels, CUDA kernels and Vulkan shaders are never ported**; they travel as embedded data.
 - **A newly ported file goes into `module.zig`.**
+- **Locks are `sync.Mutex` and `sync.Condition`** (`src/sync/`): futexes, no C library, no `std.Io`. Never `pthread_mutex_t`, `pthread_cond_t`, SRW locks or `std.Io.Mutex`. A module that imports `sync` and compiles beside libllama takes libllama's instance (`llamacpp.syncOf`); a gate script that declares modules by hand passes `--dep sync` and `-Msync=src/sync/module.zig`.
 
 ### Citations (`make port-links`)
 
@@ -177,7 +179,7 @@ Zig **0.17.0**, 0.16-style std (`std.process.Init`, explicit `std.Io`, `std.Io.W
 - Write kernels against `simd.F32`/`simd.F16` (`simd-mappings.h`), never hard-coded lane counts.
 - **Gate `src/ggml/cpu/` changes at `GATE_CPU` default, `apple_m3` (i8mm: two rows per call, different repack shapes), `generic` (Linux arm64 baseline), `apple_a7`, `apple_a12`.** `scripts/gate-cpu` checks both libraries were really built for that CPU. `generic` gives Linux's CPU, not its OS defaults.
 - x86: load vectors through a vector pointer, never an array `@bitCast`; run-time shift counts via `psrli`/`pslli`; v3 has F16C and BMI2 (port that arm); a harness without `ggml_cpu_init` reads an all-zero fp16 table. AVX-512 is the AVX2 code at twice the width (`repack/x86/wide.zig`); confirm 512-bit code by disassembly. AVX512-BF16/FP16 are a compile error until gated.
-- Windows: `std::mutex`, `std::random_device`, `wchar_t` and the C ctype table differ (`impl.CxxMutex`, 16-bit `wregex`, `[[:blank:]]` misses `\t`).
+- Windows: `std::random_device`, `wchar_t` and the C ctype table differ (the clock seed, 16-bit `wregex`, `[[:blank:]]` misses `\t`).
 
 ## libc++ reproduction
 

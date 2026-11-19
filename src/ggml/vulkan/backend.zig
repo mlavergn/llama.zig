@@ -22,6 +22,7 @@
 //! This build is static, as in `metal/backend.zig`.
 
 const std = @import("std");
+const sync = @import("sync");
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
 const m = @import("module.zig");
@@ -249,14 +250,14 @@ fn regGetDeviceCount(r: c.ggml_backend_reg_t) callconv(.c) usize {
 const Devices = struct {
     var list: std.ArrayList(c.ggml_backend_dev_t) = .empty;
     var initialized = false;
-    var mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER;
+    var mutex: sync.Mutex = .{};
 };
 
 /// Ports `ggml_backend_vk_reg_get_device` (ggml-vulkan.cpp:16696 @b1b770d90).
 fn regGetDevice(r: c.ggml_backend_reg_t, device: usize) callconv(.c) c.ggml_backend_dev_t {
     {
-        _ = std.c.pthread_mutex_lock(&Devices.mutex);
-        defer _ = std.c.pthread_mutex_unlock(&Devices.mutex);
+        Devices.mutex.lock();
+        defer Devices.mutex.unlock();
         if (!Devices.initialized) {
             const min_batch_size: c_int = if (std.c.getenv("GGML_OP_OFFLOAD_MIN_BATCH")) |e| atoi(e) else 32;
             const count: usize = @intCast(getDeviceCount());

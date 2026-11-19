@@ -11,18 +11,12 @@
 //! contract is three symbols, the callers are all already Zig, and it proves
 //! the C-ABI swap carries over to a `.cpp` file unchanged.
 //!
-//! # Why libc++'s primitive and not a Zig mutex
+//! # The mutex
 //!
 //! The C++ holds a namespace-scope `std::mutex` and calls `.lock()` and
-//! `.unlock()`. libc++'s `std::mutex` *is* a `pthread_mutex_t` initialised to
-//! `PTHREAD_MUTEX_INITIALIZER` on POSIX and an `SRWLOCK` on Windows, so
-//! `impl.CxxMutex`, which drives exactly those, is the closer translation
-//! rather than a substitution.
-//!
-//! It is also the only workable one: Zig 0.16's `std.Io.Mutex`
-//! takes an `Io` on every lock, and a function entered through a C ABI has
-//! none to thread through. `src/ggml/cpu/threading.zig` reaches the same
-//! conclusion for the threadpool's mutex and condition variable.
+//! `.unlock()`. Here it is `impl.Mutex`, the port's futex mutex: no C
+//! library, and no `std.Io`, which a function entered through a C ABI has
+//! none of.
 //!
 //! # One deliberate difference
 //!
@@ -49,9 +43,8 @@ const impl = @import("impl.zig");
 /// exported too, and `scripts/port-coverage` compares the whole symbol list.
 /// Nothing outside this file references it, in the C++ or here.
 ///
-/// `.{}` is a static initialisation with no runtime setup — the same as
 /// libc++'s `constexpr mutex()`.
-export var ggml_critical_section_mutex: impl.CxxMutex = .{};
+export var ggml_critical_section_mutex: impl.Mutex = .{};
 
 /// Ports `ggml_critical_section_start` (ggml-threading.cpp:6 @b1b770d90).
 ///

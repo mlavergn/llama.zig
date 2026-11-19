@@ -29,6 +29,7 @@
 //! `http.zig` serves none and neither does this.
 
 const std = @import("std");
+const sync = @import("sync");
 const builtin = @import("builtin");
 const tc = @import("tools_common");
 const json = @import("json");
@@ -571,7 +572,7 @@ const DownloadState = struct {
     cancelled: *std.atomic.Value(bool),
     // files download in parallel threads: throttle each file on its own, a shared
     // timer lets a small, fast file (e.g. a draft) starve the updates of the others
-    progress_mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
+    progress_mutex: sync.Mutex = .{},
     last_progress_time: std.StringHashMapUnmanaged(i64) = .empty, // keys are `gpa`'s
     is_ok: bool = false,
 
@@ -641,8 +642,8 @@ const DownloadState = struct {
         // throttle progress updates to avoid flooding logs; the first update of a file
         // always passes, it carries the file's total size
         {
-            _ = std.c.pthread_mutex_lock(&dl.progress_mutex);
-            defer _ = std.c.pthread_mutex_unlock(&dl.progress_mutex);
+            dl.progress_mutex.lock();
+            defer dl.progress_mutex.unlock();
             if (dl.last_progress_time.getPtr(p.url)) |t| {
                 if (now - t.* < 100) {
                     return;

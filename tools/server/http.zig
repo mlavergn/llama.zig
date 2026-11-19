@@ -64,6 +64,7 @@
 //! pre-routing lambda keeps a reference to `common_params`.
 
 const std = @import("std");
+const sync = @import("sync");
 const httplib = @import("httplib/module.zig");
 const tools_common = @import("tools_common");
 const json = @import("cli_fit").json;
@@ -1284,7 +1285,7 @@ pub const Context = struct {
         /// The `conn_impl` of `ws`: `ws_conn` over cpp-httplib's socket.
         const ConnImpl = struct {
             sock: *httplib.ws.WebSocket,
-            mutex_send: std.c.pthread_mutex_t = .{},
+            mutex_send: sync.Mutex = .{},
 
             fn selfOf(ctx: *anyopaque) *ConnImpl {
                 return @ptrCast(@alignCast(ctx));
@@ -1298,14 +1299,14 @@ pub const Context = struct {
             }
             fn send(ctx: *anyopaque, msg: []const u8) bool {
                 const c = selfOf(ctx);
-                _ = std.c.pthread_mutex_lock(&c.mutex_send);
-                defer _ = std.c.pthread_mutex_unlock(&c.mutex_send);
+                c.mutex_send.lock();
+                defer c.mutex_send.unlock();
                 return c.sock.send(msg);
             }
             fn sendBinary(ctx: *anyopaque, msg: []const u8) bool {
                 const c = selfOf(ctx);
-                _ = std.c.pthread_mutex_lock(&c.mutex_send);
-                defer _ = std.c.pthread_mutex_unlock(&c.mutex_send);
+                c.mutex_send.lock();
+                defer c.mutex_send.unlock();
                 return c.sock.sendBinary(msg);
             }
             fn isOpen(ctx: *anyopaque) bool {

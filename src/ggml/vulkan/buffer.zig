@@ -12,6 +12,7 @@
 //! C++'s lifetimes depend on take a reference.
 
 const std = @import("std");
+const sync = @import("sync");
 const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 const win32 = @import("../win32.zig");
@@ -104,15 +105,15 @@ extern fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
 /// process here where the C++ keeps one per device; its totals are per
 /// device in the C++, so they are keyed by device.
 const memory_logger = struct {
-    var mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER;
+    var mutex: sync.Mutex = .{};
     var allocations: std.AutoHashMapUnmanaged(vk.VkBuffer, usize) = .empty;
     var totals: std.AutoHashMapUnmanaged(*Device, [2]usize) = .empty;
 
     /// Ports `vk_memory_logger`'s `log_allocation` (ggml-vulkan-debug.cpp:67 @b1b770d90).
     fn logAllocation(buf: *Buffer, size: usize) void {
         if (!m.instance.loggers.memory_logger_enabled) return;
-        _ = std.c.pthread_mutex_lock(&mutex);
-        defer _ = std.c.pthread_mutex_unlock(&mutex);
+        mutex.lock();
+        defer mutex.unlock();
         const device = buf.memory_property_flags & vk.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT != 0;
         allocations.put(allocator, buf.buffer, size) catch oom();
         const t = totals.getOrPutValue(allocator, buf.device, .{ 0, 0 }) catch oom();
@@ -126,8 +127,8 @@ const memory_logger = struct {
     /// Ports `vk_memory_logger`'s `log_deallocation` (ggml-vulkan-debug.cpp:81 @b1b770d90).
     fn logDeallocation(buf: *Buffer) void {
         if (buf.size == 0 or !m.instance.loggers.memory_logger_enabled) return;
-        _ = std.c.pthread_mutex_lock(&mutex);
-        defer _ = std.c.pthread_mutex_unlock(&mutex);
+        mutex.lock();
+        defer mutex.unlock();
         const device = buf.memory_property_flags & vk.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT != 0;
         const kind: [*:0]const u8 = if (device) "device" else "host";
         if (allocations.fetchRemove(buf.buffer)) |kv| {
@@ -831,7 +832,7 @@ fn hostBufferTypeGetMaxSize(_: c.ggml_backend_buffer_type_t) callconv(.c) usize 
 }
 
 var host_buffer_type: c.struct_ggml_backend_buffer_type = undefined;
-var host_buffer_type_mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER;
+var host_buffer_type_mutex: sync.Mutex = .{};
 var host_buffer_type_ready = false;
 
 fn initHostBufferType() void {
@@ -854,12 +855,12 @@ fn initHostBufferType() void {
 /// Ports `ggml_backend_vk_host_buffer_type` (ggml-vulkan.cpp:13683 @b1b770d90):
 /// a function-local static, initialised on first call.
 pub fn hostBufferType() callconv(.c) c.ggml_backend_buffer_type_t {
-    _ = std.c.pthread_mutex_lock(&host_buffer_type_mutex);
+    host_buffer_type_mutex.lock();
     if (!host_buffer_type_ready) {
         initHostBufferType();
         host_buffer_type_ready = true;
     }
-    _ = std.c.pthread_mutex_unlock(&host_buffer_type_mutex);
+    host_buffer_type_mutex.unlock();
     // Make sure device 0 is initialized
     m.instance.instanceInitOrAbort();
     _ = m.device.getDevice(0);

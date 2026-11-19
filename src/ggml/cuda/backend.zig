@@ -23,6 +23,7 @@
 //! As in `metal/backend.zig`: this build is static.
 
 const std = @import("std");
+const sync = @import("sync");
 const config = @import("config");
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
@@ -351,7 +352,7 @@ const buffer_type_interface = c.struct_ggml_backend_buffer_type_i{
 };
 
 const BufferTypes = struct {
-    var mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER;
+    var mutex: sync.Mutex = .{};
     var types: [common.max_devices]c.struct_ggml_backend_buffer_type = undefined;
     var ctxs: [common.max_devices]BufferTypeCtx = undefined;
     var initialized = false;
@@ -359,8 +360,8 @@ const BufferTypes = struct {
 
 /// Ports `ggml_backend_cuda_buffer_type` (ggml-cuda.cu:1253 @b1b770d90).
 pub fn bufferType(device: c_int) callconv(.c) c.ggml_backend_buffer_type_t {
-    _ = std.c.pthread_mutex_lock(&BufferTypes.mutex);
-    defer _ = std.c.pthread_mutex_unlock(&BufferTypes.mutex);
+    BufferTypes.mutex.lock();
+    defer BufferTypes.mutex.unlock();
 
     if (device >= getDeviceCount()) return null;
 
@@ -1145,7 +1146,7 @@ const reg_interface = c.struct_ggml_backend_reg_i{
 };
 
 const Registry = struct {
-    var mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER;
+    var mutex: sync.Mutex = .{};
     var value: c.struct_ggml_backend_reg = undefined;
     var initialized = false;
     var ctx: RegCtx = .{};
@@ -1155,8 +1156,8 @@ const Registry = struct {
 
 /// Ports `ggml_backend_cuda_reg` (ggml-cuda.cu:6887 @b1b770d90).
 pub fn reg() callconv(.c) c.ggml_backend_reg_t {
-    _ = std.c.pthread_mutex_lock(&Registry.mutex);
-    defer _ = std.c.pthread_mutex_unlock(&Registry.mutex);
+    Registry.mutex.lock();
+    defer Registry.mutex.unlock();
     if (!Registry.initialized) {
         const min_batch_size: c_int = common.opOffloadMinBatch();
 

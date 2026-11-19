@@ -686,7 +686,7 @@ pub fn loadShaders(device: *Device, requested: ?*Pipeline) void {
 
     // The rest of the walk reads and writes shared device state, so hold
     // the lock until we're done deciding what to compile.
-    _ = std.c.pthread_mutex_lock(&device.compile_mutex);
+    device.compile_mutex.lock();
 
     if (device.coopmat2) {
         // spec constants and tile sizes for non-quant matmul/matmul_id
@@ -2547,7 +2547,7 @@ fn walkConv(w: *Walk, subgroup_min_size_16: bool, subgroup_size_16: u32, subgrou
 fn finish(w: *Walk) void {
     const device = w.device;
     // Drop compile_mutex so other threads can walk while we compile.
-    _ = std.c.pthread_mutex_unlock(&device.compile_mutex);
+    device.compile_mutex.unlock();
 
     if (w.claimed) |task| {
         m.pipeline.createPipelineFunc(device, task.pipeline, task.args);
@@ -2556,9 +2556,9 @@ fn finish(w: *Walk) void {
 
     // Another thread may be compiling the pipeline we need; block on it here.
     if (w.wait_pipeline) |p| {
-        _ = std.c.pthread_mutex_lock(&device.compile_mutex);
-        while (!p.compiled.load(.seq_cst)) _ = std.c.pthread_cond_wait(&device.compile_cv, &device.compile_mutex);
-        _ = std.c.pthread_mutex_unlock(&device.compile_mutex);
+        device.compile_mutex.lock();
+        while (!p.compiled.load(.seq_cst)) device.compile_cv.wait(&device.compile_mutex);
+        device.compile_mutex.unlock();
     }
 }
 

@@ -33,6 +33,7 @@
 //! none of the three there; `supported` is that condition.
 
 const std = @import("std");
+const sync = @import("sync");
 const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 const m = @import("module.zig");
@@ -127,8 +128,8 @@ const CommCtx = struct {
     imported: std.atomic.Value(u64) = .init(0),
     sleeping: std.atomic.Value(bool) = .init(false),
     stop: std.atomic.Value(bool) = .init(false),
-    mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
-    cv: std.c.pthread_cond_t = std.c.PTHREAD_COND_INITIALIZER,
+    mutex: sync.Mutex = .{},
+    cv: sync.Condition = .{},
 };
 
 /// Ports `ggml_vk_comm_free_buffers` (ggml-vulkan-comm.cpp:80 @b1b770d90).
@@ -207,9 +208,9 @@ fn submit(ctx: *BackendCtx, cx: *Context, signal: vk.VkSemaphore, value: u64) vo
 fn notifySubmitted(comm: *CommCtx, round: u64) void {
     comm.submitted.store(round, .seq_cst);
     if (comm.sleeping.load(.seq_cst)) {
-        _ = std.c.pthread_mutex_lock(&comm.mutex);
-        defer _ = std.c.pthread_mutex_unlock(&comm.mutex);
-        _ = std.c.pthread_cond_signal(&comm.cv);
+        comm.mutex.lock();
+        defer comm.mutex.unlock();
+        comm.cv.signal();
     }
 }
 
@@ -226,11 +227,11 @@ fn waitSubmitted(comm: *CommCtx, r: u64) bool {
         }
         comm.sleeping.store(true, .seq_cst);
         if (comm.submitted.load(.seq_cst) < r) {
-            _ = std.c.pthread_mutex_lock(&comm.mutex);
+            comm.mutex.lock();
             while (!(comm.submitted.load(.seq_cst) >= r or comm.stop.load(.seq_cst))) {
-                _ = std.c.pthread_cond_wait(&comm.cv, &comm.mutex);
+                comm.cv.wait(&comm.mutex);
             }
-            _ = std.c.pthread_mutex_unlock(&comm.mutex);
+            comm.mutex.unlock();
         }
         comm.sleeping.store(false, .seq_cst);
     }
@@ -529,11 +530,11 @@ pub fn commFree(comm_ctx: ?*anyopaque) callconv(.c) void {
     for (comm.devs) |dv| c.ggml_backend_synchronize(dv.backend);
     if (comm.thread) |t| {
         {
-            _ = std.c.pthread_mutex_lock(&comm.mutex);
-            defer _ = std.c.pthread_mutex_unlock(&comm.mutex);
+            comm.mutex.lock();
+            defer comm.mutex.unlock();
             comm.stop.store(true, .seq_cst);
         }
-        _ = std.c.pthread_cond_broadcast(&comm.cv);
+        comm.cv.broadcast();
         t.join();
         comm.thread = null;
     }

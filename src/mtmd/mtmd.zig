@@ -865,7 +865,7 @@ pub const Context = struct {
     backends: ?*clip.Backends = null, // shared by the subcontexts
 
     // held by every public function that runs a graph, the internals never lock
-    compute_mutex: llama_impl.CxxMutex = .{},
+    compute_mutex: llama_impl.Mutex = .{},
 
     ctx_v: ?*clip.Ctx = null, // vision
     ctx_a: ?*clip.Ctx = null, // audio

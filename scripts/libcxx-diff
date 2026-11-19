@@ -26,7 +26,7 @@ zig c++ "${GATE_CC[@]}" -std=c++17 -O2 \
     || { echo "FAIL: cannot compile the reference" >&2; head -10 "$tmp/err" >&2; exit 1; }
 
 zig build-exe "${GATE_EXE[@]}" -femit-bin="$tmp/libcxx_diff$GATE_SUFFIX" -Ofast -lc \
-    --dep libcxx -Mroot=harness/libcxx_diff.zig -Mlibcxx=src/llama/libcxx.zig \
+    --dep libcxx -Mroot=harness/libcxx_diff.zig --dep sync -Mlibcxx=src/llama/libcxx.zig -Msync=src/sync/module.zig \
     "$tmp/ref.o" -lc++ 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }
 

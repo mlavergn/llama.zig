@@ -951,7 +951,7 @@ const ExtraBuffer = struct {
 /// `std.once`.
 var buft_storage: c.struct_ggml_backend_buffer_type = undefined;
 var buft_ready = std.atomic.Value(bool).init(false);
-var buft_mutex: impl.CxxMutex = .{};
+var buft_mutex: impl.Mutex = .{};
 
 fn bufferType() c.ggml_backend_buffer_type_t {
     if (!buft_ready.load(.acquire)) {

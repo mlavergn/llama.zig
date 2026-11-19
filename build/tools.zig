@@ -263,6 +263,7 @@ pub fn add(b: *std.Build, opts: Options) !void {
         mod.addImport("tools_h", tools_h_module);
         mod.addImport("cli_fit", fit_module);
         mod.addImport("llama", opts.reference.llama.root_module);
+        mod.addImport("sync", llamacpp.syncOf(opts.reference.llama.root_module));
         mod.addImport("mtmd", mtmd_module);
         mod.addImport("ui_assets", opts.ui.port_module);
         mod.addImport("json", json_module);

@@ -403,7 +403,7 @@ const Registry = struct {
 /// call after the first is lock-free.
 var registry: Registry = .{};
 var registry_ready = std.atomic.Value(bool).init(false);
-var registry_mutex: impl.CxxMutex = .{};
+var registry_mutex: impl.Mutex = .{};
 
 /// Ports `get_reg` (src/ggml-backend-reg.cpp:292 @b1b770d90).
 ///

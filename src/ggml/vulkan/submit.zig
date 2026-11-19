@@ -289,11 +289,11 @@ pub fn queueSubmit(h: *m.device.QueueHandle, submits: []const vk.VkSubmitInfo, f
 /// `error.VulkanError`, with `common.last_error` set.
 pub fn queueSubmitChecked(h: *m.device.QueueHandle, submits: []const vk.VkSubmitInfo, fence: vk.VkFence) common.VkError!void {
     // Workaround for NVIDIA driver bug
-    if (h.device_submit_mutex) |dm| _ = std.c.pthread_mutex_lock(dm);
+    if (h.device_submit_mutex) |dm| dm.lock();
     h.lock();
     const result = d.vkQueueSubmit.?(h.queue, @intCast(submits.len), submits.ptr, fence);
     h.unlock();
-    if (h.device_submit_mutex) |dm| _ = std.c.pthread_mutex_unlock(dm);
+    if (h.device_submit_mutex) |dm| dm.unlock();
     if (result == vk.VK_ERROR_DEVICE_LOST) printDeviceLostInfo(h.device);
     return common.check(result, "vk::Queue::submit");
 }

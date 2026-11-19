@@ -89,7 +89,7 @@ zig translate-c "${GATE_TC[@]}" -I llama.cpp/include -I llama.cpp/ggml/include \
 zig build-exe "${GATE_EXE[@]}" --gc-sections -femit-bin="$tmp/schema_diff$GATE_SUFFIX" -O"${SCHEMA_DIFF_O:-ReleaseSafe}" -lc \
     --dep json -Mroot=harness/schema_diff.zig \
     --dep llama -Mjson=cli/json/module.zig \
-    --dep llama_c -Mllama=src/llama/harness_root.zig -Mllama_c="$tmp/llama_c.zig" \
+    --dep llama_c --dep sync -Mllama=src/llama/harness_root.zig -Msync=src/sync/module.zig -Mllama_c="$tmp/llama_c.zig" \
     "${OBJS[@]}" ${COMMON_REST[@]+"${COMMON_REST[@]}"} "$GATE_LLAMA_REF" "$GATE_GGML" -lc++ \
     ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }

@@ -120,6 +120,7 @@ pub fn add(b: *std.Build, opts: Options) void {
     http_module.addImport("tools_common", common_module);
     http_module.addImport("cli_fit", fit_module);
     http_module.addImport("llama", opts.reference.llama.root_module);
+    http_module.addImport("sync", llamacpp.syncOf(opts.reference.llama.root_module));
     http_module.addImport("ui_assets", opts.ui.port_module);
 
     const port_mod = b.createModule(.{ .root_source_file = b.path("harness/http_diff.zig"), .target = opts.target, .optimize = safe, .link_libc = true, .link_libcpp = true });

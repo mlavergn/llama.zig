@@ -39,7 +39,7 @@ zig translate-c "${GATE_TC[@]}" -I llama.cpp/include -I llama.cpp/ggml/include \
 
 zig build-exe "${GATE_EXE[@]}" -femit-bin="$tmp/regex_diff$GATE_SUFFIX" -Ofast -lc \
     --dep regex -Mroot=harness/regex_diff.zig \
-    --dep llama_c -Mregex=src/llama/regex.zig -Mllama_c="$tmp/llama_c.zig" \
+    --dep llama_c --dep sync -Mregex=src/llama/regex.zig -Msync=src/sync/module.zig -Mllama_c="$tmp/llama_c.zig" \
     "$tmp/ref.o" "$GATE_GGML" -lc++ \
     ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }

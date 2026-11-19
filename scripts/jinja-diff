@@ -79,7 +79,7 @@ zig build-exe "${GATE_EXE[@]}" -femit-bin="$tmp/jinja_diff$GATE_SUFFIX" "${JINJA
     --dep json --dep llama -Mpeg=cli/peg/module.zig \
     --dep llama -Mjson=cli/json/module.zig \
     -Mzigjinja=../zigjinja/src/root.zig \
-    --dep llama_c -Mllama=src/llama/harness_root.zig -Mllama_c="$tmp/llama_h.zig" \
+    --dep llama_c --dep sync -Mllama=src/llama/harness_root.zig -Msync=src/sync/module.zig -Mllama_c="$tmp/llama_h.zig" \
     -Minputs="$tmp/inputs/inputs.zig" \
     "${OBJS[@]}" "$GATE_LLAMA_REF" "$GATE_GGML" -lc++ \
     ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} 2>"$tmp/berr" \

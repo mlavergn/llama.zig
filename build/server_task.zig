@@ -103,6 +103,7 @@ pub fn modules(b: *std.Build, opts: Options, optimize: std.builtin.OptimizeMode)
     data.addImport("tools_h", tools_h_module);
     data.addImport("cli_fit", fit_module);
     data.addImport("llama", opts.reference.llama.root_module);
+    data.addImport("sync", llamacpp.syncOf(opts.reference.llama.root_module));
     data.addImport("json", json_module);
     data.addImport("common_chat", chat_module);
     data.addImport("peg", peg_module);

@@ -36,6 +36,7 @@
 //! are `gpa`'s; an event lives as long as it takes to send it.
 
 const std = @import("std");
+const sync = @import("sync");
 const json = @import("json");
 const chat = @import("common_chat");
 const tc = @import("tools_common");
@@ -267,7 +268,7 @@ const Conversation = struct {
     resampler: ?*c.mtmd_helper_resampler = null, // input_rate -> model rate
 
     // the item or response the results belong to, shared with the result loop
-    mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
+    mutex: sync.Mutex = .{},
     last_item_id: []const u8 = "",
     transcribe_item_id: []const u8 = "", // transcription: the item being transcribed
     transcript: std.ArrayList(u8) = .empty,
@@ -285,11 +286,11 @@ const Conversation = struct {
     closed: std.atomic.Value(bool) = .init(false),
 
     fn lock(self: *Conversation) void {
-        _ = std.c.pthread_mutex_lock(&self.mutex);
+        self.mutex.lock();
     }
 
     fn unlock(self: *Conversation) void {
-        _ = std.c.pthread_mutex_unlock(&self.mutex);
+        self.mutex.unlock();
     }
 
     fn a(self: *Conversation) Allocator {

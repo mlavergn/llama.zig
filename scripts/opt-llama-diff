@@ -52,7 +52,7 @@ zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
 # float arithmetic is ggml's, in libggml.a, on both sides.
 zig build-exe -mcpu baseline -femit-bin="$tmp/opt_llama_diff" -OReleaseSafe -lc \
     --dep harness_root -Mroot=harness/opt_llama_diff.zig \
-    --dep llama_c -Mharness_root=src/llama/harness_root.zig -Mllama_c="$tmp/llama_c.zig" \
+    --dep llama_c --dep sync -Mharness_root=src/llama/harness_root.zig -Msync=src/sync/module.zig -Mllama_c="$tmp/llama_c.zig" \
     zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
     -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
     -F "$SDK/System/Library/Frameworks" 2>"$tmp/berr" \

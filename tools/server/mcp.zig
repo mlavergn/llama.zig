@@ -29,6 +29,7 @@
 //! command is spawned as given, through `PATH`.
 
 const std = @import("std");
+const sync = @import("sync");
 const builtin = @import("builtin");
 const json = @import("json");
 const tc = @import("tools_common");
@@ -78,13 +79,13 @@ fn z(s: []const u8) [*:0]const u8 {
 
 /// `std::mutex`.
 pub const Mutex = struct {
-    m: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
+    m: sync.Mutex = .{},
 
     pub fn lock(self: *Mutex) void {
-        _ = std.c.pthread_mutex_lock(&self.m);
+        self.m.lock();
     }
     pub fn unlock(self: *Mutex) void {
-        _ = std.c.pthread_mutex_unlock(&self.m);
+        self.m.unlock();
     }
 };
 

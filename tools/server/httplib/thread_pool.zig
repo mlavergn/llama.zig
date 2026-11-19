@@ -8,17 +8,21 @@
 //! 0.66.0, vendored at v1.0.0, `b1b770d90`). Each declaration names what it
 //! ports and the line it began at.
 //!
-//! # pthreads, as the C's are
+//! # Locks
 //!
-//! The mutex and condition variable are pthreads', as in all
-//! ported threading code: `std::mutex` and `std::condition_variable` are
-//! those on every POSIX libc++, and Zig's own take an `Io` this layer has
-//! none of. A dynamic worker's idle wait is `pthread_cond_timedwait`
-//! against the realtime clock, which is what libc++'s `wait_for` reaches on
-//! Darwin and Linux alike.
+//! The mutex and condition variable are the port's futex ones
+//! (`src/sync/`), as in all ported threading code. A dynamic worker's idle
+//! wait runs against the steady clock, one deadline for the whole wait.
 
 const std = @import("std");
 const detail = @import("detail.zig");
+const socket = @import("socket.zig");
+const sync = @import("sync");
+
+/// The steady clock, in nanoseconds.
+fn monotonicNs() u64 {
+    return @as(u64, @intCast(socket.steadyNowUs())) * std.time.ns_per_us;
+}
 
 extern "c" fn pthread_equal(t1: std.c.pthread_t, t2: std.c.pthread_t) c_int;
 
@@ -80,11 +84,11 @@ pub const ThreadPool = struct {
     threads: std.ArrayList(Worker) = .empty,
     dynamic_threads: std.ArrayList(Worker) = .empty,
     finished_threads: std.ArrayList(Worker) = .empty,
-    cond: std.c.pthread_cond_t = .{},
-    mutex: std.c.pthread_mutex_t = .{},
+    cond: sync.Condition = .{},
+    mutex: sync.Mutex = .{},
     /// Held by a dynamic worker from before its spawn until it has
     /// recorded its own handle, so `move_to_finished` always finds it.
-    started: std.c.pthread_mutex_t = .{},
+    started: sync.Mutex = .{},
 
     /// Ports `ThreadPool` (httplib.cpp:7655 @b1b770d90), the constructor:
     /// starts the `n` base threads. The C throws when `max_n` is below `n`;
@@ -109,10 +113,10 @@ pub const ThreadPool = struct {
         try self.threads.ensureTotalCapacity(allocator, n);
         for (0..n) |_| {
             const t = std.Thread.spawn(.{}, worker, .{ self, false }) catch |e| {
-                _ = std.c.pthread_mutex_lock(&self.mutex);
+                self.mutex.lock();
                 self.shutdown_ = true;
-                _ = std.c.pthread_mutex_unlock(&self.mutex);
-                _ = std.c.pthread_cond_broadcast(&self.cond);
+                self.mutex.unlock();
+                self.cond.broadcast();
                 for (self.threads.items) |w| w.thread.join();
                 return e;
             };
@@ -161,45 +165,45 @@ pub const ThreadPool = struct {
     /// Return: false once shut down.
     pub fn enqueue(self: *ThreadPool, fn_: Task) bool {
         {
-            _ = std.c.pthread_mutex_lock(&self.mutex);
-            defer _ = std.c.pthread_mutex_unlock(&self.mutex);
+            self.mutex.lock();
+            defer self.mutex.unlock();
             if (self.shutdown_) return false;
             if (self.max_queued_requests > 0 and self.jobs.items.len - self.jobs_head >= self.max_queued_requests) return false;
             self.jobs.append(self.allocator, fn_) catch return false;
             if (self.jobs.items.len - self.jobs_head > self.idle_thread_count and self.threads.items.len + self.dynamic_threads.items.len < self.max_thread_count) {
                 self.cleanupFinishedThreads();
                 self.dynamic_threads.ensureUnusedCapacity(self.allocator, 1) catch return true;
-                _ = std.c.pthread_mutex_lock(&self.started);
+                self.started.lock();
                 if (std.Thread.spawn(.{}, worker, .{ self, true })) |t| {
                     self.dynamic_threads.appendAssumeCapacity(.{ .thread = t, .id = t.getHandle() });
                 } else |_| {}
-                _ = std.c.pthread_mutex_unlock(&self.started);
+                self.started.unlock();
             }
         }
-        _ = std.c.pthread_cond_signal(&self.cond);
+        self.cond.signal();
         return true;
     }
 
     /// Ports `shutdown` (httplib.cpp:7723 @b1b770d90), a member of
     /// `ThreadPool`: lets the queue drain, then joins every thread.
     pub fn shutdown(self: *ThreadPool) void {
-        _ = std.c.pthread_mutex_lock(&self.mutex);
+        self.mutex.lock();
         self.shutdown_ = true;
-        _ = std.c.pthread_mutex_unlock(&self.mutex);
-        _ = std.c.pthread_cond_broadcast(&self.cond);
+        self.mutex.unlock();
+        self.cond.broadcast();
         for (self.threads.items) |w| w.thread.join();
         self.threads.clearRetainingCapacity();
 
-        _ = std.c.pthread_mutex_lock(&self.mutex);
+        self.mutex.lock();
         var remaining = self.dynamic_threads;
         self.dynamic_threads = .empty;
-        _ = std.c.pthread_mutex_unlock(&self.mutex);
+        self.mutex.unlock();
         for (remaining.items) |w| w.thread.join();
         remaining.deinit(self.allocator);
 
-        _ = std.c.pthread_mutex_lock(&self.mutex);
+        self.mutex.lock();
         self.cleanupFinishedThreads();
-        _ = std.c.pthread_mutex_unlock(&self.mutex);
+        self.mutex.unlock();
     }
 
     /// Ports `move_to_finished` (httplib.cpp:7750 @b1b770d90), a member of
@@ -247,24 +251,23 @@ pub const ThreadPool = struct {
     fn worker(self: *ThreadPool, is_dynamic: bool) void {
         if (is_dynamic) {
             // wait for `enqueue` to have recorded this thread
-            _ = std.c.pthread_mutex_lock(&self.started);
-            _ = std.c.pthread_mutex_unlock(&self.started);
+            self.started.lock();
+            self.started.unlock();
         }
         while (true) {
             var fn_: Task = undefined;
             {
-                _ = std.c.pthread_mutex_lock(&self.mutex);
-                defer _ = std.c.pthread_mutex_unlock(&self.mutex);
+                self.mutex.lock();
+                defer self.mutex.unlock();
                 self.idle_thread_count += 1;
                 if (is_dynamic) {
-                    var deadline: std.c.timespec = undefined;
-                    _ = std.c.clock_gettime(std.c.CLOCK.REALTIME, &deadline);
-                    deadline.sec += @intCast(self.idle_timeout_sec);
+                    const deadline = monotonicNs() + @as(u64, @intCast(self.idle_timeout_sec)) * std.time.ns_per_s;
                     var has_work = self.hasJobs() or self.shutdown_;
                     while (!has_work) {
-                        const rc = std.c.pthread_cond_timedwait(&self.cond, &self.mutex, &deadline);
+                        const now = monotonicNs();
+                        const woken = now < deadline and self.cond.timedWait(&self.mutex, deadline - now);
                         has_work = self.hasJobs() or self.shutdown_;
-                        if (rc == .TIMEDOUT) break;
+                        if (!woken) break;
                     }
                     if (!has_work) {
                         self.idle_thread_count -= 1;
@@ -272,7 +275,7 @@ pub const ThreadPool = struct {
                         break;
                     }
                 } else {
-                    while (!(self.hasJobs() or self.shutdown_)) _ = std.c.pthread_cond_wait(&self.cond, &self.mutex);
+                    while (!(self.hasJobs() or self.shutdown_)) self.cond.wait(&self.mutex);
                 }
                 self.idle_thread_count -= 1;
                 if (self.shutdown_ and !self.hasJobs()) break;

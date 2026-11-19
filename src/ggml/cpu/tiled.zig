@@ -600,7 +600,7 @@ fn unpackSrc1Q8K(rows: [*]const [*]const Q8K, n_rows: c_int, tile: *TileSrc1, kb
 /// The C's `std::call_once` statics, behind one mutex.
 const EnvFlags = struct {
     ready: std.atomic.Value(bool) = .init(false),
-    mutex: impl.CxxMutex = .{},
+    mutex: impl.Mutex = .{},
     enabled: bool = true,
     forced: bool = false,
 

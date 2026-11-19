@@ -104,7 +104,7 @@ zig test "${GATE_EXE[@]}" ${WIN_X86:+--test-no-exec} -lc \
     --dep json --dep peg --dep llama --dep zigjinja -Mroot=cli/common_chat/module.zig \
     --dep json --dep llama -Mpeg=cli/peg/module.zig \
     --dep llama -Mjson=cli/json/module.zig -Mzigjinja=../zigjinja/src/root.zig \
-    --dep llama_c -Mllama=src/llama/harness_root.zig -Mllama_c="$tmp/llama_c.zig" \
+    --dep llama_c --dep sync -Mllama=src/llama/harness_root.zig -Msync=src/sync/module.zig -Mllama_c="$tmp/llama_c.zig" \
     "$GATE_GGML" -lc++ ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} >"$tmp/zt" 2>&1 \
     || { echo "FAIL: the unit tests of cli/peg and cli/common_chat" >&2; tail -30 "$tmp/zt" >&2; exit 1; }
 
@@ -113,7 +113,7 @@ zig build-exe "${GATE_EXE[@]}" --gc-sections -femit-bin="$tmp/peg_diff$GATE_SUFF
     --dep json --dep peg --dep llama --dep zigjinja -Mcommon_chat=cli/common_chat/module.zig \
     --dep json --dep llama -Mpeg=cli/peg/module.zig \
     --dep llama -Mjson=cli/json/module.zig -Mzigjinja=../zigjinja/src/root.zig \
-    --dep llama_c -Mllama=src/llama/harness_root.zig -Mllama_c="$tmp/llama_c.zig" \
+    --dep llama_c --dep sync -Mllama=src/llama/harness_root.zig -Msync=src/sync/module.zig -Mllama_c="$tmp/llama_c.zig" \
     "$tmp/peg_ref.o" "${ROBJS[@]}" "$tmp/r-main.o" "$tmp/r-chat.o" "${LIBS[@]}" -lc++ \
     ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }

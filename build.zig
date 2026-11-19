@@ -705,6 +705,16 @@ pub fn build(b: *std.Build) !void {
     const tests_step = b.step("test", "Run unit tests");
     tests_step.dependOn(&tests_run.step);
 
+    // `src/sync/`, the futex mutex and condition variable every module locks
+    // with, is a module of its own, so its tests are a compile step too.
+    const sync_tests = b.addTest(.{
+        .root_module = llamacpp.syncModule(b, cfg.target, cfg.optimize),
+        .filters = test_filters,
+    });
+    const sync_tests_run = b.addRunArtifact(sync_tests);
+    sync_tests_run.has_side_effects = true;
+    tests_step.dependOn(&sync_tests_run.step);
+
     // The CLI is its own module, so its tests need their own compile step.
     const cli_tests_module = b.createModule(.{
         .root_source_file = b.path("cli/module.zig"),

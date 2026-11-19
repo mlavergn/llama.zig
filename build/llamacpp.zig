@@ -134,6 +134,48 @@ pub fn writeAppleLibcFile(b: *std.Build, sdk: []const u8) std.Build.LazyPath {
 /// - `opts`: target and optimize mode.
 ///
 /// Return: the translated module, owned by the build graph.
+/// One `sync` module per target and optimize mode, shared by every module of
+/// a build that imports it.
+var sync_modules: std.ArrayList(struct {
+    target: std.Build.ResolvedTarget,
+    optimize: std.lang.Optimize,
+    module: *std.Build.Module,
+}) = .empty;
+
+/// The port's futex mutex and condition variable (`src/sync/`), as a module.
+///
+/// One instance per target and optimize mode: ggml, libllama, libmtmd and the
+/// tools all import it, and one compilation that reaches the same file through
+/// two module instances is an error.
+///
+/// Parameters:
+/// - `b`: the build graph.
+/// - `target`, `optimize`: the importing module's.
+///
+/// Return: the module, owned by the build graph.
+pub fn syncModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) *std.Build.Module {
+    for (sync_modules.items) |e| {
+        if (e.optimize == optimize and e.target.query.eql(target.query)) return e.module;
+    }
+    const module = b.createModule(.{
+        .root_source_file = b.path("src/sync/module.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    sync_modules.append(b.allocator, .{ .target = target, .optimize = optimize, .module = module }) catch @panic("OOM");
+    return module;
+}
+
+/// The `sync` module `module` imports, for a module compiled beside it.
+///
+/// Parameters:
+/// - `module`: a module wired with `syncModule`, such as libllama's.
+///
+/// Return: the same instance, so one compilation reaches `src/sync/` once.
+pub fn syncOf(module: *std.Build.Module) *std.Build.Module {
+    return module.import_table.get("sync").?;
+}
+
 fn ggmlCModule(b: *std.Build, opts: Options) *std.Build.Module {
     const translate = b.addTranslateC(.{
         .root_source_file = b.path("src/ggml/c_import.h"),
@@ -424,6 +466,7 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     }
     mod.addOptions("config", options);
     mod.addImport("ggml_c", ggmlCModule(b, opts));
+    mod.addImport("sync", syncModule(b, opts.target, opts.optimize));
     addVarargsShim(b, mod, opts);
 
     mod.addIncludePath(b.path(root ++ "/ggml/include"));
@@ -1363,6 +1406,7 @@ pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
     options.addOption(bool, "cuda_port", false);
     mod.addOptions("config", options);
     mod.addImport("ggml_c", ggmlCModule(b, opts));
+    mod.addImport("sync", syncModule(b, opts.target, opts.optimize));
     addVarargsShim(b, mod, opts);
 
     mod.addIncludePath(b.path(root ++ "/ggml/include"));
@@ -1441,6 +1485,7 @@ fn portedTestModuleInner(
     options.addOption(bool, "cuda_port", false);
     mod.addOptions("config", options);
     mod.addImport("ggml_c", ggmlCModule(b, opts));
+    mod.addImport("sync", syncModule(b, opts.target, opts.optimize));
     addVarargsShim(b, mod, opts);
 
     mod.addIncludePath(b.path(root ++ "/ggml/include"));
@@ -1493,6 +1538,7 @@ fn addLlama(b: *std.Build, opts: Options, ggml: *std.Build.Step.Compile) *std.Bu
         .link_libc = true,
     });
     mod.addImport("llama_c", llamaCModule(b, opts));
+    mod.addImport("sync", syncModule(b, opts.target, opts.optimize));
     addSdkPaths(b, mod, opts.sdk);
     mod.linkLibrary(ggml);
     // Where `libggml` links the Vulkan loader -- its unit tests do -- Zig

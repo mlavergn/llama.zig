@@ -32,36 +32,10 @@ const std = @import("std");
 /// `@cImport`).
 pub const c = @import("ggml_c");
 
-/// `std::mutex`, as the libc++ this build links lays it out and drives it.
-///
-/// Not a port of anything. The C++ translation units hold `std::mutex`
-/// globals and statics; libc++ builds one on a `pthread_mutex_t` behind
-/// `PTHREAD_MUTEX_INITIALIZER`, or on Windows on an `SRWLOCK` behind
-/// `AcquireSRWLockExclusive` (`__thread/support/windows.h`,
-/// `src/support/win32/thread_win32.cpp`). `.{}` is a static initialisation on
-/// both, with no runtime setup -- the same as libc++'s `constexpr mutex()`.
-/// The pthread arm is pthreads, not `std.Io`, as everywhere here; the threadpool's own lock is
-/// `ggml_mutex_t`, in `cpu/defs.zig`, and is not this.
-pub const CxxMutex = extern struct {
-    raw: Raw = .{},
-
-    const is_windows = @import("builtin").os.tag == .windows;
-    const win32 = @import("win32.zig");
-    const Raw = if (is_windows) win32.SRWLOCK else std.c.pthread_mutex_t;
-
-    /// `std::mutex::lock`. Its only documented failures are bugs (deadlock,
-    /// an invalid mutex), which the C++ would turn into `terminate`.
-    pub fn lock(self: *CxxMutex) void {
-        if (comptime is_windows) return win32.AcquireSRWLockExclusive(&self.raw);
-        _ = std.c.pthread_mutex_lock(&self.raw);
-    }
-
-    /// `std::mutex::unlock`.
-    pub fn unlock(self: *CxxMutex) void {
-        if (comptime is_windows) return win32.ReleaseSRWLockExclusive(&self.raw);
-        _ = std.c.pthread_mutex_unlock(&self.raw);
-    }
-};
+/// The port's mutex, under every `std::mutex` and `ggml_mutex_t` it ports: a
+/// futex, with no C library under it (`src/sync/`). `.{}` needs no setup, as
+/// libc++'s `constexpr mutex()` does not.
+pub const Mutex = @import("sync").Mutex;
 
 /// Mirrors `GGML_USE_ACCELERATE`, which `build/llamacpp.zig` defines for every
 /// Darwin target and no other. Ported code that takes the C's Accelerate arm

@@ -32,6 +32,7 @@
 //! the condition variable is a pthread one, as `queue.zig`'s are.
 
 const std = @import("std");
+const sync = @import("sync");
 const builtin = @import("builtin");
 const tc = @import("tools_common");
 const json = @import("json");
@@ -100,30 +101,25 @@ fn timeMs() i64 {
 
 /// A `std::condition_variable` paired with `server_models::mutex`.
 const Mutex = struct {
-    m: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
+    m: sync.Mutex = .{},
     pub fn lock(self: *Mutex) void {
-        _ = std.c.pthread_mutex_lock(&self.m);
+        self.m.lock();
     }
     pub fn unlock(self: *Mutex) void {
-        _ = std.c.pthread_mutex_unlock(&self.m);
+        self.m.unlock();
     }
 };
 
 const Cond = struct {
-    c: std.c.pthread_cond_t = std.c.PTHREAD_COND_INITIALIZER,
+    c: sync.Condition = .{},
     pub fn wait(self: *Cond, m: *Mutex) void {
-        _ = std.c.pthread_cond_wait(&self.c, &m.m);
+        self.c.wait(&m.m);
     }
     fn waitForMs(self: *Cond, m: *Mutex, ms: u64) void {
-        var ts: std.c.timespec = undefined;
-        _ = std.c.clock_gettime(std.c.CLOCK.REALTIME, &ts);
-        const ns: u64 = @as(u64, @intCast(ts.nsec)) + (ms % 1000) * std.time.ns_per_ms;
-        ts.sec += @intCast(ms / 1000 + ns / std.time.ns_per_s);
-        ts.nsec = @intCast(ns % std.time.ns_per_s);
-        _ = std.c.pthread_cond_timedwait(&self.c, &m.m, &ts);
+        _ = self.c.timedWait(&m.m, ms * std.time.ns_per_ms);
     }
     pub fn notifyAll(self: *Cond) void {
-        _ = std.c.pthread_cond_broadcast(&self.c);
+        self.c.broadcast();
     }
 };
 

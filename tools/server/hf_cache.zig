@@ -28,6 +28,7 @@
 //! `HF_ENDPOINT` pointing at a plain-HTTP mirror works on both sides.
 
 const std = @import("std");
+const sync = @import("sync");
 const builtin = @import("builtin");
 const tc = @import("tools_common");
 const json = @import("json");
@@ -324,15 +325,15 @@ fn absolute(a: Allocator, p: []const u8) Allocator.Error![]u8 {
 
 /// The cache directory, decided on the first call.
 var cache_dir_value: ?[]const u8 = null;
-var cache_dir_mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER;
+var cache_dir_mutex: sync.Mutex = .{};
 
 /// Ports `get_cache_directory` (hf-cache.cpp:34 @b1b770d90): the first of
 /// `LLAMA_CACHE`, `HF_HUB_CACHE`, `HUGGINGFACE_HUB_CACHE`, `$HF_HOME/hub`,
 /// `$XDG_CACHE_HOME/huggingface/hub`, `$HOME/.cache/huggingface/hub` and
 /// the password database's home, decided on the first call.
 fn getCacheDirectory() Error![]const u8 {
-    _ = std.c.pthread_mutex_lock(&cache_dir_mutex);
-    defer _ = std.c.pthread_mutex_unlock(&cache_dir_mutex);
+    cache_dir_mutex.lock();
+    defer cache_dir_mutex.unlock();
     if (cache_dir_value) |v| return v;
     const a = std.heap.c_allocator;
     const Entry = struct { var_: [*:0]const u8, path: []const u8 };

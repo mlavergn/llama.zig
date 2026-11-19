@@ -59,7 +59,7 @@ var extra_bufts_n: usize = 0;
 /// `backend_reg.zig` uses for `get_reg`. Every call after the first is a
 /// single acquire load.
 var extra_bufts_ready = std.atomic.Value(bool).init(false);
-var extra_bufts_mutex: impl.CxxMutex = .{};
+var extra_bufts_mutex: impl.Mutex = .{};
 
 fn ensureExtraBufts() void {
     if (extra_bufts_ready.load(.acquire)) return;
@@ -610,7 +610,7 @@ fn regGetDeviceCount(reg: c.ggml_backend_reg_t) callconv(.c) usize {
 var device_ctx: DeviceContext = .{};
 var cpu_device: c.struct_ggml_backend_device = undefined;
 var device_ready = std.atomic.Value(bool).init(false);
-var device_mutex: impl.CxxMutex = .{};
+var device_mutex: impl.Mutex = .{};
 
 fn ensureDevice(reg: c.ggml_backend_reg_t) void {
     if (device_ready.load(.acquire)) return;
@@ -642,7 +642,7 @@ fn regGetDevice(reg: c.ggml_backend_reg_t, index: usize) callconv(.c) c.ggml_bac
 var features: [10]c.ggml_backend_feature = undefined;
 var features_n: usize = 0;
 var features_ready = std.atomic.Value(bool).init(false);
-var features_mutex: impl.CxxMutex = .{};
+var features_mutex: impl.Mutex = .{};
 
 fn pushFeature(name: [*c]const u8, value: [*c]const u8) void {
     features[features_n] = .{ .name = name, .value = value };

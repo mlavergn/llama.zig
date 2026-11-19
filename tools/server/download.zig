@@ -34,6 +34,7 @@
 //! downloaded in its iteration order, which `libcxx.StringMap` reproduces.
 
 const std = @import("std");
+const sync = @import("sync");
 const builtin = @import("builtin");
 const tc = @import("tools_common");
 const json = @import("json");
@@ -658,7 +659,7 @@ fn urlGetFilename(url: []const u8) []const u8 {
 /// Ports `ProgressBar` (download.cpp:93 @b1b770d90): one line per file
 /// being downloaded, redrawn in place, when stdout is a terminal.
 const ProgressBar = struct {
-    var mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER;
+    var mutex: sync.Mutex = .{};
     var lines: std.AutoHashMapUnmanaged(*const ProgressBar, c_int) = .empty;
     var max_line: c_int = 0;
 
@@ -709,8 +710,8 @@ const ProgressBar = struct {
 
     fn onDone(ctx: *anyopaque, _: *const Progress, _: bool) void {
         const self: *ProgressBar = @ptrCast(@alignCast(ctx));
-        _ = std.c.pthread_mutex_lock(&mutex);
-        defer _ = std.c.pthread_mutex_unlock(&mutex);
+        mutex.lock();
+        defer mutex.unlock();
         cleanup(self);
     }
 
@@ -720,8 +721,8 @@ const ProgressBar = struct {
             return;
         }
 
-        _ = std.c.pthread_mutex_lock(&mutex);
-        defer _ = std.c.pthread_mutex_unlock(&mutex);
+        mutex.lock();
+        defer mutex.unlock();
 
         const io = tc.io;
         if (!lines.contains(self)) {

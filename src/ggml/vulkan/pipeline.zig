@@ -479,12 +479,12 @@ pub fn createPipelineFunc(device: *Device, pipeline: *Pipeline, args: CompileArg
         readStatistics(device, pipeline);
     }
 
-    _ = std.c.pthread_mutex_lock(&device.compile_mutex);
+    device.compile_mutex.lock();
     device.all_pipelines.append(allocator, pipeline) catch impl.abort("ggml_vulkan: out of memory");
     pipeline.compiled.store(true, .seq_cst);
     pipeline.compile_pending = false;
-    _ = std.c.pthread_mutex_unlock(&device.compile_mutex);
-    _ = std.c.pthread_cond_broadcast(&device.compile_cv);
+    device.compile_mutex.unlock();
+    device.compile_cv.broadcast();
 }
 
 /// The pipeline-statistics tail of `ggml_vk_create_pipeline_func`: prints

@@ -42,6 +42,7 @@
 //! which is why `ggml_backend_init` is not among the exports.
 
 const std = @import("std");
+const sync = @import("sync");
 const impl = @import("../impl.zig");
 const mc = @import("device_c.zig");
 const fusion = @import("fusion.zig");
@@ -352,7 +353,7 @@ fn BufferType(comptime kind: Kind) type {
         var bufts: [max_devices]c.struct_ggml_backend_buffer_type = undefined;
         var ctxs: [max_devices]BufferTypeCtx = undefined;
         var ready = std.atomic.Value(bool).init(false);
-        var mutex: std.c.pthread_mutex_t = .{};
+        var mutex: sync.Mutex = .{};
 
         /// The C's function-local `static std::mutex` plus `static bool
         /// initialized`, written out. Zig 0.16 has no `std.once`; this is
@@ -364,8 +365,8 @@ fn BufferType(comptime kind: Kind) type {
         /// Return: the buffer type, borrowed for the life of the process.
         fn get(device: c_int) c.ggml_backend_buffer_type_t {
             if (!ready.load(.acquire)) {
-                _ = std.c.pthread_mutex_lock(&mutex);
-                defer _ = std.c.pthread_mutex_unlock(&mutex);
+                mutex.lock();
+                defer mutex.unlock();
                 if (!ready.load(.acquire)) {
                     var i: c_int = 0;
                     while (i < g_devices) : (i += 1) {
@@ -923,15 +924,15 @@ var reg_storage: c.struct_ggml_backend_reg = undefined;
 var reg_ctx: RegCtx = .{};
 var reg_devices: [max_devices]c.struct_ggml_backend_device = undefined;
 var reg_ready = std.atomic.Value(bool).init(false);
-var reg_mutex: std.c.pthread_mutex_t = .{};
+var reg_mutex: sync.Mutex = .{};
 
 /// Ports `ggml_backend_metal_reg` (ggml-metal.cpp:910 @b1b770d90).
 ///
 /// Return: the Metal registry, borrowed for the life of the process.
 pub export fn ggml_backend_metal_reg() callconv(.c) c.ggml_backend_reg_t {
     if (!reg_ready.load(.acquire)) {
-        _ = std.c.pthread_mutex_lock(&reg_mutex);
-        defer _ = std.c.pthread_mutex_unlock(&reg_mutex);
+        reg_mutex.lock();
+        defer reg_mutex.unlock();
         if (!reg_ready.load(.acquire)) {
             // The C reads this on every call, outside the `initialized`
             // guard, so a later change still takes effect for a later

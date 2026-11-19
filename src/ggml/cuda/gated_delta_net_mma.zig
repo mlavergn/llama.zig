@@ -30,6 +30,7 @@
 //! against the arithmetic; the GB10 pickup compares them with `nvcc`'s.
 
 const std = @import("std");
+const sync = @import("sync");
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
 const kernels = @import("kernels.zig");
@@ -130,14 +131,14 @@ fn kernel(comptime C: comptime_int, comptime V: comptime_int, comptime BLOCKS: c
 /// device; a refusal is remembered as well as an acceptance.
 fn Init(comptime C: comptime_int, comptime V: comptime_int, comptime BLOCKS: comptime_int) type {
     return struct {
-        var mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER;
+        var mutex: sync.Mutex = .{};
         var done: [common.max_devices]bool = @splat(false);
         var available: [common.max_devices]bool = @splat(false);
 
         fn get(device: c_int) bool {
             const d: usize = @intCast(device);
-            _ = std.c.pthread_mutex_lock(&mutex);
-            defer _ = std.c.pthread_mutex_unlock(&mutex);
+            mutex.lock();
+            defer mutex.unlock();
             if (!done[d]) {
                 done[d] = true;
                 run(device);

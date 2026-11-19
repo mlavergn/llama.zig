@@ -75,7 +75,7 @@ zig c++ -mcpu=baseline -c harness/context_ref.cpp -o "$tmp/context_ref.o" -std=c
     || { echo "FAIL: cannot compile harness/context_ref.cpp" >&2; head -20 "$tmp/cerr" >&2; exit 1; }
 zig build-exe -mcpu baseline -femit-bin="$tmp/context_diff" -Ofast -lc \
     --dep harness_root -Mroot=harness/context_diff.zig \
-    --dep llama_c -Mharness_root="$PORT/harness_root.zig" -Mllama_c="$tmp/llama_c.zig" \
+    --dep llama_c --dep sync -Mharness_root="$PORT/harness_root.zig" -Msync="$PORT/../sync/module.zig" -Mllama_c="$tmp/llama_c.zig" \
     "$tmp/proxy_dev.o" "$tmp/context_ref.o" "$LIBS/libllama-ref.a" "$LIBS/libggml.a" -lc++ \
     "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }

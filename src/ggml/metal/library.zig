@@ -33,6 +33,7 @@
 //! truncated kernel name would be a wrong lookup rather than a short one.
 
 const std = @import("std");
+const sync = @import("sync");
 const impl = @import("../impl.zig");
 const mc = @import("device_c.zig");
 const fc = @import("impl_c.zig");
@@ -129,10 +130,10 @@ pub export fn ggml_metal_device_get(device: c_int, n_devices: c_int) callconv(.c
     const S = struct {
         var devs: [16]?*mc.Device = @splat(null);
         var n: usize = 0;
-        var mutex: std.c.pthread_mutex_t = .{};
+        var mutex: sync.Mutex = .{};
     };
-    _ = std.c.pthread_mutex_lock(&S.mutex);
-    defer _ = std.c.pthread_mutex_unlock(&S.mutex);
+    S.mutex.lock();
+    defer S.mutex.unlock();
 
     const dev = mc.ggml_metal_device_init(device, n_devices);
     if (S.n < S.devs.len) {

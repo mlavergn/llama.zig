@@ -461,8 +461,8 @@ pub fn coopmatShmemSupport(dev: *const Device, params: *const FaTuningParams, hs
 /// for `key`, created empty on first sight for the compile walk to fill.
 fn dynamicPipeline(ctx: *BackendCtx, map: anytype, key: anytype) *Pipeline {
     const dev = ctx.device;
-    _ = std.c.pthread_mutex_lock(&dev.compile_mutex);
-    defer _ = std.c.pthread_mutex_unlock(&dev.compile_mutex);
+    dev.compile_mutex.lock();
+    defer dev.compile_mutex.unlock();
     const gop = map.getOrPut(m.common.allocator, key) catch impl.abort("ggml_vulkan: out of memory");
     if (!gop.found_existing or gop.value_ptr.* == null) gop.value_ptr.* = Pipeline.create();
     return gop.value_ptr.*.?;
@@ -665,8 +665,8 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
 
     var pipeline_: ?*Pipeline = null;
     {
-        _ = std.c.pthread_mutex_lock(&dev.compile_mutex);
-        defer _ = std.c.pthread_mutex_unlock(&dev.compile_mutex);
+        dev.compile_mutex.lock();
+        defer dev.compile_mutex.unlock();
         if (xe_fa_opt) {
             const neq1: i64 = q.ne[1];
             const nek1: i64 = k.ne[1];

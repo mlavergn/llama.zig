@@ -19,6 +19,7 @@
 //! A `msg_t` owns its strings. The client is `httplib/client.zig`'s.
 
 const std = @import("std");
+const sync = @import("sync");
 const json = @import("json");
 const http = @import("http.zig");
 const common = @import("common.zig");
@@ -58,7 +59,7 @@ const Shared = struct {
     /// The client the thread drives, null once it is done with it: what
     /// `cli->stop()` reaches from the response's destructor.
     cli: ?*httplib_client.ClientImpl = null,
-    cli_mutex: std.c.pthread_mutex_t = .{},
+    cli_mutex: sync.Mutex = .{},
     // true once response_handler has already forwarded the headers
     headers_sent: std.atomic.Value(bool) = .init(false),
 
@@ -179,8 +180,8 @@ pub const Proxy = struct {
         self.shared.pipe.closeRead();
         self.shared.pipe.closeWrite();
         {
-            _ = std.c.pthread_mutex_lock(&self.shared.cli_mutex);
-            defer _ = std.c.pthread_mutex_unlock(&self.shared.cli_mutex);
+            self.shared.cli_mutex.lock();
+            defer self.shared.cli_mutex.unlock();
             if (self.shared.cli) |cli| cli.stop();
         }
         if (self.cleanup) |c| c.func(c.ctx);
@@ -261,8 +262,8 @@ pub const Proxy = struct {
         fn run(job: *Job) void {
             defer {
                 {
-                    _ = std.c.pthread_mutex_lock(&job.shared.cli_mutex);
-                    defer _ = std.c.pthread_mutex_unlock(&job.shared.cli_mutex);
+                    job.shared.cli_mutex.lock();
+                    defer job.shared.cli_mutex.unlock();
                     job.shared.cli = null;
                 }
                 job.shared.release();

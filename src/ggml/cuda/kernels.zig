@@ -44,6 +44,7 @@
 //! struct; that is `make cuda-struct-layout`'s job.
 
 const std = @import("std");
+const sync = @import("sync");
 const builtin = @import("builtin");
 const common = @import("common.zig");
 const gen = @import("cuda_kernels");
@@ -107,7 +108,7 @@ fn lookup(comptime library: []const u8, comptime key: []const u8) Kernel {
 // -----------------------------------------------------------------------------
 // Loading
 
-var load_mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER;
+var load_mutex: sync.Mutex = .{};
 var libraries: [gen.libraries.len]cu.CUlibrary = @splat(null);
 var handles: [gen.kernel_count]std.atomic.Value(?*anyopaque) = @splat(.init(null));
 var checked: [gen.kernel_count]std.atomic.Value(bool) = @splat(.init(false));
@@ -120,8 +121,8 @@ var checked: [gen.kernel_count]std.atomic.Value(bool) = @splat(.init(false));
 /// Return: the context-independent handle; aborts if the driver refuses.
 pub fn handle(k: Kernel) cu.CUkernel {
     if (handles[k.index].load(.acquire)) |h| return @ptrCast(h);
-    _ = std.c.pthread_mutex_lock(&load_mutex);
-    defer _ = std.c.pthread_mutex_unlock(&load_mutex);
+    load_mutex.lock();
+    defer load_mutex.unlock();
     if (handles[k.index].load(.acquire)) |h| return @ptrCast(h);
     if (libraries[k.library] == null) {
         const image = k.fatbin;

@@ -182,8 +182,8 @@ const Device = m.device.Device;
 /// more use of the fusion `label`, when the stats are on.
 pub fn countFusion(device: *Device, label: []const u8) void {
     if (!device.fusion_stats_enabled.load(.monotonic)) return;
-    _ = std.c.pthread_mutex_lock(&device.fusion_mutex);
-    defer _ = std.c.pthread_mutex_unlock(&device.fusion_mutex);
+    device.fusion_mutex.lock();
+    defer device.fusion_mutex.unlock();
     // `device->fusion_counts[label]++`, kept in the map's order.
     const items = device.fusion_counts.items;
     var lo: usize = 0;
@@ -212,8 +212,8 @@ pub fn fusionStatsInit(finfo: ?*anyopaque) callconv(.c) void {
 /// Ports `ggml_backend_vk_fusion_stats_reset` (ggml-vulkan-debug.cpp:33 @b1b770d90).
 pub fn fusionStatsReset(finfo: ?*anyopaque) callconv(.c) void {
     const device: *Device = @ptrCast(@alignCast(finfo.?));
-    _ = std.c.pthread_mutex_lock(&device.fusion_mutex);
-    defer _ = std.c.pthread_mutex_unlock(&device.fusion_mutex);
+    device.fusion_mutex.lock();
+    defer device.fusion_mutex.unlock();
     // Keep labels and their order stable between fused and unfused runs.
     for (device.fusion_counts.items) |*e| e.count = 0;
 }
@@ -223,8 +223,8 @@ pub fn fusionStatsReset(finfo: ?*anyopaque) callconv(.c) void {
 /// in label order.
 pub fn fusionStatsGet(finfo: ?*anyopaque, labels: [*c][*c]const u8, counts: [*c]u64, n: c_int) callconv(.c) c_int {
     const device: *Device = @ptrCast(@alignCast(finfo.?));
-    _ = std.c.pthread_mutex_lock(&device.fusion_mutex);
-    defer _ = std.c.pthread_mutex_unlock(&device.fusion_mutex);
+    device.fusion_mutex.lock();
+    defer device.fusion_mutex.unlock();
     if (labels == null) return @intCast(device.fusion_counts.items.len);
     var i: c_int = 0;
     for (device.fusion_counts.items) |e| {

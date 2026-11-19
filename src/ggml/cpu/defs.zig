@@ -27,6 +27,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 const win32 = @import("../win32.zig");
+const sync = @import("sync");
 const c = impl.c;
 
 pub const Tensor = c.ggml_tensor;
@@ -69,10 +70,11 @@ pub const ComputeParams = extern struct {
 /// Ports `struct ggml_threadpool` (ggml-cpu.c:490 @b1b770d90).
 ///
 /// Ports `ggml_cond_t`, `ggml_mutex_t`, `ggml_cond_t`, `ggml_mutex_t`
-/// (ggml-cpu.c:439, 440, 459, 460 @b1b770d90): a condition variable and an SRW
-/// lock on Windows, pthreads everywhere else. `threading.zig` holds the macros that drive them.
-pub const Mutex = if (builtin.os.tag == .windows) win32.SRWLOCK else std.c.pthread_mutex_t;
-pub const Cond = if (builtin.os.tag == .windows) win32.CONDITION_VARIABLE else std.c.pthread_cond_t;
+/// (ggml-cpu.c:439, 440, 459, 460 @b1b770d90): the C's SRW lock and condition
+/// variable on Windows and pthreads elsewhere are the port's futex `Mutex` and
+/// `Condition` on every target. `threading.zig` holds the macros that drive them.
+pub const Mutex = sync.Mutex;
+pub const Cond = sync.Condition;
 
 /// Opaque to everything outside this translation unit — `ggml.h` only forward
 /// declares it — so this is a plain Zig struct rather than an `extern` one,

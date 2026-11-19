@@ -25,6 +25,7 @@
 //! observable.
 
 const std = @import("std");
+const sync = @import("sync");
 const json = @import("json");
 const libcxx = @import("llama").libcxx;
 
@@ -57,32 +58,23 @@ fn nowSeconds() i64 {
 
 /// A pthread mutex, as `queue.zig` takes them.
 const Mutex = struct {
-    m: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
+    m: sync.Mutex = .{},
     fn lock(self: *Mutex) void {
-        _ = std.c.pthread_mutex_lock(&self.m);
+        self.m.lock();
     }
     fn unlock(self: *Mutex) void {
-        _ = std.c.pthread_mutex_unlock(&self.m);
+        self.m.unlock();
     }
 };
 
 /// A pthread condition variable.
 const Cond = struct {
-    c: std.c.pthread_cond_t = std.c.PTHREAD_COND_INITIALIZER,
+    c: sync.Condition = .{},
     fn waitFor(self: *Cond, m: *Mutex, ns: u64) void {
-        var now: std.c.timespec = undefined;
-        _ = std.c.clock_gettime(std.c.CLOCK.REALTIME, &now);
-        var sec: i64 = @as(i64, @intCast(now.sec)) + @as(i64, @intCast(ns / std.time.ns_per_s));
-        var nsec: i64 = @as(i64, @intCast(now.nsec)) + @as(i64, @intCast(ns % std.time.ns_per_s));
-        if (nsec >= std.time.ns_per_s) {
-            sec += 1;
-            nsec -= std.time.ns_per_s;
-        }
-        const deadline: std.c.timespec = .{ .sec = @intCast(sec), .nsec = @intCast(nsec) };
-        _ = std.c.pthread_cond_timedwait(&self.c, &m.m, &deadline);
+        _ = self.c.timedWait(&m.m, ns);
     }
     fn notifyAll(self: *Cond) void {
-        _ = std.c.pthread_cond_broadcast(&self.c);
+        self.c.broadcast();
     }
 };
 

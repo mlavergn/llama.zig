@@ -28,6 +28,7 @@
 //! it, through the socket mutex and the in-flight count.
 
 const std = @import("std");
+const sync = @import("sync");
 const builtin = @import("builtin");
 const detail = @import("detail.zig");
 const socket = @import("socket.zig");
@@ -608,7 +609,7 @@ pub const ClientImpl = struct {
     /// `socket_mutex_`, `socket_requests_in_flight_` and
     /// `socket_should_be_closed_when_request_is_done_`: what `stop` reads
     /// from another thread.
-    socket_mutex: std.c.pthread_mutex_t = .{},
+    socket_mutex: sync.Mutex = .{},
     socket_requests_in_flight: usize = 0,
     socket_should_be_closed_when_request_is_done: bool = false,
     /// `stop_requested_`: set by `stop` while a request is in flight. The
@@ -752,8 +753,8 @@ pub const ClientImpl = struct {
     /// any more and errors out, set `stop_requested` for its reads to see,
     /// and flag it closed for when it is done.
     pub fn stop(self: *ClientImpl) void {
-        _ = std.c.pthread_mutex_lock(&self.socket_mutex);
-        defer _ = std.c.pthread_mutex_unlock(&self.socket_mutex);
+        self.socket_mutex.lock();
+        defer self.socket_mutex.unlock();
         if (self.socket_requests_in_flight > 0) {
             if (self.sock != socket.invalid_socket) _ = socket.shutdownSocket(self.sock);
             // shutdown() does not wake a read waiting in WSAPoll on Windows, so the
@@ -871,8 +872,8 @@ pub const ClientImpl = struct {
     /// keep-alive here).
     fn sendImpl(self: *ClientImpl, req: *Request, res: *Response, err: *Error) Oom!bool {
         {
-            _ = std.c.pthread_mutex_lock(&self.socket_mutex);
-            defer _ = std.c.pthread_mutex_unlock(&self.socket_mutex);
+            self.socket_mutex.lock();
+            defer self.socket_mutex.unlock();
 
             // Set this to false immediately - if it ever gets set to true by the end
             // of the request, we know another thread instructed us to close the
@@ -902,10 +903,10 @@ pub const ClientImpl = struct {
         const close_connection = !self.keep_alive;
         defer {
             // Briefly lock mutex in order to mark that a request is no longer ongoing
-            _ = std.c.pthread_mutex_lock(&self.socket_mutex);
+            self.socket_mutex.lock();
             self.socket_requests_in_flight -= 1;
             if (self.socket_should_be_closed_when_request_is_done or close_connection or !ret) self.disconnect();
-            _ = std.c.pthread_mutex_unlock(&self.socket_mutex);
+            self.socket_mutex.unlock();
         }
 
         // `process_socket`, then `process_client_socket` (httplib.cpp:2106 @b1b770d90)
@@ -1002,8 +1003,8 @@ pub const ClientImpl = struct {
         if (!ret) return false;
 
         {
-            _ = std.c.pthread_mutex_lock(&self.socket_mutex);
-            defer _ = std.c.pthread_mutex_unlock(&self.socket_mutex);
+            self.socket_mutex.lock();
+            defer self.socket_mutex.unlock();
             // Also when the request asked for it (e.g. a body that was never sent,
             // or "Connection: close"), so that a redirect or an auth retry below does
             // not reuse the socket.
@@ -1312,8 +1313,8 @@ pub const ClientImpl = struct {
                 // A final response came first, so the body this request declared was
                 // never sent, and the server may still be waiting for it. The
                 // connection cannot carry another request.
-                _ = std.c.pthread_mutex_lock(&self.socket_mutex);
-                defer _ = std.c.pthread_mutex_unlock(&self.socket_mutex);
+                self.socket_mutex.lock();
+                defer self.socket_mutex.unlock();
                 self.socket_should_be_closed_when_request_is_done = true;
             }
         }
@@ -1327,8 +1328,8 @@ pub const ClientImpl = struct {
                     return false;
                 }
                 if (message.hasFaultyTransferEncoding(res)) {
-                    _ = std.c.pthread_mutex_lock(&self.socket_mutex);
-                    defer _ = std.c.pthread_mutex_unlock(&self.socket_mutex);
+                    self.socket_mutex.lock();
+                    defer self.socket_mutex.unlock();
                     self.socket_should_be_closed_when_request_is_done = true;
                 }
             }

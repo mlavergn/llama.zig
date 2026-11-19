@@ -190,8 +190,8 @@ pub fn concatIsTransposed(device: *const m.device.Device, src0: *const Tensor, s
 /// under the compile mutex.
 fn dynamicPipeline(ctx: *BackendCtx, map: anytype, key: anytype) *Pipeline {
     const dev = ctx.device;
-    _ = std.c.pthread_mutex_lock(&dev.compile_mutex);
-    defer _ = std.c.pthread_mutex_unlock(&dev.compile_mutex);
+    dev.compile_mutex.lock();
+    defer dev.compile_mutex.unlock();
     const gop = map.getOrPut(allocator, key) catch oom();
     if (!gop.found_existing or gop.value_ptr.* == null) gop.value_ptr.* = Pipeline.create();
     return gop.value_ptr.*.?;

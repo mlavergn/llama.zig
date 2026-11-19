@@ -123,7 +123,7 @@ zig translate-c -lc -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp
 MODES=(ReleaseFast ReleaseSafe)
 for mode in "${MODES[@]}"; do
     [ $SWAPPED -eq 1 ] && break
-    zig build-obj -O "$mode" -lc --dep ggml_c -Mroot=src/ggml/backend_meta.zig -Mggml_c="$tmp/ggml_c.zig" \
+    zig build-obj -O "$mode" -lc --dep ggml_c --dep sync -Mroot=src/ggml/backend_meta.zig -Msync=src/sync/module.zig -Mggml_c="$tmp/ggml_c.zig" \
         -femit-bin="$tmp/meta_$mode.o" 2> "$tmp/berr" \
         || { echo "FAIL: cannot build src/ggml/backend_meta.zig ($mode)" >&2; head -30 "$tmp/berr" >&2; exit 1; }
     nm -gUj "$tmp/meta_$mode.o" | sed 's/^_//' | grep -v '^_Z' | sort > "$tmp/exports_$mode"

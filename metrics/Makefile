@@ -31,7 +31,9 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eo pipefail -c
 
-ROOT     := $(abspath $(CURDIR)/..)
+# The checkout's path may hold a space: no path goes through a make
+# function or becomes a target, and every recipe quotes it.
+ROOT     := $(CURDIR)/..
 B        := $(CURDIR)/build
 
 MODEL    ?= $(ROOT)/Qwen3.5-2B-Q4_K_M.gguf
@@ -48,22 +50,22 @@ FORCE    ?=
 CPU      ?= baseline
 
 REF_OUT   := $(B)/ref-$(CPU)
-REF_LIBS  := $(REF_OUT)/lib/libllama.a $(REF_OUT)/lib/libggml.a
+REF_LIBS  := "$(REF_OUT)/lib/libllama.a" "$(REF_OUT)/lib/libggml.a"
 ifeq ($(PORT_REV),)
 PORT_DIR  := $(ROOT)
 PORT_OUT  := $(B)/port-worktree-$(CPU)
 PORT_DESC := working tree
 else
-PORT_SHA  := $(shell git -C $(ROOT) rev-parse --short=9 $(PORT_REV)^{commit})
+PORT_SHA  := $(shell git -C "$(ROOT)" rev-parse --short=9 $(PORT_REV)^{commit})
 PORT_DIR  := $(B)/port-$(PORT_SHA)
 PORT_OUT  := $(B)/port-$(PORT_SHA)-$(CPU)
 PORT_DESC := $(PORT_REV) ($(PORT_SHA))
 endif
-PORT_LIBS := $(PORT_OUT)/lib/libllama.a $(PORT_OUT)/lib/libggml.a
+PORT_LIBS := "$(PORT_OUT)/lib/libllama.a" "$(PORT_OUT)/lib/libggml.a"
 
 SDK      := $(shell xcrun --sdk macosx --show-sdk-path)
-LINK     := zig cc -O2 -mcpu=baseline $(CURDIR)/perf_driver.c -std=c11 \
-            -I $(ROOT)/llama.cpp/include -I $(ROOT)/llama.cpp/ggml/include
+LINK     := zig cc -O2 -mcpu=baseline "$(CURDIR)/perf_driver.c" -std=c11 \
+            -I "$(ROOT)/llama.cpp/include" -I "$(ROOT)/llama.cpp/ggml/include"
 SYSLIBS  := -lc++ -lIOReport -framework IOKit -framework CoreFoundation \
             -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
             -F $(SDK)/System/Library/Frameworks
@@ -90,20 +92,20 @@ report:
 # Always rebuilt: Zig's cache makes an unchanged tree cheap, and a stale
 # library is the one way this comparison can measure the wrong thing.
 libs:
-	cd $(ROOT)/llama.cpp.zmake && zig build lib --release=fast -Dcpu=$(CPU) -p $(REF_OUT)
+	cd "$(ROOT)/llama.cpp.zmake" && zig build lib --release=fast -Dcpu=$(CPU) -p "$(REF_OUT)"
 ifneq ($(PORT_REV),)
 	@test -n "$(PORT_SHA)" || { echo "PORT_REV=$(PORT_REV) is not a commit" >&2; exit 2; }
-	@if [ ! -f $(PORT_DIR)/build.zig ]; then \
-	    mkdir -p $(PORT_DIR) && git -C $(ROOT) archive $(PORT_SHA) | tar -x -C $(PORT_DIR) && \
-	    rm -rf $(PORT_DIR)/llama.cpp && ln -s $(ROOT)/llama.cpp $(PORT_DIR)/llama.cpp && \
-	    ln -sfn $(abspath $(ROOT)/../zigjinja) $(B)/zigjinja; fi
+	@if [ ! -f "$(PORT_DIR)/build.zig" ]; then \
+	    mkdir -p "$(PORT_DIR)" && git -C "$(ROOT)" archive $(PORT_SHA) | tar -x -C "$(PORT_DIR)" && \
+	    rm -rf "$(PORT_DIR)/llama.cpp" && ln -s "$(ROOT)/llama.cpp" "$(PORT_DIR)/llama.cpp" && \
+	    ln -sfn "$$(cd "$(ROOT)/.." && pwd)/zigjinja" "$(B)/zigjinja"; fi
 endif
-	cd $(PORT_DIR) && zig build reference --release=fast -Dcpu=$(CPU) -p $(PORT_OUT)
+	cd "$(PORT_DIR)" && zig build reference --release=fast -Dcpu=$(CPU) -p "$(PORT_OUT)"
 
 drivers: libs
-	mkdir -p $(B)
-	$(LINK) -o $(B)/perf-ref  $(REF_LIBS)  $(SYSLIBS)
-	$(LINK) -o $(B)/perf-port $(PORT_LIBS) $(SYSLIBS)
+	mkdir -p "$(B)"
+	$(LINK) -o "$(B)/perf-ref"  $(REF_LIBS)  $(SYSLIBS)
+	$(LINK) -o "$(B)/perf-port" $(PORT_LIBS) $(SYSLIBS)
 
 clean:
-	rm -rf $(B)
+	rm -rf "$(B)"

@@ -11,6 +11,7 @@
 //! them from a static destructor at exit, which the port does not reproduce.
 
 const std = @import("std");
+const sync = @import("sync");
 const impl = @import("../impl.zig");
 const m = @import("module.zig");
 
@@ -197,16 +198,16 @@ pub const CommandPool = struct {
 pub const QueueHandle = struct {
     queue: vk.VkQueue = null,
     device: *Device,
-    device_submit_mutex: ?*std.c.pthread_mutex_t = null,
+    device_submit_mutex: ?*sync.Mutex = null,
     synchronized: bool,
-    mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
+    mutex: sync.Mutex = .{},
 
     pub fn lock(self: *QueueHandle) void {
-        if (self.synchronized) _ = std.c.pthread_mutex_lock(&self.mutex);
+        if (self.synchronized) self.mutex.lock();
     }
 
     pub fn unlock(self: *QueueHandle) void {
-        if (self.synchronized) _ = std.c.pthread_mutex_unlock(&self.mutex);
+        if (self.synchronized) self.mutex.unlock();
     }
 };
 
@@ -224,7 +225,7 @@ pub const Queue = struct {
 /// type and constant differ between C libraries; this is the same contract
 /// over a plain one.
 pub const RecursiveMutex = struct {
-    m: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
+    m: sync.Mutex = .{},
     owner: std.atomic.Value(std.Thread.Id) = .init(0),
     depth: u32 = 0,
 
@@ -234,7 +235,7 @@ pub const RecursiveMutex = struct {
             self.depth += 1;
             return;
         }
-        _ = std.c.pthread_mutex_lock(&self.m);
+        self.m.lock();
         self.owner.store(me, .monotonic);
         self.depth = 1;
     }
@@ -243,7 +244,7 @@ pub const RecursiveMutex = struct {
         self.depth -= 1;
         if (self.depth != 0) return;
         self.owner.store(0, .monotonic);
-        _ = std.c.pthread_mutex_unlock(&self.m);
+        self.m.unlock();
     }
 };
 
@@ -269,12 +270,12 @@ pub fn lightningIndexerKTypeSupported(t: c.ggml_type) bool {
 /// Ports `vk_device_struct` (ggml-vulkan-types.h:685 @b1b770d90).
 pub const Device = struct {
     mutex: RecursiveMutex = .{},
-    queue_submit_mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
+    queue_submit_mutex: sync.Mutex = .{},
 
     // Guards compile_pending, all_pipelines, and the dynamic pipeline maps.
     // Lock order is device->mutex -> compile_mutex, never the reverse.
-    compile_mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
-    compile_cv: std.c.pthread_cond_t = std.c.PTHREAD_COND_INITIALIZER,
+    compile_mutex: sync.Mutex = .{},
+    compile_cv: sync.Condition = .{},
 
     debug_cmdbuf_idx: u32 = 0,
 
@@ -668,7 +669,7 @@ pub const Device = struct {
 
     disable_fusion: bool = false,
     fusion_stats_enabled: std.atomic.Value(bool) = .init(false),
-    fusion_mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
+    fusion_mutex: sync.Mutex = .{},
     /// `std::map<std::string, uint64_t>`: kept sorted by label, as the map
     /// iterates, because `ggml_backend_vk_fusion_stats_get` reports in that
     /// order.
@@ -871,15 +872,15 @@ fn link(last: **vk.VkBaseOutStructure, next: anytype) void {
 }
 
 /// `ggml_vk_get_device`'s function-local `static std::mutex mutex`.
-var get_device_mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER;
+var get_device_mutex: sync.Mutex = .{};
 
 /// Ports `ggml_vk_get_device` (ggml-vulkan.cpp:4240 @b1b770d90): creates
 /// the logical device for index `idx` on first use, and returns it. One
 /// lock covers the whole construction, and the device is published only
 /// once it is fully built, so concurrent first calls build it once.
 pub fn getDevice(idx: usize) *Device {
-    _ = std.c.pthread_mutex_lock(&get_device_mutex);
-    defer _ = std.c.pthread_mutex_unlock(&get_device_mutex);
+    get_device_mutex.lock();
+    defer get_device_mutex.unlock();
 
     if (devices[idx]) |dev| return dev;
 

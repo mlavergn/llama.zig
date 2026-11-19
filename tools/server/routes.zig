@@ -27,6 +27,7 @@
 //! during sleep wakes the server first.
 
 const std = @import("std");
+const sync = @import("sync");
 const json = @import("json");
 const chat = @import("common_chat");
 const tc = @import("tools_common");
@@ -220,7 +221,7 @@ pub const Routes = struct {
     queue_results: *context.ResultQueue,
 
     // cached responses, to be used during sleep
-    mutex_cache: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
+    mutex_cache: sync.Mutex = .{},
     cached_models: Value = .null,
     cached_props: Value = .null,
     cached_metrics: common.Metrics = .{},
@@ -336,8 +337,8 @@ pub const Routes = struct {
 
     /// The cached-metrics lambda of `get_metrics` (server-context.cpp:5791 @b1b770d90).
     fn useCachedMetrics(self: *Routes, res: *ResGenerator) !void {
-        _ = std.c.pthread_mutex_lock(&self.mutex_cache);
-        defer _ = std.c.pthread_mutex_unlock(&self.mutex_cache);
+        self.mutex_cache.lock();
+        defer self.mutex_cache.unlock();
         const a = res.alloc();
         try res.base.setHeader("Process-Start-Time-Unix", try std.fmt.allocPrint(a, "{d}", .{self.cached_metrics.t_start}));
         const tmp = try Result.create(gpa, .metrics);
@@ -496,8 +497,8 @@ pub const Routes = struct {
         const res = try self.createResponse(true);
         errdefer res.destroy();
         if (self.queue_tasks.isSleeping()) {
-            _ = std.c.pthread_mutex_lock(&self.mutex_cache);
-            defer _ = std.c.pthread_mutex_unlock(&self.mutex_cache);
+            self.mutex_cache.lock();
+            defer self.mutex_cache.unlock();
             try res.ok(&self.cached_props);
         } else {
             var p = try getResProps(res.alloc(), self.metaRef(), self.params, false);
@@ -823,8 +824,8 @@ pub const Routes = struct {
         errdefer res.destroy();
         // note: do NOT use ctx_server here, this endpoint must be accessible during sleep
         if (self.queue_tasks.isSleeping()) {
-            _ = std.c.pthread_mutex_lock(&self.mutex_cache);
-            defer _ = std.c.pthread_mutex_unlock(&self.mutex_cache);
+            self.mutex_cache.lock();
+            defer self.mutex_cache.unlock();
             try res.ok(&self.cached_models);
         } else {
             var m = try getResModels(res.alloc(), self.metaRef());
@@ -2155,8 +2156,8 @@ pub const Routes = struct {
     /// @b1b770d90): the caller is the task queue, so the context can be
     /// read without holding locks.
     fn updateCachedResponses(self: *Routes, is_sleeping: bool) !void {
-        _ = std.c.pthread_mutex_lock(&self.mutex_cache);
-        defer _ = std.c.pthread_mutex_unlock(&self.mutex_cache);
+        self.mutex_cache.lock();
+        defer self.mutex_cache.unlock();
 
         if (is_sleeping) {
             _ = self.cache_arena.reset(.free_all);
@@ -2350,7 +2351,7 @@ const LiveAsr = struct {
     model_rate: c_int = 0,
 
     // one item per committed audio buffer, deltas are attributed to the current item
-    mutex_item: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
+    mutex_item: sync.Mutex = .{},
     item_id: []const u8 = "",
     item_prev: []const u8 = "", // the committed item before item_id, empty for the first one
     item_text: std.ArrayList(u8) = .empty,
@@ -2358,11 +2359,11 @@ const LiveAsr = struct {
     input_ended: std.atomic.Value(bool) = .init(false),
 
     fn lock(self: *LiveAsr) void {
-        _ = std.c.pthread_mutex_lock(&self.mutex_item);
+        self.mutex_item.lock();
     }
 
     fn unlock(self: *LiveAsr) void {
-        _ = std.c.pthread_mutex_unlock(&self.mutex_item);
+        self.mutex_item.unlock();
     }
 
     fn randomItem(self: *LiveAsr) ![]const u8 {

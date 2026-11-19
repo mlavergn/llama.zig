@@ -25,7 +25,7 @@ zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
     || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
 zig build-obj -mcpu baseline -femit-bin="$tmp/mtmd.o" -OReleaseFast -lc \
     --dep llama=harness_root -Mroot=src/mtmd/module.zig \
-    --dep llama_c -Mharness_root=src/llama/harness_root.zig \
+    --dep llama_c --dep sync -Mharness_root=src/llama/harness_root.zig -Msync=src/sync/module.zig \
     -Mllama_c="$tmp/llama_c.zig" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the port" >&2; head -40 "$tmp/berr" >&2; exit 1; }
 

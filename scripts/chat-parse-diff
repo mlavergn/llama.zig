@@ -188,7 +188,7 @@ def build(out):
                 "--dep", "json", "--dep", "llama", "-Mpeg=cli/peg/module.zig",
                 "--dep", "llama", "-Mjson=cli/json/module.zig",
                 "-Mzigjinja=../zigjinja/src/root.zig",
-                "--dep", "llama_c", "-Mllama=src/llama/harness_root.zig", f"-Mllama_c={cache}",
+                "--dep", "llama_c", "--dep", "sync", "-Mllama=src/llama/harness_root.zig", "-Msync=src/sync/module.zig", f"-Mllama_c={cache}",
                 # libllama-ref.a for the two C helpers the port's model loader
                 # calls by name (`llama_split_path`, `llama_split_prefix`)
                 os.path.join(LIB, "libllama-ref.a"), os.path.join(LIB, "libggml.a"), "-lc++"] + platform_libs("exe")

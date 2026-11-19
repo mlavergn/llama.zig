@@ -34,6 +34,7 @@
 //! over `libcxx.I32Map`.
 
 const std = @import("std");
+const sync = @import("sync");
 const llama = @import("llama");
 const tools = @import("tools_common");
 
@@ -101,56 +102,51 @@ pub const IdSet = struct {
     }
 };
 
-/// A pthread mutex with the C++'s `std::mutex` semantics.
+/// The port's mutex, with the C++'s `std::mutex` operations.
 const Mutex = struct {
-    m: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
+    m: sync.Mutex = .{},
 
     fn lock(self: *Mutex) void {
-        _ = std.c.pthread_mutex_lock(&self.m);
+        self.m.lock();
     }
     fn unlock(self: *Mutex) void {
-        _ = std.c.pthread_mutex_unlock(&self.m);
+        self.m.unlock();
     }
 };
 
-/// A pthread condition variable with the C++'s `std::condition_variable`
+/// The port's condition variable, with the C++'s `std::condition_variable`
 /// operations the queues use.
 const Cond = struct {
-    c: std.c.pthread_cond_t = std.c.PTHREAD_COND_INITIALIZER,
+    c: sync.Condition = .{},
 
     fn wait(self: *Cond, m: *Mutex) void {
-        _ = std.c.pthread_cond_wait(&self.c, &m.m);
+        self.c.wait(&m.m);
     }
 
     /// `wait_for(lock, seconds)`. Return: false on timeout.
     fn waitFor(self: *Cond, m: *Mutex, ns: u64) bool {
-        return self.waitUntil(m, deadlineIn(ns));
+        return self.c.timedWait(&m.m, ns);
     }
 
-    /// `wait_until(lock, deadline)`.
+    /// `wait_until(lock, deadline)`, the deadline from `deadlineIn`.
     ///
     /// Return: false on a timeout.
-    fn waitUntil(self: *Cond, m: *Mutex, deadline: std.c.timespec) bool {
-        const rc = std.c.pthread_cond_timedwait(&self.c, &m.m, &deadline);
-        return rc != .TIMEDOUT;
+    fn waitUntil(self: *Cond, m: *Mutex, deadline: u64) bool {
+        const now = tools.clock.monotonicNs();
+        if (now >= deadline) return false;
+        return self.c.timedWait(&m.m, deadline - now);
     }
 
-    /// The moment `ns` nanoseconds from now, as `pthread_cond_timedwait` reads it.
-    fn deadlineIn(ns: u64) std.c.timespec {
-        var now: std.c.timespec = undefined;
-        _ = std.c.clock_gettime(std.c.CLOCK.REALTIME, &now);
-        const total: u64 = @as(u64, @intCast(now.nsec)) + ns % std.time.ns_per_s;
-        return .{
-            .sec = now.sec + @as(@TypeOf(now.sec), @intCast(ns / std.time.ns_per_s + total / std.time.ns_per_s)),
-            .nsec = @intCast(total % std.time.ns_per_s),
-        };
+    /// The moment `ns` nanoseconds from now, on the monotonic clock.
+    fn deadlineIn(ns: u64) u64 {
+        return tools.clock.monotonicNs() + ns;
     }
 
     fn notifyOne(self: *Cond) void {
-        _ = std.c.pthread_cond_signal(&self.c);
+        self.c.signal();
     }
     fn notifyAll(self: *Cond) void {
-        _ = std.c.pthread_cond_broadcast(&self.c);
+        self.c.broadcast();
     }
 };
 
