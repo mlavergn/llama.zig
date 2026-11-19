@@ -31,6 +31,7 @@ const params_mod = @import("params.zig");
 const log = @import("log.zig");
 const io = @import("io.zig");
 const build_info = @import("build_info.zig");
+const file = @import("file.zig");
 
 const Params = params_mod.Params;
 const Example = params_mod.Example;
@@ -58,16 +59,19 @@ const S = [:0]const u8;
 
 /// Ports `read_file` (arg.cpp:44 @b1b770d90).
 pub fn readFile(p: *Params, fname: [:0]const u8) ![]const u8 {
-    const f = std.c.fopen(fname.ptr, "r") orelse return throw("error: failed to open file '%s'\n", .{fname.ptr});
-    defer _ = std.c.fclose(f);
-    var content: std.ArrayList(u8) = .empty;
-    var buf: [65536]u8 = undefined;
-    while (true) {
-        const n = std.c.fread(&buf, 1, buf.len, f);
-        if (n == 0) break;
-        try content.appendSlice(p.arena, buf[0..n]);
-    }
-    return content.items;
+    return file.readText(file.defaultIo(), p.arena, fname) catch |e| switch (e) {
+        error.OutOfMemory => e,
+        else => throw("error: failed to open file '%s'\n", .{fname.ptr}),
+    };
+}
+
+/// `std::ifstream file(path)` and its `if (!file)`: whether `path` opens
+/// to read.
+fn opens(path: [:0]const u8) bool {
+    const std_io = file.defaultIo();
+    const f = file.openIn(std_io, path) catch return false;
+    f.close(std_io);
+    return true;
 }
 
 /// The body of the `-j` and `-jf` handlers (arg.cpp lines 2281 and 2288): the text as
@@ -538,8 +542,7 @@ fn addPart1(ctx: *Context) !void {
         fn f(q: *Params, value: S) !void {
             const items = try parseCsvRow(q.arena, value);
             for (items.items) |item| {
-                const file = std.c.fopen(item.ptr, "r") orelse return throw("error: failed to open file '%s'\n", .{item.ptr});
-                _ = std.c.fclose(file);
+                if (!opens(item)) return throw("error: failed to open file '%s'\n", .{item.ptr});
                 try q.in_files.append(q.arena, item);
             }
         }
@@ -552,8 +555,7 @@ fn addPart1(ctx: *Context) !void {
         .handler = .{
             .string = struct {
                 fn f(q: *Params, value: S) !void {
-                    const file = std.c.fopen(value.ptr, "rb") orelse return throw("error: failed to open file '%s'\n", .{value.ptr});
-                    _ = std.c.fclose(file);
+                    if (!opens(value)) return throw("error: failed to open file '%s'\n", .{value.ptr});
                     // store the external file name in params
                     q.prompt_file = try arg.dupe(q, value);
                     q.prompt = try readFile(q, value);

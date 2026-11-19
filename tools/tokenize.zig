@@ -81,25 +81,18 @@ fn writeUtf8ToStdout(a: std.mem.Allocator, str: [:0]const u8, invalid_utf8: *boo
     io.printf("%s", .{str.ptr});
 }
 
-/// Reads all of `f`, as `ss << in.rdbuf()` does.
-fn readAll(a: std.mem.Allocator, f: *anyopaque) ![]const u8 {
-    var out: std.ArrayList(u8) = .empty;
+/// Reads all of standard input, as `ss << std::cin.rdbuf()` does: its
+/// bytes as they are, no newline translation on Windows.
+///
+/// Return: the bytes, owned by `a`; an error when they cannot be read.
+fn readStdin(a: std.mem.Allocator, std_io: std.Io) ![]const u8 {
     var buf: [65536]u8 = undefined;
-    while (true) {
-        const n = std.c.fread(&buf, 1, buf.len, @ptrCast(f));
-        if (n == 0) break;
-        try out.appendSlice(a, buf[0..n]);
-    }
-    return out.items;
+    var r = std.Io.File.stdin().readerStreaming(std_io, &buf);
+    return r.interface.allocRemaining(a, .unlimited);
 }
 
-extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
-extern fn fclose(f: *anyopaque) c_int;
-extern fn fdopen(fd: c_int, mode: [*:0]const u8) ?*anyopaque;
-extern fn _fdopen(fd: c_int, mode: [*:0]const u8) ?*anyopaque;
-
 /// Ports `main` (tokenize.cpp:95 @b1b770d90).
-fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
+fn run(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u8 {
     var params = try tc.params.Params.init(a);
 
     tc.common.init();
@@ -124,12 +117,10 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
         // (a trailing newline is itself a token). escapes are applied locally
         // to match the behavior of -p/--prompt and --stdin.
         const pf = try a.dupeSentinel(u8, params.prompt_file, 0);
-        const in = fopen(pf.ptr, "rb") orelse {
+        prompt = std.Io.Dir.cwd().readFileAlloc(std_io, pf, a, .unlimited) catch {
             log.err("error: could not open file '%s' for reading\n", .{pf.ptr});
             return 1;
         };
-        prompt = try readAll(a, in);
-        _ = fclose(in);
         if (params.escape) prompt = try arg.processEscapes(a, prompt);
     } else if (!use_stdin) {
         // -p/--prompt is already escape-processed by common_params_parse()
@@ -160,11 +151,10 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
 
     // read entire prompt from stdin?
     if (params.tokenize_stdin) {
-        const stdin_f = (if (comptime builtin.os.tag == .windows) _fdopen(0, "rb") else fdopen(0, "rb")) orelse {
+        prompt = readStdin(a, std_io) catch {
             log.err("error: could not read the entire standard input.\n", .{});
             return 1;
         };
-        prompt = try readAll(a, stdin_f);
 
         // stdin is not seen by common_params_parse(), so apply escape handling
         // here to match the behavior of -p/--prompt and -f/--file.
@@ -215,7 +205,7 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
-    return run(arena, argv);
+    return run(arena, init.io, argv);
 }
 
 // -----------------------------------------------------------------------------

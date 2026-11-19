@@ -23,10 +23,6 @@ comptime {
     _ = @import("mtmd");
 }
 
-extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*c.FILE;
-extern fn fwrite(p: ?*const anyopaque, size: usize, n: usize, f: ?*c.FILE) usize;
-extern fn fclose(f: ?*c.FILE) c_int;
-
 /// Ports `tts_timings` (tts.cpp:20 @b1b770d90): a progress line every two
 /// seconds.
 const Timings = struct {
@@ -255,12 +251,12 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     log.inf("timings: prompt eval %.2fs + generation %.2fs + vocoder %.2fs = total %.2fs\n", .{ t_prompt_s, t_gen_s, t_wav_s, t_total_s });
     log.inf("         output audio = %.2fs (audio time = %.2fx process time)\n", .{ audio_s, if (t_total_s > 0) audio_s / t_total_s else 0.0 });
     const out_file = try a.dupeSentinel(u8, params.out_file, 0);
-    const f = fopen(out_file.ptr, "wb") orelse {
+    var f = tc.file.Out.create(init.io, out_file) catch {
         log.err("failed to open %s\n", .{out_file.ptr});
         return 1;
     };
-    _ = fwrite(data, 1, data_len, f);
-    _ = fclose(f);
+    f.write(data[0..data_len]) catch {};
+    f.close(init.io);
     log.inf("wrote %s\n", .{out_file.ptr});
 
     c.llama_backend_free();

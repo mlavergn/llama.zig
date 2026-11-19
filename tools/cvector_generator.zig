@@ -283,27 +283,19 @@ const TokenizedPrompt = struct {
 };
 
 /// Ports `ctrlvec_load_prompt_file` (cvector-generator.cpp:308 @b1b770d90).
-fn loadPromptFile(a: std.mem.Allocator, path: []const u8, skip_empty_lines: bool) !std.ArrayList([]const u8) {
+fn loadPromptFile(a: std.mem.Allocator, std_io: std.Io, path: []const u8, skip_empty_lines: bool) !std.ArrayList([]const u8) {
     var output: std.ArrayList([]const u8) = .empty;
     const z = try a.dupeSentinel(u8, path, 0);
-    const f = std.c.fopen(z.ptr, "r") orelse {
+    const content = tc.file.readText(std_io, a, z) catch {
         io.eprintf("error: unable to open file: %s\n", .{z.ptr});
         tc.cExit(1);
     };
-    defer _ = std.c.fclose(f);
-    var content: std.ArrayList(u8) = .empty;
-    var buf: [65536]u8 = undefined;
-    while (true) {
-        const n = std.c.fread(&buf, 1, buf.len, f);
-        if (n == 0) break;
-        try content.appendSlice(a, buf[0..n]);
-    }
-    var lines = std.mem.splitScalar(u8, content.items, '\n');
+    var lines = std.mem.splitScalar(u8, content, '\n');
     var consumed: usize = 0;
     while (lines.next()) |line| {
         consumed += line.len + 1;
         // `std::getline` yields no last empty line after a final '\n'
-        if (line.len == 0 and consumed > content.items.len) break;
+        if (line.len == 0 and consumed > content.len) break;
         const is_skip = skip_empty_lines and line.len == 0;
         if (!is_skip) try output.append(a, try arg.processEscapes(a, line));
     }
@@ -360,10 +352,10 @@ fn exportGguf(a: std.mem.Allocator, v_ctrl: []const *c.ggml_tensor, fname: []con
 }
 
 /// Ports `prepare_entries` (cvector-generator.cpp:381 @b1b770d90).
-fn prepareEntries(a: std.mem.Allocator, params: *tc.params.Params, ctx_train: *TrainContext) !c_int {
+fn prepareEntries(a: std.mem.Allocator, std_io: std.Io, params: *tc.params.Params, ctx_train: *TrainContext) !c_int {
     // load prompts
-    const positive_prompts = try loadPromptFile(a, params.cvector_positive_file, true);
-    const negative_prompts = try loadPromptFile(a, params.cvector_negative_file, true);
+    const positive_prompts = try loadPromptFile(a, std_io, params.cvector_positive_file, true);
+    const negative_prompts = try loadPromptFile(a, std_io, params.cvector_negative_file, true);
     if (positive_prompts.items.len != negative_prompts.items.len) {
         io.eprintf("number of positive and negative prompts must be equal\n", .{});
         return 1;
@@ -731,7 +723,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     var ctx_train = try TrainContext.init(a, n_embd, n_layers);
 
     // load and prepare entries for training
-    _ = try prepareEntries(a, &params, &ctx_train);
+    _ = try prepareEntries(a, init.io, &params, &ctx_train);
 
     // we have to pretokenize everything because otherwise we don't know how much overhead to allocate ctx_diffs_wrapped
     var tokenized_prompts: std.ArrayList(TokenizedPrompt) = .empty;

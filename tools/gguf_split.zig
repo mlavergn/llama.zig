@@ -17,9 +17,9 @@
 //!
 //! # Streams
 //!
-//! `std::ifstream` and `std::ofstream` are C `FILE *`s here. The C++ sets
-//! `failbit` exceptions on the output stream and never catches them, so a
-//! failed write terminates the process; here it aborts.
+//! `std::ifstream` and `std::ofstream` are `tools_common.file`'s. The C++
+//! sets `failbit` exceptions on the output stream and never catches them,
+//! so a failed write terminates the process; here it aborts.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -219,40 +219,30 @@ fn parse(argv: []const [:0]const u8, params: *Params, arena: std.mem.Allocator) 
 }
 
 // -----------------------------------------------------------------------------
-// C stdio, as the C++ streams
+// Files, as the C++ streams
 
-extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
-extern fn fclose(f: *anyopaque) c_int;
-extern fn fread(ptr: [*]u8, size: usize, n: usize, f: *anyopaque) usize;
-extern fn fwrite(ptr: [*]const u8, size: usize, n: usize, f: *anyopaque) usize;
-extern fn fseeko(f: *anyopaque, off: i64, whence: c_int) c_int;
-extern fn _fseeki64(f: *anyopaque, off: i64, whence: c_int) c_int;
-extern fn remove(path: [*:0]const u8) c_int;
+const Out = common.file.Out;
 
-fn seek(f: *anyopaque, off: u64) void {
-    const r = if (comptime builtin.os.tag == .windows) _fseeki64(f, @intCast(off), 0) else fseeko(f, @intCast(off), 0);
-    _ = r;
+/// An output stream's `failbit` exception, which nothing catches.
+fn terminate() noreturn {
+    io.eprintf("terminate called after throwing an instance of 'std::ios_base::failure'\n", .{});
+    std.process.abort();
+}
+
+/// `std::ofstream fout(path, std::ios::binary)` with `failbit` exceptions:
+/// a file that cannot be created terminates.
+fn createOut(std_io: std.Io, path: []const u8) Out {
+    return Out.create(std_io, path) catch terminate();
 }
 
 /// `fout.write(..)` with `failbit` exceptions: a failed write terminates.
-fn writeAll(f: *anyopaque, bytes: []const u8) void {
-    if (bytes.len == 0) return;
-    if (fwrite(bytes.ptr, 1, bytes.len, f) != bytes.len) {
-        io.eprintf("terminate called after throwing an instance of 'std::ios_base::failure'\n", .{});
-        std.process.abort();
-    }
-}
-
-/// `f_in.read(..)` and the `!f_in` after it: false on a short read, which
-/// leaves the rest of the buffer as it was.
-fn readInto(f: *anyopaque, buf: []u8) bool {
-    return fread(buf.ptr, 1, buf.len, f) == buf.len;
+fn writeAll(f: *Out, bytes: []const u8) void {
+    f.write(bytes) catch terminate();
 }
 
 /// Ports `zeros` (gguf-split.cpp:196 @b1b770d90).
-fn zeros(f: *anyopaque, n: usize) void {
-    const zero = [1]u8{0};
-    for (0..n) |_| writeAll(f, &zero);
+fn zeros(f: *Out, n: usize) void {
+    f.zeros(n) catch terminate();
 }
 
 /// A path buffer as the `char *` the C passes to `printf`.
@@ -272,7 +262,8 @@ fn pad(x: usize) usize {
 /// Ports `split_strategy` (gguf-split.cpp:203 @b1b770d90).
 const Strategy = struct {
     params: Params,
-    f_input: *anyopaque,
+    std_io: std.Io,
+    f_input: std.Io.File,
     ctx_gguf: *c.gguf_context,
     ctx_meta: *c.ggml_context,
     n_tensors: c_int,
@@ -284,9 +275,10 @@ const Strategy = struct {
 
     // because we need to know list of tensors for each file in advance, we
     // will build all the ctx_out for all output splits
-    fn init(allocator: std.mem.Allocator, params: Params, f_input: *anyopaque, ctx_gguf: *c.gguf_context, ctx_meta: *c.ggml_context) !Strategy {
+    fn init(allocator: std.mem.Allocator, std_io: std.Io, params: Params, f_input: std.Io.File, ctx_gguf: *c.gguf_context, ctx_meta: *c.ggml_context) !Strategy {
         var self: Strategy = .{
             .params = params,
+            .std_io = std_io,
             .f_input = f_input,
             .ctx_gguf = ctx_gguf,
             .ctx_meta = ctx_meta,
@@ -395,16 +387,13 @@ const Strategy = struct {
             // open the output file
             io.printf("Writing file %s ... ", .{cstr(&split_path)});
             io.flushStdout();
-            const fout = fopen(&split_path, "wb") orelse {
-                io.eprintf("terminate called after throwing an instance of 'std::ios_base::failure'\n", .{});
-                std.process.abort();
-            };
+            var fout = createOut(self.std_io, std.mem.sliceTo(&split_path, 0));
 
             // write metadata
             const data = try self.allocator.alloc(u8, c.gguf_get_meta_size(ctx_out));
             defer self.allocator.free(data);
             c.gguf_get_meta_data(ctx_out, data.ptr);
-            writeAll(fout, data);
+            writeAll(&fout, data);
 
             // write tensors
             var i: i64 = 0;
@@ -420,22 +409,21 @@ const Strategy = struct {
                 const offset = c.gguf_get_data_offset(self.ctx_gguf) + c.gguf_get_tensor_offset(self.ctx_gguf, i_tensor_in);
 
                 // copy tensor from input to output file
-                try self.copyFileToFile(fout, offset, n_bytes);
-                zeros(fout, pad(n_bytes) - n_bytes);
+                try self.copyFileToFile(&fout, offset, n_bytes);
+                zeros(&fout, pad(n_bytes) - n_bytes);
             }
 
             io.printf("done\n", .{});
             // close the file
-            _ = fclose(fout);
+            fout.close(self.std_io);
             i_split += 1;
         }
     }
 
     /// Ports `copy_file_to_file` (gguf-split.cpp:358 @b1b770d90).
-    fn copyFileToFile(self: *Strategy, f_out: *anyopaque, in_offset: usize, len: usize) !void {
+    fn copyFileToFile(self: *Strategy, f_out: *Out, in_offset: usize, len: usize) !void {
         if (self.read_buf.items.len < len) try self.read_buf.resize(self.allocator, len);
-        seek(self.f_input, in_offset);
-        if (!readInto(self.f_input, self.read_buf.items[0..len])) {
+        if (!common.file.readAt(self.std_io, self.f_input, self.read_buf.items[0..len], in_offset)) {
             io.eprintf("%s: failed to read %zu bytes at offset %zu, input file may be truncated\n", .{ "copy_file_to_file", len, in_offset });
             common.cExit(1);
         }
@@ -444,12 +432,12 @@ const Strategy = struct {
 };
 
 /// Ports `gguf_split` (gguf-split.cpp:373 @b1b770d90).
-fn ggufSplit(allocator: std.mem.Allocator, split_params: Params) !void {
+fn ggufSplit(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params) !void {
     var ctx_meta: ?*c.ggml_context = null;
 
     const params: c.gguf_init_params = .{ .no_alloc = true, .ctx = &ctx_meta };
 
-    const f_input = fopen(split_params.input.ptr, "rb") orelse {
+    const f_input = common.file.openIn(std_io, split_params.input) catch {
         io.eprintf("%s:  failed to open input GGUF from %s\n", .{ "gguf_split", split_params.input.ptr });
         common.cExit(1);
     };
@@ -460,7 +448,7 @@ fn ggufSplit(allocator: std.mem.Allocator, split_params: Params) !void {
     };
 
     // prepare the strategy
-    var strategy = try Strategy.init(allocator, split_params, f_input, ctx_gguf, ctx_meta.?);
+    var strategy = try Strategy.init(allocator, std_io, split_params, f_input, ctx_gguf, ctx_meta.?);
     defer strategy.deinit();
     const n_split: c_int = @intCast(strategy.ctx_outs.items.len);
     strategy.printInfo();
@@ -472,24 +460,24 @@ fn ggufSplit(allocator: std.mem.Allocator, split_params: Params) !void {
 
     // done, clean up
     c.gguf_free(ctx_gguf);
-    _ = fclose(f_input);
+    f_input.close(std_io);
 
     io.eprintf("%s: %d gguf split written with a total of %d tensors.\n", .{ "gguf_split", n_split, strategy.n_tensors });
 }
 
 /// Ports `gguf_merge` (gguf-split.cpp:411 @b1b770d90).
-fn ggufMerge(allocator: std.mem.Allocator, split_params: Params) !void {
+fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params) !void {
     const func = "gguf_merge";
     io.eprintf("%s: %s -> %s\n", .{ func, split_params.input.ptr, split_params.output.ptr });
     var n_split: c_int = 1;
     var total_tensors: c_int = 0;
 
     // avoid overwriting existing output file
-    if (fopen(split_params.output.ptr, "rb")) |existing| {
-        _ = fclose(existing);
+    if (common.file.openIn(std_io, split_params.output)) |existing| {
+        existing.close(std_io);
         io.eprintf("%s: output file %s already exists\n", .{ func, split_params.output.ptr });
         common.cExit(1);
-    }
+    } else |_| {}
 
     const ctx_out = c.gguf_init_empty().?;
 
@@ -588,15 +576,12 @@ fn ggufMerge(allocator: std.mem.Allocator, split_params: Params) !void {
         common.cExit(1);
     }
 
-    var fout: ?*anyopaque = null;
+    var fout: Out = undefined;
     if (!split_params.dry_run) {
-        fout = fopen(split_params.output.ptr, "wb") orelse {
-            io.eprintf("terminate called after throwing an instance of 'std::ios_base::failure'\n", .{});
-            std.process.abort();
-        };
+        fout = createOut(std_io, split_params.output);
         // placeholder for the meta data
         const meta_size = c.gguf_get_meta_size(ctx_out);
-        zeros(fout.?, meta_size);
+        zeros(&fout, meta_size);
     }
 
     // Write tensors data
@@ -604,14 +589,14 @@ fn ggufMerge(allocator: std.mem.Allocator, split_params: Params) !void {
     i_split = 0;
     while (i_split < n_split) : (i_split += 1) {
         _ = c.llama_split_path(&split_path, split_path.len, &split_prefix, i_split, n_split);
-        const f_input = fopen(&split_path, "rb") orelse {
+        const f_input = common.file.openIn(std_io, std.mem.sliceTo(&split_path, 0)) catch {
             io.eprintf("%s:  failed to open input GGUF from %s\n", .{ func, cstr(&split_path) });
             for (ctx_ggufs.items, ctx_metas.items) |g, m| {
                 c.gguf_free(g);
                 c.ggml_free(m);
             }
             c.gguf_free(ctx_out);
-            if (!split_params.dry_run) _ = fclose(fout.?);
+            if (!split_params.dry_run) fout.close(std_io);
             common.cExit(1);
         };
         io.eprintf("%s: writing tensors %s ...", .{ func, cstr(&split_path) });
@@ -630,42 +615,40 @@ fn ggufMerge(allocator: std.mem.Allocator, split_params: Params) !void {
             if (read_data.items.len < n_bytes) try read_data.resize(allocator, n_bytes);
 
             const offset = c.gguf_get_data_offset(ctx_gguf) + c.gguf_get_tensor_offset(ctx_gguf, i_tensor);
-            seek(f_input, offset);
-            if (!readInto(f_input, read_data.items[0..n_bytes])) {
+            if (!common.file.readAt(std_io, f_input, read_data.items[0..n_bytes], offset)) {
                 io.eprintf("%s: failed to read %zu bytes at offset %zu, input file may be truncated\n", .{ func, n_bytes, offset });
                 common.cExit(1);
             }
             if (!split_params.dry_run) {
                 // write tensor data + padding
-                writeAll(fout.?, read_data.items[0..n_bytes]);
-                zeros(fout.?, pad(n_bytes) - n_bytes);
+                writeAll(&fout, read_data.items[0..n_bytes]);
+                zeros(&fout, pad(n_bytes) - n_bytes);
             }
         }
 
         c.gguf_free(ctx_gguf);
         c.ggml_free(ctx_meta);
-        _ = fclose(f_input);
+        f_input.close(std_io);
         io.eprintf("\x1b[3Ddone\n", .{});
 
         if (!split_params.dry_run and split_params.delete_splits) {
-            const delete_result = remove(&split_path);
-            if (delete_result != 0) {
+            if (common.file.remove(std_io, std.mem.sliceTo(&split_path, 0))) {
+                io.eprintf("%s: deleted file %s\n", .{ func, cstr(&split_path) });
+            } else {
                 merge_error = true;
                 io.eprintf("error: failed to delete %s\n", .{cstr(&split_path)});
-            } else {
-                io.eprintf("%s: deleted file %s\n", .{ func, cstr(&split_path) });
             }
         }
     }
 
     if (!split_params.dry_run) {
         // go back to beginning of file and write the updated metadata
-        seek(fout.?, 0);
+        fout.seek(0) catch terminate();
         const data = try allocator.alloc(u8, c.gguf_get_meta_size(ctx_out));
         defer allocator.free(data);
         c.gguf_get_meta_data(ctx_out, data.ptr);
-        writeAll(fout.?, data);
-        _ = fclose(fout.?);
+        writeAll(&fout, data);
+        fout.close(std_io);
     }
     c.gguf_free(ctx_out);
 
@@ -683,8 +666,8 @@ pub fn main(init: std.process.Init) !void {
     try parse(argv, &params, arena);
 
     switch (params.operation) {
-        .split => try ggufSplit(init.gpa, params),
-        .merge => try ggufMerge(init.gpa, params),
+        .split => try ggufSplit(init.gpa, init.io, params),
+        .merge => try ggufMerge(init.gpa, init.io, params),
         else => {
             printUsage(argv[0].ptr);
             common.cExit(1);

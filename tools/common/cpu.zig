@@ -10,10 +10,10 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const file = @import("file.zig");
 
 extern fn sysctlbyname(name: [*:0]const u8, oldp: ?*anyopaque, oldlenp: ?*usize, newp: ?*anyopaque, newlen: usize) c_int;
 // `std.c` declares no `fgets`.
-extern fn fgets(s: [*]u8, n: c_int, stream: *std.c.FILE) ?[*]u8;
 
 /// `std::thread::hardware_concurrency()`.
 fn hardwareConcurrency() u32 {
@@ -32,12 +32,15 @@ pub fn numPhysicalCores() i32 {
         while (cpu < std.math.maxInt(u32)) : (cpu += 1) {
             var path_buf: [96]u8 = undefined;
             const path = std.fmt.bufPrintSentinel(&path_buf, "/sys/devices/system/cpu/cpu{d}/topology/thread_siblings", .{cpu}, 0) catch break;
-            const f = std.c.fopen(path.ptr, "r") orelse break; // no more cpus
-            defer _ = std.c.fclose(f);
-            var line: [256]u8 = undefined;
-            const got = fgets(&line, line.len, f) orelse continue;
-            var s: []u8 = std.mem.span(@as([*:0]u8, @ptrCast(got)));
-            if (s.len > 0 and s[s.len - 1] == '\n') s = s[0 .. s.len - 1];
+            const std_io = file.defaultIo();
+            const f = file.openIn(std_io, path) catch break; // no more cpus
+            defer f.close(std_io);
+            // `std::getline`'s first line, as `fgets` into 256 bytes reads it
+            var line: [255]u8 = undefined;
+            const n = f.readPositionalAll(std_io, &line, 0) catch continue;
+            if (n == 0) continue;
+            var s: []u8 = line[0..n];
+            if (std.mem.indexOfScalar(u8, s, '\n')) |k| s = s[0..k];
             var dup = false;
             for (seen[0..n_seen]) |x| {
                 if (std.mem.eql(u8, x, s)) dup = true;

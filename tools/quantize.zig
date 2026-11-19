@@ -352,36 +352,21 @@ fn parseTensorType(a: std.mem.Allocator, data: [:0]const u8, tensor_type: *std.A
     return true;
 }
 
-extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
-extern fn fclose(f: *anyopaque) c_int;
-extern fn fgetc(f: *anyopaque) c_int;
-extern fn strerror(errnum: c_int) [*:0]const u8;
 extern fn atoi(s: [*:0]const u8) c_int;
 
 /// Ports `parse_tensor_type_file` (quantize/quantize.cpp:349 @b1b770d90): each
 /// white-space-separated word of the file, as `file >> arg` reads them.
-fn parseTensorTypeFile(a: std.mem.Allocator, filename: [:0]const u8, tensor_type: *std.ArrayList(TensorTypeOption)) !bool {
-    const f = fopen(filename.ptr, "r") orelse {
-        io.printf("\n%s: failed to open file '%s': %s\n\n", .{ "parse_tensor_type_file", filename.ptr, strerror(std.c._errno().*) });
+fn parseTensorTypeFile(a: std.mem.Allocator, std_io: std.Io, filename: [:0]const u8, tensor_type: *std.ArrayList(TensorTypeOption)) !bool {
+    const text = common.file.readText(std_io, a, filename) catch |e| {
+        io.printf("\n%s: failed to open file '%s': %s\n\n", .{ "parse_tensor_type_file", filename.ptr, common.file.errnoText(e) });
         return false;
     };
-    defer _ = fclose(f);
+    defer a.free(text);
 
-    var word: std.ArrayList(u8) = .empty;
-    defer word.deinit(a);
-    while (true) {
-        const ch = fgetc(f);
-        const ws = ch == -1 or std.ascii.isWhitespace(@intCast(ch));
-        if (!ws) {
-            try word.append(a, @intCast(ch));
-            continue;
-        }
-        if (word.items.len != 0) {
-            const arg = try a.dupeSentinel(u8, word.items, 0);
-            word.clearRetainingCapacity();
-            if (!try parseTensorType(a, arg, tensor_type)) return false;
-        }
-        if (ch == -1) break;
+    var words = std.mem.tokenizeAny(u8, text, &std.ascii.whitespace);
+    while (words.next()) |word| {
+        const arg = try a.dupeSentinel(u8, word, 0);
+        if (!try parseTensorType(a, arg, tensor_type)) return false;
     }
 
     return true;
@@ -419,14 +404,15 @@ fn parseLayerPrune(a: std.mem.Allocator, data: [:0]const u8, prune_layers: *std.
 }
 
 /// `std::filesystem::equivalent(a, b, ec)`: both exist and are one file.
-fn equivalent(a: [:0]const u8, b: [:0]const u8) bool {
+fn equivalent(std_io: std.Io, a: [:0]const u8, b: [:0]const u8) bool {
     if (comptime builtin.os.tag == .windows) {
         // Windows compares by volume serial and file index; resolving both
         // paths is the closest the C library offers.
         var ra: [260:0]u8 = undefined;
         var rb: [260:0]u8 = undefined;
         if (_fullpath(&ra, a.ptr, ra.len) == null or _fullpath(&rb, b.ptr, rb.len) == null) return false;
-        if (fopen(b.ptr, "rb") == null) return false;
+        const fb = common.file.openIn(std_io, b) catch return false;
+        fb.close(std_io);
         return std.ascii.eqlIgnoreCase(std.mem.sliceTo(&ra, 0), std.mem.sliceTo(&rb, 0));
     }
     if (comptime builtin.os.tag == .linux) {
@@ -472,7 +458,7 @@ fn pathFilename(p: []const u8) []const u8 {
 }
 
 /// Ports `llama_quantize` (quantize/quantize.cpp:395 @b1b770d90).
-fn quantize(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
+fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u8 {
     const func = "llama_quantize";
     const exe = argv[0].ptr;
     if (argv.len < 3) usage(exe);
@@ -509,7 +495,7 @@ fn quantize(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
         } else if (std.mem.eql(u8, arg, "--tensor-type-file")) {
             if (last) usage(exe);
             arg_idx += 1;
-            if (!try parseTensorTypeFile(a, argv[arg_idx], &tensor_type_opts)) usage(exe);
+            if (!try parseTensorTypeFile(a, std_io, argv[arg_idx], &tensor_type_opts)) usage(exe);
         } else if (std.mem.eql(u8, arg, "--prune-layers")) {
             if (last) usage(exe);
             arg_idx += 1;
@@ -670,7 +656,7 @@ fn quantize(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     const out_z = try a.dupeSentinel(u8, fname_out, 0);
     const ftype_z = try a.dupeSentinel(u8, ftype_str, 0);
     if (!params.dry_run) {
-        if (equivalent(fname_inp, out_z)) {
+        if (equivalent(std_io, fname_inp, out_z)) {
             io.eprintf("%s: error: input and output files are the same: '%s'\n", .{ func, fname_inp.ptr });
             return 1;
         }
@@ -721,7 +707,7 @@ fn quantize(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
-    return quantize(arena, argv);
+    return quantize(arena, init.io, argv);
 }
 
 // -----------------------------------------------------------------------------

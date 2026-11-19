@@ -59,25 +59,15 @@ fn getKvF32(ctx_gguf: ?*c.gguf_context, key: [*:0]const u8) f32 {
     return if (id < 0) 0.0 else c.gguf_get_val_f32(ctx_gguf, id);
 }
 
-extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
-extern fn fclose(f: *anyopaque) c_int;
-extern fn fread(ptr: [*]u8, size: usize, n: usize, f: *anyopaque) usize;
-extern fn fwrite(ptr: [*]const u8, size: usize, n: usize, f: *anyopaque) usize;
-extern fn fseeko(f: *anyopaque, off: i64, whence: c_int) c_int;
-extern fn _fseeki64(f: *anyopaque, off: i64, whence: c_int) c_int;
+const Out = tc.file.Out;
 
-fn seek(f: *anyopaque, off: u64) void {
-    _ = if (comptime @import("builtin").os.tag == .windows) _fseeki64(f, @intCast(off), 0) else fseeko(f, @intCast(off), 0);
-}
-
-fn write(f: *anyopaque, bytes: []const u8) void {
-    if (bytes.len != 0) _ = fwrite(bytes.ptr, 1, bytes.len, f);
-}
+// The C's writes are unchecked: `fout`'s `failbit` exceptions would throw,
+// and the port has never raised them, so a failed write is dropped here as
+// there.
 
 /// Ports `zeros` (export-lora.cpp:32 @b1b770d90).
-fn zeros(f: *anyopaque, n: usize) void {
-    const zero = [1]u8{0};
-    for (0..n) |_| write(f, &zero);
+fn zeros(f: *Out, n: usize) void {
+    f.zeros(n) catch {};
 }
 
 /// Ports `ggml_ne_string` (export-lora.cpp:39 @b1b770d90).
@@ -106,16 +96,17 @@ fn loadGguf(fname: [:0]const u8, ctx_ggml: *?*c.ggml_context) !*c.gguf_context {
 const Input = struct {
     ctx_meta: ?*c.ggml_context = null,
     ctx_gguf: ?*c.gguf_context = null,
-    f_in: *anyopaque,
+    io: std.Io,
+    f_in: std.Io.File,
     /// `tensors`, by name; `names` walks it in `std::map` order.
     tensors: std.StringHashMapUnmanaged(*c.ggml_tensor) = .empty,
     names: std.ArrayList([]const u8) = .empty,
     alpha: f32 = 0,
     scale: f32,
 
-    fn init(a: std.mem.Allocator, fname: [:0]const u8, scale: f32) !Input {
-        const f_in = fopen(fname.ptr, "rb") orelse return throw("failed to open input gguf from {s}", .{fname});
-        var self: Input = .{ .f_in = f_in, .scale = scale };
+    fn init(a: std.mem.Allocator, std_io: std.Io, fname: [:0]const u8, scale: f32) !Input {
+        const f_in = tc.file.openIn(std_io, fname) catch return throw("failed to open input gguf from {s}", .{fname});
+        var self: Input = .{ .io = std_io, .f_in = f_in, .scale = scale };
 
         self.ctx_gguf = try loadGguf(fname, &self.ctx_meta);
         self.alpha = getKvF32(self.ctx_gguf, "adapter.lora.alpha");
@@ -150,8 +141,7 @@ const Input = struct {
         const zname = try a.dupeSentinel(u8, name, 0);
         const i_tensor_in = c.gguf_find_tensor(self.ctx_gguf, zname.ptr); // idx of tensor in the input file
         const offset = c.gguf_get_data_offset(self.ctx_gguf) + c.gguf_get_tensor_offset(self.ctx_gguf, i_tensor_in);
-        seek(self.f_in, offset);
-        if (fread(buf.items.ptr, 1, len, self.f_in) != len) {
+        if (!tc.file.readAt(self.io, self.f_in, buf.items[0..len], offset)) {
             return throw("failed to read data for tensor {s}, input file may be truncated", .{name});
         }
     }
@@ -178,13 +168,14 @@ const MergeCtx = struct {
     // output file
     ctx_out: ?*c.gguf_context = null,
     ctx_out_ggml: ?*c.ggml_context = null,
-    fout: *anyopaque = undefined,
+    io: std.Io,
+    fout: Out = undefined,
 
-    fn init(a: std.mem.Allocator, base_fname: [:0]const u8, lora_files: []const tc.params.LoraInfo, outfile: [:0]const u8, n_threads: c_int) !MergeCtx {
-        var self: MergeCtx = .{ .a = a, .base_model = try Input.init(a, base_fname, 0), .n_threads = n_threads };
+    fn init(a: std.mem.Allocator, std_io: std.Io, base_fname: [:0]const u8, lora_files: []const tc.params.LoraInfo, outfile: [:0]const u8, n_threads: c_int) !MergeCtx {
+        var self: MergeCtx = .{ .a = a, .io = std_io, .base_model = try Input.init(a, std_io, base_fname, 0), .n_threads = n_threads };
         // `fout(outfile, std::ios::binary)` and `fout.exceptions(failbit)`:
         // a stream that did not open throws at once
-        self.fout = fopen(outfile.ptr, "wb") orelse return throw("ios_base::clear: unspecified iostream_category error", .{});
+        self.fout = Out.create(std_io, outfile) catch return throw("ios_base::clear: unspecified iostream_category error", .{});
 
         if (c.gguf_find_key(self.base_model.ctx_gguf, tc.kv_split_count) >= 0) {
             return throw("split model is not yet supported", .{});
@@ -192,7 +183,7 @@ const MergeCtx = struct {
 
         for (lora_files) |lora_inp| {
             const adapter = try a.create(Input);
-            adapter.* = try Input.init(a, lora_inp.path, lora_inp.scale);
+            adapter.* = try Input.init(a, std_io, lora_inp.path, lora_inp.scale);
             try self.checkMetadataLora(adapter);
             try self.adapters.append(a, adapter);
         }
@@ -280,7 +271,7 @@ const MergeCtx = struct {
         }
 
         // placeholder for the meta data
-        zeros(self.fout, c.gguf_get_meta_size(self.ctx_out));
+        zeros(&self.fout, c.gguf_get_meta_size(self.ctx_out));
 
         // process base model tensors
         var n_merged: usize = 0;
@@ -297,8 +288,8 @@ const MergeCtx = struct {
         {
             const data = try a.alloc(u8, c.gguf_get_meta_size(self.ctx_out));
             c.gguf_get_meta_data(self.ctx_out, data.ptr);
-            seek(self.fout, 0);
-            write(self.fout, data);
+            self.fout.seek(0) catch {};
+            self.fout.write(data) catch {};
         }
 
         io.printf("%s : merged %zu tensors with lora adapters\n", .{ "run_merge", n_merged });
@@ -310,8 +301,8 @@ const MergeCtx = struct {
         io.printf("%s :  %s [%s]\n", .{ "copy_tensor", @as([*:0]const u8, @ptrCast(&base.name)), (try neString(self.a, base)).ptr });
         const len = c.ggml_nbytes(base);
         try self.base_model.readTensorData(self.a, std.mem.sliceTo(&base.name, 0), &self.read_buf);
-        write(self.fout, self.read_buf.items[0..len]);
-        zeros(self.fout, pad(len) - len);
+        self.fout.write(self.read_buf.items[0..len]) catch {};
+        zeros(&self.fout, pad(len) - len);
     }
 
     /// Ports `merge_tensor` (export-lora.cpp:287 @b1b770d90), a member of `lora_merge_ctx`.
@@ -411,8 +402,8 @@ const MergeCtx = struct {
             const len = c.ggml_nbytes(result);
             if (self.read_buf.items.len < len) try self.read_buf.resize(a, len);
             c.ggml_backend_tensor_get(result, self.read_buf.items.ptr, 0, len);
-            write(self.fout, self.read_buf.items[0..len]);
-            zeros(self.fout, pad(len) - len);
+            self.fout.write(self.read_buf.items[0..len]) catch {};
+            zeros(&self.fout, pad(len) - len);
         }
 
         c.ggml_free(ctx);
@@ -424,7 +415,7 @@ const MergeCtx = struct {
         c.ggml_backend_free(self.backend);
         c.gguf_free(self.ctx_out);
         c.ggml_free(self.ctx_out_ggml);
-        _ = fclose(self.fout);
+        self.fout.close(self.io);
     }
 };
 
@@ -439,7 +430,7 @@ fn printUsage(argv: []const [:0]const u8) void {
 }
 
 /// Ports `main` (export-lora.cpp:418 @b1b770d90).
-fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
+fn run(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u8 {
     var params = try tc.params.Params.init(a);
 
     params.out_file = "ggml-lora-merged-f16.gguf";
@@ -451,7 +442,7 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     g_verbose = params.verbosity > 1;
     const out_file = try a.dupeSentinel(u8, params.out_file, 0);
     blk: {
-        var ctx = MergeCtx.init(a, try a.dupeSentinel(u8, params.model.path, 0), params.lora_adapters.items, out_file, params.cpuparams.n_threads) catch |e| {
+        var ctx = MergeCtx.init(a, std_io, try a.dupeSentinel(u8, params.model.path, 0), params.lora_adapters.items, out_file, params.cpuparams.n_threads) catch |e| {
             if (e == error.Throw) break :blk;
             return e;
         };
@@ -470,7 +461,7 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
 pub fn main(init: std.process.Init) !u8 {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
-    return run(arena, argv);
+    return run(arena, init.io, argv);
 }
 
 // -----------------------------------------------------------------------------

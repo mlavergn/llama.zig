@@ -21,6 +21,7 @@ const c = @import("tools_h");
 const cxx = @import("cxx.zig");
 const log = @import("log.zig");
 const io = @import("io.zig");
+const file = @import("file.zig");
 
 /// Ports `LLAMA_NGRAM_MIN`, `LLAMA_NGRAM_MAX`, `LLAMA_NGRAM_STATIC`
 /// (ngram-cache.h:9, 10, 11 @b1b770d90).
@@ -308,12 +309,6 @@ pub fn draft(inp: []const c.llama_token, draft_out: *std.ArrayList(c.llama_token
     }
 }
 
-const FILE = opaque {};
-extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*FILE;
-extern fn fclose(f: *FILE) c_int;
-extern fn fwrite(ptr: *const anyopaque, size: usize, n: usize, f: *FILE) usize;
-extern fn fread(ptr: *anyopaque, size: usize, n: usize, f: *FILE) usize;
-
 /// Ports `common_ngram_cache_save` (ngram-cache.cpp:198 @b1b770d90): each
 /// n-gram's 16 bytes, its token count, and its `(token, count)` pairs, in
 /// iteration order. A file that cannot be opened is written to as the
@@ -323,8 +318,15 @@ extern fn fread(ptr: *anyopaque, size: usize, n: usize, f: *FILE) usize;
 /// - `cache`: the cache.
 /// - `filename`: where to write it.
 pub fn save(cache: *const Cache, filename: [:0]const u8) void {
-    const f = fopen(filename.ptr, "wb") orelse return;
-    defer _ = fclose(f);
+    const std_io = file.defaultIo();
+    const f = std.Io.Dir.cwd().createFile(std_io, filename, .{}) catch return;
+    defer f.close(std_io);
+    // records are a few bytes each: buffered, as `std::ofstream`'s are,
+    // and written out before the file closes
+    var buf: [64 * 1024]u8 = undefined;
+    var fw = f.writer(std_io, &buf);
+    defer fw.interface.flush() catch {};
+    const w = &fw.interface;
     var it = cache.iterator();
     while (it.next()) |item| {
         const ngram = item.key;
@@ -333,16 +335,16 @@ pub fn save(cache: *const Cache, filename: [:0]const u8) void {
         const ntokens: i32 = @intCast(token_counts.count());
         if (!(ntokens > 0)) _ = c.ggml_abort("ngram-cache.cpp", 205, "GGML_ASSERT(%s) failed", "ntokens > 0");
 
-        _ = fwrite(&ngram, @sizeOf(Ngram), 1, f);
-        _ = fwrite(&ntokens, @sizeOf(i32), 1, f);
+        w.writeAll(std.mem.asBytes(&ngram)) catch {};
+        w.writeAll(std.mem.asBytes(&ntokens)) catch {};
         var it2 = token_counts.iterator();
         while (it2.next()) |item2| {
             const token = item2.key;
             const count_ = item2.value.*;
             if (!(count_ > 0)) _ = c.ggml_abort("ngram-cache.cpp", 212, "GGML_ASSERT(%s) failed", "count > 0");
 
-            _ = fwrite(&token, @sizeOf(c.llama_token), 1, f);
-            _ = fwrite(&count_, @sizeOf(i32), 1, f);
+            w.writeAll(std.mem.asBytes(&token)) catch {};
+            w.writeAll(std.mem.asBytes(&count_)) catch {};
         }
     }
 }
@@ -350,14 +352,16 @@ pub fn save(cache: *const Cache, filename: [:0]const u8) void {
 /// `std::istream::read`'s answer: all `n` bytes or a failed stream at
 /// end of file, which is all the C++ asks of it.
 const Reader = struct {
-    f: *FILE,
+    r: *std.Io.File.Reader,
     eof: bool = false,
 
     fn read(self: *Reader, dst: []u8) bool {
         if (self.eof) return false;
-        if (fread(dst.ptr, 1, dst.len, self.f) == dst.len) return true;
-        self.eof = true;
-        return false;
+        self.r.interface.readSliceAll(dst) catch {
+            self.eof = true;
+            return false;
+        };
+        return true;
     }
 };
 
@@ -372,9 +376,12 @@ const Reader = struct {
 /// Return: the cache, or `error.OpenFailed` where the C++ throws
 /// `std::ifstream::failure("Unable to open file " + filename)`.
 pub fn load(allocator: std.mem.Allocator, filename: [:0]const u8) error{ OutOfMemory, OpenFailed }!Cache {
-    const f = fopen(filename.ptr, "rb") orelse return error.OpenFailed;
-    defer _ = fclose(f);
-    var hashmap_file: Reader = .{ .f = f };
+    const std_io = file.defaultIo();
+    const f = file.openIn(std_io, filename) catch return error.OpenFailed;
+    defer f.close(std_io);
+    var buf: [64 * 1024]u8 = undefined;
+    var fr = f.reader(std_io, &buf);
+    var hashmap_file: Reader = .{ .r = &fr };
     var ngram_cache = try Cache.init(allocator);
     errdefer ngram_cache.deinit();
 

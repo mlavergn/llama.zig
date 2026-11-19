@@ -17,6 +17,7 @@ const std = @import("std");
 const c = @import("tools_h");
 const log = @import("log.zig");
 const strings = @import("strings.zig");
+const file = @import("file.zig");
 
 /// `LLM_KV_IMATRIX_DATASETS`, `LLM_KV_IMATRIX_CHUNK_COUNT`, `LLM_KV_IMATRIX_CHUNK_SIZE`
 /// (imatrix-loader.h:8, 9, 10 @b1b770d90).
@@ -91,22 +92,18 @@ fn lessThan(_: void, a: []const u8, b: []const u8) bool {
     return std.mem.order(u8, a, b) == .lt;
 }
 
-extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
-extern fn fclose(f: *anyopaque) c_int;
-extern fn fread(ptr: [*]u8, size: usize, n: usize, f: *anyopaque) usize;
-extern fn fgetc(f: *anyopaque) c_int;
-extern fn ungetc(ch: c_int, f: *anyopaque) c_int;
-
 /// `std::ifstream` in binary mode, as far as the legacy reader uses it:
 /// `read` sets a sticky fail flag on a short read, `peek` looks at one byte.
 const In = struct {
-    f: *anyopaque,
+    r: *std.Io.File.Reader,
     failed: bool = false,
 
     fn read(self: *In, buf: []u8) void {
         if (self.failed) return;
         if (buf.len == 0) return;
-        if (fread(buf.ptr, 1, buf.len, self.f) != buf.len) self.failed = true;
+        self.r.interface.readSliceAll(buf) catch {
+            self.failed = true;
+        };
     }
 
     fn readInt(self: *In, comptime T: type) T {
@@ -117,9 +114,7 @@ const In = struct {
 
     fn peekEof(self: *In) bool {
         if (self.failed) return true;
-        const ch = fgetc(self.f);
-        if (ch == -1) return true;
-        _ = ungetc(ch, self.f);
+        _ = self.r.interface.peekByte() catch return true;
         return false;
     }
 };
@@ -127,12 +122,15 @@ const In = struct {
 /// Ports `common_imatrix_load_legacy` (imatrix-loader.cpp:10 @b1b770d90).
 fn loadLegacy(fname: [:0]const u8, imatrix: *Imatrix) !bool {
     const func = "common_imatrix_load_legacy";
-    const f = fopen(fname.ptr, "rb") orelse {
+    const std_io = file.defaultIo();
+    const f = file.openIn(std_io, fname) catch {
         log.err("%s: failed to open %s\n", .{ func, fname.ptr });
         return false;
     };
-    defer _ = fclose(f);
-    var in: In = .{ .f = f };
+    defer f.close(std_io);
+    var buf: [64 * 1024]u8 = undefined;
+    var fr = f.reader(std_io, &buf);
+    var in: In = .{ .r = &fr };
 
     const n_entries = in.readInt(c_int);
     if (in.failed or n_entries < 1) {

@@ -167,6 +167,8 @@ const CollectorParams = struct {
 /// computing the graph, one node at a time, so there is nothing to lock.
 const Collector = struct {
     stats: libcxx.StringMap(Stats),
+    /// What `save` writes through: `main`'s, set with `stats`.
+    io: std.Io,
     params: CollectorParams = .{},
     datasets: std.ArrayList([]const u8) = .empty,
     last_chunk: i32 = 0,
@@ -430,30 +432,29 @@ const Collector = struct {
 
         const chunk_size = self.eChunkSize();
 
-        const out = std.c.fopen(@ptrCast(fname.items.ptr), "wb");
-        defer if (out) |f| {
-            _ = std.c.fclose(f);
-        };
+        // an `std::ofstream` that did not open writes nothing, unchecked
+        var out: ?tc.file.Out = tc.file.Out.create(self.io, fname.items[0 .. fname.items.len - 1]) catch null;
+        defer if (out) |*f| f.close(self.io);
         const W = struct {
-            fn bytes(f: ?*std.c.FILE, b: []const u8) void {
-                if (f) |ff| _ = std.c.fwrite(b.ptr, 1, b.len, ff);
+            fn bytes(f: *?tc.file.Out, b: []const u8) void {
+                if (f.*) |*o| o.write(b) catch {};
             }
-            fn int(f: ?*std.c.FILE, v: i32) void {
+            fn int(f: *?tc.file.Out, v: i32) void {
                 bytes(f, std.mem.asBytes(&v));
             }
         };
-        W.int(out, n_entries);
+        W.int(&out, n_entries);
         for (to_store.items) |name| {
             const stat = self.stats.get(name).?;
-            W.int(out, @intCast(name.len));
-            W.bytes(out, name);
+            W.int(&out, @intCast(name.len));
+            W.bytes(&out, name);
             // ceiling division to avoid accidental zeros
             const maxc = std.mem.max(i64, stat.counts.items);
             const ncall: i32 = @truncate(@divTrunc(maxc + (chunk_size - 1), chunk_size));
-            W.int(out, ncall);
+            W.int(&out, ncall);
             const nval: i32 = @intCast(stat.values.items.len);
             const nmat: i32 = @intCast(stat.counts.items.len);
-            W.int(out, nval);
+            W.int(&out, nval);
             if (nval > 0 and nmat > 0) {
                 const tmp = try gpa.alloc(f32, @intCast(nval));
                 defer gpa.free(tmp);
@@ -468,20 +469,20 @@ const Collector = struct {
                     }
                     tmp[@intCast(i)] = (value / count) * @as(f32, @floatFromInt(ncall));
                 }
-                W.bytes(out, std.mem.sliceAsBytes(tmp));
+                W.bytes(&out, std.mem.sliceAsBytes(tmp));
             }
         }
 
         // Write the number of call the matrix was computed with
-        W.int(out, self.last_chunk);
+        W.int(&out, self.last_chunk);
 
         // Write the input filename at the end of the file to later on specify it in quantize
         {
             var dataset_file = self.params.prompt_file;
             // When there is no prompt but there were other imatrix files loaded, use the last dataset
             if (self.params.prompt_file.len == 0 and self.datasets.items.len != 0) dataset_file = self.datasets.items[self.datasets.items.len - 1];
-            W.int(out, @intCast(dataset_file.len));
-            W.bytes(out, dataset_file);
+            W.int(&out, @intCast(dataset_file.len));
+            W.bytes(&out, dataset_file);
         }
 
         log.tmpl(.none, 1, "\n", .{});
@@ -2058,7 +2059,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
         params.speculative.draft.n_max = 0; // keep trunk's context identical to a plain run
     }
 
-    g_collector = .{ .stats = try libcxx.StringMap(Stats).init(gpa) };
+    g_collector = .{ .stats = try libcxx.StringMap(Stats).init(gpa), .io = init.io };
 
     // set_params before show_statistics so load_imatrix has valid n_ctx/n_parallel
     g_collector.params = .of(&params);

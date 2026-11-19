@@ -50,7 +50,8 @@ Exactly four markdown files. Never add another.
 - **Out of scope, by decision:** `llama-server`'s executable and HTTP front on Windows; any BLAS but Accelerate (zDNN, ZenDNN, OpenBLAS... are vendor libraries); x86 below `x86_64_v3`; Apple OS below 26.0 on any platform.
 - **`llama-server-core` is in scope on Windows** (zigllm drives it in-process): `ServerContext`, its queues and the data layer build there. MCP, the server-side tools, `subproc`'s waiter and `oaicompat`'s media loading (`download.zig`, httplib's client) are POSIX only until their `_WIN32` arms are ported; `harness/server_core_test.zig` lists both sets.
 - **`llama-cli` refuses what it does not support** (non-zero exit, clear error), never ignores it; flags keep upstream's names and defaults.
-- **Never `@panic`, `std.debug.print` or `std.log` in library code**; abort with `impl.abort`. A `@panic` pulls in `compiler_rt`, whose `expf`/`logf` shadow libm's.
+- **Library logs go through upstream's callbacks** (`llama_log_set`, `ggml_log_set`): never `std.debug.print` or `std.log` in library code, which write to stderr past them. Never `@panic` either; abort with `impl.abort`. A `@panic` pulls in `compiler_rt`, whose `expf`/`logf` shadow libm's.
+- **Library code that needs an `Io` takes `std.Io.Threaded.global_single_threaded`**: the C API hands it none. No worker threads or signal handlers; `concurrent` fails and `async` runs inline; it sees no environment on POSIX (`getenv` stays). Never `Threaded.init` in a library: it installs `SIGIO` and `SIGPIPE` handlers in the host. It builds and links in every Apple slice.
 - **Keep upstream's `GGML_ASSERT` in every build mode**; port a C `assert` as nothing (`NDEBUG` in the reference) and its following unsigned arithmetic as `-%`/`+%`.
 
 ### Porting

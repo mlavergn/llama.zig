@@ -215,11 +215,10 @@ test:
 	@printf '\n== libmtmd exports ==\n'
 	zig build mtmd-ref --release=fast
 	./scripts/mtmd-exports
-	@printf '\n== the libraries for iOS (no std.debug.print or @panic in library code) ==\n'
-	@# Zig 0.17 cannot compile std.Io.Threaded for iOS, which std.debug.print
-	@# reaches; nothing else would notice until the xcframework next builds.
-	@# The xcframework's iOS device slice: libggml with BLAS, libmtmd with
-	@# libllama inside, for the A7 upstream's framework is built for.
+	@printf '\n== the libraries for iOS ==\n'
+	@# Nothing else compiles library code for iOS before the xcframework next
+	@# builds. The xcframework's iOS device slice: libggml with BLAS, libmtmd
+	@# with libllama inside, for the A7 upstream's framework is built for.
 	zig build xcframework -Dblas -Dtarget=aarch64-ios.26.0 -Dcpu=apple_a7 --release=fast --prefix zig-out/ios-check
 	@printf '\n== llama-server-core as a consumer builds it (host, Windows) ==\n'
 	./scripts/server-core-consumer

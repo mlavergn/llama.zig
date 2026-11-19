@@ -456,7 +456,7 @@ fn perplexityV2(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Par
 }
 
 /// Ports `perplexity` (perplexity.cpp:442 @b1b770d90).
-fn perplexity(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Params, n_ctx: i32) !void {
+fn perplexity(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, params: *const Params, n_ctx: i32) !void {
     if (params.ppl_stride > 0) return perplexityV2(a, ctx, params);
 
     const func = "perplexity";
@@ -466,25 +466,23 @@ fn perplexity(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Param
     const add_bos = c.llama_vocab_get_add_bos(vocab);
     ggmlAssert(!c.llama_vocab_get_add_eos(vocab), 456, "!llama_vocab_get_add_eos(vocab)");
 
-    var logits_stream: ?*std.c.FILE = null;
-    defer if (logits_stream) |f| {
-        _ = std.c.fclose(f);
-    };
+    var logits_stream: ?tc.file.Out = null;
+    defer if (logits_stream) |*f| f.close(std_io);
     const W = struct {
-        fn bytes(f: ?*std.c.FILE, b: []const u8) void {
-            if (f) |ff| _ = std.c.fwrite(b.ptr, 1, b.len, ff);
+        fn bytes(f: *?tc.file.Out, b: []const u8) void {
+            if (f.*) |*o| o.write(b) catch {};
         }
     };
     if (params.logits_file.len != 0) {
         const z = try a.dupeSentinel(u8, params.logits_file, 0);
-        logits_stream = std.c.fopen(z.ptr, "wb");
+        logits_stream = tc.file.Out.create(std_io, z) catch null;
         if (logits_stream == null) {
             log.err("%s: failed to open %s for writing\n", .{ func, z.ptr });
             return;
         }
         log.inf("%s: saving all logits to %s\n", .{ func, z.ptr });
-        W.bytes(logits_stream, "_logits_");
-        W.bytes(logits_stream, std.mem.asBytes(&n_ctx));
+        W.bytes(&logits_stream, "_logits_");
+        W.bytes(&logits_stream, std.mem.asBytes(&n_ctx));
     }
 
     const tim1 = nowNs();
@@ -538,9 +536,9 @@ fn perplexity(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Param
     var log_probs: []u16 = &.{};
     const nv: usize = @intCast(2 * @divTrunc(n_vocab + 1, 2) + 4);
     if (params.logits_file.len != 0) {
-        W.bytes(logits_stream, std.mem.asBytes(&n_vocab));
-        W.bytes(logits_stream, std.mem.asBytes(&n_chunk));
-        W.bytes(logits_stream, std.mem.sliceAsBytes(tokens[0..@intCast(n_chunk * n_ctx)]));
+        W.bytes(&logits_stream, std.mem.asBytes(&n_vocab));
+        W.bytes(&logits_stream, std.mem.asBytes(&n_chunk));
+        W.bytes(&logits_stream, std.mem.sliceAsBytes(tokens[0..@intCast(n_chunk * n_ctx)]));
         log_probs = try gpa.alloc(u16, @as(usize, @intCast(n_ctx)) * nv);
         @memset(log_probs, 0);
     }
@@ -617,7 +615,7 @@ fn perplexity(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Param
             if (params.logits_file.len != 0) {
                 var work: NllWork = .{ .n_vocab = nvu, .logits = all_logits, .tokens = tokens.ptr + base, .n_token = n_token, .log_probs = log_probs.ptr, .nv = nv };
                 try work.run(n_workers, &nll, &nll2);
-                W.bytes(logits_stream, std.mem.sliceAsBytes(log_probs[0 .. n_token * nv]));
+                W.bytes(&logits_stream, std.mem.sliceAsBytes(log_probs[0 .. n_token * nv]));
             } else {
                 var work: NllWork = .{ .n_vocab = nvu, .logits = all_logits, .tokens = tokens.ptr + base, .n_token = n_token, .logit_history = logit_history.ptr + base, .prob_history = prob_history.ptr + base };
                 try work.run(n_workers, &nll, &nll2);
@@ -1780,7 +1778,7 @@ fn sqrtUnc(x: f64, y: f64, cov: f64) f64 {
 }
 
 /// Ports `kl_divergence` (perplexity.cpp:1675 @b1b770d90).
-fn klDivergence(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Params) !void {
+fn klDivergence(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, params: *const Params) !void {
     const func = "kl_divergence";
     const model = c.llama_get_model(ctx);
     const vocab = c.llama_model_get_vocab(model);
@@ -1790,21 +1788,27 @@ fn klDivergence(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Par
         return;
     }
     const fname = try a.dupeSentinel(u8, params.logits_file, 0);
-    const f = std.c.fopen(fname.ptr, "rb") orelse {
+    const f = tc.file.openIn(std_io, fname) catch {
         log.err("%s: failed to open %s\n", .{ func, fname.ptr });
         return;
     };
-    defer _ = std.c.fclose(f);
+    defer f.close(std_io);
+    var in_buf: [65536]u8 = undefined;
+    var f_reader = f.reader(std_io, &in_buf);
+    // `std::ifstream::read`: a short read sets `failbit`, and every read
+    // after it reads nothing
     const In = struct {
-        file: *std.c.FILE,
+        r: *std.Io.File.Reader,
         failed: bool = false,
         fn read(self: *@This(), dst: []u8) bool {
             if (self.failed) return false;
-            if (std.c.fread(dst.ptr, 1, dst.len, self.file) != dst.len) self.failed = true;
+            self.r.interface.readSliceAll(dst) catch {
+                self.failed = true;
+            };
             return !self.failed;
         }
     };
-    var in: In = .{ .file = f };
+    var in: In = .{ .r = &f_reader };
     {
         var check: [8]u8 = undefined;
         if (!in.read(&check) or !std.mem.eql(u8, &check, "_logits_")) {
@@ -2169,9 +2173,9 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     } else if (params.multiple_choice) {
         try multipleChoiceScore(a, ctx, &params);
     } else if (params.kl_divergence) {
-        try klDivergence(a, ctx, &params);
+        try klDivergence(a, init.io, ctx, &params);
     } else {
-        try perplexity(a, ctx, &params, n_ctx);
+        try perplexity(a, init.io, ctx, &params, n_ctx);
     }
 
     log.out("\n", .{});
