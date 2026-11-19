@@ -38,7 +38,7 @@ pub fn realtimeUs() i64 {
 ///
 /// Return: nanoseconds from an arbitrary origin. Whole seconds and the
 /// remainder scale apart: an `i128` division here would pull in `__divti3`,
-/// and `compiler_rt` with it, which shadows libm's `expf` (`CLAUDE.md`).
+/// and `compiler_rt` with it, which shadows libm's `expf`.
 pub fn monotonicNs() u64 {
     if (comptime is_windows) {
         var count: i64 = undefined;

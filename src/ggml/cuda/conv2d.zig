@@ -9,7 +9,7 @@
 //!
 //! # Paths
 //!
-//! An F16 kernel that fits in `int` takes the implicit GEMM (v0.5.0): the
+//! An F16 kernel that fits in `int` takes the implicit GEMM: the
 //! input is converted to F16 (padded first if the convolution pads), then a
 //! pointwise convolution is one cuBLAS GEMM per batch on hardware with fast
 //! F16, and anything else a tiled kernel -- tensor-core MMA from Turing on,

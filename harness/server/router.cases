@@ -1,4 +1,4 @@
-# Router mode (Stage 10 step 7, server-models.cpp): no model on the command
+# Router mode (server-models.cpp): no model on the command
 # line, so the server routes to a child per model. Each side's router
 # spawns its own binary ($BIN), so ours runs ours and upstream's upstream's.
 # router.setup writes $DATA/models and the presets.
@@ -46,7 +46,7 @@ POST /completion {"model":"qwen3","prompt":"One, two,","n_predict":6,"temperatur
 POST /v1/chat/completions {"model":"qwen3","messages":[{"role":"user","content":"Hi"}],"max_tokens":4,"temperature":0}
 POST /tokenize {"model":"qwen3","content":"hello world"}
 POST /detokenize {"model":"qwen3","tokens":[14990,1879]}
-# v1.0.0 (e182fdad4): a browser's request passes the router's origin check and
+# (e182fdad4) a browser's request passes the router's origin check and
 # reaches the child without its Origin and Sec-Fetch-* headers; a child refuses
 # a request that still carries them
 !header Origin: http://127.0.0.1:$SPORT
@@ -187,8 +187,8 @@ GET /models
 POST /models/unload {"model":"qwen3"}
 !waitfor /models "id":"qwen3"[^{]*\{"value":"unloaded"
 
-# --- colours on, which the children follow (v0.6.0: LLAMA_ARG_LOG_COLORS in
-# their arguments). Since v0.6.0 a child's state lines go to its stdout and
+# --- colours on, which the children follow (LLAMA_ARG_LOG_COLORS in
+# their arguments). A child's state lines go to its stdout and
 # its log to stderr, so a colour reset left by a warning cannot hide a state
 # line; the events show it. At the default verbosity
 !server --models-dir $DATA/models -c 256 -np 1 --no-jinja --log-colors on
@@ -201,7 +201,7 @@ GET /models
 POST /models/unload {"model":"tiny"}
 !waitfor /models "id":"tiny"[^{]*\{"value":"unloaded"
 
-# --- v0.5.0: --log-file and --api-key-file stay the router's; the children's
+# --- --log-file and --api-key-file stay the router's; the children's
 # arguments (GET /models) carry neither
 !server --models-dir $DATA/models -c 256 -np 1 --no-jinja --log-file $CWD/router.log --api-key-file $DATA/keys.txt
 !header Authorization: Bearer k4
@@ -230,7 +230,7 @@ POST /models/unload {"model":"new"}
 !waitfor /models "id":"keep"[^{]*\{"value":"unloaded"
 !waitfor /models "id":"new"[^{]*\{"value":"unloaded"
 
-# --- v0.6.0: a preset's --log-file reaches its child and the router's does
+# --- a preset's --log-file reaches its child and the router's does
 # not (GET /models' args); the child writes its commands to stdout and its
 # log to stderr, so the router forwards its log whole
 !server --models-preset $DATA/logfile.ini -c 256 -np 1 -lv 4 --no-jinja --log-file $CWD/router.log
@@ -243,7 +243,7 @@ POST /props {"model":"logged"}
 POST /models/unload {"model":"logged"}
 !waitfor /models "id":"logged"[^{]*\{"value":"unloaded"
 
-# --- v0.6.0: a child whose log is JSON lines on its stdout
+# --- a child whose log is JSON lines on its stdout
 !mask "time":\d+
 !server --models-preset $DATA/jsonlog.ini -c 256 -np 1 --no-jinja
 !fulllog
@@ -253,7 +253,7 @@ GET /models
 POST /models/unload {"model":"jsonlog"}
 !waitfor /models "id":"jsonlog"[^{]*\{"value":"unloaded"
 
-# --- v0.6.0: the router's --no-mmproj applies to every child's input
+# --- the router's --no-mmproj applies to every child's input
 # modalities (update_caps), the decision models' output ones are kept
 !server --models-dir $DATA/models -c 256 -np 1 --no-jinja --no-mmproj
 GET /models
@@ -265,7 +265,7 @@ GET /models
 !noenv
 !env LLAMA_CACHE=$CWD/cache
 
-# --- v0.8.0: a client that hangs up before any byte of its answer: the router
+# --- a client that hangs up before any byte of its answer: the router
 # stops its client, so the child's request is cancelled, not run to its end
 !server --models-dir $DATA/models -c 8192 -np 1 --no-jinja --metrics
 POST /models/load {"model":"qwen3"}
@@ -275,7 +275,7 @@ POST /completion {"model":"qwen3","prompt":"Count:","n_predict":8000,"ignore_eos
 !waitfor /slots?model=qwen3 "is_processing":false
 # a cancelled task counts what it got to; one run to its end counts 8000
 !waitfor /metrics?model=qwen3 tokens_predicted_total ([1-7]\d{3}|\d{1,3})\b
-# v0.8.0: /v1/realtime through the router: a websocket to the child, here one
+# /v1/realtime through the router: a websocket to the child, here one
 # whose model takes no audio, and the error events it answers by itself
 WS /v1/realtime?model=qwen3 [{"$read":1}]
 WS /v1/realtime?model=nope [{"$read":1}]

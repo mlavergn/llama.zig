@@ -191,14 +191,14 @@ const ggml_base_sources = [_][]const u8{
 };
 
 const ggml_base_cxx_sources = [_][]const u8{
-    // ggml.cpp is dropped, not ported (PLAN.md, "Order of work"): it only
+    // ggml.cpp is dropped, not ported: it only
     // installs a std::terminate handler that prints a ggml backtrace when a
     // C++ exception escapes, and no C++ is left in the build to throw one.
     //
     // ggml-backend.cpp is ported: src/ggml/backend.zig and
-    // src/ggml/backend_sched.zig. 102 C-ABI symbols, not the 82 PLAN.md
-    // recorded; none of its 141 mangled exports is reached from another
-    // object, so the Stage 3 swap applies unchanged.
+    // src/ggml/backend_sched.zig. 102 C-ABI symbols, not the 82 first
+    // estimated; none of its 141 mangled exports is reached from another
+    // object, so it swaps at its C ABI like ggml's C files.
     // ggml-backend-meta.cpp is ported: src/ggml/backend_meta.zig, gated by
     // scripts/meta-diff. The multi-device backend behind
     // LLAMA_SPLIT_MODE_TENSOR.
@@ -253,7 +253,7 @@ const ggml_metal_objc_sources = [_][]const u8{
 };
 
 // Every translation unit under `src/` is ported to Zig: libllama swapped
-// once, at `llama.h` (PLAN.md, Decision 42). `libllama.a` is now the Zig
+// once, at `llama.h`. `libllama.a` is now the Zig
 // alone -- `src/llama/module.zig`, with `exports.zig` exporting the C API.
 //
 // The stock C++ is still compiled, as `libllama-ref.a`, for the in-process
@@ -347,20 +347,19 @@ pub const Options = struct {
     /// See `addVulkan`.
     vulkan: ?Vulkan = null,
     /// Builds ggml's BLAS backend, over Accelerate, into `libggml.a`; null
-    /// leaves it out. Apple only (PLAN.md, Decision 60). See `addBlas`.
+    /// leaves it out. Apple only. See `addBlas`.
     blas: ?Blas = null,
 };
 
 /// ggml's BLAS backend, which this build compiles over Apple's Accelerate
-/// alone (PLAN.md, Decision 60).
+/// alone.
 pub const Blas = struct {
     /// Use the Zig port (`src/ggml/blas.zig`) in place of upstream's
     /// `ggml-blas.cpp`. `build.zig` defaults it on; the gates build both.
     port: bool = true,
 };
 
-/// The Vulkan toolchain every Vulkan build uses, resolved by `build.zig`
-/// (PLAN.md, Decisions 55 and 59).
+/// The Vulkan toolchain every Vulkan build uses, resolved by `build.zig`.
 pub const Vulkan = struct {
     /// The `glslc` every shader is compiled with.
     glslc: []const u8,
@@ -389,7 +388,7 @@ pub const Cuda = struct {
     /// by path: Zig reads a system library named `stdc++` as its own libc++.
     libstdcxx: []const u8,
     /// Use the Zig host layer (`src/ggml/cuda/`) in place of upstream's.
-    /// Until the swap (Decision 48) this is off by default and the gates
+    /// Until the swap this is off by default and the gates
     /// build both.
     port: bool = false,
     /// Upstream's `GGML_CUDA_FA_QUANTS`: the FlashAttention K-V type
@@ -567,7 +566,7 @@ const cuda_defines = [_][]const u8{
 /// The K and V types a FlashAttention vector kernel can be instantiated
 /// for, in the order `ggml_cuda_fattn_vec_instances`
 /// (ggml/cmake/common.cmake:60 @b1b770d90) iterates them: its `FA_TYPES`.
-/// `f8_e4m3` joined at v1.0.0 (CUDA's OCP FP8 support).
+/// `f8_e4m3` is CUDA's OCP FP8 support.
 const cuda_fa_types = [_][]const u8{ "q4_0", "q4_1", "q5_0", "q5_1", "q8_0", "bf16", "f16", "f8_e4m3" };
 
 /// What `cudaFaCombinations` derives from `Cuda.fa_quants`.
@@ -659,8 +658,8 @@ fn cudaFaDefines(b: *std.Build, cuda: Cuda) []const []const u8 {
 
 /// Compiles upstream's `ggml-cuda` with `nvcc` and adds it to the ggml module.
 ///
-/// **This is the reference CUDA backend, not a port.** PLAN.md's Stage 6 has
-/// the Zig host layer calling `cudaLaunchKernel`; until that exists, the
+/// **This is the reference CUDA backend, not a port.** The Zig host layer
+/// (`src/ggml/cuda/`) replaces it by default; with `-Dcuda-port=false` the
 /// whole of `ggml/src/ggml-cuda/` -- host code included -- compiles unmodified,
 /// the position `llama.cpp.zmake` holds for the rest of the tree. Its
 /// external contract is C: every ggml symbol its objects leave undefined is a
@@ -759,8 +758,7 @@ const NvccOutput = enum {
     /// `-c`: a host object with the device code registered through cudart.
     /// The reference.
     object,
-    /// `-fatbin`: device code alone, for the Zig host layer to load
-    /// (Decision 44).
+    /// `-fatbin`: device code alone, for the Zig host layer to load.
     fatbin,
 };
 
@@ -806,10 +804,10 @@ fn nvccCompile(b: *std.Build, cuda: Cuda, file: []const u8, kind: NvccOutput, ex
 /// Adds the Zig CUDA host layer's inputs to the ggml module: the fatbins,
 /// the kernel table generated from them, and the translated CUDA headers.
 ///
-/// Every upstream translation unit becomes a fatbin (Decision 44). Its entry
+/// Every upstream translation unit becomes a fatbin. Its entry
 /// symbols are listed with `cuobjdump` and demangled with `cu++filt`, and
 /// `build/cuda_kernels.zig` turns the listings into the `cuda_kernels`
-/// module, which embeds the fatbins (Decision 45). No upstream host code is
+/// module, which embeds the fatbins. No upstream host code is
 /// linked.
 ///
 /// Parameters:
@@ -860,7 +858,7 @@ fn addCudaPort(b: *std.Build, mod: *std.Build.Module, cuda: Cuda, files: []const
     mod.addImport("cuda_kernels", kernels);
     mod.addImport("cuda_c", cudaCModule(b, mod, cuda));
 
-    // Decision 47: CUB's device-wide sort and scan behind a C ABI. A host
+    // CUB's device-wide sort and scan behind a C ABI. A host
     // object with its device code registered through cudart, like the
     // reference's, compiled with the reference's flags so its CUB
     // instantiations are the ones `argsort.cu` and `cumsum.cu` make.
@@ -954,8 +952,7 @@ pub fn addCudaLibraries(b: *std.Build, mod: *std.Build.Module, cuda: ?Cuda) void
 /// glibc has no `__divti3`, so on Linux a Zig program that divides an
 /// `i128` -- zigjinja's clock and `random`, `std.Io.Threaded`'s timestamps --
 /// takes it from `compiler_rt`, which Zig links as one object, and with it
-/// `compiler_rt`'s weak `expf` and `logf` in place of glibc's (CLAUDE.md,
-/// "Zig's `compiler_rt` shadows the C library's `expf` and `logf`"). Every
+/// `compiler_rt`'s weak `expf` and `logf` in place of glibc's. Every
 /// CPU op, the samplers and the server's token probabilities then round
 /// differently from upstream's gcc-built binaries; `server-task-diff` found
 /// it as one probability one ULP out. With `libgcc.a` first, `__divti3`
@@ -1016,8 +1013,8 @@ fn hasDefine(defines: []const []const u8, define: []const u8) bool {
     return false;
 }
 
-/// Upstream's Vulkan backend: `ggml-vulkan.cpp` and, since v0.5.0, the
-/// buffer and debug code split out of it, and since v0.9.0 its multi-device
+/// Upstream's Vulkan backend: `ggml-vulkan.cpp` and the
+/// buffer and debug code split out of it, and its multi-device
 /// all-reduce, `ggml-vulkan-comm.cpp` (ggml-vulkan/CMakeLists.txt:62-71
 /// @cd959bae9).
 const vulkan_sources = [_][]const u8{
@@ -1067,7 +1064,7 @@ var vulkan_shaders_once: ?VulkanShaders = null;
 /// and `.glsl` is an input of every run, because `glslc` resolves the
 /// includes and Zig cannot see them.
 ///
-/// **Once** is the point (PLAN.md, Decision 59): `glslc -O` is not
+/// **Once** is the point: `glslc -O` is not
 /// reproducible on `tri_f16`, so the reference objects and the port's
 /// embedded table must come from the same run's files. Every caller in one
 /// build graph gets the same `LazyPath`s.
@@ -1246,7 +1243,7 @@ fn addVulkanPort(b: *std.Build, mod: *std.Build.Module, vk: Vulkan, shaders: Vul
 }
 
 /// The functions upstream's `ggml-vulkan.o` exports unmangled, measured with
-/// `nm -g --defined-only` (`NOTES.md`, "Stage 7: the measurement"):
+/// `nm -g --defined-only`:
 /// `ggml-vulkan.h`'s eight and `vk_conv_block_sizes`, an internal table
 /// missing its `static`.
 pub const vulkan_c_exports = [_][]const u8{

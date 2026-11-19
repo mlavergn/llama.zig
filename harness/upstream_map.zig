@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! **Not a port.** This is our own code (`MAINTENANCE.md`, Phase 3).
+//! **Not a port.** This is our own code: sync tooling.
 //!
 //! # What it does
 //!
@@ -64,8 +64,8 @@ const FileMap = struct {
 ///
 /// Before the body opens, a brace inside parentheses or straight after an
 /// identifier is a braced initializer -- `pimpl(new impl{})`, `mem{m}` in a
-/// constructor's member-initializer list -- and closes nothing. Until v0.6.0
-/// such a brace ended the extent on the signature's second line, so changes
+/// constructor's member-initializer list -- and closes nothing. Such a brace
+/// once ended the extent on the signature's second line, so changes
 /// further into the constructor read as untouched and were repinned
 /// (`common_init_result`, `common_speculative_init_result`).
 ///

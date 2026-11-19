@@ -14,8 +14,8 @@
 //!
 //! # Generic over `common_subproc`
 //!
-//! `server_subproc` wraps a `common_subproc` (`common/subproc.cpp`, Stage 10
-//! step 6, with router mode in step 7). It is written against the members
+//! `server_subproc` wraps a `common_subproc` (`common/subproc.cpp`), for
+//! the built-in tools and router mode. It is written against the members
 //! it calls -- `alive()`, `terminate()`, `join()`, `stdoutFile()` and
 //! `stderrFile()`, the child's two output pipes as C `FILE *`s or null -- so `Subproc(P)` is
 //! the C++ struct over any such `P`. Windows' arms (`PeekNamedPipe`) wait

@@ -2,7 +2,7 @@
 # Writes quantize's inputs into $DATA: llama-dense given a tokenizer by
 # harness/tools/add_vocab.c, and an imatrix collected over it by upstream's
 # llama-imatrix, the file and its dataset under subdirectories, so the names
-# llama-quantize records in the output's metadata (since v1.0.0 the file
+# llama-quantize records in the output's metadata (the file
 # names alone, 71a6a114b) are seen apart from their paths. Run by
 # scripts/tools-diff.
 set -eu

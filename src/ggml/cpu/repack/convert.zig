@@ -445,7 +445,7 @@ fn makeBlockMxfp4x8(in: *const [8]src_blocks.MXFP4, blck_size_interleave: u32) b
 /// - `require_ne0_mul8`: whether the guard includes `t->ne[0] % 8 != 0`.
 ///   `repack_iq4_nl_to_iq4_nl_8_bl` (ggml-cpu/repack.cpp:4031 @b1b770d90),
 ///   `repack_mxfp4_to_mxfp4_8_bl` (ggml-cpu/repack.cpp:4202 @b1b770d90)
-///   and, since v0.5.0, `repack_q1_0_to_q1_0_4_bl` are the three that omit
+///   and `repack_q1_0_to_q1_0_4_bl` are the three that omit
 ///   it; the other nine have it.
 /// - `make`: the interleaver.
 ///

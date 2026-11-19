@@ -1,5 +1,5 @@
 #!/bin/bash
-# Map an upstream diff A..B onto the port's citations (MAINTENANCE.md, Phase 3).
+# Map an upstream diff A..B onto the port's citations.
 #
 # Prints the citations whose definitions the diff touched (re-read them at B),
 # the hunks no citation covers (new or uncited code), the changed files with
@@ -17,8 +17,8 @@ if [ "${1:-}" = "--repin" ]; then REPIN=(--repin); shift; fi
 [ $# -eq 2 ] || { echo "usage: scripts/upstream-map [--repin] <A> <B>" >&2; exit 2; }
 
 # Upstream's ported scope: what the port cites, plus the backends and tools it
-# ports (tools/server and cpp-httplib since v0.8.0: without them the
-# server's new files appeared nowhere). Out-of-scope backends (Hexagon, OpenCL, SYCL, ...) are left out so
+# ports (tools/server and cpp-httplib: without them the
+# server's files appear nowhere). Out-of-scope backends (Hexagon, OpenCL, SYCL, ...) are left out so
 # they do not swamp the uncited-file list.
 SCOPE=(
   ggml/include include src common

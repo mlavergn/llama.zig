@@ -12,7 +12,7 @@
 # Why this exists
 # ---------------
 # The Linux host arms of `ggml-cpu.c` and `llama-sampler.cpp` were ported on a
-# Mac that cannot run them (PLAN.md, Stage 5 step 3). Nothing that compares
+# Mac that cannot run them. Nothing that compares
 # results can see them: a thread at the wrong priority or on the wrong CPU
 # computes the same bits. On macOS this still runs, and covers the Apple arms
 # -- `SCHED_FIFO` priorities, no affinity, no NUMA, `arc4random` seeds; on

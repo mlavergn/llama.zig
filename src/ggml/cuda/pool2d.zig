@@ -4,7 +4,7 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/pool2d.cu` and
 //! `llama.cpp/ggml/src/ggml-cuda/pool2d.cuh` at v1.0.0 (`b1b770d90`). The
-//! kernels, `pool2d_nchw_kernel` and (since v0.7.0) the warp-per-output
+//! kernels, `pool2d_nchw_kernel` and the warp-per-output
 //! `pool2d_nchw_kernel_warp`, stay CUDA.
 
 const std = @import("std");
@@ -27,7 +27,7 @@ fn int(x: i64) c_int {
 }
 
 /// Ports `pool2d_nchw_kernel_f32_f32_cuda` (pool2d.cu:112 @b1b770d90).
-/// Since v0.7.0 a window of 32 or more elements takes one warp per output.
+/// A window of 32 or more elements takes one warp per output.
 fn pool2dNchwKernelF32F32Cuda(ih: c_int, iw: c_int, oh: c_int, ow: c_int, kh: c_int, kw: c_int, sh: c_int, sw: c_int, ph: c_int, pw: c_int, parallel_elements: c_int, src: ?*const anyopaque, dst: ?*anyopaque, op: c.enum_ggml_op_pool, stream: cu.cudaStream_t) void {
     if (kh *% kw >= warp_kernel_min_window) {
         const warps_per_block: c_int = block_size / common.warp_size;

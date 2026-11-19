@@ -1,10 +1,10 @@
 #!/bin/bash
 # Whether the reference Vulkan backend is reproducible run to run, node by
-# node -- the measurement Stage 7 begins with (PLAN.md, "Stage 7 — Vulkan").
+# node -- measured before any Vulkan code was ported.
 #
 # Every exact gate in this project rests on the reference producing the same
 # bits twice. Metal and CUDA were measured to before anything was ported
-# (NOTES.md); a backend that is not would need a different kind of gate, and
+# (measured); a backend that is not would need a different kind of gate, and
 # it is cheaper to learn that before writing one. This runs
 # harness/node_dump.c, linked against llama.cpp.zmake built with
 # `VULKAN=1`, on the GPU -- the only GPU device that build registers is
@@ -13,11 +13,11 @@
 #
 # It also prints the toolchain the answer belongs to: `glslc --version`, the
 # Vulkan header version, and the device, because which shaders and which C++
-# arms exist depends on all three (PLAN.md, Decision 55).
+# arms exist depends on all three.
 #
 # Usage: scripts/vk-repro <model.gguf> [runs] [prompt]
 #   Requires: the reference built with VULKAN=1 and the pinned toolchain,
-#   which `make vk-repro` does (scripts/vk-toolchain, PLAN.md Decision 55).
+#   which `make vk-repro` does (scripts/vk-toolchain).
 #   GLSLC and VULKAN_INCLUDE name that toolchain; they default to
 #   .tools/vulkan.
 set -u
@@ -85,5 +85,5 @@ if [ "$fail" -eq 0 ]; then
     echo "PASS: the reference Vulkan backend reproduces its own node hashes over $RUNS runs"
     exit 0
 fi
-echo "FAIL: the reference Vulkan backend is not reproducible run to run -- see PLAN.md, Stage 7"
+echo "FAIL: the reference Vulkan backend is not reproducible run to run, so no exact Vulkan gate can be trusted"
 exit 1

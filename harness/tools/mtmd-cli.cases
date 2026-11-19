@@ -3,7 +3,7 @@
 # they carry no chat template, so every run names one (the legacy,
 # non-Jinja path this tool defaults to). Single turns at --temp 0, then the
 # REPL on scripted stdin -- each script but repl-eof.txt ends in /quit,
-# because through v0.5.0 upstream's REPL spun on an empty line at end of
+# because upstream's REPL once spun on an empty line at end of
 # input. Timings and log timestamps
 # differ run to run.
 !mask s/^[0-9]+\.[0-9]{2}\.[0-9]{3}\.[0-9]{3} /T /
@@ -47,7 +47,7 @@
 -m $MM/text-qwen2vl.gguf -mm $MM/qwen2vl_merger.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 12 --temp 0 -c 2048
 -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "<__media__> first, then <__media__> second" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg,$MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 8 --temp 0
 
-# deepseek4v (v0.4.0): learned start/end/newline/pad embeddings and the
+# deepseek4v: learned start/end/newline/pad embeddings and the
 # lead pads that align the image to the text model's 4-token blocks, which
 # depend on where the image falls; a custom token cap feeds the resize
 # solver; the media markers are split into parts for
@@ -60,7 +60,7 @@
 # the video options reach mtmd_helper_init_opt; without MTMD_VIDEO they change nothing
 -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 4 --temp 0 --video-fps 2 --video-timestamp-interval 0 --video-ffmpeg-dir /nonexistent
 
-# v0.6.0: a model whose image decodes non-causally needs the whole image in
+# a model whose image decodes non-causally needs the whole image in
 # one ubatch, so init_vision_context caps the token budget (and the minimum
 # with it) to n_ubatch, from mtmd_get_memory_usage, with two warnings; a
 # budget already under n_ubatch, and a causal model, are left alone
@@ -72,17 +72,17 @@
 # above n_ubatch comes down with the maximum
 -m $MM/text-qwen3.gguf -mm $MM/gemma4v.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 4 --temp 0 --perf -lv 5 -ub 32 --image-min-tokens 40
 
-# v0.6.0's projectors: Ling 3.0 VL (Qwen3-VL's tower, a norm-only merger)
+# More projectors: Ling 3.0 VL (Qwen3-VL's tower, a norm-only merger)
 # and GLM-5.3-Flash (clamped SwiGLU, a ceil-aligned canvas)
 -m $MM/text-qwen3vl.gguf -mm $MM/ling3vl.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 12 --temp 0 --perf -lv 5 -c 4096
 -m $MM/text-qwen2vl.gguf -mm $MM/glm5v.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 12 --temp 0 --perf -lv 5
 
-# v0.4.1: without -mmdev the projector follows --device, so -dev none
+# without -mmdev the projector follows --device, so -dev none
 # keeps it off the GPU too
 -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 4 --temp 0 -dev none -lv 5
 -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg --chat-template chatml -n 4 --temp 0 -dev none -mmdev $GPU_DEV -lv 5
 
-# -j and -jf (Stage 10 step 3b): the schema becomes an output-format
+# -j and -jf: the schema becomes an output-format
 # grammar, which constrains the reply; malformed JSON throws nlohmann's
 # parse error, a schema outside the subset json_schema_to_grammar's, and a
 # missing file the handler's own; -j with --grammar keeps whichever is last
@@ -132,14 +132,14 @@
 # --simple-io is not one of this tool's flags (common/arg.cpp gives it to the
 # completion and cli examples only): the rejection is what is compared
 !fail -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf --chat-template chatml -n 6 --temp 0 --simple-io
-# v0.6.0: end of input without /quit ends the conversation (an empty read
+# end of input without /quit ends the conversation (an empty read
 # is EOF; a submitted line always ends in a newline)
 !stdin $DATA/repl-eof.txt
 -m $MM/text-qwen3.gguf -mm $MM/gemma3.gguf --chat-template chatml -n 6 --temp 0
 !stdin
 !tty off
 
-# v0.8.0: the new vision and audio towers in a turn; a realtime model
+# the new vision and audio towers in a turn; a realtime model
 # streams its one audio file through mtmd_audio_stream instead, and its
 # transcript follows the audio by the text model's token delay
 -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3vl.gguf -p "describe" --image $MM/../../llama.cpp/tools/mtmd/test-1.jpeg -n 12 --temp 0

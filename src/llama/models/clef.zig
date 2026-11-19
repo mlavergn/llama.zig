@@ -18,8 +18,8 @@
 //! `input_decision` and `llm_graph_input_attn_clef`, and its `graph` with
 //! `build_attn_inp_causal`, `build_layer_attn`, `build_layer_attn_linear`,
 //! `build_head`, `build_head_norm`, `build_head_attn` and `build_head_ffn`;
-//! and from `llama.cpp/src/models/models.h` at v0.8.0, `llama_model_clef`'s
-//! members; and from `llama.cpp/src/llama-ext.h` at v0.8.0,
+//! and from `llama.cpp/src/models/models.h`, `llama_model_clef`'s
+//! members; and from `llama.cpp/src/llama-ext.h`,
 //! `llama_decision_order`.
 
 const std = @import("std");

@@ -167,7 +167,7 @@ fn w(out: *std.ArrayList(u8), comptime fmt: []const u8, args: anytype) void {
 /// `v`'s fields copied into a zeroed struct, so its bytes hold no padding.
 /// The C++'s aggregate initialiser happens to zero padding and Zig's struct
 /// literal does not; neither is defined. `llama_model_params` gained four
-/// bytes of it after `main_gpu` at v0.4.0, when `lazy_mode` was added.
+/// bytes of it after `main_gpu`, where `lazy_mode` sits.
 fn fieldsOnly(v: anytype) @TypeOf(v) {
     var z = std.mem.zeroes(@TypeOf(v));
     inline for (@typeInfo(@TypeOf(v)).@"struct".field_names) |name| @field(z, name) = @field(v, name);

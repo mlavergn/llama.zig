@@ -1,11 +1,10 @@
 //! A PEG arena as JSON, for comparing two arenas in `make peg-diff` and
 //! `make chat-parse-diff`.
 //!
-//! **Not a port.** Upstream's `common_peg_arena` serialized itself with
-//! `save` (peg-parser.cpp, until v0.6.0) so a chat template's parser could
-//! travel as a string; v0.7.0 removed that and passes the arena itself,
-//! and the port followed (`cli/peg/` has no serializer). The gates still
-//! compare whole arenas, so this keeps the old form, and
+//! **Not a port.** Upstream's `common_peg_arena` once serialized itself with
+//! `save` (peg-parser.cpp) so a chat template's parser could travel as a
+//! string; it no longer does, and the port has no serializer (`cli/peg/`).
+//! The gates compare whole arenas, so this keeps that form, and
 //! `harness_peg_save` in `harness/peg_rec.h` writes the same for upstream's
 //! arena through its public members. One change from the old form: the rule
 //! map, whose libc++ iteration order no caller can see any more, is written

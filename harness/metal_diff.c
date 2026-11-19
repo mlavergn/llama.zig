@@ -67,7 +67,7 @@ extern bool ref_ggml_metal_op_flash_attn_ext_use_vec(const struct ggml_tensor *)
 
 /* The mat-mul dispatch predicates of `ggml-metal-common.cpp` (ours
  * `src/ggml/metal/common.zig`), the reference's renamed ref_*. Both the
- * encoder and the Objective-C `supports_op` ask these, and since v0.6.0
+ * encoder and the Objective-C `supports_op` ask these, and
  * the fusion table's MUL_MAT + ADD check does too, so they are swept
  * directly: a wrong answer moves a MUL_MAT to another kernel, which only
  * `node-diff ARGS=--gpu` could otherwise see, and only for the shapes one
@@ -144,8 +144,8 @@ static void cmp_s(const char *what, const char *a, const char *b) {
  * graphs live in Metal buffers, because the FULL mode asks which buffer
  * an addend is in. */
 
-/* Since v0.5.0 the table is opaque -- `ggml_metal_fusion_all` is gone and
- * the header declares `struct ggml_metal_fusion` without a body -- so an
+/* The table is opaque -- the
+ * header declares `struct ggml_metal_fusion` without a body -- so an
  * entry's position is read back the only way the API allows: count it in
  * a stats-enabled info and see which counter moved. Both sides count by
  * the entry's offset into their own table. */
@@ -180,7 +180,7 @@ static int backend_deps_seen = 0;
 
 /* Every table entry each side handed out, by table index, as the probes
  * found them: the info object's counters are fed these. */
-/* The table has 39 entries since v1.0.0 (#31615 added 12 TOPK_MOE rows). */
+/* The table has 39 entries (#31615 added 12 TOPK_MOE rows). */
 #define MAX_ENTRIES 64
 static const ggml_metal_fusion * entry_a[MAX_ENTRIES];
 static const ggml_metal_fusion * entry_b[MAX_ENTRIES];
@@ -462,7 +462,7 @@ static void mma_predicates_diff(void) {
     }
 
     /* MUL_MAT_ID's matrix-matrix break-even, at expert-id rows either side
-     * of 32 -- and, since v0.7.0, at expert counts either side of the 1024
+     * of 32 -- and at expert counts either side of the 1024
      * the id-map kernel's one threadgroup takes */
     {
         struct ggml_context * ctx = ggml_init(ip);
@@ -529,8 +529,8 @@ static void mma_predicates_diff(void) {
 }
 
 /* MUL_MAT_ID's two id-map scratch regions, swept over expert counts,
- * experts used and tokens. Since v0.7.0 ("fix mul_mat_id with duplicate
- * ids") the first is a tile list bounded by
+ * experts used and tokens. The first ("fix mul_mat_id with duplicate
+ * ids") is a tile list bounded by
  * `ggml_metal_op_mul_mat_id_max_tiles`, whose three arms -- the bound
  * clamped to the entry count, the per-expert partial tiles bounded by the
  * experts, and by the entries -- each need a shape of their own; the
@@ -584,7 +584,7 @@ static void mul_mat_id_extra_diff(ggml_backend_buffer_type_t bt_a, ggml_backend_
     if (by_entries == 0) { printf("  max_tiles never bounded by the entries\n"); fails++; }
 }
 
-/* The two-stage ARGMAX's scratch (v0.8.0): nothing up to N_ARGMAX_CHUNK, a
+/* The two-stage ARGMAX's scratch: nothing up to N_ARGMAX_CHUNK, a
  * max and an index per part per row past it, the parts capped at
  * N_ARGMAX_NPART_MAX. Rows either side of every edge: the size is the only
  * thing that says the scratch exists, and a kernel writing past a short one
@@ -682,7 +682,7 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
         for (int len = 1; len <= 9; len++) {
             struct ggml_context * ctx  = fusion_ctx();
             struct ggml_context * ctx2 = fusion_ctx();
-            /* v4: zero rows -- since v0.6.0 `_max` packs 0-element nodes
+            /* v4: zero rows -- `_max` packs 0-element nodes
              * as it packs their non-empty counterparts */
             const int64_t rows = variant == 4 ? 0 : 4;
             struct ggml_tensor * x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 32, rows);
@@ -763,7 +763,7 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
         ggml_free(ctx);
     }
 
-    /* NORM / RMS_NORM + SCALE (v0.5.0): both norms, an F16 norm, a scale
+    /* NORM / RMS_NORM + SCALE: both norms, an F16 norm, a scale
      * of something else after the norm, a reshape between them, the norm
      * also consumed elsewhere, a scale_bias (still a SCALE), and -- after
      * allocation -- the norm's input moved to overlap the output, which
@@ -794,7 +794,7 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
         ggml_free(ctx);
     }
 
-    /* SSM_CONV + UNARY(silu) (v0.5.0): silu, gelu (not silu), the conv
+    /* SSM_CONV + UNARY(silu): silu, gelu (not silu), the conv
      * consumed elsewhere, a scale between them, an output overlapping
      * the conv's input. */
     for (int variant = 0; variant < 5; variant++) {
@@ -816,7 +816,7 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
         ggml_free(ctx);
     }
 
-    /* MoE routing and output reduction (v0.5.0), built as llama-graph.cpp's
+    /* MoE routing and output reduction, built as llama-graph.cpp's
      * `build_moe_ffn` builds them: softmax gating, `ggml_argsort_top_k`,
      * the weights gathered, optionally renormalised by their clamped sum
      * and optionally scaled; then the experts' outputs times the weights,
@@ -834,11 +834,11 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
      *   FULL must still fuse
      *   v15 the third ADD reading the first view instead of the running
      *   sum: src[1] is right, only the src[0] check refuses it
-     *   v16 no tokens (a no-output ubatch): since v0.6.0 both checks
+     *   v16 no tokens (a no-output ubatch): both checks
      *   accept it, so the packing does not depend on the batch
      *   v17, v18 the experts, then the weights, a leaf overlapping the
-     *   output (FULL): the memory-range check skips a leaf, so since
-     *   v0.8.0 only the reduction's own check refuses these
+     *   output (FULL): the memory-range check skips a leaf, so
+     *   only the reduction's own check refuses these
      *   v19, v20 the same, sharing the output's address exactly, which
      *   that check skips too
      *   v21 both leaves, clear of the output: FULL must still fuse
@@ -926,7 +926,7 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
         }
     }
 
-    /* The unary-gated MoE routings (v1.0.0, #31615), as llama-graph.cpp's
+    /* The unary-gated MoE routings (#31615), as llama-graph.cpp's
      * `build_moe_ffn` builds them for DeepSeek-V4 (`sqrt(softplus)`) and GLM
      * (sigmoid): the scores ranked after adding a per-expert selection bias,
      * the unbiased ones gathered, optionally renormalised by a sum that is
@@ -982,7 +982,7 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
         }
     }
 
-    /* MUL_MAT + ADD (v0.6.0): the residual added in the few-row MMA store.
+    /* MUL_MAT + ADD: the residual added in the few-row MMA store.
      * The weight sits in a buffer marked WEIGHTS, as the model loader marks
      * them; STRUCTURAL packs on the operand and types alone, FULL also
      * wants the MMA path, a same-shape contiguous residual and no overlap
@@ -1066,8 +1066,8 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
      * RMS_NORM + MUL (one fused group each) then SCALE, summed, so the
      * pass has nodes to pull forward. In the variants a later node's
      * output is placed over a fused group's *internal* source (the norm
-     * between RMS_NORM and MUL) or over its first node's output. Since
-     * v0.5.0 a group's internal sources are not ranges it reads, and every
+     * between RMS_NORM and MUL) or over its first node's output. A
+     * group's internal sources are not ranges it reads, and every
      * fused tensor is a range it writes (`h_add`/`h_check`); these are the
      * cases where that decides whether a node may move. */
     for (int variant = 0; variant < 6; variant++) {
@@ -1147,7 +1147,7 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
     }
 }
 
-/* The three batched buffer slots (v0.9.0): `set_tensor_n`, `get_tensor_n`
+/* The three batched buffer slots: `set_tensor_n`, `get_tensor_n`
  * and `cpy_tensor_n`. translate-c defaults an omitted slot to null, so an
  * iface that forgot them would still compile and `ggml-backend.cpp` would
  * quietly fall back to one call per tensor -- same bytes, other path. So
@@ -1398,7 +1398,7 @@ int main(void) {
     {
         /* sparse FLASH_ATTN_EXT (`n_kv_max` set, a mask present): the
          * vec kernel's (dk, dv) list decides whether the index scratch is
-         * allocated -- v0.5.0 added (96, 64) -- and so do the bound and
+         * allocated -- (96, 64) is on it -- and so do the bound and
          * the KV type. One pair off the list, one over the 4096 bound. */
         const int64_t dks[]  = { 96, 96, 128, 80, 128, 576, 128 };
         const int64_t dvs[]  = { 96, 64, 128, 80, 128, 512,  96 };
@@ -1420,7 +1420,7 @@ int main(void) {
     }
 
     {
-        /* quantized KV and the upfront dequantise to F16: since v0.7.0 a
+        /* quantized KV and the upfront dequantise to F16: a
          * batch under 32 rows dequantises when the head is 512 or wider
          * and the batch is too big for the vec kernel (20 rows), so the
          * pad scratch is sized for F16 rows there. Rows either side of
@@ -1444,8 +1444,8 @@ int main(void) {
     }
 
     {
-        /* FLASH_ATTN_EXT over K/V row lists (`ggml_flash_attn_ext_rows`,
-         * v0.9.0): the gathered-rows scratch is K's rows plus V's, unless V
+        /* FLASH_ATTN_EXT over K/V row lists (`ggml_flash_attn_ext_rows`):
+         * the gathered-rows scratch is K's rows plus V's, unless V
          * is a view of K; zero without `src[5]`. Several streams (q->ne[3])
          * since the lists are one per stream; the KV types `supports_op`
          * accepts and two it refuses; V a view of K at the same and at a
@@ -1487,7 +1487,7 @@ int main(void) {
     }
 
     {
-        /* TOP_K_MASK (v0.8.0), each optional source on and off: no scratch,
+        /* TOP_K_MASK, each optional source on and off: no scratch,
          * and `supports_op`'s arm is the `.m`'s. */
         for (int bits = 0; bits < 16; bits++) {
             const enum ggml_type type = bits & 8 ? GGML_TYPE_F32 : GGML_TYPE_F16;
@@ -1554,7 +1554,7 @@ int main(void) {
 
     ggml_free(ctx);
 
-    /* the five generic fusion-debugging names, new at v0.4.1: each side's
+    /* the five generic fusion-debugging names: each side's
      * registry must hand out an entry point for each, or neither */
     {
         const char * names[] = { "ggml_backend_fusion_get", "ggml_backend_fusion_stats_init",

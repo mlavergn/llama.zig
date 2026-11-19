@@ -1,7 +1,7 @@
 // The reference side of `mtmd_get_memory_usage` for `make mtmd-diff`.
 //
 // **Not a port.** A harness. Upstream's `mtmd_get_memory_usage` has C++
-// linkage and, since v0.6.0, returns a struct holding a `std::map`, so the
+// linkage and returns a struct holding a `std::map`, so the
 // Zig harness cannot call it directly; this flattens the result into
 // arrays, in the map's order (by device pointer).
 

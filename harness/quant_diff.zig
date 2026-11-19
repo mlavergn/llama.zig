@@ -192,7 +192,7 @@ fn buildList(v: Variant, n_layer: u32, n_expert: u32) TensorList {
                     l.addf("blk.{d}.ffn_down.bias", .{i}, .{ 256, 2, 1, 1 }, f32_);
                     l.addf("blk.{d}.attn_output.weight.x", .{i}, .{ 256, 2, 1, 1 }, h16);
                     l.addf("blk.{d}.int.weight", .{i}, .{ 256, 2, 1, 1 }, c.GGML_TYPE_I32);
-                    // the names v0.6.0's GLM5-Next rules keep at F32 or Q8_0
+                    // the names GLM5-Next's rules keep at F32 or Q8_0
                     inline for (.{
                         "hc_attn_fn",              "indexer.attn_q_b",       "indexer.attn_k", "indexer.proj",
                         "indexer_compressor_gate", "indexer_compressor_ape", "ssm_f_a",        "ssm_f_b",
@@ -200,13 +200,13 @@ fn buildList(v: Variant, n_layer: u32, n_expert: u32) TensorList {
                         "attn_k_b",                "attn_v_b",               "attn_q_a",       "attn_q_b",
                         "nextn.eh_proj",
                     }) |nm| l.addf("blk.{d}." ++ nm ++ ".weight", .{i}, .{ 512, 512, 1, 1 }, h16);
-                    // v0.8.0: the fused QKV-and-gate and the two categories
+                    // the fused QKV-and-gate and the two categories
                     // Muse Spark bumps to Q8_0, and what is never quantized
                     inline for (.{
                         "attn_qkv_gate", "attn_gate",      "ffn_latent_down", "ffn_latent_up",
                         "engram_gate",   "conv2d_spatial", "conv_dw",
                     }) |nm| l.addf("blk.{d}." ++ nm ++ ".weight", .{i}, .{ 512, 512, 1, 1 }, h16);
-                    // v0.9.0: what Limite and Metis16 keep unquantized
+                    // what Limite and Metis16 keep unquantized
                     inline for (.{
                         "attn_ve_gate",      "mudd_down",    "mudd_up",     "attn_pass_lora_down",
                         "attn_pass_lora_up", "ffn_exp_embd", "hc_attn_mix", "depth_mem_x",
@@ -244,7 +244,7 @@ fn buildList(v: Variant, n_layer: u32, n_expert: u32) TensorList {
             l.add("a.gen.wav.0.weight", .{ 512, 512, 1, 1 }, h16);
             l.add("xa.conv1d.0.weight", .{ 512, 512, 1, 1 }, h16);
             l.add("xa.gen.wav.0.weight", .{ 512, 512, 1, 1 }, h16);
-            // v0.9.0 keeps only the codec FSQ unquantized
+            // only the codec FSQ stays unquantized
             l.add("a.gen.wav.quant.0.weight", .{ 512, 512, 1, 1 }, h16);
             // Metis16's prefixes, at the start of a name and inside one
             inline for (.{ "depth_mem_query", "cont_hidden", "stream_embd", "xdepth_mem_query", "xcont_output" }) |nm|
@@ -474,7 +474,7 @@ fn typeRules(quick: bool) void {
     }
 
     // The architectures the rules name, under every descriptor, parameter
-    // set and list (v1.0.0 adds kimi-k31's and xing4_0's).
+    // set and list (including kimi-k31's and xing4_0's).
     const archs = [_][:0]const u8{ "llama", "falcon", "bailingmoe3", "qwen35", "qwen2", "deepseek2", "glm5-next", "muse-spark", "limite", "metis16", "kimi-k31", "xing4_0" };
     const layer_counts = [_]u32{ 1, 8, 32, 80 };
     const heads = [_][2]u32{ .{ 32, 32 }, .{ 32, 8 }, .{ 32, 4 }, .{ 32, 0 } };
@@ -941,7 +941,7 @@ fn fileRuns(dir: []const u8, quick: bool) void {
         .{ .name = "bf16-gqa4-untied", .wtype = c.GGML_TYPE_BF16, .tied = false },
         .{ .name = "mixed-gqa1", .wtype = c.GGML_TYPE_F32, .mixed = true, .n_head_kv = 4, .tied = false },
         .{ .name = "f32-four-d", .wtype = c.GGML_TYPE_F32, .four_d = true },
-        // v0.9.0: an F8_E4M3 source dequantizes like a quantized one
+        // an F8_E4M3 source dequantizes like a quantized one
         .{ .name = "f8-gqa4-untied", .wtype = c.GGML_TYPE_F8_E4M3, .tied = false },
     };
     var paths: [specs.len][:0]const u8 = undefined;
@@ -1326,16 +1326,14 @@ fn portSaveJob(p: *const anyopaque) void {
 fn saverRuns(dir: []const u8, models: []const [:0]const u8, vocab_files: []const [:0]const u8, save_files: []const [:0]const u8) void {
     for (models) |m| saveBoth(dir, m, -1, false);
     for (models) |m| saveBoth(dir, m, 0, false);
-    // Fixtures saved and nothing else: since v0.5.0 the saver writes the
+    // Fixtures saved and nothing else: the saver writes the
     // SWA pattern per layer, skips null special ids, the hrm.* keys and
     // `hrm_z_l_init`, and saves each tensor of a looped model's aliased
     // cache slots once (llama-model-saver.cpp:147, 472 @620d2225c).
     for (save_files) |m| saveBoth(dir, m, 0, false);
-    // Every upstream vocabulary, vocab-only. Through v0.3.0 this compared
-    // each tokenizer's tokens, scores, types, merges and special ids as
-    // saved; since v0.4.0 upstream aborts saving any vocab-only model
-    // (saveBoth), so it compares the abort, and the tokenizer keys are
-    // covered by the full models above alone.
+    // Every upstream vocabulary, vocab-only. Upstream aborts saving any
+    // vocab-only model (saveBoth), so this compares the abort, and the
+    // tokenizer keys are covered by the full models above alone.
     for (vocab_files) |m| saveBoth(dir, m, 0, true);
 }
 
@@ -1379,7 +1377,7 @@ fn saveBoth(dir: []const u8, m: [:0]const u8, ngl: i32, vocab_only: bool) void {
         defer port.deinit(gpa);
         if (vocab_only or hasCharsmap(m)) {
             // `std::vector<char>` matches no branch of add_kv: both abort.
-            // And since v0.4.0 a vocab-only save aborts in upstream on any
+            // And a vocab-only save aborts in upstream on any
             // file: `add_kv_from_model` asks `hparams.n_ff_exp()`, now an
             // accessor bounded by `n_layer_all`, which `load_hparams` never
             // reads for vocab-only (llama-hparams.cpp:79 @620d2225c).

@@ -820,9 +820,7 @@ pub fn isPadded1d(tensor: *const c.ggml_tensor) bool {
 // left the comparison green.
 //
 // Regenerate only from a C build: `scripts/types-golden` prints the traits and
-// four name checksums from the stock ggml `llama.cpp.zmake` builds (v0.4.0 added
-// SWIGLU_CLAMP, which moved `golden_glu_name` alone; v1.0.0's prune of ADD1 and
-// the DIAG_MASKs moved both op tables, and Q4_2/Q4_3's "REMOVED" the traits).
+// four name checksums from the stock ggml `llama.cpp.zmake` builds.
 const golden_traits: u64 = 0xbbdffe39ac19e897;
 const golden_op_name: u64 = 0x0fc0e52932954250;
 const golden_op_symbol: u64 = 0x889b46b6e2bd5c8e;

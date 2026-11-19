@@ -66,8 +66,8 @@ const P = struct {
     pub const llama_batch_ext_set_output_logits = api.batch.llama_batch_ext_set_output_logits;
 };
 
-/// The C++, under the C names. The next-token embedding calls moved from
-/// `llama-ext.h` into `llama.h` at v1.0.0, so they are C symbols too.
+/// The C++, under the C names. The next-token embedding calls are in
+/// `llama.h`, so they are C symbols too.
 const R = struct {
     pub const llama_model_load_from_file = c.llama_model_load_from_file;
     pub const llama_model_free = c.llama_model_free;

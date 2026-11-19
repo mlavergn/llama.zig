@@ -1,4 +1,4 @@
-# The router's device memory scheduler (v0.8.0, server-models-sched.cpp): a
+# The router's device memory scheduler (server-models-sched.cpp): a
 # measure child per model, what each instance holds, and --models-memory-margin
 # unloading idle models until a new one fits. Free memory is read live, so
 # every figure derived from it is masked; the arithmetic shows in which model

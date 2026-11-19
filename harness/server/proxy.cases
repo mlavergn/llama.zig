@@ -1,17 +1,17 @@
-# The CORS proxy, --ui-mcp-proxy (Stage 10 step 6): scripts/server-diff
+# The CORS proxy, --ui-mcp-proxy: scripts/server-diff
 # proxy. Each side forwards to the one target proxy.setup starts
 # (harness/server/proxy_target.py, at $TPORT), or to itself ($SPORT).
 # A multipart body is re-encoded under a boundary drawn from a random
 # device, so the boundary is masked.
 !mask ----llama-cpp-proxy-[0-9a-z]{16}
-# v0.8.0: a finished response's destructor stops the client, which can reach
+# a finished response's destructor stops the client, which can reach
 # it before its thread has returned: upstream against itself logs this or not
 !droplog http client error: Connection handling canceled
 !server -m $QWEN3 -c 512 -np 1 --no-jinja
 GET /cors-proxy?url=http://127.0.0.1:$TPORT/echo
 POST /cors-proxy?url=http://127.0.0.1:$TPORT/echo {}
 
-# v1.0.0 (8954f1948): the target must resolve to public addresses and is
+# (8954f1948) the target must resolve to public addresses and is
 # pinned, and a redirect comes back rewritten through the proxy; the target
 # here is local, so the test-only escape hatch lets it through
 !env LLAMA_SERVER_DEBUG_PROXY_ALLOW_PRIVATE=1
@@ -87,7 +87,7 @@ GET /cors-proxy?url=http://[::1]:1/x
 GET /cors-proxy?url=http://127.0.0.1:$TPORT/echo/%E2%9C%93
 !noenv
 
-# v1.0.0 (8954f1948): without the escape hatch, a local, private or
+# (8954f1948) without the escape hatch, a local, private or
 # unresolvable target is refused before anything is sent
 !server -m $QWEN3 -c 512 -np 1 --no-jinja --ui-mcp-proxy
 !fulllog

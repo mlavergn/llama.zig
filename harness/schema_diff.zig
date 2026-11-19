@@ -1040,7 +1040,7 @@ fn refChainVisit(n: usize) []const u8 {
     return t.items;
 }
 
-/// v0.8.0's recursion limits, on either side of each.
+/// The recursion limits, on either side of each.
 fn depthCases() void {
     for ([_]usize{ 126, 127, 128, 129, 400 }) |n| {
         const label = std.fmt.allocPrint(gpa, "depth-{d}", .{n}) catch oom();

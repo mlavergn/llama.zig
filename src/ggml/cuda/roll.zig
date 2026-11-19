@@ -18,7 +18,7 @@ const Tensor = c.ggml_tensor;
 const block_size = 256;
 
 /// Ports `ggml_cuda_op_roll` (roll.cu:49 @b1b770d90), which launches with
-/// `<<<>>>`. Since v0.7.0 the kernel reads the source through its byte
+/// `<<<>>>`. The kernel reads the source through its byte
 /// strides, so a non-contiguous view rolls as it is.
 pub fn opRoll(ctx: *common.Context, dst: *Tensor) void {
     const s0: c_int = dst.op_params[0];

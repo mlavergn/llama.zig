@@ -51,16 +51,13 @@
 //!   statics** that are never freed, and the C++ notes they are not
 //!   thread-safe. Neither is this.
 //!
-//! # An upstream use-after-free, fixed upstream at v0.7.0
+//! # Subgraph contexts
 //!
-//! Through v0.6.0, when a graph raised `max_nnodes`, `backendGraphCompute`
-//! freed the context holding every subgraph and re-created only the first
-//! `n_subgraphs` of them, each sized for the graph at hand. A later graph with
-//! more subgraphs but no more nodes then ran on a `cgraph_main` in freed
-//! memory -- measured with `scripts/meta-diff`'s harness, a 19-node graph with
-//! one subgraph followed by a 15-node graph with two -- and the port kept that
-//! behaviour so the two would agree. Upstream #30453 now re-creates all
-//! `max_subgraphs` of them at `max_nnodes`, and so does this port.
+//! When a graph raises `max_nnodes`, `backendGraphCompute` frees the context
+//! holding every subgraph and re-creates all `max_subgraphs` of them at
+//! `max_nnodes` (upstream #30453), as this port does. Re-creating only the
+//! first `n_subgraphs` would leave a later graph with more subgraphs but no
+//! more nodes running on a `cgraph_main` in freed memory.
 
 const std = @import("std");
 const impl = @import("impl.zig");
@@ -130,7 +127,7 @@ inline fn axisInt(axis: Axis) c_int {
 }
 
 /// Source `i` of `t`, narrowed: `[*c]` array fields must not be indexed
-/// through (the `p.*.arr[i]` miscompile in `CLAUDE.md`), so every source is
+/// through (Zig miscompiles `p.*.arr[i]` there), so every source is
 /// read through this before its `ne` or `nb` is touched.
 inline fn srcOf(t: *const c.ggml_tensor, i: usize) *c.ggml_tensor {
     return impl.one(c.ggml_tensor, t.src[i]);
@@ -2060,7 +2057,7 @@ fn bufferReset(buffer: c.ggml_backend_buffer_t) callconv(.c) void {
 
 /// Ports `ggml_backend_meta_buffer_iface` (ggml-backend-meta.cpp:1748 @b1b770d90).
 ///
-/// The three batched slots v0.9.0 added (`set_tensor_n`, `get_tensor_n`,
+/// The three batched slots (`set_tensor_n`, `get_tensor_n`,
 /// `cpy_tensor_n`) are null here as in the C, and listed explicitly:
 /// translate-c gives every field a null default, so leaving them out would
 /// compile and read as an oversight.
@@ -2130,9 +2127,7 @@ fn buftAllocBuffer(buft: c.ggml_backend_buffer_type_t, size: usize) callconv(.c)
 
 /// Ports `ggml_backend_meta_buffer_type_alloc_buffer_n`
 /// (ggml-backend-meta.cpp:1804 @b1b770d90), the meta buffer type's
-/// `alloc_buffer_n`. At v0.5.0 it was `ggml_backend_meta_alloc_ctx_tensors_from_buft`,
-/// exported and called by `ggml_backend_alloc_ctx_tensors_from_buft` for a
-/// meta type; now the allocator's `ggml_backend_buft_alloc_buffer_n`
+/// `alloc_buffer_n`. The allocator's `ggml_backend_buft_alloc_buffer_n`
 /// reaches it through the vtable, with the context's tensors as a list.
 ///
 /// Every tensor becomes a static meta tensor whose slices go into one simple
@@ -2670,7 +2665,7 @@ const Delay = struct {
 /// The test `graph_compute`'s subgraph split and its delay lookahead still
 /// spell inline: a view of a CPU-resident leaf (`s_copy_main`), which has no
 /// meta slices and is skipped. Mapping the nodes uses `isHostView` instead
-/// since v0.7.0 ([TAG_META_HOST_VIEWS]).
+/// ([TAG_META_HOST_VIEWS]).
 ///
 /// Its true arm is **ungated on this machine (one GPU)**: it needs a meta
 /// device whose buffers are host memory.
@@ -2748,7 +2743,7 @@ inline fn computeAsync(backend: c.ggml_backend_t, cgraph: *impl.CGraph) c.enum_g
 ///
 /// The generic all-reduce of subgraph `i`'s last node, for backends with no
 /// collective of their own: zero the slices of devices whose compute flag
-/// was cleared (since v0.6.0 with a `FILL` of zero, not a `SCALE` by zero,
+/// was cleared (with a `FILL` of zero, not a `SCALE` by zero,
 /// which kept NaNs, and only for non-empty slices), fold any devices beyond the largest power of two into the
 /// first ones, run a butterfly of copy-and-`ADD` steps through per-step
 /// scratch buffers, and copy the result back out to the folded devices.

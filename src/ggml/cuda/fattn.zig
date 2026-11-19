@@ -5,9 +5,8 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/fattn.cu` and
 //! `llama.cpp/ggml/src/ggml-cuda/fattn.cuh` at v1.0.0 (`b1b770d90`); the
-//! sparse K/V path (`compactMask`, `mmaF16ShallUseSparse`) is new at v0.4.1
-//! (`b29c606e2`), and since v0.5.0 a query tile of `ncols1` queries shares
-//! one index list, the union of what its queries see. The
+//! sparse K/V path (`compactMask`, `mmaF16ShallUseSparse`) gives a query
+//! tile of `ncols1` queries one index list, the union of what its queries see. The
 //! families are in `fattn_mma.zig` (tensor cores), `fattn_tile.zig`
 //! (generic) and `fattn_vec.zig` (one or two query columns); the launcher
 //! they share is `fattn_common.zig`.
@@ -49,7 +48,7 @@ const kq_stride = fattn_common.kq_stride;
 const sizeof_half = 2;
 
 /// Ports `ggml_cuda_flash_attn_ext_compact_mask` (fattn.cu:117 @b1b770d90),
-/// the non-MUSA arm (since v0.9.0 HIP compiles it too, the kernel sized to
+/// the non-MUSA arm (HIP compiles it too, the kernel sized to
 /// the physical warp): for every group of `ncols1` queries, the
 /// indices of the mask columns any of them can see, at most `n_kv_max` of
 /// them, padded with -1, and in `counts` how many there are. The kernel,
@@ -90,7 +89,7 @@ pub fn compactMask(mask: *const Tensor, indices: ?[*]i32, counts: ?[*]i32, n_que
 /// the non-MUSA arm: whether a node takes the sparse-gather
 /// kernel at `ncols1` x `ncols2`, given an instantiation that has one
 /// (`fattn_mma.mayUseSparse`). The gather must beat the dense kernel, which
-/// handles up to `64/ncols2` queries per K/V pass. Since v0.9.0 never with
+/// handles up to `64/ncols2` queries per K/V pass. Never with
 /// `kv_rows` (`src[5]`), and CDNA takes it for DKQ 576; the CDNA arms are
 /// false on a CUDA device.
 pub fn mmaF16ShallUseSparse(cc: c_int, dst: *const Tensor, ncols1: c_int, ncols2: c_int) bool {
@@ -122,7 +121,7 @@ pub fn mmaF16ShallUseSparse(cc: c_int, dst: *const Tensor, ncols1: c_int, ncols2
 }
 
 /// Ports `ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1` (fattn.cu:172 @b1b770d90).
-/// The sparse arm is under `!GGML_USE_MUSA` (HIP since v0.9.0).
+/// The sparse arm is under `!GGML_USE_MUSA` (HIP too).
 fn mmaF16SwitchNcols1(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols2: comptime_int, ctx: *common.Context, dst: *Tensor) void {
     const cc = common.info().devices[@intCast(common.getDevice())].cc;
     const Q = impl.one(Tensor, dst.src[0]);
@@ -182,7 +181,7 @@ fn gqaOpt(base: bool, Q: *const Tensor, K: *const Tensor, V: *const Tensor, mask
 }
 
 /// Ports `ggml_cuda_flash_attn_ext_mma_f16_switch_ncols2` (fattn.cu:211 @b1b770d90).
-/// Since v0.9.0 the K/V length is the mask's column count under `kv_rows`.
+/// Under `kv_rows` the K/V length is the mask's column count.
 fn mmaF16SwitchNcols2(comptime DKQ: comptime_int, comptime DV: comptime_int, ctx: *common.Context, dst: *Tensor) void {
     const cc = common.info().devices[@intCast(common.getDevice())].cc;
     const KQV = dst;
@@ -270,7 +269,7 @@ fn mmaF16SwitchNcols2(comptime DKQ: comptime_int, comptime DV: comptime_int, ctx
 }
 
 /// Ports `ggml_cuda_flash_attn_ext_mma_f16` (fattn.cu:308 @b1b770d90). Head
-/// sizes 40 and 72 are new at v1.0.0 (#30285).
+/// sizes 40 and 72 are taken (#30285).
 fn mmaF16(ctx: *common.Context, dst: *Tensor) void {
     const cc = common.info().devices[@intCast(common.getDevice())].cc;
     const KQV = dst;
@@ -468,8 +467,8 @@ fn vecCaseFn(comptime D: comptime_int, comptime type_K: c.enum_ggml_type, compti
 /// `FATTN_VEC_CASE` (fattn.cu:448 @b1b770d90) unrolled over every K/V pair
 /// and `FATTN_VEC_CASES_ALL_D`'s head sizes: the vector kernel for the given
 /// head size and K/V types, null if its template instance was not compiled.
-/// F32 K or V takes the F16 kernel; since v0.8.0 that is said once, here.
-/// v1.0.0 added the `F8_E4M3` pairs; the C lists the pairs in a different
+/// F32 K or V takes the F16 kernel; that is said once, here.
+/// The `F8_E4M3` pairs are included; the C lists the pairs in a different
 /// order, and at most one matches.
 fn getFattnVecCase(head_size: i64, type_K_in: c.enum_ggml_type, type_V_in: c.enum_ggml_type) ?VecCase {
     const type_K: c.enum_ggml_type = if (type_K_in == c.GGML_TYPE_F32) c.GGML_TYPE_F16 else type_K_in;
@@ -539,8 +538,8 @@ fn kvTypeSupported(t: c.enum_ggml_type) bool {
     };
 }
 
-/// Ports `ggml_cuda_get_best_fattn_kernel` (fattn.cu:587 @b1b770d90). Since
-/// v0.9.0 a node with `kv_rows` (`src[5]`, `ggml_flash_attn_ext_rows`) takes
+/// Ports `ggml_cuda_get_best_fattn_kernel` (fattn.cu:587 @b1b770d90). A node
+/// with `kv_rows` (`src[5]`, `ggml_flash_attn_ext_rows`) takes
 /// the MMA kernel or none.
 fn getBestKernel(device: c_int, dst: *const Tensor) BestKernel {
     const KQV = dst;
@@ -625,7 +624,7 @@ fn getBestKernel(device: c_int, dst: *const Tensor) BestKernel {
     // 192 satisfies % 64 == 0 but has no vec instance (DKQ != DV); force it onto the MMA path.
     const can_use_vector_kernel = Q.ne[0] <= 256 and @rem(Q.ne[0], 64) == 0 and Q.ne[0] != 192 and @rem(K.ne[1], kq_stride) == 0;
 
-    // If Turing tensor cores are available, use them (since v1.0.0 for head sizes 40 and 72 too):
+    // If Turing tensor cores are available, use them (for head sizes 40 and 72 too):
     if (common.turingMmaAvailable(cc)) {
         if (can_use_vector_kernel) {
             if (!c.ggml_is_quantized(K.type) and !c.ggml_is_quantized(V.type)) {

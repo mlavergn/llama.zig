@@ -1,6 +1,6 @@
 #!/bin/bash
 # The Vulkan backend's registry and device answers, port against reference
-# -- `cuda-backend-diff` for Vulkan (PLAN.md, "Stage 7 — Vulkan").
+# -- `cuda-backend-diff` for Vulkan.
 #
 # `harness/vk_backend_diff.c` is linked once against the ported libggml and
 # upstream's renamed `libggml-vulkan-ref.a`, and asks one side per process:
@@ -20,21 +20,21 @@
 # `GGML_VK_DISABLE_HOST_VISIBLE_VIDMEM` reaches the staging and pinned
 # transfer paths -- its device-local-only types 0 and 1.
 #
-# Since v0.7.0 a host buffer is shared by every device when there is more
+# A host buffer is shared by every device when there is more
 # than one and all of them can import host memory (`multi_device`): plain
 # aligned memory each device imports on first use. Only the memory logger
 # shows which path ran -- the data reads back the same either way -- so the
 # multi-device scenarios run with it on: `0,1` on the GB10, and `0,0`, the
 # one physical device listed twice, which is how llvmpipe alone reaches it.
 #
-# Since v0.9.0 the registry hands out an all-reduce (`ggml-vulkan-comm.cpp`)
+# The registry hands out an all-reduce (`ggml-vulkan-comm.cpp`)
 # and every scenario reduces a set of tensors across two backends through it
 # (`ask_allreduce`): the default spin, none (`GGML_VK_ALLREDUCE_SPIN_US=0`,
 # which puts the bridge thread to sleep on its condition variable at once),
 # a long one, `GGML_VK_DISABLE_ALLREDUCE` and the serialized and perf-logger
 # scenarios above, which refuse or always submit.
 #
-# Since v1.0.0 the buffer has batched transfers (`set_tensor_n`,
+# The buffer has batched transfers (`set_tensor_n`,
 # `get_tensor_n`, `cpy_tensor_n`): every scenario sets, reads and copies
 # five regions through them. Only llvmpipe with the host-visible VRAM off
 # reaches the staging path (the GB10 is UMA and maps every buffer); with a
@@ -123,7 +123,7 @@ for env in "${scenarios[@]}"; do
     # The memory logger prints Vulkan handles and host pointers, which move
     # run to run.
     sed -i -E '/^ggml_vulkan memory: /s/0x[0-9a-f]+/0x(addr)/g' "$tmp/ref.txt" "$tmp/port.txt"
-    # The perf logger's timings move too (since v1.0.0 the fusion questions
+    # The perf logger's timings move too (the fusion questions
     # compute graphs under it); the op names, counts and order stay.
     sed -i -E 's/: ([0-9]+) x [0-9.e+-]+ us = [0-9.e+-]+ us( \([0-9.e+-]+ GFLOPS\/s\))?$/: \1 x (time)/; s/^Total time: [0-9.e+-]+ us\.$/Total time: (time)/' "$tmp/ref.txt" "$tmp/port.txt"
     # VK_BACKEND_DIFF_OUT=<prefix> keeps both answers of scenario k as

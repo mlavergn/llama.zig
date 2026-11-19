@@ -77,7 +77,7 @@ inline fn zeroDst(dst: *Tensor) void {
 /// Ports `ggml_compute_forward_conv_transpose_1d_f16_f32` and
 /// `ggml_compute_forward_conv_transpose_1d_f32` (ops.cpp:6413, 6499 @b1b770d90).
 ///
-/// The two differ in the kernel element type and, since v1.0.0 (#31854), in
+/// The two differ in the kernel element type and, per #31854, in
 /// the work buffer's layout: the `f16` variant keeps the permuted source in
 /// `f32` **first** and the `f16` kernel after it, and dots them with
 /// `ggml_vec_dot_f16_f32` (kernel, then source); the `f32` variant keeps
@@ -591,8 +591,8 @@ pub export fn ggml_compute_forward_im2col_3d(params: *const ComputeParams, dst: 
 /// buffers and hands them to `ggml_compute_forward_mul_mat`: `a` is
 /// `[m, k]` of `src1_type`, `b` is `[n, k]` of `src0_type`, and `out`
 /// receives `[m, n]` as `f32`. Every field not set is zero, as the C's `= {}`
-/// leaves it. The two types are separate since v1.0.0 (#31854): the
-/// convolutions now keep their patches in `f32` whatever the kernel is.
+/// leaves it. The two types are separate (#31854): the
+/// convolutions keep their patches in `f32` whatever the kernel is.
 fn callMulMat(src0_type: c.ggml_type, src1_type: c.ggml_type, params: *const ComputeParams, m: i64, n: i64, k: i64, a: *anyopaque, b: *anyopaque, out: [*]f32) void {
     const ts0 = c.ggml_get_type_traits(src0_type).*.type_size;
     const ts1 = c.ggml_get_type_traits(src1_type).*.type_size;
@@ -1011,7 +1011,7 @@ fn convTranspose2d(comptime T: type, params: *const ComputeParams, dst: *Tensor)
     impl.assert(l.nb00 == c.ggml_type_size(src0.type), "nb00 == ggml_type_size(src0->type)");
     impl.assert(l.nb10 == @sizeOf(f32), "nb10 == sizeof(float)");
 
-    // Since v1.0.0 (#31854) the permuted source comes first, in `f32`, and
+    // The permuted source comes first (#31854), in `f32`, and
     // the kernel follows it in its own type.
     const wbytes: [*]u8 = @ptrCast(params.wdata.?);
     const wsrc: [*]f32 = @ptrCast(@alignCast(wbytes));

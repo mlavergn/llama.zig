@@ -1,7 +1,7 @@
 /*
  * The CUDA headers the Zig host layer calls through: the driver API (kernel
  * loading and launch, the VMM pool), the runtime API (streams, events,
- * memory, graphs), cuBLAS and (v1.0.0, for the FP8 matmul) cuBLASLt.
+ * memory, graphs), cuBLAS and (for the FP8 matmul) cuBLASLt.
  * Translated by `build/llamacpp.zig`'s `cudaCModule` as the `cuda_c`
  * module.
  *

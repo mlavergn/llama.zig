@@ -1,9 +1,9 @@
 //! Barrel for the CUDA host layer.
 //!
 //! **Not a port.** Everything it imports is; see each file. Built only with
-//! `-Dcuda-port` until the swap (PLAN.md, Decision 48), and then the files
+//! `-Dcuda-port` until the swap, and then the files
 //! here replace upstream's `ggml-cuda` host code, whose kernels travel as
-//! fatbins (Decision 44).
+//! fatbins.
 
 pub const common = @import("common.zig");
 pub const kernels = @import("kernels.zig");

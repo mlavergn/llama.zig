@@ -1,4 +1,4 @@
-//! The chunked gated-delta-net kernel, new at v0.7.0 (#29353): for a
+//! The chunked gated-delta-net kernel (#29353): for a
 //! long non-KDA prefill with 128-wide heads, `gdn_single` advances the
 //! recurrence 16 tokens at a time through BF16 tensor-core products (a
 //! high and a residual half per operand), where `gated_delta_net_cuda`
@@ -16,9 +16,9 @@
 //! # The kernel's name
 //!
 //! `gdn_single` is a `static __global__` template inside a namespace, so
-//! its demangled key carries the namespace. Through v0.7.0 that was an
-//! anonymous one, which `cu++filt` spells `<unnamed>`; since v0.8.0 it is
-//! named: `ggml_cuda_gated_delta_net_mma::gdn_single<(int)16, (int)128,
+//! its demangled key carries the namespace. It is a
+//! named namespace (not an anonymous one, which `cu++filt` spells
+//! `<unnamed>`): `ggml_cuda_gated_delta_net_mma::gdn_single<(int)16, (int)128,
 //! (int)1>`. The first such key in this layer.
 //!
 //! # The shared-memory size
@@ -38,7 +38,7 @@ const cu = common.cu;
 
 /// Ports `ggml_cuda_gdn_mma_args` (gated-delta-net-mma.cuh:7 @b1b770d90).
 /// Passed to the kernel by value, so its size is checked against the
-/// kernel's parameter on the first launch (Decision 46).
+/// kernel's parameter on the first launch.
 pub const Args = extern struct {
     q: ?*const f32,
     k: ?*const f32,

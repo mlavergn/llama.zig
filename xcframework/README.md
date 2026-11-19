@@ -136,7 +136,7 @@ as upstream's are; every slice ships a dSYM.
 | Form | Upstream's: a dynamic framework per slice, dSYMs beside | drop-in: an app embeds and signs it as it does upstream's, and one linked against upstream's loads ours by the same install name |
 | Name | `llama` throughout | upstream's framework, module and binary name |
 | Slices | upstream's seven, arm64 and x86_64 where upstream has both | an app's every destination must find its slice |
-| Minimums | 26.0 on every platform, since v0.9.0 (upstream's: iOS 16.4, macOS 13.3, tvOS 16.4, visionOS 1.0) | the port's Apple baseline is 26.0 (Marc, 2026-11-09). It no longer loads on an OS older than 26.0 that upstream's supports: a drop-in for apps whose deployment target is 26.0 or later. `verify.sh compat` holds each slice to 26.0 (`COMPAT_MINOS`) and every other byte of the bundle to upstream's |
+| Minimums | 26.0 on every platform, since v0.9.0 (upstream's: iOS 16.4, macOS 13.3, tvOS 16.4, visionOS 1.0) | the port's Apple baseline is 26.0. It no longer loads on an OS older than 26.0 that upstream's supports: a drop-in for apps whose deployment target is 26.0 or later. `verify.sh compat` holds each slice to 26.0 (`COMPAT_MINOS`) and every other byte of the bundle to upstream's |
 | arm64 CPU | Apple clang's default per target | the oldest device upstream's runs on; each is gated (`GATE_CPU=apple_a7`, `apple_a12`; `apple_m1` is the baseline) |
 | x86_64 CPU | `x86_64_v3` | the port's x86 floor (AVX2, gated on Intel hardware) |
 | Headers, module map, Info.plist | upstream's, byte for byte (`bundle.sh`), but for the Info.plist's minimum (`MinimumOSVersion`, `DTSDKName`) | `verify.sh compat` holds them to upstream's own build |
@@ -204,7 +204,7 @@ node-diff parity-port-cpu GATE_CPU=apple_a7` (and `apple_a12` for visionOS).
   LLVM sets `FeatureMaxInterleaveFactor4` only from the A14 on, and the A7
   to A13 vectorize as `generic` does. `ops-diff` at `GATE_CPU=apple_a7`
   failed on `ssm_conv`, `ssm_scan` and `conv_3d` until it keyed on the
-  feature (`NOTES.md`, "llama.xcframework").
+  feature.
 - **Upstream's module map does not link the framework.** Swift autolinks
   only what a module map names, so a bare `swiftc -F <slice>` resolves the
   headers and fails at link time; name `-framework llama`, as Xcode does

@@ -8,7 +8,7 @@
 //! `ggml_cuda_device_info`, `ggml_cuda_pool`, `ggml_cuda_pool_alloc`,
 //! `ggml_backend_cuda_context`), `llama.cpp/ggml/src/ggml-cuda/graph.cuh`
 //! (`ggml_cuda_graph`, `ggml_cuda_concurrent_event`,
-//! `ggml_cuda_stream_context`, which v1.0.0 moved out of `common.cuh`) and
+//! `ggml_cuda_stream_context`, which live in `graph.cuh`) and
 //! `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` (`ggml_cuda_error`, device
 //! selection, `ggml_cuda_init`, the three pools, and the context's
 //! constructor, destructor and graph cache), at v1.0.0 (`b1b770d90`).
@@ -62,7 +62,7 @@ pub const cc = struct {
     pub const volta = 700;
     pub const turing = 750;
     pub const ampere = 800;
-    /// `GGML_CUDA_CC_AMPERE_GA10X`, new at v0.7.0 for the chunked
+    /// `GGML_CUDA_CC_AMPERE_GA10X`, for the chunked
     /// gated-delta-net kernel's shared-memory rule.
     pub const ampere_ga10x = 860;
     pub const orin = 870;
@@ -175,8 +175,8 @@ pub fn blackwellMmaAvailable(x: c_int) bool {
     return cc.isNvidia(x) and highestCompiledArch(x) >= cc.blackwell and highestCompiledArch(x) < cc.rubin;
 }
 
-/// Ports `fp8_mma_hardware_available` (common.cuh:399 @b1b770d90), new at
-/// v1.0.0: Ada Lovelace through Blackwell.
+/// Ports `fp8_mma_hardware_available` (common.cuh:399 @b1b770d90): Ada
+/// Lovelace through Blackwell.
 pub fn fp8MmaHardwareAvailable(x: c_int) bool {
     return cc.isNvidia(x) and x >= cc.ada_lovelace and x < cc.rubin;
 }
@@ -268,11 +268,9 @@ pub fn atoi(s: [*:0]const u8) c_int {
 // -----------------------------------------------------------------------------
 // Environment
 //
-// v0.7.0 reads each of the backend's environment variables once, through
-// these helpers, where it had called `getenv` at every use. Three of them
-// changed meaning with it: `GGML_CUDA_ENABLE_UNIFIED_MEMORY`,
-// `GGML_CUDA_NO_PINNED` and `GGML_CUDA_REGISTER_HOST` are now flags
-// (`atoi(value) != 0`) where being set at all had been enough.
+// The backend's environment variables are read once, through these helpers.
+// `GGML_CUDA_ENABLE_UNIFIED_MEMORY`, `GGML_CUDA_NO_PINNED` and
+// `GGML_CUDA_REGISTER_HOST` are flags (`atoi(value) != 0`), not merely set.
 
 /// Ports `ggml_cuda_env_flag` (ggml-cuda.cu:145 @b1b770d90).
 pub fn envFlag(var_name: [*:0]const u8) bool {
@@ -360,8 +358,7 @@ pub fn opOffloadMinBatch() c_int {
 }
 
 /// Ports `ggml_cuda_graph_debug_enabled` (ggml-cuda.cu:3201 @b1b770d90):
-/// v0.7.0's `GGML_CUDA_GRAPH_DEBUG`, which gates the CUDA-graph debug lines
-/// that had been `#ifndef NDEBUG` or unconditional.
+/// `GGML_CUDA_GRAPH_DEBUG`, which gates the CUDA-graph debug lines.
 pub fn graphDebugEnabled() bool {
     return EnvOnce(bool, struct {
         fn f() bool {
@@ -623,8 +620,8 @@ pub fn deviceMalloc(ptr: *?*anyopaque, size: usize, device: c_int) cu.cudaError_
 // Pools
 
 /// Ports `ggml_cuda_pool` (common.cuh:1284 @b1b770d90). The C's virtual
-/// base becomes a tagged union of its three implementations (the debug pool
-/// is new at v1.0.0).
+/// base becomes a tagged union of its three implementations (including the
+/// debug pool).
 pub const Pool = union(enum) {
     leg: PoolLeg,
     vmm: PoolVmm,
@@ -650,7 +647,7 @@ pub const Pool = union(enum) {
 };
 
 /// Ports `ggml_cuda_pool_leg` (ggml-cuda.cu:450 @b1b770d90): a best-fit
-/// cache of `cudaMalloc`ed buffers. Since v0.8.0 it holds its context, whose
+/// cache of `cudaMalloc`ed buffers. It holds its context, whose
 /// captured CUDA graphs a freed buffer invalidates.
 pub const PoolLeg = struct {
     const max_buffers = 256;
@@ -759,7 +756,7 @@ pub const PoolLeg = struct {
 
 /// Ports `ggml_cuda_pool_vmm` (ggml-cuda.cu:585 @b1b770d90): a stack
 /// allocator over one reserved virtual range, growing its physical backing
-/// on demand. Frees must come in reverse order. Since v1.0.0 (#30542) the
+/// on demand. Frees must come in reverse order. The
 /// range is reserved before the first physical allocation, and a reservation
 /// the driver refuses for lack of memory is retried at half the size, down
 /// to what the allocation needs.
@@ -888,8 +885,7 @@ pub const PoolVmm = struct {
     }
 };
 
-/// Ports `ggml_cuda_pool_debug` (ggml-cuda.cu:748 @b1b770d90), new at
-/// v1.0.0: for NVIDIA's compute-sanitizer, under `GGML_CUDA_POOL_DEBUG`.
+/// Ports `ggml_cuda_pool_debug` (ggml-cuda.cu:748 @b1b770d90): for NVIDIA's compute-sanitizer, under `GGML_CUDA_POOL_DEBUG`.
 /// Allocations are exact-size and freed on release, so memcheck can catch
 /// out-of-bounds accesses and use-after-free.
 pub const PoolDebug = struct {
@@ -986,8 +982,7 @@ pub fn PoolAlloc(comptime T: type) type {
 // -----------------------------------------------------------------------------
 // CUDA graphs
 
-/// Ports `ggml_cuda_graph_cluster` (graph.cuh:22 @b1b770d90), new at v1.0.0
-/// (#31284): the cluster dims of a clustered kernel node.
+/// Ports `ggml_cuda_graph_cluster` (graph.cuh:22 @b1b770d90): the cluster dims of a clustered kernel node.
 /// `USE_CUDA_GRAPH_CLUSTER_CHECK` is defined on CUDA 11.8 and later, which
 /// the build requires.
 pub const GraphCluster = struct {
@@ -1005,7 +1000,7 @@ pub const GraphCluster = struct {
     }
 };
 
-/// Ports `ggml_cuda_graph_instance` (graph.cuh:32 @b1b770d90), new at v1.0.0:
+/// Ports `ggml_cuda_graph_instance` (graph.cuh:32 @b1b770d90):
 /// an executable graph and the cluster dims it was instantiated with, since
 /// `cudaGraphExecUpdate` keeps stale ones (cuBLAS on sm90).
 pub const GraphInstance = struct {
@@ -1036,7 +1031,7 @@ pub const NodeProperties = struct {
 pub const Graph = struct {
     /// The ggml graph is captured as a series of CUDA graphs, so the GPU can
     /// run one chunk while the next is enqueued. The captured `cudaGraph_t`
-    /// is gone by v0.8.0: each chunk's is destroyed once instantiated.
+    /// is not kept: each chunk's is destroyed once instantiated.
     instances: std.ArrayList(GraphInstance) = .empty,
     num_nodes: usize = 0,
     nodes: std.ArrayList(cu.cudaGraphNode_t) = .empty,
@@ -1056,8 +1051,8 @@ pub const Graph = struct {
         self.node_props.deinit(allocator);
     }
 
-    /// Ports `ggml_cuda_graph`'s `is_enabled` (graph.cuh:65 @b1b770d90). Since
-    /// v1.0.0 the debug pool disables graphs too.
+    /// Ports `ggml_cuda_graph`'s `is_enabled` (graph.cuh:65 @b1b770d90). The
+    /// debug pool disables graphs too.
     pub fn isEnabled(self: *const Graph) bool {
         const S = struct {
             var disabled_by_env = false;
@@ -1204,8 +1199,8 @@ pub const StreamContext = struct {
 // -----------------------------------------------------------------------------
 // The backend context
 
-/// Ports `ggml_backend_cuda_context` (common.cuh:1352 @b1b770d90). Since
-/// v1.0.0 the concurrent stream context is a `unique_ptr` to a type
+/// Ports `ggml_backend_cuda_context` (common.cuh:1352 @b1b770d90). The
+/// concurrent stream context is a `unique_ptr` to a type
 /// `graph.cuh` defines; held by value here, the order of destruction is the
 /// same.
 pub const Context = struct {
@@ -1217,7 +1212,7 @@ pub const Context = struct {
     cublas_handles: [max_devices][max_streams]cu.cublasHandle_t = @splat(@splat(null)),
     cublas_workspaces: [max_devices][max_streams]?*anyopaque = @splat(@splat(null)),
     cublas_workspace_sizes: [max_devices]usize = @splat(0),
-    /// v1.0.0, for `fp8.zig`'s cuBLASLt matmul.
+    /// For `fp8.zig`'s cuBLASLt matmul.
     cublaslt_handles: [max_devices]cu.cublasLtHandle_t = @splat(null),
 
     curr_stream_no: c_int = 0,
@@ -1365,8 +1360,7 @@ pub const Context = struct {
         return self.cublas_handles[d][s];
     }
 
-    /// Ports `ggml_backend_cuda_context`'s `cublaslt_handle` (common.cuh:1427 @b1b770d90),
-    /// new at v1.0.0.
+    /// Ports `ggml_backend_cuda_context`'s `cublaslt_handle` (common.cuh:1427 @b1b770d90).
     pub fn cublasltHandle(self: *Context) cu.cublasLtHandle_t {
         const d: usize = @intCast(self.device);
         if (self.cublaslt_handles[d] == null) {
@@ -1429,7 +1423,7 @@ pub const lock = struct {
 
 /// Ports `ggml_cuda_mm_fusion_args_host` (common.cuh:1453 @b1b770d90).
 /// `glu_limit` is `GGML_GLU_OP_SWIGLU_CLAMP`'s limit, op_params slot 3.
-/// The `shared_*` fields (v0.6.0) carry the shared expert MMVQ computes
+/// The `shared_*` fields carry the shared expert MMVQ computes
 /// beside the routed ones (`fusion.zig`'s `matchSharedExpert`).
 pub const MmFusionArgsHost = struct {
     x_bias: ?*const Tensor = null,
@@ -1439,7 +1433,7 @@ pub const MmFusionArgsHost = struct {
     gate_scale: ?*const Tensor = null,
     glu_op: c.enum_ggml_glu_op = 0,
     glu_limit: f32 = 0.0,
-    /// v1.0.0: the `src1` precision requested by the fused `MUL_MAT`s (MMQ).
+    /// The `src1` precision requested by the fused `MUL_MAT`s (MMQ).
     prec_src1: c.enum_ggml_prec = c.GGML_PREC_UNDEFINED,
     shared_up: ?*const Tensor = null,
     shared_gate: ?*const Tensor = null,
@@ -1448,8 +1442,8 @@ pub const MmFusionArgsHost = struct {
 
 /// Ports `ggml_cuda_mm_fusion_args_device` (common.cuh:1466 @b1b770d90).
 /// Passed to kernels by value, so its layout is the kernel's: the `float`
-/// follows the 4-byte enum, and since v0.6.0 the trailing `uint32_t` is
-/// padded to 80 bytes, where it was 48.
+/// follows the 4-byte enum, and the trailing `uint32_t` is
+/// padded to 80 bytes.
 pub const MmFusionArgsDevice = extern struct {
     x_bias: ?*const anyopaque = null,
     gate: ?*const anyopaque = null,

@@ -1080,8 +1080,7 @@ pub fn writeContentChunked(a: std.mem.Allocator, strm: *SocketStream, provider: 
 /// body framed by `length`, written raw. The server reaches it with a
 /// chunked provider (through `ContentProviderAdapter`, httplib.cpp:5669
 /// @b1b770d90, which drops the length) once its error handler gave a
-/// streamed response a body, and so a `Content-Length` (Stage 10 step 6:
-/// a 404 through the CORS proxy).
+/// streamed response a body, and so a `Content-Length` (a 404 through the CORS proxy).
 ///
 /// Return: false when the provider stops, ends early or makes no
 /// progress, or a write fails.

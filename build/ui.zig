@@ -14,7 +14,7 @@
 //! Without `-Dui` the port's table is empty and the reference compiles
 //! zmake's `zig/ui-stub`, so both take upstream's no-assets path, as before.
 //! The two must always be given the same bundle: `npm run build` is not
-//! reproducible (`llama.cpp.zmake`'s `CLAUDE.md`, "The web UI").
+//! reproducible.
 
 const std = @import("std");
 const llamacpp = @import("llamacpp.zig");

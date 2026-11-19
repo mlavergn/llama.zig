@@ -6,15 +6,14 @@
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-debug.cpp`, and
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v1.0.0
-//! (`b1b770d90`). Upstream split `ggml-vulkan.cpp` into those files at
-//! v0.5.0. Each declaration below names the C++ it replaces and the line it
+//! (`b1b770d90`). Each declaration below names the C++ it replaces and the line it
 //! began at. The instance and the device queries are in `instance.zig`.
 //!
 //! # The whole host layer
 //!
-//! Every vtable entry is ported, and since the swap (PLAN.md, "Stage 7 —
-//! Vulkan") this is the Vulkan backend `-Dvulkan` builds; `supports_op` is
-//! the reference's predicate alone, as Stage 6 left CUDA's. The buffer
+//! Every vtable entry is ported, and since the swap
+//! this is the Vulkan backend `-Dvulkan` builds; `supports_op` is
+//! the reference's predicate alone, as on CUDA. The buffer
 //! types are in `buffer.zig`, the backend iface, events and
 //! `buffer_from_host_ptr` in `iface.zig`.
 //!
@@ -42,7 +41,7 @@ pub const ConvBlockSize = extern struct { K: u32, NPQ: u32, CRS: u32 };
 
 /// Ports `vk_conv_block_sizes` (ggml-vulkan-types.h:395 @b1b770d90). Exported,
 /// because the C++ leaves out its `static` and the reference's contract
-/// therefore includes it -- weakly since v0.5.0, which made it an `inline`
+/// therefore includes it -- weakly, as an `inline`
 /// variable in a header.
 pub var conv_block_sizes = [_]ConvBlockSize{
     .{ .K = 128, .NPQ = 128, .CRS = 16 }, // CONV_SHAPE_128x128

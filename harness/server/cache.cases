@@ -1,5 +1,4 @@
-# Prompt caching, cache reuse, context shift and checkpoints (Stage 10
-# step 3c): scripts/server-diff cache.
+# Prompt caching, cache reuse, context shift and checkpoints: scripts/server-diff cache.
 !server -m $QWEN3 -c 256 -np 1 --no-jinja --context-shift --cache-reuse 4 -lv 4
 !fulllog
 
@@ -41,11 +40,11 @@ POST /completion {"prompt": "The quick brown fox jumps over the lazy dog. The qu
 POST /completion {"prompt": "The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the mat.", "n_predict": 6, "temperature": 0, "message_delimiters": [{"role": "user", "delimiter": "The quick"}]}
 GET /slots
 
-# v0.7.0 (#26004): a slot file carries the slot's context checkpoints after
+# (#26004) a slot file carries the slot's context checkpoints after
 # the llama state payload ("SCKP"), so a hybrid slot restored from it can
 # still roll back to one; a checkpoint restored from a file that no longer
 # loads falls back to re-processing instead of aborting
-# v0.8.0 (#30666): a checkpoint past the shared prefix is erased even when its
+# (#30666) a checkpoint past the shared prefix is erased even when its
 # pos_max is not past pos_next: the second prompt shares the first half, a
 # restored earlier checkpoint moves pos_next back, later ones stay wrong
 !server -m $MM/text-gemma3.gguf -c 2048 -np 1 --no-jinja --no-warmup --ctx-checkpoints 4 --checkpoint-min-step 8 -b 16 -ub 16 -lv 4

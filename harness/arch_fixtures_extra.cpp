@@ -32,13 +32,13 @@
 // n_embd_r()` itself. RWKV-7 and ARWKV-7 additionally get the LoRA ranks
 // they read, and `--variant hs64nogate` writes ARWKV-7 without a gate rank,
 // its gateless form. `--variant topk8` gives the k-pool indexers of
-// GLM5-Next and Qwen4exp a top_k of 8 (since v0.6.0), and `--variant mtp`
-// (`mtptopk8`) gives them a NextN block (since v0.7.0). `--variant mova1` writes
+// GLM5-Next and Qwen4exp a top_k of 8, and `--variant mtp`
+// (`mtptopk8`) gives them a NextN block. `--variant mova1` writes
 // K2 Horizon with one of four value experts, softmax routing, and no output
-// gate or value-router bias (since v0.7.0). `--variant gqa` gives Nemotron
-// a Q wider than n_embd (since v0.8.0), `--variant nopost` writes LFM3
+// gate or value-router bias. `--variant gqa` gives Nemotron
+// a Q wider than n_embd, `--variant nopost` writes LFM3
 // without its sandwich norms and `--variant d1` as a decision model, and
-// `--variant nocap` Beam without a softcap key (since v0.8.0). Written as `<arch>-<variant>-dense.gguf` (or `-moe.gguf`).
+// `--variant nocap` Beam without a softcap key. Written as `<arch>-<variant>-dense.gguf` (or `-moe.gguf`).
 //
 // Usage: arch_fixtures_extra <out-dir> <seed> [--variant hs64] <arch>...
 // Prints one line per fixture: `wrote <path>` or `failed <arch> (<config>): <why>`.
@@ -57,7 +57,7 @@ static bool is_bert_family(llm_arch arch) {
 }
 
 // The architectures with an MTP (NextN) draft head besides the k-pool two,
-// for `--variant mtp` (since v0.7.0). Two are left out: DeepSeek V4 decides
+// for `--variant mtp`. Two are left out: DeepSeek V4 decides
 // it has NextN layers by probing the file's weights (deepseek4.cpp:14
 // @b1b770d90), which a model built from user data has none of, so the
 // fixture gets no MTP block; and MiMo-2's MTP block needs a fused
@@ -110,7 +110,7 @@ static bool write_fixture(llm_arch arch, bool moe, size_t seed, const std::strin
         }
         gguf_set_val_u32(meta.get(), (a + ".token_shift_count").c_str(), arch == LLM_ARCH_RWKV7 ? 2 : 1);
     }
-    // Since v0.4.1 Gemma 4 reads its SWA pattern with `get_arr`, which
+    // Gemma 4 reads its SWA pattern with `get_arr`, which
     // refuses the scalar `get_gguf_ctx` still writes; upstream's own loop
     // skips the architecture, so nothing there noticed. The array is the
     // recipe's comment: every fifth layer full attention.
@@ -125,13 +125,12 @@ static bool write_fixture(llm_arch arch, bool moe, size_t seed, const std::strin
     }
     // The k-pool indexers (GLM5-Next, Qwen4exp) at an indexer top_k of 8,
     // two pools of four: the recipe's 131072 keeps every pool, so selection
-    // never drops one. (Until v0.7.0 removed it, GLM5-Next's gather path also
-    // needed n_ctx above top_k + kpool - 1.)
+    // never drops one.
     if (variant == "topk8" || variant == "mtptopk8") {
         const std::string a = llm_arch_name(arch);
         gguf_set_val_u32(meta.get(), (a + ".attention.indexer.top_k").c_str(), 8);
     }
-    // The k-pool architectures with a NextN (MTP) block (since v0.7.0):
+    // The k-pool architectures with a NextN (MTP) block:
     // `--variant mtp` (and `mtptopk8`, with the top_k above) appends one
     // NextN layer after the recipe's two, so a third block, its per-layer
     // arrays extended -- for GLM5-Next an MLA layer (head_count_kv 1), the
@@ -154,7 +153,7 @@ static bool write_fixture(llm_arch arch, bool moe, size_t seed, const std::strin
             gguf_set_arr_data(meta.get(), (a + ".attention.head_count_kv").c_str(), GGUF_TYPE_UINT32, head_kv.data(), head_kv.size());
         }
     }
-    // The other MTP architectures (since v0.7.0): one NextN layer after
+    // The other MTP architectures: one NextN layer after
     // the recipe's, and every per-layer array -- of n_layer entries --
     // extended by its last entry, the NextN layer being built like the last
     // trunk layer; for BailingMoE3 by its first, since its last trunk layer
@@ -199,7 +198,7 @@ static bool write_fixture(llm_arch arch, bool moe, size_t seed, const std::strin
             gguf_set_val_u32(meta.get(), (a + ".expert_shared_feed_forward_length").c_str(), 64);
         }
     }
-    // Mellum's MTP head (since v0.8.0) comes in both of `graph_mtp<iswa>`:
+    // Mellum's MTP head comes in both of `graph_mtp<iswa>`:
     // the recipe's sliding window, and `mtpnoswa` without one. The recipe's
     // scalar pattern leaves a NextN layer dense (`set_swa_pattern`), so
     // `mtpswa` gives an array that makes it sliding, the arm taking plain RoPE.
@@ -210,7 +209,7 @@ static bool write_fixture(llm_arch arch, bool moe, size_t seed, const std::strin
         const uint32_t pattern[3] = {1, 0, 1};
         gguf_set_arr_data(meta.get(), "mellum.attention.sliding_window_pattern", GGUF_TYPE_UINT32, pattern, 3);
     }
-    // Non-standard GQA (since v0.8.0, models/nemotron.cpp:28 @b1b770d90): Q is
+    // Non-standard GQA (models/nemotron.cpp:28 @b1b770d90): Q is
     // n_embd_head_k * n_head wide, not n_embd. The recipe's heads tile n_embd,
     // so nothing else reaches it.
     if (variant == "gqa" && arch == LLM_ARCH_NEMOTRON) {
@@ -221,30 +220,30 @@ static bool write_fixture(llm_arch arch, bool moe, size_t seed, const std::strin
         gguf_set_val_u32(meta.get(), (a + ".attention.value_length").c_str(), 128);
         gguf_set_val_u32(meta.get(), (a + ".rope.dimension_count").c_str(), 128);
     }
-    // `--variant nocap` beam changes nothing here: Beam's default (since
-    // v0.8.0, models/beam.cpp:10 @b1b770d90) is that an absent key means no
+    // `--variant nocap` beam changes nothing here: Beam's default
+    // (models/beam.cpp:10 @b1b770d90) is that an absent key means no
     // softcap where the hparam's own default is 30, the recipe writes no such
     // key, and `-o`'s file has one only because the saver writes every hparam.
-    // LFM3's d1 (since v0.8.0, models/lfm3.cpp:23, 92 @b1b770d90): a non-causal
+    // LFM3's d1 (models/lfm3.cpp:23, 92 @b1b770d90): a non-causal
     // model, which has no memory and takes `graph<true>`.
     if (variant == "d1" && arch == LLM_ARCH_LFM3) {
         gguf_set_val_bool(meta.get(), "lfm3.attention.causal", false);
     }
-    // K2 Horizon's other arms (since v0.7.0): the recipe's MoVA routes
+    // K2 Horizon's other arms: the recipe's MoVA routes
     // through 2 of 2 value experts under sigmoid gating, with an output gate
     // and a router bias. `mova1` takes 1 of 4 under softmax -- the single
     // expert's `ggml_cont` (k2-horizon.cpp:205 @b1b770d90) and a top-k that
     // drops experts -- and the file leaves out `attn_gate` and
     // `attn_v_gate.bias`, so o_proj runs inside `build_attn` and selection
     // reads the unbiased probabilities.
-    // The gated delta nets with grouped value heads (since v0.7.0):
+    // The gated delta nets with grouped value heads:
     // `--variant gdnrep2` gives the Qwen3.5/Qwen3-Next families two value
     // heads per key head -- the recipe's time_step_rank equals its
     // group_count, so the value heads never repeat the key heads -- at the
     // recipe's head size of 128. Under prism.hadamard that is the only shape
     // in which ssm_out's input is permuted from the tiled to the grouped head
-    // order (set_gdn_v_perm, llama-model.h:725 @b1b770d90). Since v0.9.0
-    // also Clover MoE, whose linear layers repeat the key heads the same way
+    // order (set_gdn_v_perm, llama-model.h:725 @b1b770d90). Also
+    // Clover MoE, whose linear layers repeat the key heads the same way
     // (models/clover-moe.cpp:281 @b1b770d90).
     if (variant == "gdnrep2" && (arch == LLM_ARCH_QWEN35 || arch == LLM_ARCH_QWEN35MOE || arch == LLM_ARCH_QWEN3NEXT ||
             arch == LLM_ARCH_CLOVER_MOE)) {
@@ -262,7 +261,7 @@ static bool write_fixture(llm_arch arch, bool moe, size_t seed, const std::strin
             gguf_set_val_u32(meta.get(), (a + ".attention.value_expert_used_count").c_str(), 1);
         }
     }
-    // EmbeddingGemma 2 (since v0.7.0) reads the per-layer input width,
+    // EmbeddingGemma 2 reads the per-layer input width,
     // which the recipe writes for Gemma 4 alone; its value there, n_embd/2.
     if (arch == LLM_ARCH_GEMMA_EMBEDDING2) {
         const std::string a = llm_arch_name(arch);
@@ -283,7 +282,7 @@ static bool write_fixture(llm_arch arch, bool moe, size_t seed, const std::strin
     ggml_backend_dev_t devs[2] = { ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU), nullptr };
     mp.devices = devs;
 
-    // test-llama-archs' default -d (0.1) since v0.5.0
+    // test-llama-archs' default -d (0.1)
     tensor_data_params tp = { seed, 0.1f };
     llama_model * model = llama_model_init_from_user(meta.get(), set_tensor_data, &tp, mp);
     if (!model) {
@@ -357,7 +356,7 @@ int main(int argc, char ** argv) {
 
     const std::string dir = argv[1];
     const size_t seed = std::strtoull(argv[2], nullptr, 10);
-    // Since v0.8.0 upstream's main fills the pool `set_tensor_data` draws from,
+    // Upstream's main fills the pool `set_tensor_data` draws from,
     // at test-llama-archs' default -d.
     init_normal_pool(seed, 0.1f);
     std::string variant;

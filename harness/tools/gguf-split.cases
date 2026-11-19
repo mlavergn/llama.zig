@@ -43,14 +43,14 @@ $VOCAB/ggml-vocab-llama-spm.gguf vs
 !fail --merge ld-merged.gguf again.gguf
 !fail --merge /nonexistent-00001-of-00002.gguf x.gguf
 
-# v0.8.0: a short read stops the tool, with the offset, where it used to copy
+# a short read stops the tool, with the offset, and does not copy
 # whatever the buffer held
 !fail --split-max-tensors 5 $DATA/trunc.gguf tr
 # --dry-run: what a failed merge leaves on disk is whatever each side's stream
 # had flushed, upstream's std::ofstream dropping its buffer at exit()
 !fail --merge --dry-run $DATA/trunc-merge-00001-of-00001.gguf tm.gguf
 
-# v0.9.0: every split must be the next of the first one's set, and the set
+# every split must be the next of the first one's set, and the set
 # must hold split.tensors.count tensors -- each used to merge regardless
 !fail --merge $DATA/cnt-00001-of-00002.gguf cnt.gguf
 !fail --merge $DATA/no-00001-of-00002.gguf no.gguf

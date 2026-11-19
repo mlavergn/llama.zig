@@ -1,9 +1,8 @@
 // A PEG arena as JSON, for the gates that compare two arenas
 // (scripts/peg-diff, scripts/chat-parse-diff).
 //
-// Not a port. The form upstream's own `common_peg_arena::save` wrote until
-// v0.7.0 removed it, read through the arena's public members -- every
-// parser by `get(id)`, the root -- with the rule map, whose libc++ order no
+// Not a port. The form upstream's own `common_peg_arena::save` wrote, read through the arena's
+// public members -- every parser by `get(id)`, the root -- with the rule map, whose libc++ order no
 // caller can see any more, sorted by name. `harness/peg_serialize.zig`
 // writes the same for the port.
 

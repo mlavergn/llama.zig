@@ -17,8 +17,8 @@ const Tensor = c.ggml_tensor;
 /// Ports `CUDA_CONV2D_DW_BLOCK_SIZE` (conv2d-dw.cuh:4 @b1b770d90).
 const block_size = 256;
 
-/// Ports `ggml_cuda_op_conv2d_dw` (conv2d-dw.cu:120 @b1b770d90). Since
-/// v0.6.0 the kernel may be F16; the input and output stay F32.
+/// Ports `ggml_cuda_op_conv2d_dw` (conv2d-dw.cu:120 @b1b770d90). The
+/// kernel may be F16; the input and output stay F32.
 pub fn opConv2dDw(ctx: *common.Context, dst: *Tensor) void {
     const kernel = impl.one(Tensor, dst.src[0]);
     const input = impl.one(Tensor, dst.src[1]);

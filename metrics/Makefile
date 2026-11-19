@@ -1,5 +1,4 @@
 # metrics/: performance of the stock C against the port, side by side.
-# See README.md for what each metric measures and what it cannot.
 #
 #   make              libs, drivers, then RUNS rounds on Metal and the report
 #   make cpu          the same on the CPU device alone -- the ported CPU kernels

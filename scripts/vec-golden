@@ -24,7 +24,6 @@
 # Matching the ARM quant goldens, and for the same reason. The fusion sites in
 # vec.cpp are explicit `GGML_F32_VEC_FMA` intrinsics rather than expressions a
 # compiler chose, so the port can name them with `@mulAdd` and match exactly.
-# See CLAUDE.md, "Float contraction".
 #
 # vec.cpp is compiled here rather than taken from the reference archive, so the
 # contraction setting is ours to choose. The object precedes the archive on the
@@ -37,8 +36,8 @@ cd "$ROOT"
 
 # GOLDEN_CPU is the CPU the reference kernels are compiled for. `baseline`
 # writes the committed goldens; any other CPU writes a `_<cpu>` sibling,
-# because a different CPU is a different reference -- see NOTES.md,
-# "Stage 5 step 2". `generic` is Zig's aarch64-linux baseline.
+# because a different CPU is a different reference.
+# `generic` is Zig's aarch64-linux baseline.
 GOLDEN_CPU="${GOLDEN_CPU:-baseline}"
 sfx=""; [ "$GOLDEN_CPU" = baseline ] || sfx="_$GOLDEN_CPU"
 

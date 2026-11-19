@@ -5,7 +5,7 @@
 //!
 //! Mirrors the `FC_*`, `OP_*`, `N_*` and `SZ_*` `#define`s of
 //! `llama.cpp/ggml/src/ggml-metal/ggml-metal-impl.h` at v1.0.0
-//! (`b1b770d90`), and since v0.6.0 its two `GGML_METAL_FWHT_*`.
+//! (`b1b770d90`), and its two `GGML_METAL_FWHT_*`.
 //!
 //! # Hand-declared, generated, and checked
 //!
@@ -209,7 +209,7 @@ pub const FC_LIGHTNING_INDEXER: c_int = 2200;
 pub const FC_MUL_MV_MMA: c_int = 2300;
 /// Mirrors `FC_TOP_K_MASK` (ggml-metal-impl.h:128 @b1b770d90).
 pub const FC_TOP_K_MASK: c_int = 2400;
-/// Mirrors `FC_GROUP_NORM` (ggml-metal-impl.h:129 @b1b770d90), new at v1.0.0
+/// Mirrors `FC_GROUP_NORM` (ggml-metal-impl.h:129 @b1b770d90)
 /// (#31852): whether the group-norm rows are flat or strided.
 pub const FC_GROUP_NORM: c_int = 2500;
 /// Mirrors `OP_FLASH_ATTN_EXT_NQPSG` (ggml-metal-impl.h:132 @b1b770d90).
@@ -336,9 +336,9 @@ pub const count: usize = 138;
 // `harness/struct_layout.cpp` includes the real header and compares these
 // against its own `#define`s. Name and value travel together so a
 // reordering cannot let two wrong entries cancel. Every value is the
-// declaration above it, not a second copy of the number: until v0.6.0 the
-// table held literals, so a wrong `pub const` -- the one the encoders
-// read -- passed the gate beside a right literal.
+// declaration above it, not a second copy of the number: a table of literals would
+// let a wrong `pub const` -- the one the encoders read -- pass the gate
+// beside a right literal.
 
 const Entry = struct { name: [*:0]const u8, value: c_long };
 

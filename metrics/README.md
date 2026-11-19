@@ -43,8 +43,7 @@ the only variable — the pairing `scripts/parity-port` uses for correctness.
 upstream commit would report the version gap as the port's speed.
 
 What `port` contains today is the ported ggml plus the sampler and grammar.
-The rest of libllama is still the C++ until it swaps at `llama.h` (`PLAN.md`,
-Decision 42), so `port` against `ref` measures **ggml** above all.
+The rest of libllama is still the C++ until it swaps at `llama.h`, so `port` against `ref` measures **ggml** above all.
 
 This compares libraries, not binaries. Our `llama-cli` adds argument
 parsing and chat templating on top; neither runs per token.

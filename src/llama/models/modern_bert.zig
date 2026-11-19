@@ -5,7 +5,7 @@
 //!
 //! # Provenance
 //!
-//! A decision model (since v0.6.0) puts `n_layer_decision` blocks of a
+//! A decision model puts `n_layer_decision` blocks of a
 //! head after the encoder: plain pre-norm blocks with biases and no
 //! positional encoding, evaluated once per question type with that type's
 //! embedding added, each ending in the classifier, so the output is one

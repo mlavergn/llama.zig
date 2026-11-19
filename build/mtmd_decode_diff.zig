@@ -1,4 +1,4 @@
-//! Stage 8 workstream build file: `mtmd_decode_diff`. Owned by that workstream; wired
+//! Build file for `mtmd_decode_diff`, wired
 //! into `build.zig` through `build/mtmd.zig`'s `Gates`.
 //!
 //! **Not a port.** This is build description. It adds `mtmd-decode-diff`:

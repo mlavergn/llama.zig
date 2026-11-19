@@ -1,7 +1,6 @@
 #!/bin/bash
 # `repack-diff` for x86: every interleaved repack kernel and converter
-# against the reference C++, on bits, on the Windows laptop (PLAN.md, Stage
-# 5 step 6; Decision 57).
+# against the reference C++, on bits, on the Windows laptop.
 #
 # `harness/repack_diff.zig` unchanged: it calls all 36 gemv/gemm and
 # quantize_mat names and drives both `CPU_REPACK` buffer types. On x86,

@@ -5,7 +5,7 @@
  * `ggml-vulkan.cpp` is written against `vulkan.hpp`, the C++ binding; that is
  * a header-only wrapper over this C API, so the port calls the C API
  * directly. No ggml header is included here: a second translation of one
- * would produce incompatible `ggml_tensor` types (CLAUDE.md, `impl.zig`). */
+ * would produce incompatible `ggml_tensor` types (see `impl.zig`). */
 #define VK_NO_PROTOTYPES 1
 #include <vulkan/vulkan_core.h>
 

@@ -25,8 +25,8 @@
 #    ubatch.
 #
 # 2. In process (harness/meta_diff.c). The reference .cpp compiled with its
-#    unmangled exports (seven since v0.6.0) -D-renamed to ref_* -- the rename that NOTES.md
-#    records as unusable for swapping, because it renames internal callers
+#    unmangled exports (seven) -D-renamed to ref_* -- the rename found
+#    unusable for swapping, because it renames internal callers
 #    too, which is exactly what keeps the renamed object self-consistent --
 #    beside the port in one process. Every vtable answer, every transfer
 #    path on every split layout, and graphs built to reach the delayed
@@ -35,8 +35,7 @@
 # The port is built twice, ReleaseFast and ReleaseSafe, and both builds go
 # through both halves: the bit-exact comparison is insensitive to Zig's
 # safety checks, and ReleaseSafe is the only build in which an overflow or
-# an out-of-bounds index would show (CLAUDE.md, "A gate's optimization level
-# is part of what it can see").
+# an out-of-bounds index would show.
 #
 # Usage: scripts/meta-diff [--quick | --coverage]
 #   --quick     one e2e config instead of all of them
@@ -150,10 +149,9 @@ port_obj() { [ "$1" = archive ] || echo "$tmp/meta_$1.o"; }
 
 # The end-to-end configs -- devices | opts | port build. Two to four devices,
 # Metal beside the CPU, uneven and zero tensor_split entries, a small ubatch,
-# and CPU-only lists. Those were absent through v0.6.0 because the reference
-# crashed on them: with every simple buffer host-resident, graph_compute's
-# `s_copy_main` FIXME skipped views of leaves it should slice. v0.7.0's host
-# views (#30217, [TAG_META_HOST_VIEWS]) replaced it.
+# and CPU-only lists. Those crashed the reference before host views
+# (#30217, [TAG_META_HOST_VIEWS]): with every simple buffer host-resident, graph_compute's
+# `s_copy_main` FIXME skipped views of leaves it should slice.
 # devices | opts | port build
 CONFIGS=(
     "mm||ReleaseFast"

@@ -118,7 +118,7 @@ static void ask_buffers(size_t i, ggml_backend_dev_t dev, ggml_backend_reg_t reg
         ggml_backend_tensor_copy(ta, tb);
         printf("dev %zu cpy_tensor = %016llx\n", i, (unsigned long long) read_all(b, tb, scratch, n));
 
-        /* v1.0.0's batched transfers (set_tensor_n, get_tensor_n,
+        /* The batched transfers (set_tensor_n, get_tensor_n,
          * cpy_tensor_n): five regions over views of both buffers, one of
          * them empty, staged in as few submissions as the staging buffer
          * allows -- GGML_VK_SUBALLOCATION_BLOCK_SIZE caps it. */
@@ -331,8 +331,8 @@ static void ask_offload(ggml_backend_dev_t dev, struct ggml_context * ctx) {
  * as original indices. No allocation: the reorder reads ops, sources and
  * view sources, never data. */
 
-/* The scheduler's allocation-dependency callback (ggml-backend.cpp, since
- * v0.4.0). Vulkan calls it from v0.4.1 on, for the external inputs of each
+/* The scheduler's allocation-dependency callback (ggml-backend.cpp).
+ * Vulkan calls it for the external inputs of each
  * topk_moe pattern it keeps whole; each call is printed with both tensors
  * as their index in the original node order (a leaf as its name), so the
  * calls, their order and their targets are compared. */
@@ -501,7 +501,7 @@ static struct ggml_cgraph * graph_snake_tail(struct ggml_context * ctx) {
     return g;
 }
 
-/* The v0.4.1 fusions the reorder keeps together or pulls forward:
+/* The fusions the reorder keeps together or pulls forward:
  * RMS_NORM+MUL+ADD(+MUL) and RMS_NORM+VIEW+SET_ROWS kept whole; a MUL that
  * consumes a GELU/SILU a few nodes later, pulled forward when its other
  * operand is a weight or already scheduled; an RMS_NORM's MUL found past
@@ -561,7 +561,7 @@ static struct ggml_cgraph * graph_fusions_041(struct ggml_context * ctx) {
     return g;
 }
 
-/* v0.6.0's HC_POST_GATE: qwen4exp's hc_combine weights,
+/* HC_POST_GATE: qwen4exp's hc_combine weights,
  * scale(sigmoid(scale(p))), feeding a DSV4_HC_POST. The reorder keeps the
  * four nodes whole and asks the scheduler to keep their external inputs
  * (p, x, residual, comb) alive until the HC_POST. An independent node
@@ -588,7 +588,7 @@ static struct ggml_cgraph * graph_hc_post_gate(struct ggml_context * ctx) {
 }
 
 /*
- * v1.0.0's test-fusion interface (`tests/test-fusion.cpp`'s proc
+ * The test-fusion interface (`tests/test-fusion.cpp`'s proc
  * addresses): which fusions the graph walk took, by label and count, over
  * the graphs above computed on zeroed buffers -- once fused, then reset and
  * with fusion disabled, then enabled again. The labels are a sorted map, so
@@ -613,7 +613,7 @@ static void print_fusion_stats(size_t i, const char * what, fusion_stats_get_t g
 }
 
 /* One row, ADD then RMS_NORM of the sum: the add+rms_norm partials, which
- * since v1.0.0 GGML_VK_DISABLE_FUSION turns off at each use. */
+ * GGML_VK_DISABLE_FUSION turns off at each use. */
 static struct ggml_cgraph * graph_add_rms_row(struct ggml_context * ctx) {
     struct ggml_cgraph * g = ggml_new_graph(ctx);
     struct ggml_tensor * a = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 4096);
@@ -687,7 +687,7 @@ static void ask_graph_optimize(size_t i, ggml_backend_dev_t dev) {
 }
 
 /*
- * v0.9.0's all-reduce (`ggml-vulkan-comm.cpp`), reached as the meta backend
+ * The all-reduce (`ggml-vulkan-comm.cpp`), reached as the meta backend
  * reaches it: through the registry's proc addresses. Two backends -- devices
  * 0 and 1, or device 0 twice when there is one -- and one f32 tensor on
  * each, reduced in place; every byte of both results is hashed. The cases

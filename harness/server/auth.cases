@@ -1,5 +1,4 @@
-# API keys, the API prefix and the startup warnings they change (Stage 10
-# step 3c): scripts/server-diff auth.
+# API keys, the API prefix and the startup warnings they change: scripts/server-diff auth.
 !server -m $QWEN3 -c 1024 -np 1 --no-jinja --api-key k1,k2 -lv 4
 !fulllog
 GET /health

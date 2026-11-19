@@ -11,7 +11,7 @@
 # as one unit: `repack.cpp` derives from the two abstract bases `traits.cpp`
 # declares, so porting any one of them alone leaves the others' vtable and
 # RTTI references unresolved. Measured — the whole C++ coupling is five
-# symbols; see NOTES.md, "The vtable cluster, measured".
+# symbols.
 #
 # Two definitions of a symbol in one static archive is not a link error, so a
 # half-wired cluster would build, run and be quietly wrong. This compiles
@@ -70,8 +70,8 @@ printf 'cluster  %s / %s unmangled symbols (%d%%), compiles\n' \
     "$have" "$want" "$(( have * 100 / want ))"
 
 # The symbol count is NOT the contract for this cluster, and reporting it
-# alone is how a stubbed dispatch read as 100%. `repack.cpp` is one of the
-# four translation units CLAUDE.md names as exceptions: its buffer type,
+# alone is how a stubbed dispatch read as 100%. For `repack.cpp` the
+# unmangled exports are not the contract: its buffer type,
 # `extra_buffer_type` and `tensor_traits` instantiations all have C++
 # linkage and never appear in `nm -gU | grep -v _Z`.
 #

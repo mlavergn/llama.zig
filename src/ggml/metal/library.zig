@@ -101,7 +101,7 @@ fn typeName(t: c.enum_ggml_type) []const u8 {
 /// `op->src[i]`, **narrowed**.
 ///
 /// `op.src[i]` is a `[*c]ggml_tensor`, and Zig 0.16 types `p.*.ne[0]` on a
-/// C pointer as the whole `[4]i64` — the miscompile `CLAUDE.md` records.
+/// C pointer as the whole `[4]i64`, a miscompile.
 /// Every one of the 81 functions below reads `ne`, `nb` or `type` off a
 /// source, so narrowing happens here once rather than being remembered 79
 /// times. `.?` does **not** narrow a `[*c]`; `impl.one` does.
@@ -570,9 +570,8 @@ pub export fn ggml_metal_library_get_pipeline_soft_max(lib: *mc.Library, op: *co
 /// Ports `ggml_metal_library_get_pipeline_lightning_indexer`
 /// (ggml-metal-device.cpp:483 @b1b770d90).
 ///
-/// Since v0.6.0 the head count is a function constant rather than the
-/// fixed `OP_LIGHTNING_INDEXER_NH` the encoder used to assert, and the
-/// cache key carries it. The C's `int16_t nh = ne[1]` narrows implicitly;
+/// The head count is a function constant, not a fixed
+/// `OP_LIGHTNING_INDEXER_NH`, and the cache key carries it. The C's `int16_t nh = ne[1]` narrows implicitly;
 /// so does the `@truncate`.
 pub export fn ggml_metal_library_get_pipeline_lightning_indexer(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_LIGHTNING_INDEXER, "op->op == GGML_OP_LIGHTNING_INDEXER");
@@ -645,7 +644,7 @@ pub export fn ggml_metal_library_get_pipeline_top_k_mask(
 /// Ports `ggml_metal_library_get_pipeline_dsv4_hc`
 /// (ggml-metal-device.cpp:551 @b1b770d90).
 ///
-/// Since v0.5.0 it takes the tensor, not the op: `HC_PRE` picks the gated
+/// It takes the tensor, not the op: `HC_PRE` picks the gated
 /// kernel from op_params slot 1 and specialises on the number of
 /// hyper-connections (`src[0]->ne[1]`, a function constant and part of
 /// the cache key), and `HC_POST` takes the `_nocomb` kernel when `src[3]`
@@ -693,7 +692,7 @@ pub export fn ggml_metal_library_get_pipeline_dsv4_hc(lib: *mc.Library, op: *con
 /// (ggml-metal-device.cpp:591 @b1b770d90).
 ///
 /// The kernel width `nc` and whether a fused SILU follows are function
-/// constants since v0.5.0, and both are in the cache key.
+/// constants, and both are in the cache key.
 pub export fn ggml_metal_library_get_pipeline_ssm_conv(lib: *mc.Library, op: *const Tensor, nc: i32, use_silu: bool) callconv(.c) Pwp {
     const src0 = src(op, 0);
     const src1 = src(op, 1);
@@ -1255,8 +1254,8 @@ fn mvShapeQuantBase(t: c.enum_ggml_type, log_type: c.enum_ggml_type) MvShape {
         c.GGML_TYPE_Q5_0 => .{ .nsg = fc.N_SG_Q5_0, .nr0 = fc.N_R0_Q5_0 },
         c.GGML_TYPE_Q5_1 => .{ .nsg = fc.N_SG_Q5_1, .nr0 = fc.N_R0_Q5_1 },
         c.GGML_TYPE_Q8_0 => .{ .nsg = fc.N_SG_Q8_0, .nr0 = fc.N_R0_Q8_0, .smem = 32 * @sizeOf(f32) * fc.N_R0_Q8_0 },
-        // Since v0.9.0 MXFP4 takes no shared memory: its table moved into
-        // the kernel's constant space.
+        // MXFP4 takes no shared memory: its table is in the kernel's
+        // constant space.
         c.GGML_TYPE_MXFP4 => .{ .nsg = fc.N_SG_MXFP4, .nr0 = fc.N_R0_MXFP4 },
         c.GGML_TYPE_Q2_K => .{ .nsg = fc.N_SG_Q2_K, .nr0 = fc.N_R0_Q2_K },
         c.GGML_TYPE_Q3_K => .{ .nsg = fc.N_SG_Q3_K, .nr0 = fc.N_R0_Q3_K },
@@ -1365,7 +1364,7 @@ pub export fn ggml_metal_library_get_pipeline_mul_mv(lib: *mc.Library, op: *cons
 /// Ports `ggml_metal_library_get_pipeline_mul_mm_id_map0`
 /// (ggml-metal-device.cpp:1268 @b1b770d90).
 ///
-/// Since v0.7.0 the expert count reaches the kernel as a function constant
+/// The expert count reaches the kernel as a function constant
 /// (`FC_MUL_MM + 7`) rather than through the arguments, and the
 /// threadgroup memory holds, per expert, an entry count and a base offset
 /// before the staging of the ids.
@@ -1395,7 +1394,7 @@ pub export fn ggml_metal_library_get_pipeline_mul_mm_id_map0(lib: *mc.Library, n
 }
 
 /// Ports `ggml_metal_library_get_pipeline_mul_mm_id_zero`
-/// (ggml-metal-device.cpp:1292 @b1b770d90): new at v0.8.0, the kernel that
+/// (ggml-metal-device.cpp:1292 @b1b770d90): the kernel that
 /// zeroes the `dst` rows of `-1` ids, which no expert owns.
 pub export fn ggml_metal_library_get_pipeline_mul_mm_id_zero(lib: *mc.Library) callconv(.c) Pwp {
     var base: Name = .{};
@@ -1606,7 +1605,7 @@ pub export fn ggml_metal_library_get_pipeline_argsort_merge(lib: *mc.Library, op
 
 /// Ports `ggml_metal_library_get_pipeline_fwht`
 /// (ggml-metal-device.cpp:1654 @b1b770d90). The kernel is named for the
-/// `src[1]` type since v0.5.0, which reads an F16 source directly.
+/// `src[1]` type, which reads an F16 source directly.
 pub export fn ggml_metal_library_get_pipeline_fwht(lib: *mc.Library, n: c_int, tsrc: c.enum_ggml_type) callconv(.c) Pwp {
     var base: Name = .{};
     var name: Name = .{};
@@ -1667,8 +1666,7 @@ pub export fn ggml_metal_library_get_pipeline_top_k_merge(lib: *mc.Library, op: 
 
 /// Ports `ggml_metal_library_get_pipeline_topk_moe`
 /// (ggml-metal-device.cpp:1740 @b1b770d90): the fused MoE routing kernel,
-/// specialised on the expert count, `k`, the renormalisation and, since
-/// v1.0.0 (#31615), the gating function and whether a selection bias is
+/// specialised on the expert count, `k`, the renormalisation and (#31615) the gating function and whether a selection bias is
 /// added (DeepSeek-V4 and GLM routing).
 pub export fn ggml_metal_library_get_pipeline_topk_moe(lib: *mc.Library, n_expert: i32, top_k: i32, with_norm: bool, gating: i32, pbias: bool) callconv(.c) Pwp {
     var base: Name = .{};
@@ -1793,9 +1791,9 @@ pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_blk(
 /// Ports `ggml_metal_library_get_pipeline_flash_attn_ext_tensor`
 /// (ggml-metal-device.cpp:1889 @b1b770d90).
 ///
-/// The tensor-API flash-attention kernel -- of `fa_tensor.metal` since
-/// v0.7.0, `fa_f16.metal` before -- compiled only where
-/// `GGML_METAL_HAS_TENSOR` is defined: F16 or (since v0.7.0) BF16 K and V
+/// The tensor-API flash-attention kernel -- of `fa_tensor.metal`,
+/// compiled only where
+/// `GGML_METAL_HAS_TENSOR` is defined: F16 or BF16 K and V
 /// of one of six head-size pairs, specialised on which optional inputs are
 /// present. Any other K type (a quantized one the KV-to-F16 pass converts)
 /// takes the F16 kernel.
@@ -1907,7 +1905,7 @@ pub export fn ggml_metal_library_get_pipeline_flash_attn_ext(
 }
 
 /// Ports `ggml_metal_library_get_pipeline_flash_attn_ext_rows`
-/// (ggml-metal-device.cpp:1993 @b1b770d90), new at v0.9.0: the kernel that
+/// (ggml-metal-device.cpp:1993 @b1b770d90): the kernel that
 /// gathers the K/V cache rows a `ggml_flash_attn_ext_rows` op's lists
 /// reference into contiguous F16 buffers.
 pub export fn ggml_metal_library_get_pipeline_flash_attn_ext_rows(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
@@ -2167,7 +2165,7 @@ pub export fn ggml_metal_library_get_pipeline_l2_norm(lib: *mc.Library, op: *con
 /// Ports `ggml_metal_library_get_pipeline_group_norm`
 /// (ggml-metal-device.cpp:2241 @b1b770d90).
 ///
-/// Since v1.0.0 (#31852) the source need only have contiguous rows; a
+/// The source need only have contiguous rows; a
 /// layout that is not flat in both the source and `dst` compiles the
 /// `_strided` variant (`FC_GROUP_NORM + 0` false).
 pub export fn ggml_metal_library_get_pipeline_group_norm(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
@@ -2207,7 +2205,7 @@ pub export fn ggml_metal_library_get_pipeline_group_norm(lib: *mc.Library, op: *
 }
 
 /// Ports `ggml_metal_library_get_pipeline_norm`
-/// (ggml-metal-device.cpp:2279 @b1b770d90). Since v0.5.0 every norm
+/// (ggml-metal-device.cpp:2279 @b1b770d90). Every norm
 /// kernel is compiled with `FC_NORM + 0` (use the fused scale) false.
 pub export fn ggml_metal_library_get_pipeline_norm(lib: *mc.Library, op: *const Tensor, n_fuse: c_int) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_NORM or op.op == c.GGML_OP_RMS_NORM, "op->op is NORM or RMS_NORM");
@@ -2569,9 +2567,9 @@ pub export fn ggml_metal_library_get_pipeline_roll(lib: *mc.Library, op: *const 
 /// Ports `ggml_metal_library_get_pipeline_pad`
 /// (ggml-metal-device.cpp:2639 @b1b770d90).
 ///
-/// v0.6.0 dropped the `_4` variant (`res.c4` is never set now) and added
-/// circular padding, op_params slot 8, as a function constant in the
-/// cache key. With the `c4` asymmetry gone this is the common shape.
+/// There is no `_4` variant (`res.c4` is never set); circular padding,
+/// op_params slot 8, is a function constant in the cache key. This is the
+/// common shape.
 pub export fn ggml_metal_library_get_pipeline_pad(lib: *mc.Library, op: *const Tensor) callconv(.c) Pwp {
     impl.assert(op.op == c.GGML_OP_PAD, "op->op == GGML_OP_PAD");
 

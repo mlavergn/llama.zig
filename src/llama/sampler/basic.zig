@@ -101,7 +101,7 @@ fn greedyBackendInit(smpl: [*c]Sampler, buft: c.ggml_backend_buffer_type_t, n_ou
 
 /// Ports `llama_sampler_greedy_backend_apply` (llama-sampler.cpp:1077 @b1b770d90).
 ///
-/// Since v0.7.0 a chain whose earlier samplers left `candidates` -- a
+/// A chain whose earlier samplers left `candidates` -- a
 /// filtered list, so the argmax is a position in it -- maps the argmax back
 /// to the token id through it.
 fn greedyBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.struct_ggml_cgraph, data: [*c]c.struct_llama_sampler_data) callconv(.c) void {

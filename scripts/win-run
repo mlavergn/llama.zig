@@ -1,6 +1,5 @@
 #!/bin/bash
-# Run a cross-built program on the Windows laptop and print what it printed
-# (PLAN.md, Decision 57).
+# Run a cross-built program on the Windows laptop and print what it printed.
 #
 # Pushes the .exe through `ziglink push --run`, which starts it with
 # the given arguments and streams its console back through ConPTY. ConPTY

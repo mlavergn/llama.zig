@@ -46,10 +46,10 @@
 //! - **NEON** (`__ARM_NEON && __ARM_FEATURE_FMA && __ARM_FP16_FORMAT_IEEE`),
 //!   with both of its `F16` variants. SVE's is not ported: no Apple core has
 //!   SVE, and Zig's Linux baseline does not enable it.
-//! - **AVX-512** (`__AVX512F__`) -- x86-64-v4, Decision 53's second level,
+//! - **AVX-512** (`__AVX512F__`) -- x86-64-v4, the second x86 level,
 //!   with its `GGML_F32Cx16` fallback for `F16`. The `__AVX512FP16__` arm is
 //!   a compile error: no CPU this project gates on has it.
-//! - **AVX** with FMA and F16C -- x86-64-v3, Decision 53's first level. AVX
+//! - **AVX** with FMA and F16C -- x86-64-v3, the first x86 level. AVX
 //!   without FMA, and SSE, are compile errors: no target this project builds
 //!   needs them.
 //!
@@ -167,7 +167,7 @@ const NeonF32 = struct {
     ///
     /// The pairwise step is load-bearing. `neon.addvq_f32` reduces as
     /// `(l0+l1)+(l2+l3)`; `@reduce(.Add, ...)` is ordered and differs on
-    /// 23.5% of random lane vectors. See `CLAUDE.md`, "Porting notes".
+    /// 23.5% of random lane vectors.
     ///
     /// The C widens the result to `ggml_float` and every caller narrows it
     /// straight back to `float`, which is lossless, so the round trip is
@@ -619,8 +619,8 @@ pub const StrictLoop = struct {
 ///   body's, on `zmm`. **`tigerlake`** likewise, measured on its reference.
 ///
 /// Any other model is a compile error rather than a guess: these sites are
-/// bit-exact or wrong, and `NOTES.md`, "Stage 5: the measurement", has how
-/// to measure one.
+/// bit-exact or wrong: measure a new one from its reference's disassembly
+/// and IR, then confirm with `make ops-diff`.
 pub const strict_loop: StrictLoop = blk: {
     const model = builtin.cpu.model.name;
     if (builtin.cpu.arch == .aarch64 and std.mem.startsWith(u8, model, "apple_"))

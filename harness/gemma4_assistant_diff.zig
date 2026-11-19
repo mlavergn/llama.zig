@@ -52,8 +52,8 @@ const P = struct {
     pub const llama_memory_seq_pos_max = harness_root.api.context.llama_memory_seq_pos_max;
 };
 
-/// The C++, under the C names. The next-token embedding calls moved from
-/// `llama-ext.h` into `llama.h` at v1.0.0, so they are C symbols too.
+/// The C++, under the C names. The next-token embedding calls are in
+/// `llama.h`, so they are C symbols too.
 const R = struct {
     pub const llama_model_init_from_user = c.llama_model_init_from_user;
     pub const llama_model_free = c.llama_model_free;

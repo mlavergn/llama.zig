@@ -19,7 +19,7 @@
 //! That converts to a huge `size_t`, `std::vector` throws `length_error`,
 //! and nothing catches it. The port terminates at the same point with the
 //! same exception text rather than "fixing" a path no shipped vocabulary
-//! reaches -- see "Where the C's own answer is unspecified" in `CLAUDE.md`.
+//! reaches.
 
 const std = @import("std");
 const impl = @import("../impl.zig");

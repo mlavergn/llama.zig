@@ -23,7 +23,7 @@
 //! fuses both of its products in turn, and a `double` sum of a `float`
 //! product never fuses: the types differ.
 //!
-//! Since v1.0.0 the log-mel itself is a ggml graph (`logMel`, upstream's
+//! The log-mel itself is a ggml graph (`logMel`, upstream's
 //! `mtmd_audio_log_mel`): a windowed DFT as a `MUL_MAT`, the power, the
 //! filterbank as a second `MUL_MAT`, the floor and the log, on whichever
 //! backend the scheduler places it. Its bits are ggml's, so the graph is
@@ -543,7 +543,7 @@ pub fn logMel(config: *const MelConfig, cache: *const Cache, samples: [*]const f
 /// added one at a time -- leaving only the `t % 4` past the last group scalar
 /// and fused (`fmadd`). Read off the reference `mtmd-audio.o`'s disassembly,
 /// in both `log_mel_spectrogram` and the parakeet `preprocess`; the shape of
-/// CLAUDE.md's "One expression is fused; one *reduction loop* is not". The
+/// "one expression is fused; one *reduction loop* is not". The
 /// gate cannot tell the two apart here -- the variance only reaches a float
 /// through a square root and a division -- so the disassembly is the evidence.
 pub fn strictSquareSum(row: []const f32, mean: f64) f64 {
@@ -1380,7 +1380,7 @@ fn fillEntries(mels: []const Mel, shape_only: bool, entries: *std.ArrayList(impl
 
 /// The sixteen subclasses of `mtmd_audio_preprocessor`
 /// (mtmd-audio.h:87 @b1b770d90), in the header's order -- later ones
-/// (`d1omni` at v0.7.0, `nemotron_transcribe` and `chatterbox_ref` at v0.9.0)
+/// (`d1omni`, `nemotron_transcribe` and `chatterbox_ref`)
 /// last, so the earlier kinds keep the ordinals `harness/mtmd_audio_ref.cpp`
 /// switches on.
 pub const Kind = enum {

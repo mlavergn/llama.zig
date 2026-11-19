@@ -2,8 +2,8 @@
 # Compare src/llama/quant.zig and src/llama/model_saver.zig with llama.cpp's
 # llama-quant.cpp and llama-model-saver.cpp, in one process.
 #
-# The quantizer and the saver are ported ahead of libllama's single swap
-# (PLAN.md, Decision 42). This quantizes through the C++ in libllama-ref.a and
+# The quantizer and the saver are ported ahead of libllama's single swap.
+# This quantizes through the C++ in libllama-ref.a and
 # through the port into separate files and compares the files byte for byte
 # and everything logged; diffs the type-selection rules on every
 # architecture through llama-ext.h's helpers; and saves every local model
@@ -22,7 +22,7 @@ for lib in zig-out/lib/libllama-ref.a zig-out/lib/libggml.a; do
 done
 
 # The saver cases below need scripts/gen-arch-fixtures' output. A missing
-# fixture is a failure, not a smaller run: at v0.5.0 a combined gate run
+# fixture is a failure, not a smaller run: once a combined gate run
 # reached this script before the fixtures were written and passed on the
 # rest.
 FIXTURES="${ARCH_FIXTURES:-zig-out/arch-fixtures}"
@@ -87,7 +87,7 @@ for m in Qwen3.5-*.gguf; do
     [ -f "$m" ] && models+=("$m")
 done
 # Saved and nothing else: the looped hrm_text, and architectures with an
-# SWA pattern the saver writes per layer since v0.5.0.
+# SWA pattern the saver writes per layer.
 for m in "${save_fixtures[@]}"; do
     models+=("save:$m")
 done

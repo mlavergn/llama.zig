@@ -23,7 +23,7 @@
 //!
 //! The rest have the same status as the `_generic` dot products in
 //! `cpu/quants/`: exported, unreachable, and therefore gated only by
-//! goldens. See `CLAUDE.md`.
+//! goldens and `make repack-diff`.
 //!
 //! # The `>> 4` is on the sum, not the product
 //!

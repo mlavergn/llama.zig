@@ -6,8 +6,7 @@
 //! v1.0.0 (`b1b770d90`): `ggml_cuda_kernel_launch`, `ggml_cuda_pdl_config`,
 //! `ggml_cuda_kernel_can_use_pdl` and `CUDA_SET_SHARED_MEMORY_LIMIT`. The
 //! lookup and the loader are not ports; they replace what `nvcc`'s host
-//! stubs and cudart's fatbin registration do for the C++ (PLAN.md,
-//! Decisions 44–46).
+//! stubs and cudart's fatbin registration do for the C++.
 //!
 //! # How a kernel is named
 //!
@@ -38,7 +37,7 @@
 //! A kernel's parameters are a byte buffer the driver copies; a Zig
 //! argument of the wrong width is not a type error, it is a different
 //! number. The first launch of every kernel compares each argument's size
-//! and the argument count against `cuKernelGetParamInfo` (Decision 46).
+//! and the argument count against `cuKernelGetParamInfo`.
 //! **In every build, not only safe ones**: the gates build ReleaseFast,
 //! and a check they cannot see is a check nothing runs. After the first
 //! launch it costs one atomic load. It cannot see field order inside a
@@ -186,7 +185,8 @@ fn pack(k: Kernel, h: cu.CUkernel, args: anytype) ArgPointers(@TypeOf(args.*)) {
     return ptrs;
 }
 
-/// Decision 46: every argument's size, and the count, against the kernel.
+/// Every argument's size, and the count, against the kernel, in every
+/// build mode.
 fn checkArgs(k: Kernel, h: cu.CUkernel, comptime types: []const type) void {
     inline for (types, 0..) |T, i| {
         var offset: usize = 0;
@@ -296,8 +296,7 @@ fn pdlEnabled() bool {
 }
 
 /// Ports `ggml_cuda_kernel_can_use_pdl` (ggml-cuda.cu:843 @b1b770d90), which
-/// v1.0.0 moved out of `common.cuh` and which asks `GGML_CUDA_PDL` itself
-/// (`launchPdl` asks `pdlEnabled` first, the same answer).
+/// asks `GGML_CUDA_PDL` itself (`launchPdl` asks `pdlEnabled` first, the same answer).
 ///
 /// The C caches the answer per (device, kernel) behind a mutex; the PTX
 /// version a loaded function reports is a property of the kernel image and
@@ -356,7 +355,7 @@ pub const half2 = enum(u32) { _ };
 /// `nv_bfloat162`.
 pub const bf162 = enum(u32) { _ };
 
-/// `ggml_fp8_e4m3_t` (ggml.h:211 @b1b770d90), the OCP FP8 type v1.0.0's
+/// `ggml_fp8_e4m3_t` (ggml.h:211 @b1b770d90), the OCP FP8 type the
 /// kernels take as a template argument.
 pub const fp8_e4m3 = enum(u8) { _ };
 
@@ -413,7 +412,7 @@ pub fn ggmlType(comptime t: comptime_int) []const u8 {
     return std.fmt.comptimePrint("(ggml_type){d}", .{t});
 }
 
-/// `(ggml_prec)p`: since v0.6.0 the MMQ kernels take the `src1` precision
+/// `(ggml_prec)p`: the MMQ kernels take the `src1` precision
 /// as a template argument.
 pub fn ggmlPrec(comptime p: comptime_int) []const u8 {
     return std.fmt.comptimePrint("(ggml_prec){d}", .{p});

@@ -9,7 +9,7 @@
 //!
 //! # Every function here but one is unreachable on this target
 //!
-//! The exception is `ggml_vec_dot_f8_e4m3_f32`, new at v0.9.0, which has no
+//! The exception is `ggml_vec_dot_f8_e4m3_f32`, which has no
 //! `_generic` suffix and no architecture replacement.
 //!
 //! `arch-fallback.h` renames nothing from `quants.c` on ARM, and

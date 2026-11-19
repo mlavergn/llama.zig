@@ -22,7 +22,7 @@
 
 static struct ggml_context * ctx;
 
-/* Declared in ggml-impl.h since v1.0.0 (#30206), which is not a public
+/* Declared in ggml-impl.h (#30206), which is not a public
  * header; both libraries export them. Copied from ggml-impl.h:112, 115. */
 void ggml_rope_yarn_corr_dims(int n_dims, int n_ctx_orig, float freq_base, float beta_fast, float beta_slow,
                               bool truncate, float dims[2]);
@@ -71,8 +71,8 @@ static void dies(const char * label, void (*fn)(void)) {
     printf("%-28s %s\n", label, WIFSIGNALED(st) ? "aborted" : "returned");
 }
 
-/* v0.7.0 (#30135): a negative offset passed through `size_t` used to wrap
- * into an out-of-bounds `int32_t` slot; `ggml_acc_impl` now asserts it. */
+/* (#30135): a negative offset passed through `size_t` would wrap
+ * into an out-of-bounds `int32_t` slot; `ggml_acc_impl` asserts it. */
 static void acc_negative_offset(void) {
     struct ggml_tensor * a = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 4);
     struct ggml_tensor * b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 8);
@@ -89,8 +89,7 @@ static void acc_offset_below_limit(void) {
     ggml_acc_inplace(ctx, a, b, 32, 128, 128, ((size_t) 1 << 30) - 4);
 }
 
-/* v0.8.0: `ggml_scale_impl` asserts `ggml_is_contiguous_rows`, where it had
- * asserted `ggml_is_padded_1d`. A permutation that keeps dim 0 now builds; one
+/* `ggml_scale_impl` asserts `ggml_is_contiguous_rows`. A permutation that keeps dim 0 builds; one
  * that moves it does not. */
 static void scale_permuted_rows(void) {
     ggml_scale(ctx, ggml_permute(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 8, 4, 2), 0, 2, 1, 3), 2.0f);
@@ -131,9 +130,9 @@ static struct ggml_tensor * prec_node;
 static void prec_idx_negative(void) { ggml_prec_get_src(prec_node, -1); }
 static void prec_idx_past_end(void) { ggml_prec_get_src(prec_node, GGML_MAX_SRC); }
 
-/* v0.9.0: `ggml_new_tensor_impl` takes a view's strides and bounds the view by
- * the bytes those strides reach (`ggml_nbytes`), where it had bounded it by
- * its element count. Overlapping rows near the end of the source now build;
+/* `ggml_new_tensor_impl` takes a view's strides and bounds the view by
+ * the bytes those strides reach (`ggml_nbytes`), not by
+ * its element count. Overlapping rows near the end of the source build;
  * gapped rows that run past it, and an element count that fits while the
  * strides do not, no longer do. `ggml_view_impl` also refuses strides over a
  * source that is not contiguous along dim 0. */
@@ -164,7 +163,7 @@ static void view_4d_past_end(void) {
     ggml_view_4d(ctx, a, 4, 4, 2, 2, 8, 32, 72, 0);
 }
 
-/* v0.9.0: `ggml_roll` bounds each shift on both sides instead of through
+/* `ggml_roll` bounds each shift on both sides instead of through
  * `abs`, which is undefined for INT_MIN. */
 static void roll_int_min(void) {
     ggml_roll(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 4), -2147483647 - 1, 0, 0, 0);
@@ -176,7 +175,7 @@ static void roll_neg_ne(void) {
     ggml_roll(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 4), 0, -4, 0, 0);
 }
 
-/* v0.9.0: every GGML_ASSERT `ggml_flash_attn_ext_impl` adds for `kv_rows`,
+/* Every GGML_ASSERT `ggml_flash_attn_ext_impl` adds for `kv_rows`,
  * each from a call that is otherwise valid. */
 #define FAR_Q()    ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 64, 4, 8, 3)
 #define FAR_KV()   ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 64, 40, 2, 1)
@@ -381,7 +380,7 @@ int main(void) {
         D(ggml_im2col(ctx, k2, im, 2, 2, 1, 1, 1, 1, true, GGML_TYPE_F16));
         D(ggml_conv_1d(ctx, k1, sg, 1, 1, 1));
         D(ggml_conv_1d_ph(ctx, k1, sg, 1, 1));
-        /* batched (v0.7.0, #28738): the matmul's rows are [OC, N, OL] and a
+        /* batched (#28738): the matmul's rows are [OC, N, OL] and a
          * permute plus a cont bring them to [N, OC, OL]; the permute's
          * strides are what a wrong axis order would change */
         struct ggml_tensor * sg3 = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 32, 4, 3);
@@ -484,7 +483,7 @@ int main(void) {
     {
         /* hc_pre's two forms share GGML_OP_DSV4_HC_PRE and differ only in
          * op_params -- scale in slot 0, gated in slot 1 -- and in the
-         * weights' shape; hc_post's comb may be NULL since v0.5.0, which
+         * weights' shape; hc_post's comb may be NULL, which
          * shows in src=. The scales are chosen so a slot swap or a dropped
          * sign is visible: 1.0 is what the plain form writes. */
         const int hc = 4, nt = 5, ne = 8;
@@ -549,7 +548,7 @@ int main(void) {
                 snprintf(label, sizeof(label), "prec_set_src(%d,1)=%d", (int) precs[p], src1);
                 dump(label, nodes[n]);
 
-                /* v0.8.0's getters read back what the setters above left. */
+                /* The getters read back what the setters above left. */
                 printf("prec_get_acc=%d prec_get_src=", (int) ggml_prec_get_acc(nodes[n]));
                 for (int idx = 0; idx < GGML_MAX_SRC; idx++) {
                     printf("%d,", (int) ggml_prec_get_src(nodes[n], idx));
@@ -562,7 +561,7 @@ int main(void) {
         dies("prec_get_src(GGML_MAX_SRC)", prec_idx_past_end);
     }
 
-    puts("=== v0.9.0: strided views ===");
+    puts("=== strided views ===");
     {
         struct ggml_tensor * v4 = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 4, 4, 2, 2);
         D(ggml_view_2d(ctx, a2, 8, 4, 16, 32));
@@ -581,13 +580,13 @@ int main(void) {
         dies("view_4d past end", view_4d_past_end);
     }
 
-    puts("=== v0.9.0: roll bounds ===");
+    puts("=== roll bounds ===");
     dies("roll INT_MIN", roll_int_min);
     dies("roll -7,-3", roll_neg_edge);
     dies("roll -ne1", roll_neg_ne);
     D(ggml_roll(ctx, a2, -7, -3, 0, 0));
 
-    puts("=== v0.9.0: flash_attn_ext_rows ===");
+    puts("=== flash_attn_ext_rows ===");
     {
         struct ggml_tensor * q    = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 64, 4, 8, 3);
         struct ggml_tensor * kk   = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 64, 40, 2, 1);
@@ -609,7 +608,7 @@ int main(void) {
         dies("fa k ne3 != q ne3", fa_k_ne3);
     }
 
-    puts("=== v0.9.0: f8_e4m3 ===");
+    puts("=== f8_e4m3 ===");
     {
         struct ggml_tensor * f8 = ggml_new_tensor_3d(ctx, GGML_TYPE_F8_E4M3, 32, 6, 2);
         struct ggml_tensor * x  = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 32, 5, 2);
@@ -626,8 +625,7 @@ int main(void) {
 
     puts("=== backward ===");
     {
-        /* The autodiff pass, node by node. v1.0.0 (#29801, #30712) rewrote
-         * SUM's and MEAN's gradients without ADD1, gave TRI a gradient and
+        /* The autodiff pass, node by node. SUM's and MEAN's gradients without ADD1, gave TRI a gradient and
          * carries RoPE's truncation into ROPE_BACK. */
         struct ggml_tensor * x  = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 8);
         struct ggml_tensor * y  = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 8, 8);

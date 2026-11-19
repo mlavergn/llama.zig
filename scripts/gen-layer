@@ -186,8 +186,8 @@ open("harness/model_fields.inc", "w").write(hdr_note + "".join(f"M({n})\n" for n
 
 # `model_saver.zig`'s `layer_fields` is the same flat order, which
 # `add_tensors_from_model` walks: the block between its markers is rewritten
-# here too (since v0.9.0; it was hand-kept before, and a pin that added layer
-# members stopped the build on its comptime check). `zig fmt` aligns it.
+# here too, so a pin that added layer
+# members does not stop the build on its comptime check. `zig fmt` aligns it.
 SAVER = "src/llama/model_saver.zig"
 saver = open(SAVER).read()
 begin, end = "    // BEGIN layer_fields\n", "    // END layer_fields\n"

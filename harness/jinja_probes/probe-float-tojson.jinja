@@ -1,4 +1,4 @@
-{#- v0.7.0: `tojson` writes a float as json.dumps does: Python's repr(), and NaN, Infinity, -Infinity; a float mapping key the same way. -#}
+{#- `tojson` writes a float as json.dumps does: Python's repr(), and NaN, Infinity, -Infinity; a float mapping key the same way. -#}
 {%- set vals = [0.1, 0.5, 1.0, 100.0, 0.0001, 0.00001, 1234.5678, 0.1 + 0.2, 1.0 / 3.0, 5|float, 0.0 - 1.5,
   '1e16'|float, '1e15'|float, '123456789012345678.0'|float, '1e-5'|float, '1e22'|float, '1e23'|float,
   '1e-300'|float / '2e23'|float, '1.7976931348623157e308'|float, '-0.0'|float, 'nan'|float, 'inf'|float, '-inf'|float] -%}

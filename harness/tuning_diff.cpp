@@ -12,7 +12,7 @@
  * names and every one around them, families past int8_t that the C's cast
  * wraps onto a tuned one, every KV type the table mentions plus ones it
  * does not, every (dk, dv) pair the Metal kernels instantiate and some they
- * do not, and both sides of every bucket edge. Since v0.5.0 the table is
+ * do not, and both sides of every bucket edge. The table is
  * keyed by family (7 to 10) rather than by SKU, with no fallback. The reference is compiled with its seven entry points renamed
  * via -D, so both implementations live in one process.
  */
@@ -119,7 +119,7 @@ int main() {
     // C's `(int8_t) gpu_family` wraps onto 7..10 (263 is 7, -246 is 10):
     // a port that range-checked or saturated instead would differ there.
     // dk and dv past int16_t do the same for `(int16_t) dk`. The table's
-    // families at v0.5.0 are 7..10; `gen-tuning-table` stops on any other.
+    // families are 7..10; `gen-tuning-table` stops on any other.
     std::vector<int> families;
     for (int fam = -2; fam <= 40; fam++) families.push_back(fam);
     for (int fam : { 127, 128, 255, 256, 263, 264, 265, 266, -246, -249, 7 + 1024, 10 - 4096 })

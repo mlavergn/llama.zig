@@ -174,9 +174,9 @@ fn checkShapes(dst: *const Tensor) void {
 /// Ports `simd_gemm` (simd-gemm.h:110 @b1b770d90), the `GGML_SIMD` arm without
 /// SVE: `C[M x N] += A[M x K] * B[K x N]`.
 ///
-/// Since v0.6.0 the column remainder is `simd_gemm_ukernel_tail`
+/// The column remainder is `simd_gemm_ukernel_tail`
 /// (simd-gemm.h:60 @b1b770d90): a masked AVX-512 or AVX2 fused multiply-add
-/// on x86, the same scalar loop as before elsewhere. Every arm still folds
+/// on x86, a scalar loop elsewhere. Every arm still folds
 /// `A[i][kk] * B[kk][j]` into `C[i][j]` one fused step per `kk` ascending.
 ///
 /// The C blocks this into 4×16 micro-kernels plus three kinds of remainder,
@@ -185,7 +185,7 @@ fn checkShapes(dst: *const Tensor) void {
 /// fused multiply-add per step — `vfmaq_f32` in the kernels, and `a += A*B`
 /// contracted by clang in the scalar remainders. Elements never meet. So the
 /// blocking is a schedule, not a result, and one loop with `kk` outside `j`
-/// gives the same bits. That is why v1.0.0's switch of NEON from the 2×2
+/// gives the same bits. That is why the switch of NEON from the 2×2
 /// tile to 4×4 (#32128, `__ARM_NEON__` corrected to `__ARM_NEON`) changes
 /// nothing here.
 fn simdGemm(C: [*]f32, A: [*]const f32, B: [*]const f32, M: usize, K: usize, N: usize) void {
@@ -603,7 +603,7 @@ fn tiled(params: *const ComputeParams, dst: *Tensor, ir0: i64, ir1: i64) void {
             simdGemm(KQ, Q_q, K_f32, Q_TILE_SZ, dk, KV_TILE_SZ);
             vec.scale_f32(Q_TILE_SZ * KV_TILE_SZ, KQ, ap.scale);
 
-            // Since v0.6.0 the softcap runs before the padding: after it,
+            // The softcap runs before the padding: after it,
             // `tanh(-inf)` turned every padded entry into `-softcap`, a finite
             // logit softmax then weighted.
             if (ap.logit_softcap != 0.0) {
@@ -787,8 +787,8 @@ fn reducePartials(params: *const ComputeParams, dst: *Tensor, n_chunks: i64, chu
 }
 
 /// Ports `ggml_compute_forward_flash_attn_ext_f16` (ops.cpp:9315 @b1b770d90),
-/// the `GGML_SIMD` arm without SVE for the tiled-path guard, which since
-/// v0.6.0 x86 skips.
+/// the `GGML_SIMD` arm without SVE for the tiled-path guard, which x86
+/// skips.
 fn flashAttnExtF16(params: *const ComputeParams, dst: *Tensor) void {
     const q = impl.one(Tensor, dst.src[0]);
     const k = impl.one(Tensor, dst.src[1]);
@@ -878,7 +878,7 @@ fn flashAttnExtF16(params: *const ComputeParams, dst: *Tensor) void {
                 kv_is_f32_or_f16 and
                 k.type == v.type and
                 neq1 >= @as(i64, q_tile_sz));
-        // `#if defined(GGML_SIMD) && !defined(__x86_64__)` since v0.6.0: on
+        // `#if defined(GGML_SIMD) && !defined(__x86_64__)`: on
         // x86 `simd_gemm` finishes a ragged row with a masked tail, so the
         // tiled path no longer needs `DV` to be a whole number of vectors.
         if (builtin.cpu.arch != .x86_64) {

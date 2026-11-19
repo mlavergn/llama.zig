@@ -1098,7 +1098,7 @@ pub export fn ggml_mul_mat_set_hint(a: *Tensor, hint: c.enum_ggml_op_hint) void 
 ///     ids -> [n_expert_used, n_tokens] (i32)
 ///     c   -> [rows, n_expert_used, n_tokens]
 ///
-/// [TAG_MUL_MAT_ID_DUPLICATE_ID] (ggml.h, v0.7.0): the result is undefined if
+/// [TAG_MUL_MAT_ID_DUPLICATE_ID] (ggml.h): the result is undefined if
 /// one expert appears more than once in a token's `ids` -- not every backend
 /// supports duplicates.
 pub export fn ggml_mul_mat_id(ctx: *Context, as: *Tensor, b: *Tensor, ids: *Tensor) *Tensor {
@@ -2359,7 +2359,7 @@ fn ropeYarnCorrDim(n_dims: c_int, n_ctx_orig: c_int, n_rot: f32, base: f32) f32 
 /// The dimension range over which YaRN blends between interpolated and
 /// extrapolated frequencies. Below `dims[0]` the frequency is extrapolated,
 /// above `dims[1]` interpolated, and between them the two are mixed. Declared
-/// in `ggml-impl.h` since v1.0.0, which is why `c_import.h` repeats its
+/// in `ggml-impl.h`, which is why `c_import.h` repeats its
 /// prototype.
 ///
 /// Parameters:
@@ -2648,9 +2648,8 @@ pub export fn ggml_im2col_back(
 /// Ports `ggml_conv_1d` (ggml.c:4537 @b1b770d90).
 ///
 /// im2col, then one matmul, then a reshape and a permute back to [N, OC, OL].
-/// No op code of its own. The matmul's rows come out as [OC, N, OL]; before
-/// v0.7.0 they were reshaped straight to [N, OC, OL], which was right only for
-/// a batch of one.
+/// No op code of its own. The matmul's rows come out as [OC, N, OL], so it is
+/// reshaped to that and permuted to [N, OC, OL].
 pub export fn ggml_conv_1d(ctx: *Context, a: *Tensor, b: *Tensor, s0: c_int, p0: c_int, d0: c_int) *Tensor {
     // [N, OL, IC * K]
     const im2col = ggml_im2col(ctx, a, b, s0, 0, p0, 0, d0, 0, false, im2colType(a));
@@ -4387,7 +4386,7 @@ pub export fn ggml_rwkv_wkv7(
 ///
 /// `state` holds only the initial state; `K` snapshot slots are appended to
 /// the result, as in `ggml_ssm_scan`. When `n_tokens > K` only slot 0 is
-/// guaranteed; a backend may leave slots 1..K-1 unwritten (ggml.h, v0.7.0).
+/// guaranteed; a backend may leave slots 1..K-1 unwritten (ggml.h).
 pub export fn ggml_gated_delta_net(
     ctx: *Context,
     q: *Tensor,

@@ -70,7 +70,7 @@ const m_graph: Mask = m_alnum | m_punct;
 /// `src/locale.cpp` in the libc++ the reference links -- libc++'s, not a
 /// citation of upstream). On Windows the table is the UCRT's,
 /// whose `_BLANK` marks the space alone -- measured by `scripts/regex-diff`
-/// built for Windows, which answered `PLAN.md`'s open question: `[[:blank:]]`
+/// built for Windows, which answered the open question: `[[:blank:]]`
 /// misses `\t` there in `std::regex` and `std::wregex` alike, and no other
 /// byte, code point or class differs.
 const tab_is_blank = @import("builtin").os.tag != .windows;

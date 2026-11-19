@@ -19,7 +19,7 @@ fn oom() noreturn {
 }
 
 /// Ports `naive_trie` (llama-vocab.cpp:29 @b1b770d90). Walking iteratively is
-/// what upstream's `insert` and `get_longest_prefix` do too since v0.8.0.
+/// what upstream's `insert` and `get_longest_prefix` do too.
 pub const Trie = struct {
     pub const Node = struct {
         has_value: bool = false,

@@ -54,9 +54,9 @@
 //! **The consequence, stated plainly:** bytes these quantizers produce can
 //! differ in the last bit from a stock llama.cpp build. That is invisible to
 //! this project's deliverable -- our CLI reads model files and never writes
-//! one -- but it would matter to anyone quantizing a model with it, and it is
-//! a live question for Stage 3 steps 4 and 5, where float arithmetic *is* on
-//! the inference path. See PLAN.md.
+//! one -- but it would matter to anyone quantizing a model with it.
+//! The CPU kernels differ: float arithmetic *is* on the inference path
+//! there, and every fusion is named.
 
 const std = @import("std");
 const impl = @import("../impl.zig");

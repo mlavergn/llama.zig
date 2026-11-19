@@ -27,10 +27,10 @@
 //!   [--case-exact <name>] [--skip-case <name>] [--list-cases]
 //!   [--hadamard | --hadamard-tied] [--section-order <tyxz|zyxt>] [--target <model.gguf>]
 //!
-//! v1.0.0: `moe-cache-cpu`, `moe-cache` with `moe_cache_cpu_share`
+//! `moe-cache-cpu`, `moe-cache` with `moe_cache_cpu_share`
 //! (`MOE_CACHE_CPU_SHARE`, default 0.5), explicit like `moe-cache`.
 //!
-//! v0.7.0 additions: the `moe-cache` and `host-experts` configurations run
+//! The `moe-cache` and `host-experts` configurations run
 //! only when named with `--model` (they need a MoE model; deepseek2-moe's
 //! 64 experts exercise the LRU, `MOE_CACHE_SIZE` sets the budget);
 //! `--hadamard` derives `prism.hadamard` metadata onto the model (version
@@ -66,8 +66,8 @@ extern fn _Z24llama_model_set_attn_rotP11llama_modelb(model: ?*c.struct_llama_mo
 const StdVector = extern struct { begin: [*c]c.ggml_backend_buffer_t, end: [*c]c.ggml_backend_buffer_t, cap: [*c]c.ggml_backend_buffer_t };
 extern fn _Z24llama_memory_get_buffersP14llama_memory_i(mem: c.llama_memory_t) StdVector;
 extern fn _ZdlPv(p: ?*anyopaque) void;
-// The NextN, layer input and embedding row entry points moved from
-// `llama-ext.h` to `llama.h` at v1.0.0, so the reference's are `c.*`.
+// The NextN, layer input and embedding row entry points are in
+// `llama.h`, so the reference's are `c.*`.
 
 /// The architectures whose graph records its layers' inputs, the ones a
 /// `llama_set_embeddings_layer_inp` request does not abort on: every
@@ -136,7 +136,7 @@ fn note(comptime fmt: []const u8, args: anytype) void {
 
 fn logCb(level: c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
     const r = rec orelse return;
-    // v0.8.0 demoted a warning to information, which the text alone cannot show.
+    // A warning level is recorded, which the text alone cannot show.
     if (level == c.GGML_LOG_LEVEL_WARN) r.appendSlice(gpa, "[W] ") catch unreachable;
     r.appendSlice(gpa, std.mem.span(@as([*:0]const u8, @ptrCast(text)))) catch unreachable;
 }
@@ -187,7 +187,7 @@ fn writtenBytes(t: *const c.ggml_tensor) usize {
 
 /// SET_ROWS writes only the rows `src[1]` names, into a destination that is
 /// usually a whole buffer: a KV cache, which is cleared when it is made, or
-/// since v0.9.0 the layer-input device buffer, which is not (see `nodeCb`).
+/// the layer-input device buffer, which is not (see `nodeCb`).
 /// So hash each written row, in the order upstream's loop writes them, with
 /// its index value folded in -- a row written to the wrong place still
 /// differs. The indexing is upstream's
@@ -271,7 +271,7 @@ fn nodeCb(t: [*c]c.ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
         return false;
     }
     // A node without GGML_TENSOR_FLAG_COMPUTE -- an unselected branch of
-    // `ggml_build_forward_select`, such as v0.6.0's mixed-batch input when
+    // `ggml_build_forward_select`, such as the mixed-batch input when
     // the ubatch is not mixed -- is skipped by every backend (ggml-cpu.c:3137,
     // ggml-metal-ops.cpp:218 @cd959bae9): its bytes are the allocator's
     // leftovers on either side. The flags above are compared, so a node one
@@ -283,7 +283,7 @@ fn nodeCb(t: [*c]c.ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
     // An op that computes nothing (`ggml_op_is_empty`, ggml-impl.h) writes
     // no bytes: its data is whatever its source holds, which the node that
     // wrote it already hashed -- or, before anything has, the allocator's
-    // leftovers. v0.9.0's layer-input device buffer is allocated without a
+    // leftovers. The layer-input device buffer is allocated without a
     // clear, by `layer_inp_dev_alloc` (llama-context.cpp:1481 @cd959bae9),
     // and read through a VIEW before its SET_ROWS, so on the GB10's CPU the reference differed from
     // itself run to run on `bailingmoe3-moe`'s "layer inputs, device".
@@ -385,7 +385,7 @@ const Case = struct {
     /// DSpark's target features, `res->t_layer_inp`) and compares them after
     /// the prompt. Only on `layer_inp_archs`: on the others the C++ asserts.
     layer_inp: bool = false,
-    /// v0.9.0, with `layer_inp`: the layer inputs go to the context's layer
+    /// With `layer_inp`: the layer inputs go to the context's layer
     /// input device buffer (`llama_set_embeddings_layer_inp_dev`), written by
     /// `set_rows` nodes the node hashes see, and are not read back.
     layer_inp_dev: bool = false,
@@ -397,7 +397,7 @@ const Case = struct {
     /// the meta backend assert in the C++ itself.
     layer_inp_max: u32 = std.math.maxInt(u32),
     /// Turns the KV cache's attention rotation off on the model before the
-    /// context is made, through `llama_model_set_attn_rot` (v0.7.0), and
+    /// context is made, through `llama_model_set_attn_rot`, and
     /// back on after.
     attn_rot_off: bool = false,
     /// Runs `sharedHistory` instead of the script.
@@ -433,8 +433,8 @@ fn batchAdd(b: *c.llama_batch, tok: i32, pos: i32, seqs: []const i32, logits: bo
 // matching crashes. They are driven the way `common/speculative.cpp` drives
 // them instead: an embedding batch of n_embd_inp_enc features encoded first;
 // eagle3's decoder batches carry the g embeddings beside the tokens; and a
-// DFlash round ends by injecting target features into the cache -- since
-// v0.4.0 the raw n_embd_inp_enc-wide ones, which the decoder fuses -- and
+// DFlash round ends by injecting target features into the cache -- the
+// raw n_embd_inp_enc-wide ones, which the decoder fuses -- and
 // decoding a token over them.
 var model_path: [:0]const u8 = "";
 const DraftKind = enum { none, eagle3, dflash };
@@ -496,7 +496,7 @@ fn layerInpArch(arch: []const u8) bool {
     return false;
 }
 
-/// v0.8.0: DeepSeek-V4.1's Engram hashes the n-gram ending at each token, so
+/// DeepSeek-V4.1's Engram hashes the n-gram ending at each token, so
 /// `dsv41_shared_history_ok` refuses a token shared by sequences that disagree
 /// on its predecessors, in the cache or in the batch, and lets those that
 /// agree through. No other case decodes a token with two sequences over
@@ -540,8 +540,8 @@ var model_no_alloc = false;
 /// models/qwen4exp.cpp:54 @cd959bae9) while the `t_embd` their graph returns
 /// is `result_norm`, `n_embd` wide, so `llama_context::decode`'s extraction
 /// reads past it and `ggml_backend_tensor_get_async` aborts (ggml-backend.cpp:479
-/// @cd959bae9) -- in upstream alone, on upstream's own ggml, since v0.8.0
-/// added the embeddings toggle below. The script skips only that toggle on
+/// @cd959bae9) -- in upstream alone, on upstream's own ggml, because of
+/// the embeddings toggle below. The script skips only that toggle on
 /// them, so the rest of every case still runs on these fixtures.
 const embd_out_wider_archs = [_][]const u8{ "deepseek4", "qwen4exp" };
 var embd_out_wider = false;
@@ -630,7 +630,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
     const mem = A.llama_get_memory(ctx);
     note("memory {} can_shift {}", .{ mem != null, A.llama_memory_can_shift(mem) });
 
-    // v0.8.0: a model with `no_alloc` has no tensor data to decode with; what
+    // A model with `no_alloc` has no tensor data to decode with; what
     // its memories report is the point.
     if (model_no_alloc) {
         noteBreakdown(A, ctx);
@@ -722,7 +722,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
         var ret = A.llama_decode(ctx, b);
         note("decode prompt: {d}", .{ret});
         if (ret != 0) return;
-        // v0.7.0: a pooled embeddings context has no LM head, so no
+        // A pooled embeddings context has no LM head, so no
         // logits buffer (#30255, #30445)
         note("logits buffer: {}", .{A.llama_get_logits(ctx) != null});
         // On the device, the rows are not copied out: the C++ asserts on a
@@ -731,7 +731,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
             const row: [*c]f32 = if (A == c) c.llama_get_embeddings_layer_inp(ctx, @intCast(lid)) else harness_root.api.context.llama_get_embeddings_layer_inp(ctx, @intCast(lid));
             Out.row("layer_inp", row, tokens.len * n_embd_row, @intCast(lid));
         }
-        // v0.7.0's `llama_memory_get_buffers`, on a memory holding the
+        // `llama_memory_get_buffers`, on a memory holding the
         // prompt: an empty one reports none.
         if (round == 0) noteMemoryBuffers(A, mem);
 
@@ -794,7 +794,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
         }
         State.positions(mem, n_seq);
 
-        // Since v0.6.0: the extended batch through `llama_process` -- tokens
+        // The extended batch through `llama_process` -- tokens
         // with decision-order spans, then tokens and embeddings mixed, which
         // an architecture that picks weights by the input kind refuses.
         if (draft.kind == .none) {
@@ -812,7 +812,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
                 const p = [_]i32{ pos + @as(i32, @intCast(k)), 0, 0, 0 };
                 _ = AB.llama_batch_ext_set_pos(eb, idx, &p);
                 // The question's last token and every option token are
-                // outputs: vllm-decision2's head (v0.7.0) reads the output
+                // outputs: vllm-decision2's head reads the output
                 // row of each span's last token, so the question's must be
                 // one; the separator at k = 2 is not, which keeps the batch
                 // at five outputs for "n_outputs_max 5".
@@ -847,7 +847,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
                 else
                     AB.llama_batch_ext_add_token(eb, 0, tokens[k]);
                 const pk = pos + @as(i32, @intCast(k));
-                // distinct y and x, so a section order (v0.7.0) that swaps
+                // distinct y and x, so a section order that swaps
                 // them shows
                 const p = if (n_pos > 1 and as_embd) [_]i32{ pk, pk + 1, pk + 2, 0 } else [_]i32{ pk, 0, 0, 0 };
                 _ = AB.llama_batch_ext_set_pos(eb, idx, &p);
@@ -866,7 +866,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
             note("process type 7: {d}", .{A.llama_process(ctx, 7, eb)});
             State.positions(mem, n_seq);
 
-            // v0.9.0: entries whose embedding is a row of ctx_other's layer
+            // Entries whose embedding is a row of ctx_other's layer
             // input device buffer, which only a DFlash/DSpark decoder over a
             // target with that buffer reads; everywhere else decode and
             // encode refuse the batch before touching the memory.
@@ -932,7 +932,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
             // The lower sequence id first: `split_equal` takes only
             // increasing ids into one ubatch, so with sequence 1 first it
             // splits by sequence anyway and cannot be told from
-            // `split_seq` (v0.7.0's `embd_all` split; an injection that
+            // `split_seq` (the `embd_all` split; an injection that
             // dropped it escaped).
             const one_first = other > 1;
             for (0..6) |k| {
@@ -954,7 +954,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
             if (other == 0) pos = other_pos;
             State.positions(mem, n_seq);
 
-            // v0.9.0: sequences 0 and 2 as runs, three tokens each and
+            // Sequences 0 and 2 as runs, three tokens each and
             // then one token each, which a unified cache with flash
             // attention splits into one cell list per sequence
             // (`get_n_kv_slices`'s runs) for `ggml_flash_attn_ext_rows`;
@@ -991,7 +991,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
             A.llama_memory_seq_cp(mem, 0, 1, -1, -1);
             note("seq_cp 0 -> 1", .{});
             State.positions(mem, n_seq);
-            // v0.7.0: a recurrent cell shared by several sequences cannot
+            // A recurrent cell shared by several sequences cannot
             // roll back for one of them (with n_rs_seq it otherwise could).
             note("seq_rm 0 tail while shared: {}", .{A.llama_memory_seq_rm(mem, 0, pos - 1, -1)});
             State.positions(mem, n_seq);
@@ -1026,7 +1026,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
 
         if (draft.kind == .dflash) {
             const p0: i32 = A.llama_memory_seq_pos_max(mem, 0) + 1;
-            // Since v0.4.0 the injection carries the raw target features,
+            // The injection carries the raw target features,
             // n_embd_inp_enc wide, and the decoder fuses them itself
             // (common/speculative.cpp, `batch_inject`).
             const ib = draftBatch(4, draft.n_enc, p0, false, 11 + round);
@@ -1039,7 +1039,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
             note("decode over injected: {d}", .{ret_i});
             if (ret_i == 0) Out.row("logits", A.llama_get_logits_ith(ctx, 0), n_vocab, 0);
 
-            // v0.9.0: the same injection read from the target's layer input
+            // The same injection read from the target's layer input
             // device buffer (`llama_set_embeddings_layer_inp_dev`, rows added
             // with `llama_batch_ext_add_embd_row`), as common/speculative.cpp
             // drives a DFlash draft whose target writes its features on the
@@ -1085,7 +1085,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
                 }
             }
 
-            // v0.7.0's LiliCorr head builds only for a token ubatch with
+            // The LiliCorr head builds only for a token ubatch with
             // state embeddings of `block_size` tokens per sequence: one
             // drafting block as common/speculative.cpp:1297 makes it, every
             // entry with a state row, NextN embeddings on, outputs off.
@@ -1159,7 +1159,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
             }
         }
 
-        // v1.0.0's h_nextn device buffer (a8fad21e9), as common/speculative.cpp
+        // The h_nextn device buffer (a8fad21e9), as common/speculative.cpp
         // drives it on a target: refused while the extraction is off or
         // masked, then the unmasked rows of a decode written to the device
         // (build_h_nextn_dev) and read back, a host-set row read back, and
@@ -1213,7 +1213,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
             State.positions(mem, n_seq);
         }
 
-        // Since v0.6.0 a failed sequence restore zeroes the K/V and
+        // A failed sequence restore zeroes the K/V and
         // recurrent rows it wrote -- attention still reads free cells -- and
         // a hybrid memory undoes its attention half when the recurrent half
         // fails: a restore cut in the middle and one cut at its tail, each
@@ -1240,7 +1240,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
         State.positions(mem, n_seq);
     }
 
-    // Since v0.7.0 a pooled context has no LM head while it computes
+    // A pooled context has no LM head while it computes
     // embeddings, so toggling them off changes the graph and must reserve
     // again and grow the output buffer for logits.
     if (pooled and draft.kind == .none and !enc_dec) {
@@ -1258,12 +1258,11 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
         if (rc == 0) Out.row("embd_seq", A.llama_get_embeddings_seq(ctx, 0), n_embd, 0);
     }
 
-    // A real K-shift: until v0.8.0 no case moved a position, so `update` and
-    // its shift graph ran only with nothing pending. On a model with no RoPE
+    // A real K-shift, so `update` and
+    // its shift graph run with something pending. On a model with no RoPE
     // layer it builds no graph (`--model no-rope`).
     if (mem != null and A.llama_memory_can_shift(mem) and draft.kind == .none and !enc_dec) {
-        // the sequence restores above can leave it short (v1.0.0: the shift
-        // had stopped running on every model), so give it the positions
+        // the sequence restores above can leave it short, so give it the positions
         if (A.llama_memory_seq_pos_max(mem, 0) <= 4) {
             b.n_tokens = 0;
             const p0 = A.llama_memory_seq_pos_max(mem, 0) + 1;
@@ -1285,7 +1284,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
         }
     }
 
-    // v0.8.0: with pooling NONE the toggle changes the reserve graph too --
+    // With pooling NONE the toggle changes the reserve graph too --
     // it outputs every token -- so it must reserve again.
     if (!pooled and !embeddings and mem != null and draft.kind == .none and !enc_dec and !embd_out_wider) {
         A.llama_set_embeddings(ctx, true);
@@ -1302,7 +1301,7 @@ fn script(comptime A: type, comptime S: type, model: ?*c.struct_llama_model, cs:
         if (rc == 0) Out.row("logits", A.llama_get_logits_ith(ctx, -1), n_vocab, -1);
     }
 
-    // `llama_memory_get_buffers` (v0.7.0): the buffers a state write of the
+    // `llama_memory_get_buffers`: the buffers a state write of the
     // memory touches.
     noteMemoryBuffers(A, mem);
 
@@ -1462,7 +1461,7 @@ const Edits = struct {
         p.n_seq_max = 2;
         p.n_ctx = 1024;
     }
-    /// v0.7.0: every token an output with a stream per sequence, which
+    /// Every token an output with a stream per sequence, which
     /// splits by sequence (`init_batch`'s `embd_all`).
     fn twoSeqsEmbd(p: *c.llama_context_params) void {
         twoSeqs(p);
@@ -1635,9 +1634,9 @@ const ModelEdits = struct {
     }
     var expert_overrides: [2]c.llama_model_tensor_buft_override = undefined;
     /// The experts in host memory, as `--cpu-moe` puts them: the layers
-    /// the MoE cache (v0.7.0) caches on the GPU.
+    /// the MoE cache caches on the GPU.
     var no_rope_overrides: [2]c.llama_model_kv_override = undefined;
-    /// v0.8.0: a Granite with `rope_finetuned` off has no layer with RoPE, so
+    /// A Granite with `rope_finetuned` off has no layer with RoPE, so
     /// a K-shift has nothing to rotate and must build no graph.
     fn noRope(p: *c.llama_model_params) void {
         no_rope_overrides = std.mem.zeroes(@TypeOf(no_rope_overrides));
@@ -1674,8 +1673,8 @@ const ModelEdits = struct {
     }
     /// The budget: `MOE_CACHE_SIZE` bytes, or 1 MiB.
     var moe_cache_size: usize = 1 << 20;
-    /// `moeCacheCtx` with part of the misses computed on the CPU (v1.0.0,
-    /// e95426f16): `MOE_CACHE_CPU_SHARE`, or one half.
+    /// `moeCacheCtx` with part of the misses computed on the CPU (e95426f16):
+    /// `MOE_CACHE_CPU_SHARE`, or one half.
     /// The zero slots the CPU part keeps beside the cached ones need room:
     /// at least 2 MiB, so deepseek2-moe's cache still holds a token's
     /// experts.
@@ -1751,10 +1750,10 @@ fn splitStates(rm: *c.struct_llama_model, pm: *M.Model) void {
 }
 
 // -----------------------------------------------------------------------------
-// prism.hadamard (v0.7.0)
+// prism.hadamard
 
 /// `--section-order <order>`: `src` with `<arch>.rope.section_order` set
-/// (v0.7.0, MiniCPM-V 4.7's `zyxt`), written to `dst`, for an M-RoPE model:
+/// (MiniCPM-V 4.7's `zyxt`), written to `dst`, for an M-RoPE model:
 /// the embedding rows of the mixed batches then have their positions
 /// reordered into the model's section order.
 fn deriveSectionOrder(src: [:0]const u8, dst: [:0]const u8, order: []const u8) void {

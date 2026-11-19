@@ -12,8 +12,8 @@
 # own: its PEG tests are compiled with harness/peg_rec.h force-included,
 # which records every parser they build and every input they parse, and
 # must still pass; then random descriptions, chat grammars over random
-# tools, and Gemma 4- and MiniMax-M3-shaped grammars (upstream removed the
-# arena's save and load at v0.7.0, and with them the mutated saved arenas).
+# tools, and Gemma 4- and MiniMax-M3-shaped grammars (upstream's arena has no
+# save and load, so there are no mutated saved arenas).
 # See harness/peg_diff.zig.
 #
 # Usage: scripts/peg-diff [case label substring]

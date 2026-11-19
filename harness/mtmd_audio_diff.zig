@@ -3,7 +3,7 @@
 //! (`harness/mtmd_audio_ref.cpp`), in one process.
 //!
 //! Every preprocessor runs on both sides over the same PCM and hparams, and
-//! everything it returns must agree **on bits** -- since v1.0.0 through its
+//! everything it returns must agree **on bits** -- through its
 //! two public stages: what `preprocess` returns (each entry's shape, whether
 //! it is a placeholder, its floats if not, the samples kept for the log-mel
 //! graph and `needs_compute`), then the same after `compute`, which runs the
@@ -79,7 +79,7 @@ const Config = struct {
     chunk_samples: usize = 0,
     /// `audio_patch_sizes` (muse-spark).
     patches: []const i32 = &.{},
-    /// chatterbox_ref's `is_mtl` (v0.9.0).
+    /// chatterbox_ref's `is_mtl`.
     is_mtl: bool = false,
 };
 
@@ -102,16 +102,15 @@ const configs = [_]Config{
     .{ .name = "parakeet-128-win512", .kind = .parakeet, .n_mel = 128, .n_fft = 512, .window = 512, .hop = 160, .sr = 16000 },
     .{ .name = "nemotron-transcribe", .kind = .nemotron_transcribe, .n_mel = 128, .n_fft = 512, .window = 400, .hop = 160, .sr = 16000 },
     .{ .name = "nemotron-tr-odd", .kind = .nemotron_transcribe, .n_mel = 40, .n_fft = 400, .window = 300, .hop = 150, .sr = 12000 },
-    // v0.7.0: the conformer's, cut at 30 s (the chunk) and padded to 0.5 s;
+    // the conformer's, cut at 30 s (the chunk) and padded to 0.5 s;
     // the odd one's hop does not divide its padded lengths
     .{ .name = "d1omni", .kind = .d1omni, .n_mel = 128, .n_fft = 512, .window = 400, .hop = 160, .sr = 16000, .chunk_samples = 480000 },
     .{ .name = "d1omni-odd", .kind = .d1omni, .n_mel = 64, .n_fft = 400, .window = 300, .hop = 150, .sr = 12000, .chunk_samples = 360000 },
-    // v0.8.0
     .{ .name = "lfm3a", .kind = .lfm3a, .n_mel = 128, .n_fft = 400, .window = 400, .hop = 160, .sr = 16000 },
     .{ .name = "lfm3a-odd", .kind = .lfm3a, .n_mel = 32, .n_fft = 512, .window = 300, .hop = 150, .sr = 12000 },
     .{ .name = "muse-spark", .kind = .muse_spark_audio, .n_mel = 1, .n_fft = 0, .window = 0, .hop = 0, .sr = 24000, .patches = &.{ 4, 5, 6 } },
     .{ .name = "muse-spark-one", .kind = .muse_spark_audio, .n_mel = 1, .n_fft = 0, .window = 0, .hop = 0, .sr = 24000, .patches = &.{7} },
-    // v0.9.0: chatterbox's five-entry reference front-end, its clip_ctx
+    // chatterbox's five-entry reference front-end, its clip_ctx
     // hparams (the turbo variant loudness-normalizes; the t3 cap is 15 s or 6 s)
     .{ .name = "chatterbox-ref-turbo", .kind = .chatterbox_ref, .n_mel = 80, .n_fft = 512, .window = 400, .hop = 160, .sr = 16000, .chunk_samples = 160000 },
     .{ .name = "chatterbox-ref-mtl", .kind = .chatterbox_ref, .n_mel = 80, .n_fft = 512, .window = 400, .hop = 160, .sr = 16000, .chunk_samples = 96000, .is_mtl = true },

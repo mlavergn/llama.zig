@@ -306,8 +306,7 @@ const csa_ratio: i64 = 4;
 const hca_ratio: i64 = 128;
 
 /// Ports `llama_model_deepseek4`'s `graph`'s `build_hc_mean`
-/// (models/deepseek4.cpp:261 @b1b770d90), a free function `dsv4_hc_mean`
-/// before v0.6.0: the mean over the hyper-connection streams, `[n_embd,
+/// (models/deepseek4.cpp:261 @b1b770d90): the mean over the hyper-connection streams, `[n_embd,
 /// hc, n_tokens]` to `[n_embd, n_tokens]`.
 pub fn hcMean(ctx: *c.ggml_context, x: *Tensor) *Tensor {
     const hc = x.ne[1];

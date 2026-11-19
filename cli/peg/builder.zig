@@ -123,7 +123,7 @@ fn parseCharClasses(a: Allocator, classes: []const u8) Error!struct { []CharRang
     return .{ ranges.items, negated };
 }
 
-/// `gbnf_format_rule_name`, which replaced `rule_name` here at v0.8.0.
+/// `gbnf_format_rule_name`, which stands in for `rule_name` here.
 ///
 /// Return: allocated with `a`.
 pub fn ruleName(a: Allocator, name: []const u8) Error![]u8 {

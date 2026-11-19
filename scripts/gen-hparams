@@ -50,7 +50,7 @@ def enum_values(text):
 
 enums = enum_values(hdr)
 enums.update(enum_values(llama_h))
-# ggml.h's `enum ggml_unary_op` alone, since v0.7.0's `act_cls`: other ggml.h
+# ggml.h's `enum ggml_unary_op` alone, for `act_cls`: other ggml.h
 # enums initialize with shifts, which enum_values does not evaluate.
 enums.update(enum_values(re.search(r"enum ggml_unary_op \{.*?\};",
                                    open("llama.cpp/ggml/include/ggml.h").read(), re.S).group(0)))
@@ -78,8 +78,8 @@ for i, raw in enumerate(lines):
     if not code:
         continue
     if "(" in code:
-        # A member function's declaration, one line and no body. v0.4.0
-        # declares `is_ple` and `ple_conv_state` among the data members; this
+        # A member function's declaration, one line and no body.
+        # The header declares `is_ple` and `ple_conv_state` among the data members; this
         # once stopped at the first one, and every member after it vanished.
         # The first function with a body opens the inline functions that
         # close the struct; no data member follows them.
@@ -129,7 +129,7 @@ def zig_default(ztype, init):
     if ztype.startswith("["):
         n, elem = re.fullmatch(r"\[(\d+)\](\w+)", ztype).groups()
         # `= {}` value-initializes, as no initializer does under
-        # `llama_hparams hparams = {}` (llama-hparams.h, since v0.9.0's
+        # `llama_hparams hparams = {}` (llama-hparams.h's
         # `final_logit_sigmoid_capping`); any other initializer stops.
         if init is not None and init.strip() != "{}":
             sys.exit("gen-hparams: an array with an initializer")

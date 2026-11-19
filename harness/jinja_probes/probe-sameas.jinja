@@ -1,4 +1,4 @@
-{#- v0.6.0: `sameas`, which upstream answers by value for none, bools and small ints. -#}
+{#- `sameas`, which upstream answers by value for none, bools and small ints. -#}
 {%- set n = messages|length -%}
 {%- set neg = 0 - 5 -%}{%- set neg6 = 0 - 6 -%}
 [{{ none is sameas none }}][{{ true is sameas true }}][{{ true is sameas false }}][{{ n is sameas n }}]

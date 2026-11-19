@@ -1,5 +1,5 @@
 //! Normalisation: `NORM`, `RMS_NORM`, `RMS_NORM_BACK`, `L2_NORM`,
-//! `GROUP_NORM`, and the fused `RMS_NORM + MUL (+ ADD)` and (since v0.6.0)
+//! `GROUP_NORM`, and the fused `RMS_NORM + MUL (+ ADD)` and
 //! `RMS_NORM + SCALE` entry points `ggml_cuda_try_fuse` calls.
 //!
 //! # Provenance
@@ -14,9 +14,9 @@
 //! `norm_f32`, `group_norm_f32` and `rms_norm_back_f32` launch with
 //! `<<<>>>`; `rms_norm_f32` and `l2_norm_f32` launch through
 //! `ggml_cuda_kernel_launch` (PDL). `rms_norm_f32` has seventeen trailing
-//! parameters with C++ defaults (v0.6.0 added `scale_out`), and `cudaLaunchKernelEx` does not apply
-//! defaults, so the C spells the zeros out at every launch; since v0.8.0
-//! one dispatcher, `rmsNormF32Dispatch`, makes every launch.
+//! parameters with C++ defaults, and `cudaLaunchKernelEx` does not apply
+//! defaults, so the C spells the zeros out at every launch; one
+//! dispatcher, `rmsNormF32Dispatch`, makes every launch.
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -51,7 +51,7 @@ fn uint(v: c_int) u32 {
 }
 
 /// `dim3 blocks_num(nrows, MIN(nchannels, UINT16_MAX), MIN(nsamples, UINT16_MAX))`:
-/// since v0.7.0 the kernels loop over the channels and samples past the
+/// the kernels loop over the channels and samples past the
 /// grid's limit, so the grid is clamped and the counts travel as arguments.
 fn rowGrid(nrows: c_int, nchannels: c_int, nsamples: c_int) kernels.Dim3 {
     return .{ .x = uint(nrows), .y = uint(@min(nchannels, std.math.maxInt(u16))), .z = uint(@min(nsamples, std.math.maxInt(u16))) };
@@ -106,8 +106,7 @@ fn groupNormF32Cuda(x: CPtr, dst: Ptr, num_groups: c_int, eps: f32, group_size: 
 }
 
 /// `rms_norm_f32<block_size, vpt, do_vec, do_multiply, do_add, do_scale>`;
-/// `do_scale` is v0.6.0's, `vpt` and `do_vec` v0.8.0's, and the demangled
-/// key spells every template argument, defaulted or not.
+/// the demangled key spells every template argument, defaulted or not.
 fn rmsNormKernel(comptime block_size: comptime_int, comptime vpt: comptime_int, comptime vec: bool, comptime do_multiply: bool, comptime do_add: bool, comptime do_scale: bool) kernels.Kernel {
     return kernels.get("norm", kernels.tmpl("rms_norm_f32", &.{ kernels.int(block_size), kernels.int(vpt), kernels.boolean(vec), kernels.boolean(do_multiply), kernels.boolean(do_add), kernels.boolean(do_scale) }));
 }
@@ -141,7 +140,7 @@ fn rmsNormLaunch(comptime block_size: comptime_int, comptime vpt: comptime_int, 
     }, args);
 }
 
-/// Ports `rms_norm_f32_dispatch` (norm.cu:399 @b1b770d90), new at v0.8.0:
+/// Ports `rms_norm_f32_dispatch` (norm.cu:399 @b1b770d90):
 /// one row per block, in `float4` loads held in registers where the row and
 /// its operands are 16-byte aligned, and otherwise the scalar kernel the two
 /// launchers below had each spelled out.
@@ -412,8 +411,8 @@ pub fn opRmsNorm(ctx: *common.Context, dst: *Tensor) void {
     rmsNormF32Cuda(false, a.src0, dst.data, int(ne[0]), int(ne[1]), int(ne[2]), int(ne[3]), a.s01, a.s02, a.s03, a.eps, stream, 1.0);
 }
 
-/// Ports `ggml_cuda_op_rms_norm_scale_fused` (norm.cu:614 @b1b770d90), new
-/// at v0.6.0: `RMS_NORM` followed by a bias-free `SCALE` of its result,
+/// Ports `ggml_cuda_op_rms_norm_scale_fused` (norm.cu:614 @b1b770d90):
+/// `RMS_NORM` followed by a bias-free `SCALE` of its result,
 /// written straight to the `SCALE` node.
 pub fn opRmsNormScaleFused(ctx: *common.Context, dst: *Tensor, scale_tensor: *Tensor) void {
     const src0 = srcOf(dst, 0);

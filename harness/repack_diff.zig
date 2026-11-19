@@ -22,7 +22,7 @@
 //! with every one of their 66 unmangled exports renamed to `ref_*` on the
 //! command line, so both implementations link into one process and can be
 //! called back to back on identical bytes. That is the same `-D` rename
-//! `NOTES.md` records as unusable for *swapping* a translation unit — it
+//! was found unusable for *swapping* a translation unit — it
 //! renames internal callers too — which is exactly the property wanted
 //! here: the renamed object is self-consistent and calls its own kernels.
 //!
@@ -49,8 +49,7 @@ const c = @import("ggml_h");
 /// `extern "C"`, so its only exported name is `_Z35…v`. It is therefore
 /// *not* one of `repack.cpp`'s 36 unmangled exports and `-D` cannot rename
 /// it — which is the same fact, seen from a third direction, that
-/// `CLAUDE.md` records as "the symbol count is not the contract for this
-/// file".
+/// the symbol count is not this file's contract.
 const refRepackBuft = @extern(
     *const fn () callconv(.c) c.ggml_backend_buffer_type_t,
     .{ .name = "_Z35ggml_backend_cpu_repack_buffer_typev" },
@@ -486,7 +485,7 @@ pub fn main() !void {
     });
     std.debug.print("=== repack kernels: ported vs reference, on bits ===\n", .{});
 
-    // New at v0.5.0. On ARM the bare names are NEON bodies behind dotprod
+    // On ARM the bare names are NEON bodies behind dotprod
     // (the 4x8 gemm behind i8mm) and the generics run only at `generic`,
     // so the generics are also compared by name: at the baseline nothing
     // else reaches three of them. On x86 the bare names are the generics.

@@ -449,7 +449,7 @@ fn runPort(cs: Case, in: *Inputs, log: fit.Log) !c_int {
 var port_record: []u8 = &.{};
 
 /// One side's whole transcript of a case.
-/// v0.5.0: `llama_graph_n_input_tensors` (llama-context.cpp) logs each input
+/// `llama_graph_n_input_tensors` (llama-context.cpp) logs each input
 /// tensor's users from an `unordered_map` keyed by tensor address, so a run
 /// of those lines comes in the allocator's order, run to run, on either
 /// side; each run is compared sorted.

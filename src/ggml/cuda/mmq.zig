@@ -20,12 +20,12 @@
 //!
 //! # The `src1` precision
 //!
-//! Since v0.6.0 every MMQ kernel and launcher takes `prec_src1`, a
+//! Every MMQ kernel and launcher takes `prec_src1`, a
 //! `ggml_prec`: `GGML_PREC_Q8` quantizes `src1` to `q8_1` as before, and
 //! `GGML_PREC_Q4` -- the FP4 types on Blackwell only -- keeps it at FP4 for
 //! the native W4A4 instructions. Which one a multiplication takes is
 //! `getPrecSrc1`'s answer: `GGML_CUDA_MMQ_PREC` overrides the precision the
-//! graph requests (`ggml_prec_get_src(dst, 1)`, or, since v1.0.0, the fused
+//! graph requests (`ggml_prec_get_src(dst, 1)`, or the fused
 //! matmuls' `prec_src1` in the fusion args). On Blackwell an FP4 type at `Q8` takes the Ampere
 //! configuration, so the native path is no longer implied by the type.
 
@@ -131,9 +131,9 @@ fn lookup(t: *const table.Table, ty: c.enum_ggml_type, J: c_int, fallback: bool)
 }
 
 /// Ports the host `ggml_cuda_mmq_get_config` (mmq.cuh:233 @b1b770d90),
-/// NVIDIA arms. The AMD arms -- GCN, CDNA, RDNA2/3/3.5/4 and v0.9.0's RDNA4_M -- are taken only
-/// for an AMD compute capability, which a CUDA device never has. Since
-/// v0.7.0 `prec_src1` has no default: every caller passes it (#30168).
+/// NVIDIA arms. The AMD arms -- GCN, CDNA, RDNA2/3/3.5/4 and RDNA4_M -- are taken only
+/// for an AMD compute capability, which a CUDA device never has.
+/// `prec_src1` has no default: every caller passes it (#30168).
 pub fn getConfig(ty: c.enum_ggml_type, J: c_int, fallback: bool, x: c_int, prec_src1: c.enum_ggml_prec) Config {
     if (common.blackwellMmaAvailable(x)) {
         // only src1 at Q4 uses the native FP4 config, higher precisions keep src1 at Q8_1
@@ -147,8 +147,7 @@ pub fn getConfig(ty: c.enum_ggml_type, J: c_int, fallback: bool, x: c_int, prec_
     return lookup(&table.pascal_older, ty, J, fallback);
 }
 
-/// Ports `ggml_cuda_mmq_needs_fallback` (mmq.cuh:380 @b1b770d90), new at
-/// v0.7.0, which replaced `ggml_cuda_mmq_get_J_max`: whether the rows of
+/// Ports `ggml_cuda_mmq_needs_fallback` (mmq.cuh:380 @b1b770d90): whether the rows of
 /// `x` need the bounds-checked kernels.
 pub fn needsFallback(nrows_x: i64) bool {
     return @rem(nrows_x, 128) != 0;
@@ -209,16 +208,13 @@ fn getNbytesShared(config: Config, x: c_int) usize {
     return nbs_ids + nbs_x + impl.pad(nbs_y, @as(usize, @intCast(config.nthreads)) * @sizeOf(c_int));
 }
 
-/// Ports `ggml_cuda_mmq_fusion_supported` (mmq.cuh:439 @b1b770d90), new at
-/// v0.8.0: the weight types with a fused gate/up/GLU path; NVFP4 since
-/// v1.0.0.
+/// Ports `ggml_cuda_mmq_fusion_supported` (mmq.cuh:439 @b1b770d90): the weight types with a fused gate/up/GLU path.
 pub fn fusionSupported(ty: c.enum_ggml_type) bool {
     return ty == c.GGML_TYPE_Q4_K or ty == c.GGML_TYPE_Q5_K or ty == c.GGML_TYPE_Q6_K or ty == c.GGML_TYPE_Q8_0 or ty == c.GGML_TYPE_IQ4_XS or
         ty == c.GGML_TYPE_NVFP4;
 }
 
-/// Ports `mmq_args` (mmq.cuh:1446 @b1b770d90). Since v1.0.0 (#31047, the
-/// linearized MoE layout) it carries the tile specs instead of the expert
+/// Ports `mmq_args` (mmq.cuh:1446 @b1b770d90). It carries the tile specs instead of the expert
 /// bounds, and the number of column tiles, `ntj`, instead of the widest
 /// column count.
 pub const Args = struct {
@@ -247,8 +243,8 @@ pub const Args = struct {
     stride_sample_dst: i64,
     ntj: i64,
     /// Tile width in ne11 (dense) or ne12 (MoE) direction to use for
-    /// optimal performance. Since v0.7.0 `ggml_cuda_mul_mat_q` chooses it,
-    /// to size `src1`'s padding, where `mul_mat_q_switch_J` had.
+    /// optimal performance. `ggml_cuda_mul_mat_q` chooses it,
+    /// to size `src1`'s padding.
     J_best: c_int,
     /// `gate != null` selects the fused gate/up/GLU path.
     fusion: common.MmFusionArgsDevice = .{},
@@ -302,7 +298,7 @@ fn u32Of(x: i64) u32 {
 /// Ports `launch_mul_mat_q` (mmq.cuh:1465 @b1b770d90). With `has_fusion`
 /// the kernel always tiles: it needs the whole K range of a tile in one
 /// block, and writes the GLU of `I/2` up rows and `I/2` gate rows per tile.
-/// Since v0.8.0 column tiles are innermost, grid x, so that the concurrently
+/// Column tiles are innermost, grid x, so that the concurrently
 /// running blocks share the same tile of `x` and read it from L2.
 fn launchMulMatQ(comptime ty: c.enum_ggml_type, comptime J: comptime_int, comptime fallback: bool, comptime prec_src1: c.enum_ggml_prec, comptime has_fusion: bool, ctx: *common.Context, args: *const Args, stream: cu.cudaStream_t) void {
     const id = common.getDevice();
@@ -423,7 +419,7 @@ fn mulMatQSwitchJ(comptime ty: c.enum_ggml_type, comptime fallback: bool, compti
     }
 }
 
-/// Ports `mul_mat_q_switch_fusion` (mmq.cuh:1612 @b1b770d90), new at v0.8.0:
+/// Ports `mul_mat_q_switch_fusion` (mmq.cuh:1612 @b1b770d90):
 /// a fused kernel exists only without the fallback and for the types
 /// `fusionSupported` names.
 fn mulMatQSwitchFusion(comptime ty: c.enum_ggml_type, comptime fallback: bool, comptime prec_src1: c.enum_ggml_prec, ctx: *common.Context, args: *const Args, stream: cu.cudaStream_t) void {
@@ -447,8 +443,8 @@ fn mulMatQCase(comptime ty: c.enum_ggml_type, comptime prec_src1: c.enum_ggml_pr
     }
 }
 
-/// Ports `ggml_cuda_mul_mat_q_switch_type` (mmq.cu:8 @b1b770d90). v0.7.0
-/// spells `GGML_PREC_Q8` at every case, which the port always did.
+/// Ports `ggml_cuda_mul_mat_q_switch_type` (mmq.cu:8 @b1b770d90). It
+/// spells `GGML_PREC_Q8` at every case.
 fn mulMatQSwitchType(ctx: *common.Context, args: *const Args, stream: cu.cudaStream_t, prec_src1: c.enum_ggml_prec) void {
     switch (args.type_x) {
         // src1 at Q4 uses the native FP4 instructions, which are Blackwell-only
@@ -494,8 +490,8 @@ const PrecEnv = struct {
     const once = common.Once(run);
 };
 
-/// Ports `ggml_cuda_mmq_get_prec_env` (mmq.cu:94 @b1b770d90), new at
-/// v0.6.0: `GGML_CUDA_MMQ_PREC` overrides the `src1` precision the graph
+/// Ports `ggml_cuda_mmq_get_prec_env` (mmq.cu:94 @b1b770d90):
+/// `GGML_CUDA_MMQ_PREC` overrides the `src1` precision the graph
 /// asks for; "auto" (or anything unknown, with a warning) keeps it.
 fn getPrecEnv() c.enum_ggml_prec {
     const env_c = std.c.getenv("GGML_CUDA_MMQ_PREC") orelse return c.GGML_PREC_UNDEFINED;
@@ -515,10 +511,10 @@ fn getPrecEnv() c.enum_ggml_prec {
     return c.GGML_PREC_UNDEFINED;
 }
 
-/// Ports `ggml_cuda_mmq_get_prec_src1` (mmq.cu:117 @b1b770d90), new at
-/// v0.6.0: `src1` is quantized to Q8_1 unless the FP4 types can use 4-bit
+/// Ports `ggml_cuda_mmq_get_prec_src1` (mmq.cu:117 @b1b770d90):
+/// `src1` is quantized to Q8_1 unless the FP4 types can use 4-bit
 /// activations, in which case they default to the native W4A4 instructions
-/// on Blackwell. Since v1.0.0 it takes the type and the requested precision
+/// on Blackwell. It takes the type and the requested precision
 /// rather than reading them off the tensors, so the fused paths can ask.
 fn getPrecSrc1(ty: c.enum_ggml_type, prec_requested: c.enum_ggml_prec, x: c_int) c.enum_ggml_prec {
     PrecEnv.once.call();
@@ -538,7 +534,7 @@ fn getPrecSrc1(ty: c.enum_ggml_type, prec_requested: c.enum_ggml_prec, x: c_int)
     return c.GGML_PREC_Q4;
 }
 
-/// Ports `ggml_cuda_mmq_get_J_best` (mmq.cu:135 @b1b770d90), new at v0.8.0:
+/// Ports `ggml_cuda_mmq_get_J_best` (mmq.cu:135 @b1b770d90):
 /// the tile width in ne11 (dense) / ne12 (MoE) direction with the fewest
 /// tiles that fits into shared memory, 0 if there is none.
 fn getJBest(ty: c.enum_ggml_type, ncols: i64, fallback: bool, x: c_int, smpbo: usize, prec_src1: c.enum_ggml_prec, nthreads_best: ?*c_int) c_int {
@@ -561,13 +557,12 @@ fn getJBest(ty: c.enum_ggml_type, ncols: i64, fallback: bool, x: c_int, smpbo: u
     return J_best;
 }
 
-/// Ports `ggml_cuda_mul_mat_q` (mmq.cu:164 @b1b770d90). Since v0.7.0 (#29953)
-/// it chooses the tile width `J_best` itself, as `mul_mat_q_switch_J` had,
+/// Ports `ggml_cuda_mul_mat_q` (mmq.cu:164 @b1b770d90) (#29953).
+/// It chooses the tile width `J_best` itself,
 /// and pads `src1`'s quantized copy and `ids_dst` by what one tile of that
-/// width can read past the end, where it had padded by the widest tile any
-/// configuration allowed. With `fusion` (v0.8.0, gate/up/GLU) `src0` is the
-/// up weight and `dst` the GLU output; since v0.9.0 with `ids` too (MoE).
-/// Since v1.0.0 the fusion may carry NVFP4 weight scales, with or without a
+/// width can read past the end. With `fusion` (gate/up/GLU) `src0` is the
+/// up weight and `dst` the GLU output, with `ids` too for MoE.
+/// The fusion may carry NVFP4 weight scales, with or without a
 /// gate (without, `dst` is the `MUL` applying the scale), and its
 /// `prec_src1`; and the MoE path takes the linearized tile specs.
 pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, ids: ?*const Tensor, dst: *Tensor, fusion: ?*const common.MmFusionArgsHost) void {
@@ -675,7 +670,6 @@ pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, i
             ncols_opt = ne12;
 
             // Each expert only sees ne12*n_expert_used/ne02 tokens on average.
-            // Since v1.0.0 on every GPU, where it was RDNA3 and RDNA4 only.
             ncols_opt = @divTrunc(ne12 * ids.?.ne[0] + ne02 - 1, ne02);
         }
 
@@ -865,8 +859,8 @@ fn firstOf(comptime T: type, p: ?[*]T) ?*T {
 }
 
 /// Ports `ggml_cuda_should_use_mmq` (mmq.cu:395 @b1b770d90), NVIDIA arms
-/// (v0.9.0's RDNA4_M arms are AMD).
-/// v0.6.0's `cc == GGML_CUDA_CC_PH1` refusal is a Moore Threads arm, which
+/// (the RDNA4_M arms are AMD).
+/// The `cc == GGML_CUDA_CC_PH1` refusal is a Moore Threads arm, which
 /// no CUDA device's compute capability reaches.
 pub fn shouldUseMmq(ty: c.enum_ggml_type, x: c_int, ne11: i64, n_experts: i64) bool {
     const mmq_supported = switch (ty) {
@@ -922,10 +916,10 @@ pub fn shouldUseMmq(ty: c.enum_ggml_type, x: c_int, ne11: i64, n_experts: i64) b
     return ne11 < dp4a_max_batch_size;
 }
 
-/// Ports `ggml_cuda_mmq_fusion_is_efficient` (mmq.cu:529 @b1b770d90), new at
-/// v0.8.0: the fused kernel needs one block per tile, with no stream-k
-/// split, so it is only worth taking if the tiling is efficient. Since
-/// v1.0.0 it takes the requested `src1` precision.
+/// Ports `ggml_cuda_mmq_fusion_is_efficient` (mmq.cu:529 @b1b770d90):
+/// the fused kernel needs one block per tile, with no stream-k
+/// split, so it is only worth taking if the tiling is efficient. It
+/// takes the requested `src1` precision.
 pub fn fusionIsEfficient(ty: c.enum_ggml_type, prec_requested: c.enum_ggml_prec, nrows_x: i64, ncols: i64, nchannels: i64, device: c_int) bool {
     const dev = common.info().devices[@intCast(device)];
     const x = dev.cc;

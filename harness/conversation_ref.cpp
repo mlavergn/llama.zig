@@ -1,17 +1,17 @@
 // Not a port: the reference side of `scripts/cnv-diff`, a conversation
 // driven through upstream's chat stack and upstream's libllama.
 //
-// Our `llama-cli -cnv` holds a conversation (SPEC.md, section 5.3): each
+// Our `llama-cli -cnv` holds a conversation (`cli/conversation.zig`, "Behaviour"): each
 // line of stdin is a user turn, the whole history is re-rendered through the
 // chat template every turn, the new render is diffed against the tokens
 // already decoded and only their common prefix is kept, and a memory that
 // refuses `llama_memory_seq_rm` -- Qwen3.5's hybrid cache does -- is cleared
 // and decoded again. Each reply is read back by the template's parser and
-// its reasoning shown apart from the answer (SPEC.md 5.3, "Replies").
+// its reasoning shown apart from the answer (the same doc comment, "Replies").
 // `parity-cli` covers one-shot prompts only, so nothing else runs that loop
 // against a reference.
 //
-// This is that loop written a second time, from SPEC.md, against the stock
+// This is that loop written a second time, from that contract, against the stock
 // pieces -- `llama.cpp.zmake`'s libllama decodes, and upstream's
 // `llama-common` (`libllama-common-ref.a`, `zig build tools-ref`) does the
 // rest, as upstream's `llama-cli` reaches it through the server it runs:
@@ -35,10 +35,10 @@
 //   - every byte our CLI writes: replies on stdout; the loading line, the
 //     banner, the `> ` marker, the slash-command answers, the cut-off notes
 //     and the error sentence on stderr;
-//   - the trust split: upstream's input marks, the session prompt's parts
-//     (v0.7.0), runs of one mark tokenized separately, `parse_special` off
-//     for input. `bos_token` and `eos_token` are bound as template text
-//     since v0.7.0, as ours are;
+//   - the trust split: upstream's input marks, the session prompt's parts,
+//     runs of one mark tokenized separately, `parse_special` off
+//     for input. `bos_token` and `eos_token` are bound as template text,
+//     as ours are;
 //   - the cache report our CLI writes under `LLAMAZIG_CNV_TRACE` -- tokens
 //     kept and tokens decoded, per turn -- the one place prefix reuse shows;
 //   - `--fit`, as upstream's `common_init_result` runs it before loading:
@@ -450,7 +450,7 @@ int main(int argc, char ** argv) {
         const std::vector<llama_token> tokens = tokenize(vocab, runs);
         if (tokens.size() >= n_ctx) { rc = fail("the prompt is longer than the context -- raise -c or shorten it"); break; }
 
-        // SPEC.md 5.3: keep the longest common prefix, but never all of it --
+        // Keep the longest common prefix, but never all of it --
         // an empty suffix leaves nothing to sample from.
         size_t keep = 0;
         while (keep < tokens.size() && keep < decoded.size() && tokens[keep] == decoded[keep]) keep++;

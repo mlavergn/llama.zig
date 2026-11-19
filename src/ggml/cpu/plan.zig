@@ -76,9 +76,9 @@ pub fn getNTasks(node: *Tensor, n_threads: c_int) c_int {
         // Single-threaded, either because the op is cheap or because no
         // one has written the parallel form. `GET_ROWS` could use more
         // threads; the C notes that launching them costs more than it saves
-        // once a GPU is carrying the model. `SET_ROWS` sat beside it until
-        // v0.7.0 (#30454), which planned its per-thread F16 conversion rows
-        // for one thread while every thread ran it.
+        // once a GPU is carrying the model. `SET_ROWS` is not here
+        // (#30454): it plans its per-thread F16 conversion rows for every
+        // thread that runs it.
         c.GGML_OP_GET_ROWS, c.GGML_OP_SUB, c.GGML_OP_SQR, c.GGML_OP_SQRT, c.GGML_OP_LOG, c.GGML_OP_SIN, c.GGML_OP_COS, c.GGML_OP_SUM, c.GGML_OP_SUM_ROWS, c.GGML_OP_MEAN, c.GGML_OP_ARGMAX, c.GGML_OP_REPEAT, c.GGML_OP_REPEAT_BACK, c.GGML_OP_LEAKY_RELU, c.GGML_OP_SCALE, c.GGML_OP_SET, c.GGML_OP_RESHAPE, c.GGML_OP_VIEW, c.GGML_OP_PERMUTE, c.GGML_OP_TRANSPOSE, c.GGML_OP_GET_ROWS_BACK, c.GGML_OP_DIAG, c.GGML_OP_CLAMP, c.GGML_OP_POOL_1D, c.GGML_OP_POOL_2D, c.GGML_OP_POOL_2D_BACK, c.GGML_OP_WIN_PART, c.GGML_OP_WIN_UNPART, c.GGML_OP_GET_REL_POS, c.GGML_OP_NONE => 1,
 
         c.GGML_OP_UNARY => switch (types.ggml_get_unary_op(node)) {
@@ -359,7 +359,7 @@ fn nodeWorkSize(node: *const Tensor, n_tasks: i64) usize {
             if ((src0.type == c.GGML_TYPE_F16 or src0.type == c.GGML_TYPE_BF16) and
                 src1.type == c.GGML_TYPE_F32)
             {
-                // The source is permuted into F32 since v1.0.0 (#31854); only
+                // The source is permuted into F32 (#31854); only
                 // the kernel is stored as F16.
                 return @sizeOf(f32) * @as(usize, @intCast(ne10 * ne11)) +
                     @sizeOf(c.ggml_fp16_t) * @as(usize, @intCast(ne00 * ne01 * ne02));
@@ -391,7 +391,7 @@ fn nodeWorkSize(node: *const Tensor, n_tasks: i64) usize {
             );
             impl.assert(src1.type == c.GGML_TYPE_F32, "node->src[1]->type == GGML_TYPE_F32");
 
-            // The source is permuted into F32 since v1.0.0 (#31854), ahead of
+            // The source is permuted into F32 (#31854), ahead of
             // the kernel in its own type.
             return @sizeOf(f32) * @as(usize, @intCast(ne10 * ne11 * ne12 * ne13)) +
                 types.ggml_type_size(src0.type) * @as(usize, @intCast(ne00 * ne01 * ne02 * ne03));
@@ -560,7 +560,7 @@ test "mul_mat_id reserves room for all four sub-allocations" {
     const counts = 3 * @sizeOf(i64) + @sizeOf(i64);
     const rows = 3 * 2 * 2 * @sizeOf(mulmat.RowMapping) + @sizeOf(i64);
     const chunks = defs.cache_line_size * 3 + defs.cache_line_size;
-    // Since v0.6.0 padded to 64 for the tiled workspace, which an F32 src0
+    // Padded to 64 for the tiled workspace, which an F32 src0
     // never gets.
     try std.testing.expectEqual(impl.pad(counts + rows + chunks, 64) + tiled.ggml_tiled_wdata_size(4, &node), size);
     try std.testing.expectEqual(@as(usize, 0), tiled.ggml_tiled_wdata_size(4, &node));

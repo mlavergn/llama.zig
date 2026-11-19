@@ -11,8 +11,7 @@
 //!
 //! Every one of them has an `#if defined(__AVX2__)` or similar vector arm that
 //! is **dead on this target**, so what is ported is the scalar loop the C
-//! falls through to. Where that is the case the doc comment says so, per the
-//! `#if`-arm rule in `CLAUDE.md`.
+//! falls through to. Where that is the case the doc comment says so.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -370,7 +369,7 @@ fn scaleF16Avx(n: i64, y: [*]c.ggml_fp16_t, v: f32) void {
 // Activations
 //
 // `GGML_GELU_FP16` is defined in `vec.h`, so the `f32` gelu kernels compile
-// their table-lookup arms; `GGML_GELU_QUICK_FP16` is not since v0.8.0, so the
+// their table-lookup arms; `GGML_GELU_QUICK_FP16` is not, so the
 // `f32` quick-gelu kernels are `vec.cpp`'s, at the bottom of this file. The
 // tables are `cpu/vec.zig`'s, filled by `ggml_cpu_init`.
 
@@ -586,7 +585,7 @@ pub inline fn geglu_quick_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp
 // -----------------------------------------------------------------------------
 // BF16 activations and gated linear units
 //
-// New at v0.6.0: a scalar loop per op that widens each element, applies the
+// A scalar loop per op that widens each element, applies the
 // `f32` function and narrows again. No table and no vector arm in the C.
 
 const bf16 = c.ggml_bf16_t;

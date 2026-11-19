@@ -35,7 +35,7 @@
 //!   depth and indented where the text stays small, cut short, and
 //!   destroyed; and values built 120 to 320 deep by copies around strings
 //!   and keys that are not UTF-8, so `dump` throws from below the bound.
-//!   Since v0.7.0 nlohmann copies, compares and dumps a value nested past
+//!   nlohmann copies, compares and dumps a value nested past
 //!   128 levels without the call stack; so must the port.
 
 const std = @import("std");

@@ -497,7 +497,7 @@ fn runResult(j: *const Value) !void {
     try linef("is_error {d} is_stop {d}", .{ @intFromBool(r.isError()), @intFromBool(r.isStop()) });
     const st = try j.value("state", i64, -1);
     if (st >= 0) {
-        // a state whose CS threw (v0.7.0: the session's constructor parses a
+        // a state whose CS threw (the session's constructor parses a
         // continuation's prefill, and may throw) is missing: std::map::at
         // throws, once inside the reference's update guard and once outside
         const s = states.get(st) orelse {
@@ -921,12 +921,12 @@ fn opTS(j: *Value) !void {
     try str("tts_params", try dumpV(&v));
 }
 
-/// v1.0.0: `convert_speech_to_tts`, the OpenAI speech API's body as /tts's.
+/// `convert_speech_to_tts`, the OpenAI speech API's body as /tts's.
 fn opSP(j: *Value) !void {
     try str("conv", try dumpV(&(try sd.convert.speechToTts(ra(), j))));
 }
 
-/// v1.0.0: `pcm_f32_to_s16` over the samples' bits (`f`, hex of each f32).
+/// `pcm_f32_to_s16` over the samples' bits (`f`, hex of each f32).
 fn opPCM(j: *Value) !void {
     var samples: std.ArrayList(f32) = .empty;
     var it = (try j.at("f")).items();
@@ -938,7 +938,7 @@ fn opPCM(j: *Value) !void {
     try str("pcm16", try hexOf(bytes));
 }
 
-/// v1.0.0: `server_addr_is_public` over each address of `a`.
+/// `server_addr_is_public` over each address of `a`.
 fn opAP(j: *Value) !void {
     var res: std.ArrayList(u8) = .empty;
     var it = (try j.at("a")).items();
@@ -1420,7 +1420,7 @@ fn chatLog(level: chat.msg.Level, text: []const u8) void {
 }
 
 // ---------------------------------------------------------------------------
-// the typed decision API (v0.6.0)
+// the typed decision API
 
 fn showDecisionTask(t: *const task.Task) !void {
     const d = &t.decision;

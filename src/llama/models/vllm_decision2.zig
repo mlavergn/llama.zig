@@ -16,7 +16,7 @@
 //! (`b1b770d90`): `llama_model_vllm_decision2`'s `load_arch_hparams`,
 //! `load_arch_tensors` and `build_arch_graph`, `decision2_rows` and
 //! `decision2_get_rows`, the graph input `input_decision`, and its `graph`
-//! with `build_head`; and from `llama.cpp/src/models/models.h` at v0.8.0,
+//! with `build_head`; and from `llama.cpp/src/models/models.h`,
 //! `llama_model_vllm_decision2`'s members.
 
 const std = @import("std");

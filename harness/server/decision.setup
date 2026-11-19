@@ -1,6 +1,6 @@
 #!/bin/bash
-# Writes the typed decision models for decision.cases (Stage 10, the
-# /v1/systemone API of v0.6.0, and the five types of v0.7.0) and names them
+# Writes the typed decision models for decision.cases (the
+# /v1/systemone API and its five newer types) and names them
 # in $DATA/setup.env, after the vision cases' media (vision.setup: $PNG1,
 # $WAV, ...). Run once by scripts/server-diff decision.
 #
@@ -15,10 +15,10 @@
 # template, a temperature <= 0) are small, over the qwen3 arch fixture.
 #
 #   DECOPENJEV DECLEV DECNIMBLE DECKEV DECLAYA DECCLEF   the working models
-#   DECPPLX DECVLLM2 DECD3 DECD1 DECD1OMNI              v0.7.0's, also Qwen3
+#   DECPPLX DECVLLM2 DECD3 DECD1 DECD1OMNI              the newer ones, also Qwen3
 #   DECUNKNOWN DECNOTMPL DECBADTEMP                 the failing ones
-#   DECNOMASK DECBADBIAS DECBADBIAS2                v0.7.0's failing ones
-#   DECGRANITE DECH2O DECLFM3D1 DECLFM3OMNI              v0.8.0's, also Qwen3
+#   DECNOMASK DECBADBIAS DECBADBIAS2                the newer failing ones
+#   DECGRANITE DECH2O DECLFM3D1 DECLFM3OMNI              the later ones, also Qwen3
 #   DECH2OQ               a link to DECH2O named -full.gguf: labels and classes
 #                         are read past the point a vocab-only load stops
 #                         (llama-model.cpp:1393), so server-task-diff loads
@@ -28,12 +28,12 @@
 #                         cross the port's C ABI
 #   DECOCR                openbmb-minicpm-ocr-jev over the mmproj fixtures'
 #                         text-qwen3, with a classifier of two rows
-#   DECNOLABELS DECBADLABEL DECDUPLABEL DECBADOCR        v0.8.0's failing ones, likewise
+#   DECNOLABELS DECBADLABEL DECDUPLABEL DECBADOCR        the later failing ones, likewise
 #   DECD1MM DECPPLXMM     lfm2-d1 and pplx-decider over the mmproj fixtures'
 #                         text-qwen3 (for $MM/gemma3.gguf)
 #   DECOMNIMM             lfm2-d1-omni over text-qwen2vl (for the vision and
 #                         audio $MM/qwen2.5o.gguf)
-# Each v0.7.0 type's systemone template is its converter's
+# Each newer type's systemone template is its converter's
 # (llama.cpp/conversion/{pplx_decider,vllm_d3,vllm_decision2,lfm2}.py),
 # with lfm2-d1-omni's <|mask|> spelled as the base vocabulary's mask token.
 # vllm-decision2 and lfm2-d1-omni have architectures of their own upstream;
@@ -246,7 +246,7 @@ LAYA = V + """<|im_start|>{{ type }} {{ v(instructions) }}<|im_end|>{% for o in 
 CLEF = V + """<|im_start|>user
 {% for img in images %}{{ img }}{% endfor %}{{ v(state) }}{{ sep }}{% for q in questions %}{{ mark_question }}{{ q.type }}: {{ v(q.instructions) }}{{ sep }}{% for o in q.options %}{{ mark_option }}{{ o.key }}{% if o.description is not none %} {{ v(o.description) }}{% endif %}{{ sep }}{% endfor %}{% endfor %}<|im_end|>"""
 
-# --- v0.7.0's templates, as their converters write them ----------------------
+# --- the newer templates, as their converters write them ----------------------
 
 def jsj(name):
     # conversion/base.py: jinja_str_or_json
@@ -473,7 +473,7 @@ working = {
         "qwen3.decision.max_head_tokens": v_u32(40),
         "qwen3.decision.temperature.noul": v_f32(0.25),
     }),
-    # v0.7.0: pplx-decider's label codes, with score biases for 4 levels and
+    # pplx-decider's label codes, with score biases for 4 levels and
     # for 5 (one key written "05": strtoul reads it as 5)
     "PPLX": decision("qwen3", "pplx-decider", PPLX, {
         "qwen3.decision.temperature.choice": v_f32(0.9),
@@ -505,7 +505,7 @@ working = {
         "qwen3.decision.temperature.choice.3_5": v_f32(0.7),
         "qwen3.decision.temperature.noul": v_f32(2.0),
     }),
-    # v0.8.0: granite-switch, lev's labels with noul true first
+    # granite-switch, lev's labels with noul true first
     "GRANITE": decision("qwen3", "granite-switch", granite_template()),
     # h2o-lightning: label texts of its own, read after an answer prefill,
     # and a temperature for requests with media
@@ -562,7 +562,7 @@ CODEC_PAD = tok_id(TQ2VL, "<|codec_pad|>")
 media = {
     "D1MM": (TQ3, decision("qwen3", "lfm2-d1", D1, {"qwen3.context_length": v_u32(4096)})),
     "PPLXMM": (TQ3, decision("qwen3", "pplx-decider", PPLX, {"qwen3.context_length": v_u32(4096)})),
-    # v0.8.0: a character vocabulary, each label one character; an image
+    # a character vocabulary, each label one character; an image
     # temperature; the mmproj is what lets lfm3-d1-omni hear a spoken question
     "H2OMM": (TQ3, decision("qwen3", "h2o-lightning", h2o_template(), {
         "qwen3.context_length": v_u32(4096),
@@ -592,7 +592,7 @@ for name, (src, kv) in media.items():
     write(src, p, kv)
     env[f"DEC{name}"] = p
 
-# v0.8.0: loaded whole by server-task-diff, see the header
+# loaded whole by server-task-diff, see the header
 full = {
     "BADOCR": decision("qwen3", "openbmb-minicpm-ocr-jev", "{{ state }}"),
     "NOLABELS": decision("qwen3", "h2o-lightning", h2o_template()),

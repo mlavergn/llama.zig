@@ -24,10 +24,10 @@
 //!
 //! # After a `tool-close`
 //!
-//! Until v0.6.0 the base mapper's `current_tool` still pointed at the
-//! `std::optional` a `tool-close` had just reset, and a tool-related node
-//! before the next `tool-open` wrote a destroyed `common_chat_tool_call`;
-//! upstream's `map` (chat-peg-parser.cpp:321 @b1b770d90) now clears it, so
+//! The base mapper's `current_tool` must not point at the
+//! `std::optional` a `tool-close` just reset: a tool-related node
+//! before the next `tool-open` would write a destroyed `common_chat_tool_call`.
+//! Upstream's `map` (chat-peg-parser.cpp:321 @b1b770d90) clears it, so
 //! such a node is ignored. `Mapper.after_close` records that one arrived, for
 //! `make peg-diff`, which must see some.
 

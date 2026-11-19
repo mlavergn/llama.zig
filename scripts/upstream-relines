@@ -7,7 +7,7 @@ them as literals: `impl.assert(..., "llama-model.cpp", 1235, ...)`. Gates
 compare those messages (`arch-model-diff` counts a case where both sides
 abort on the same message as a match), so after a sync a literal at the old
 line is a wrong message, and it is not a citation: `upstream-map --repin`
-never sees it. There were 1,133 of them at v0.3.0.
+never sees it.
 
 For each literal `"<file>", <N>` in `src/`, `cli/` and `tools/`, and each
 bare line handed to a helper in `HELPERS`:
@@ -42,9 +42,9 @@ MESSAGE = re.compile(r"GGML_ASSERT|GGML_ABORT|GGML_LOG|LLAMA_LOG|LOG_|assert|abo
 # Where each port area's upstream sources live, to break ties between names
 # several directories share.
 # Helpers that take a bare `__LINE__` for one fixed upstream file -- the
-# file is the helper's, so the literal has no file name beside it. Found at
-# v0.4.0, after `hparams.zig`'s `outOfBounds(248, ...)` and its kin were left
-# at v0.3.0 lines by the first version of this script, which matched only
+# file is the helper's, so the literal has no file name beside it.
+# Without them `hparams.zig`'s `outOfBounds(248, ...)` and its kin were left
+# at stale lines by the first version of this script, which matched only
 # `"<file>", <N>`. A new helper of this shape goes here.
 HELPERS = [
     ("src/ggml/backend_meta.zig", r"abortFmt\((\d+)", "ggml/src/ggml-backend-meta.cpp"),
@@ -58,7 +58,7 @@ HELPERS = [
     ("tools/llama_bench.zig", r"ggmlAssert\([^,()]+(?:\([^()]*\))?[^,()]*, (\d+)", "tools/llama-bench/llama-bench.cpp"),
     ("tools/imatrix.zig", r"ggmlAssert\([^,()]+(?:\([^()]*\))?[^,()]*, (\d+)", "tools/imatrix/imatrix.cpp"),
     ("tools/perplexity.zig", r"ggmlAssert\([^,()]+(?:\([^()]*\))?[^,()]*, (\d+)", "tools/perplexity/perplexity.cpp"),
-    # Found at v0.6.0: six more helpers of this shape had never been listed,
+    # Six more helpers of this shape had never been listed,
     # so their lines stayed at A through every sync since they were written.
     ("tools/common/speculative.zig", r"assertC\([^,()]+(?:\([^()]*\))?[^,()]*, (\d+)", "common/speculative.cpp"),
     ("tools/common/speculative_draft.zig", r"assertC\([^,()]+(?:\([^()]*\))?[^,()]*, (\d+)", "common/speculative.cpp"),

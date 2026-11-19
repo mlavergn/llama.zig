@@ -7,8 +7,8 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/gated_delta_net.cu` and
 //! `llama.cpp/ggml/src/ggml-cuda/gated_delta_net.cuh` at v1.0.0
-//! (`b1b770d90`). The kernel, `gated_delta_net_cuda`, stays CUDA. Since
-//! v0.7.0 each warp owns four state columns (#30087), and a long non-KDA
+//! (`b1b770d90`). The kernel, `gated_delta_net_cuda`, stays CUDA. Each
+//! warp owns four state columns (#30087), and a long non-KDA
 //! prefill goes to the chunked kernel in `gated_delta_net_mma.zig` first
 //! (#29353).
 

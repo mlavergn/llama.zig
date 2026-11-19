@@ -16,8 +16,8 @@
 // fixed LCG rather than that harness's, which only both sides' agreeing
 // needs.
 //
-// With --decision it writes metadata-only files for common_get_gguf_info
-// (v0.7.0): every decision type name upstream knows, an unknown one, one
+// With --decision it writes metadata-only files for common_get_gguf_info:
+// every decision type name upstream knows, an unknown one, one
 // stored as a number, a context length of the wrong type, and files with
 // no or an empty architecture.
 //

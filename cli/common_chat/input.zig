@@ -16,8 +16,8 @@
 //! # libllama
 //!
 //! `tokenize` reaches the vocabulary through libllama's port,
-//! `@import("llama").api`, never a `llama_*` C symbol (`CLAUDE.md`, the
-//! libmtmd note).
+//! `@import("llama").api`, never a `llama_*` C symbol: in a harness
+//! those are upstream's.
 
 const std = @import("std");
 const exception = @import("exception.zig");

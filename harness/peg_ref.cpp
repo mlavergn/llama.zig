@@ -439,7 +439,7 @@ std::string result_text(const common_peg_parse_result & r) {
     return s;
 }
 
-// Every node's invalid UTF-8 runs and sanitized text (v0.5.0).
+// Every node's invalid UTF-8 runs and sanitized text.
 std::string ast_invalid_text(const common_peg_ast_arena & ast) {
     std::string s;
     for (size_t i = 0; i < ast.size(); i++) {

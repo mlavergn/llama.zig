@@ -94,8 +94,8 @@ rules = {}
 pending = []
 conditional_seen = set()
 # Inside a CONDITIONAL architecture's statements, which model.zig ports by
-# hand: skipped to the next `case`, since their shape is free-form (v0.4.0's
-# DFLASH tests the rope sections in an `if` before its ternary return).
+# hand: skipped to the next `case`, since their shape is free-form (DFLASH's
+# tests the rope sections in an `if` before its ternary return).
 in_conditional = False
 for raw in switch.split("\n"):
     code = raw.split("//", 1)[0].strip()

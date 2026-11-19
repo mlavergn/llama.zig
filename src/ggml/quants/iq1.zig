@@ -344,7 +344,7 @@ const iq1m_masks = [4]u8{ 0x00, 0x80, 0x08, 0x88 };
 /// Two things here have no counterpart in `iq1_s`:
 ///
 /// - **Four shift combinations.** `x_p`/`x_m` are chosen per half-block, so
-///   `k` runs 0..3 as `(+,+), (+,-), (-,+), (-,-)`. Since v0.5.0 the split
+///   `k` runs 0..3 as `(+,+), (+,-), (-,+), (-,-)`. The split
 ///   search scores them from prefix sums kept per half -- `weight*x` and
 ///   `weight` over the sorted order -- instead of re-accumulating every run
 ///   at every split, which is a different summation order and so different

@@ -708,7 +708,7 @@ test "the wire precision follows the ops a reduction may be delayed across" {
     try std.testing.expect(!needsF32(&view, 0));
     mm.op_params[0] = c.GGML_PREC_F32;
     try std.testing.expect(needsF32(&view, 0));
-    // Since v1.0.0 a bf16 accumulator wants the f32 wire too.
+    // A bf16 accumulator wants the f32 wire too.
     mm.op_params[0] = c.GGML_PREC_BF16;
     try std.testing.expect(needsF32(&view, 0));
     mm.op_params[0] = c.GGML_PREC_F16;

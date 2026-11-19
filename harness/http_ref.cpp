@@ -148,7 +148,7 @@ static void configure(const std::string & name, common_params & params, bool & r
         params.reuse_port = true;
         params.api_keys   = {"abc"};
     } else if (name == "multi") {
-        // v0.5.0: a listener per address, a Unix socket first and one TCP
+        // A listener per address, a Unix socket first and one TCP
         // address, so port 0 is allowed
         const char * sock = std::getenv("HTTP_DIFF_SOCK");
         params.hostnames = {sock ? sock : "http-diff.sock", "127.0.0.1"};
@@ -162,7 +162,7 @@ static void configure(const std::string & name, common_params & params, bool & r
         // port 0 with two TCP addresses is refused
         params.hostnames = {"127.0.0.1", "::1"};
     } else if (name == "corslocal" || name == "child") {
-        // v1.0.0: same-origin only, and the DNS rebinding guard on Host;
+        // Same-origin only, and the DNS rebinding guard on Host;
         // "child" also has LLAMA_SERVER_ROUTER_PORT set by the driver
         params.cors_origins     = "localhost";
         params.cors_credentials = false;
@@ -296,7 +296,7 @@ int main(int argc, char ** argv) {
         return json_res({{"bye", true}});
     }));
 
-    // v0.8.0: a websocket route. It greets with what the request said, then
+    // A websocket route. It greets with what the request said, then
     // echoes each message until the peer closes; "binary:x" answers x as a
     // binary frame, "close" closes from here, "open" reports is_open
     ctx_http.ws  ("/ws/:name", [](const server_http_req & req, server_http_context::ws_conn & conn) {

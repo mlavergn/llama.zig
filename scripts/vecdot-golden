@@ -19,8 +19,8 @@ cd "$ROOT"
 
 # GOLDEN_CPU is the CPU the reference kernels are compiled for. `baseline`
 # writes the committed goldens; any other CPU writes a `_<cpu>` sibling,
-# because a different CPU is a different reference -- see NOTES.md,
-# "Stage 5 step 2". `generic` is Zig's aarch64-linux baseline.
+# because a different CPU is a different reference.
+# `generic` is Zig's aarch64-linux baseline.
 GOLDEN_CPU="${GOLDEN_CPU:-baseline}"
 sfx=""; [ "$GOLDEN_CPU" = baseline ] || sfx="_$GOLDEN_CPU"
 
@@ -55,9 +55,9 @@ trap 'rm -rf "$tmp"' EXIT
 #    `@mulAdd` and match exactly.
 #
 # The quantizer that writes the kernels' inputs, ggml-quants.c, is built
-# **off** in both runs. The port's quantizers stay plain (CLAUDE.md, "Float
-# contraction"), and the goldens test the dot product, not the bytes it is
-# fed: at v0.5.0 `quantize_row_iq1_m_impl`'s new split search quantized the
+# **off** in both runs. The port's quantizers stay plain (no
+# oracle can name their fusions), and the goldens test the dot product, not the bytes it is
+# fed: `quantize_row_iq1_m_impl`'s split search quantized the
 # `ties` pattern differently with contraction on, and the iq1_m ARM golden
 # moved with a kernel nobody had touched.
 source scripts/upstream_pin.sh

@@ -13,8 +13,7 @@
 # Metal kernels read **by offset**, where one wrong offset feeds a kernel
 # a different number with nothing in the ported code able to notice.
 #
-# CLAUDE.md calls hand-transcription "the single largest source of silent
-# error". This asks the C compiler instead of trusting the transcription:
+# Hand-transcription is the largest source of silent error here. This asks the C compiler instead of trusting the transcription:
 # sizeof, alignof, every offsetof, and every field's width.
 #
 # Usage: scripts/struct-layout

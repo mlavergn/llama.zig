@@ -13,7 +13,7 @@
 # unmodified, its ten `ggml-cuda.h` exports renamed `ref_*` -- and every
 # node is compared byte for byte before the test's own callback runs. The
 # kernels are the same `.cu` sources on both sides, compiled by the same
-# `nvcc` with the same flags (PLAN.md, Decision 44), so any difference is
+# `nvcc` with the same flags, so any difference is
 # the host code: a launch configuration, a kernel choice, an argument.
 #
 # The second half is `supports_op`: every question the test asks the
@@ -25,17 +25,16 @@
 # The multi-device paths, which need a second device. Shapes upstream's
 # list lacks are `extra_cases` in the harness, run first; they follow `-o`
 # as test-backend-ops does -- a comma list, a regex (`harness/op_filter.h`)
-# -- where before v0.8.0's pickup a list or regex ran none of them. Since
-# then they include one-column MUL_MAT at the K where MMVQ's `vdr` changes
+# -- so a list or regex runs them too. They
+# include one-column MUL_MAT at the K where MMVQ's `vdr` changes
 # the warps per row: a Q6_K `vdr` of 1 passed every upstream case.
 #
 # Until the swap, ops whose host code was not ported yet were refused by the
 # port's `supports_op` and counted ("not ported yet"), not failed. Since the
-# swap (Decision 48) `supports_op` is the C's predicate alone, so the port
+# swap `supports_op` is the C's predicate alone, so the port
 # refusing what the reference accepts is a regression -- the op silently
-# leaves the GPU -- and since v0.7.0 it fails the gate: a `supports_op` that
-# put UNARY back to contiguous-only passed it, 6 refusals counted, at the
-# v0.7.0 GB10 pickup.
+# leaves the GPU -- and it fails the gate: a `supports_op` that
+# put UNARY back to contiguous-only passed it, 6 refusals counted.
 #
 # Usage: scripts/cuda-ops-diff [test-backend-ops args, e.g. -o SCALE]
 # Requires: zig build reference cuda-ref --release=fast --prefix zig-out/cuda-port

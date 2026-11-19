@@ -13,7 +13,7 @@
 //!   run rather than silently not printing the graph.
 //! - Chat templates are `cli/common_chat`'s (`common_chat_templates_init`,
 //!   `common_chat_format_single`, `common_chat_format_example`), as the
-//!   server's: since v0.7.0 building a template runs its differential
+//!   server's: building a template runs its differential
 //!   analysis, which logs at debug.
 //! - Video: the reference is built without `MTMD_VIDEO`, so there are no
 //!   video helpers on either side.

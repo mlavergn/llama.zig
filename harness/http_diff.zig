@@ -356,7 +356,7 @@ fn configure(name: []const u8, params: *http.Params, ready: *bool) void {
         params.reuse_port = true;
         params.api_keys = &.{"abc"};
     } else if (std.mem.eql(u8, name, "multi")) {
-        // v0.5.0: a listener per address, a Unix socket first and one TCP
+        // A listener per address, a Unix socket first and one TCP
         // address, so port 0 is allowed
         params.hostnames = gpa.dupe([]const u8, &.{ sockPath(), "127.0.0.1" }) catch unreachable;
         params.api_keys = &.{"abc"};
@@ -368,7 +368,7 @@ fn configure(name: []const u8, params: *http.Params, ready: *bool) void {
         // port 0 with two TCP addresses is refused
         params.hostnames = &.{ "127.0.0.1", "::1" };
     } else if (std.mem.eql(u8, name, "corslocal") or std.mem.eql(u8, name, "child")) {
-        // v1.0.0: same-origin only, and the DNS rebinding guard on Host;
+        // Same-origin only, and the DNS rebinding guard on Host;
         // "child" also has LLAMA_SERVER_ROUTER_PORT set by the driver
         params.cors_origins = "localhost";
         params.cors_credentials = false;

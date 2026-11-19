@@ -34,7 +34,7 @@
  * count of 2 on the `CPY` -- so without it the reference never fused the
  * case, the port did, and the reference's unfused radix `TOP_K`, which
  * disagrees with itself there, excused the difference as `NONDET`.
- * Measured on v0.4.0's `test_topk_qsa`, through `GGML_VK_PERF_LOGGER`.
+ * Measured on `test_topk_qsa`, through `GGML_VK_PERF_LOGGER`.
  * `VK_DIFF_SELF=1`
  * puts a second reference backend where the port goes: that run must pass.
  *
@@ -602,7 +602,7 @@ static struct ggml_tensor * build_rope_set_rows_misaligned(struct ggml_context *
 static struct ggml_tensor * build_rope_sr_mis(struct ggml_context * c, struct ggml_tensor ** t) { return build_rope_set_rows_misaligned(c, t, false); }
 static struct ggml_tensor * build_rms_rope_sr_mis(struct ggml_context * c, struct ggml_tensor ** t) { return build_rope_set_rows_misaligned(c, t, true); }
 
-/* v0.8.0: RMS_NORM + VIEW + SET_ROWS (`RMS_NORM_VIEW_SET_ROWS`), whose
+/* RMS_NORM + VIEW + SET_ROWS (`RMS_NORM_VIEW_SET_ROWS`), whose
  * pipeline has its own block size, 128. Upstream's cases are one 256-column
  * row and twelve 128-column ones: at 128 or fewer columns a larger block
  * only adds threads holding zero, and one row's sum agreed by chance when
@@ -674,7 +674,7 @@ static struct ggml_tensor * build_fa_sparse_no_gqa(struct ggml_context * ctx, st
     return out;
 }
 
-/* v0.6.0: sparse flash attention over a quantized cache breaks even only
+/* Sparse flash attention over a quantized cache breaks even only
  * at a 16x reduction off coopmat2 (`min_ratio`). Upstream's quantized
  * sparse cases all sit exactly at 16x, which takes the sparse path with
  * any ratio up to 16; this one is at 8x with a GQA of 8, so the scalar
@@ -694,7 +694,7 @@ static struct ggml_tensor * build_fa_sparse_q8_0_ratio8(struct ggml_context * ct
     return out;
 }
 
-/* v0.6.0's HC_POST_GATE fuses scale -> sigmoid -> scale into the
+/* HC_POST_GATE fuses scale -> sigmoid -> scale into the
  * DSV4_HC_POST that reads it, but only when neither scale has a bias.
  * Upstream's gated cases have none, so dropping the check passed them;
  * here the inner scale carries one and both sides must run the chain
@@ -711,9 +711,9 @@ static struct ggml_tensor * build_hc_post_gate_bias(struct ggml_context * ctx, s
     return out;
 }
 
-/* v0.6.0's conv_2d and conv_3d push their bindings' misalignment
- * (`knl_offset`, `src_offset`, `dst_offset`) where v0.5.0 asserted there
- * was none. Upstream's cases misalign only the kernel (`kernel_offset`),
+/* conv_2d and conv_3d push their bindings' misalignment
+ * (`knl_offset`, `src_offset`, `dst_offset`) rather than asserting there
+ * is none. Upstream's cases misalign only the kernel (`kernel_offset`),
  * so zeroing `src_offset` passed all 1,966 CONV_2D and 276 CONV_3D cases.
  * Here the input is a leaf placed one element into its storage and, for
  * conv_2d, the output too: a node given a `view_src` before allocation,
@@ -749,7 +749,7 @@ static struct ggml_tensor * build_conv_3d_misaligned(struct ggml_context * ctx, 
     return out;
 }
 
-/* v0.6.0: a large soft_max's partial results, and flash attention's mask
+/* A large soft_max's partial results, and flash attention's mask
  * bits and sparse index list, are written into `prealloc_y`, which may
  * hold a matmul's converted src1 (f16 for coopmat, q8_1 for integer dot);
  * each now forgets that conversion. Here a q4_0 matmul converts X, the
@@ -778,7 +778,7 @@ static struct ggml_tensor * build_prealloc_y_reuse(struct ggml_context * ctx, st
 static struct ggml_tensor * build_prealloc_y_soft_max(struct ggml_context * c, struct ggml_tensor ** t) { return build_prealloc_y_reuse(c, t, false); }
 static struct ggml_tensor * build_prealloc_y_fa_sparse(struct ggml_context * c, struct ggml_tensor ** t) { return build_prealloc_y_reuse(c, t, true); }
 
-/* v0.7.0: a BF16 src1 reaches MUL_MAT's matrix-matrix path whatever src0
+/* A BF16 src1 reaches MUL_MAT's matrix-matrix path whatever src0
  * is, through `ggml_vk_mul_mat_b_type` -- widened to F32 where an F32 B
  * pipeline exists, converted through the new `cpy_bf16_f16` where only
  * the f16 one does. Upstream's f32 x bf16 cases have n of 1 and 8, both
@@ -795,7 +795,7 @@ static struct ggml_tensor * build_mm_f16_bf16(struct ggml_context * c, struct gg
 static struct ggml_tensor * build_mm_q4_0_bf16(struct ggml_context * c, struct ggml_tensor ** t) { return build_mm_b(c, t, GGML_TYPE_Q4_0, GGML_TYPE_BF16, 64, 32, 256); }
 static struct ggml_tensor * build_mm_q4_k_bf16(struct ggml_context * c, struct ggml_tensor ** t) { return build_mm_b(c, t, GGML_TYPE_Q4_K, GGML_TYPE_BF16, 64, 48, 512); }
 
-/* v0.7.0: MUL_MAT_ID's prepass handles an expert repeated within a token's
+/* MUL_MAT_ID's prepass handles an expert repeated within a token's
  * row, and splits each expert's rows into tiles of the matmul's BN.
  * Upstream's duplicate-id cases (`test_mul_mat_id_dup`) are disabled
  * until CUDA supports them, so none runs; here six slots over four experts
@@ -817,7 +817,7 @@ static struct ggml_tensor * build_mm_id_dup_q4_0(struct ggml_context * c, struct
 static struct ggml_tensor * build_mm_id_dup_f16(struct ggml_context * c, struct ggml_tensor ** t) { return build_mm_id(c, t, GGML_TYPE_F16, 4, 6, 33); }
 static struct ggml_tensor * build_mm_id_tiles_q4_0(struct ggml_context * c, struct ggml_tensor ** t) { return build_mm_id(c, t, GGML_TYPE_Q4_0, 4, 2, 300); }
 
-/* v0.7.0: POOL_2D takes the subgroup shader when the window is at least
+/* POOL_2D takes the subgroup shader when the window is at least
  * the subgroup size. Upstream's windows are 1, 3, 32, 64 and 128 wide, so
  * on a device whose subgroups are 4, 8 or 16 lanes none sits at the
  * threshold, and `>` for `>=` passed them all on llvmpipe. One window
@@ -832,7 +832,7 @@ static struct ggml_tensor * build_pool2d_w4(struct ggml_context * c, struct ggml
 static struct ggml_tensor * build_pool2d_w8(struct ggml_context * c, struct ggml_tensor ** t) { return build_pool2d_w(c, t, 8); }
 static struct ggml_tensor * build_pool2d_w16(struct ggml_context * c, struct ggml_tensor ** t) { return build_pool2d_w(c, t, 16); }
 
-/* v0.8.0: `ggml_prec_set_src` names the precision src1 may be reduced to,
+/* `ggml_prec_set_src` names the precision src1 may be reduced to,
  * and every q8_1 activation path asks it; upstream's cases only ever set
  * GGML_PREC_Q8, which allows it. Here f16 forbids it, on the matrix and the
  * vector paths of MUL_MAT and MUL_MAT_ID -- two columns, because the vector
@@ -845,7 +845,7 @@ static struct ggml_tensor * build_pool2d_w16(struct ggml_context * c, struct ggm
  * arms take these branches, and the matrix path's q8_1 shaders exist with
  * neither coopmat (under KHR coopmat only on RDNA3 and 4): on the GB10 the
  * matrix cases reach q8_1 on the `none` arm alone, and dropping the
- * precision check passed coopmat2 and KHR coopmat both (v0.8.0). */
+ * precision check passed coopmat2 and KHR coopmat both. */
 static struct ggml_tensor * build_mm_src1_prec(struct ggml_context * ctx, struct ggml_tensor ** cmp, int64_t m, int64_t n) {
     struct ggml_tensor * out = build_mm(ctx, cmp, GGML_TYPE_Q4_0, m, n, 256);
     ggml_prec_set_src(out, GGML_PREC_F16, 1);
@@ -868,9 +868,9 @@ static struct ggml_tensor * build_mm_src1_prec_swapped_t(struct ggml_context * c
 static struct ggml_tensor * build_mm_src1_prec_swapped(struct ggml_context * c, struct ggml_tensor ** t) { return build_mm_src1_prec_swapped_t(c, t, GGML_TYPE_Q4_0); }
 static struct ggml_tensor * build_mm_src1_prec_swapped_q2_k(struct ggml_context * c, struct ggml_tensor ** t) { return build_mm_src1_prec_swapped_t(c, t, GGML_TYPE_Q2_K); }
 
-/* v0.8.0: GGML_PREC_BF16 is new, and an f16 accumulator refuses it as it
- * does F32, in the matmul and in flash attention; the old test named only
- * GGML_PREC_F32, so this is what tells the two apart. */
+/* GGML_PREC_BF16: an f16 accumulator refuses it as it
+ * does F32, in the matmul and in flash attention; a test naming only
+ * GGML_PREC_F32 would not tell the two apart. */
 static struct ggml_tensor * build_mm_acc_bf16(struct ggml_context * ctx, struct ggml_tensor ** cmp) {
     struct ggml_tensor * out = build_mm(ctx, cmp, GGML_TYPE_F16, 64, 33, 256);
     ggml_prec_set_acc(out, GGML_PREC_BF16);
@@ -887,7 +887,7 @@ static struct ggml_tensor * build_fa_acc_bf16(struct ggml_context * ctx, struct 
     return out;
 }
 
-/* v1.0.0: a MUL_MAT hinted GGML_HINT_SRC0_IS_HADAMARD runs as a fast
+/* A MUL_MAT hinted GGML_HINT_SRC0_IS_HADAMARD runs as a fast
  * Walsh-Hadamard transform of src1, now up to 8192 wide -- above 512 on
  * the shared-memory shader, one row per workgroup -- and over an f16 src1.
  * Upstream's cases stop at 512 and jump to 16384, which is refused. */
@@ -904,12 +904,12 @@ static struct ggml_tensor * build_had_2048_f16(struct ggml_context * c, struct g
 static struct ggml_tensor * build_had_4096_f32(struct ggml_context * c, struct ggml_tensor ** t) { return build_hadamard(c, t, GGML_TYPE_F32, 4096, 5); }
 static struct ggml_tensor * build_had_8192_f16(struct ggml_context * c, struct ggml_tensor ** t) { return build_hadamard(c, t, GGML_TYPE_F16, 8192, 2); }
 
-/* v1.0.0 lets coopmat2 flash attention dequantize a quantized K/V once
+/* Coopmat2 flash attention dequantizes a quantized K/V once
  * into fp16 scratch when the query reuse pays for it (KV >= 4096, enough
- * queries times the GQA ratio), and stops requiring quantized K/V strides
+ * queries times the GQA ratio), and does not require quantized K/V strides
  * to be multiples of eight blocks on that path. A dense KV cache over one
  * head, q8_0: at KV 4096 with 1024 queries and GQA 8 (dequantized), and
- * at KV 512 with 64 queries (decoded in place, its 4-block rows now
+ * at KV 512 with 64 queries (decoded in place, its 4-block rows
  * "aligned"). Upstream's cases keep KV small. */
 static struct ggml_tensor * build_fa_q8_0_dense(struct ggml_context * ctx, struct ggml_tensor ** cmp, int64_t kv, int64_t nq, int64_t nh) {
     const int64_t hs = 128;
@@ -925,7 +925,7 @@ static struct ggml_tensor * build_fa_q8_0_dense(struct ggml_context * ctx, struc
 static struct ggml_tensor * build_fa_cm2_dequant(struct ggml_context * c, struct ggml_tensor ** t) { return build_fa_q8_0_dense(c, t, 4096, 1024, 8); }
 static struct ggml_tensor * build_fa_cm2_decode(struct ggml_context * c, struct ggml_tensor ** t) { return build_fa_q8_0_dense(c, t, 512, 64, 2); }
 
-/* v1.0.0's tiled-transpose concat: a dim-0 concat of a contiguous src0
+/* The tiled-transpose concat: a dim-0 concat of a contiguous src0
  * and a transposed src1, 2-d, as Qwen's attention builds one -- f32, f16
  * and i8, and a src1 row count that is not a multiple of the 32x32 tile. */
 static struct ggml_tensor * build_concat_t(struct ggml_context * ctx, struct ggml_tensor ** cmp, enum ggml_type type, int64_t n0, int64_t n1, int64_t rows) {
@@ -939,9 +939,9 @@ static struct ggml_tensor * build_concat_t(struct ggml_context * ctx, struct ggm
 static struct ggml_tensor * build_concat_t_f32(struct ggml_context * c, struct ggml_tensor ** t) { return build_concat_t(c, t, GGML_TYPE_F32, 64, 48, 77); }
 static struct ggml_tensor * build_concat_t_f16(struct ggml_context * c, struct ggml_tensor ** t) { return build_concat_t(c, t, GGML_TYPE_F16, 3, 100, 1000); }
 
-/* v0.8.0 lets MUL_MAT broadcast src0 over dim 3, and the non-contiguous
- * vector kernel cannot: `ggml_vk_mul_mat` now keeps such a node off it,
- * where supports_op used to. Upstream's broadcast cases are contiguous. */
+/* MUL_MAT broadcasts src0 over dim 3, and the non-contiguous
+ * vector kernel cannot: `ggml_vk_mul_mat` keeps such a node off it.
+ * Upstream's broadcast cases are contiguous. */
 static struct ggml_tensor * build_mm_nc_bcast3(struct ggml_context * ctx, struct ggml_tensor ** cmp) {
     const int64_t k = 64, m = 16;
     struct ggml_tensor * storage = ggml_new_tensor_3d(ctx, GGML_TYPE_F16, 2 * k, m, 2);
@@ -952,7 +952,7 @@ static struct ggml_tensor * build_mm_nc_bcast3(struct ggml_context * ctx, struct
     return out;
 }
 
-/* v0.8.0: RMS_NORM and its MUL, MUL+ADD and MUL+ROPE fusions pick a 128,
+/* RMS_NORM and its MUL, MUL+ADD and MUL+ROPE fusions pick a 128,
  * 256 or 512 block by row length. Upstream's rows do not sit on either
  * threshold. A tree reduction gives the same bits at any block size, so
  * only a device on the subgroup shader (NVIDIA, AMD, Intel) can tell. */
@@ -982,12 +982,12 @@ RMS_WIDTHS(mul, RMS_MUL)
 RMS_WIDTHS(mul_add, RMS_MUL_ADD)
 RMS_WIDTHS(mul_rope, RMS_MUL_ROPE)
 
-/* v0.8.0: CONV_3D takes a 256x128 tile on coopmat2, at a multiple of 256
+/* CONV_3D takes a 256x128 tile on coopmat2, at a multiple of 256
  * output channels with a workgroup per core: 64 here, past the GB10's 48
  * SMs. Upstream's output channels stop short of it. On NVIDIA's own driver
  * only from R615 (`ggml_vk_conv3d_select_shape`), and the GB10's is 580: there
  * this case takes `convSelectShape`'s tile on both sides, and calling that in
- * place of `conv3dSelectShape` passed it (v0.8.0). */
+ * place of `conv3dSelectShape` passed it. */
 static struct ggml_tensor * build_conv_3d_oc256(struct ggml_context * ctx, struct ggml_tensor ** cmp) {
     const int64_t IC = 2, OC = 256, N = 1;
     struct ggml_tensor * kernel = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 3, 3, 3, IC * OC);
@@ -997,7 +997,7 @@ static struct ggml_tensor * build_conv_3d_oc256(struct ggml_context * ctx, struc
     return out;
 }
 
-/* Answers of supports_op no case of test-backend-ops asks (from v0.8.0): extras
+/* Answers of supports_op no case of test-backend-ops asks: extras
  * compute directly, and upstream's list sets no refused precision. MUL_MAT
  * and MUL_MAT_ID refuse a src1 precision of F32 alone, whichever the other
  * precisions and whichever path; MUL_MAT broadcasts over dim 3; SUM takes
@@ -1040,7 +1040,7 @@ static void supports_extra(void) {
     struct ggml_tensor * top_k = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 16, 8);
     printf("  SUPPORTED top_k_mask: %d\n", vk_diff_supports_op(port, ggml_top_k_mask(ctx, mask, top_k, NULL, NULL, NULL)));
 
-    /* v0.9.0: flash attention over K/V row lists (`ggml_flash_attn_ext_rows`,
+    /* Flash attention over K/V row lists (`ggml_flash_attn_ext_rows`,
      * `src[5]`) is refused; the same attention without them is asked too. */
     struct ggml_tensor * fq = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 64, 4, 8, 2);
     struct ggml_tensor * fk_rows = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 64, 32, 8, 1);
@@ -1053,7 +1053,7 @@ static void supports_extra(void) {
         vk_diff_supports_op(port, ggml_flash_attn_ext(ctx, fq, fk, fv, fmask, 0.125f, 0.0f, 0.0f)),
         vk_diff_supports_op(port, ggml_flash_attn_ext_rows(ctx, fq, fk_rows, fv_rows, fmask, frows, 0.125f, 0.0f, 0.0f)));
 
-    /* v0.9.0: an op that computes nothing (NONE, RESHAPE, VIEW, PERMUTE,
+    /* An op that computes nothing (NONE, RESHAPE, VIEW, PERMUTE,
      * TRANSPOSE) is no longer held to the buffer size limits, for its own
      * size or its sources'; anything else still is. 4 TiB exceeds every
      * device's limit, and nothing is allocated. */

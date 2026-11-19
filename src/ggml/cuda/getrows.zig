@@ -212,7 +212,7 @@ fn getRowsCudaFloat(comptime S: type, comptime D: type, src0_d: ?*const anyopaqu
 }
 
 /// Ports `ggml_cuda_get_rows_switch_src0_type` (getrows.cu:296 @b1b770d90).
-/// `F8_E4M3` is new at v1.0.0.
+/// `F8_E4M3` is included.
 fn switchSrc0Type(comptime D: type, src0_d: ?*const anyopaque, src0_type: c.ggml_type, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: cu.cudaStream_t) void {
     switch (src0_type) {
         c.GGML_TYPE_F16 => getRowsCudaFloat(half, D, src0_d, src1_d, dst_d, a, stream),

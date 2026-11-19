@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run a ported upstream tool and upstream's own on the same command lines and
-# require the same stdout, stderr, exit code and files (PLAN.md, Decision 61).
+# require the same stdout, stderr, exit code and files.
 #
 # Each case in harness/tools/<tool>.cases is one command line, read as bash
 # words with $FIX (the arch fixtures), $VOCAB (upstream's vocab files),
@@ -58,8 +58,7 @@ FIX="$ROOT/zig-out/arch-fixtures"
 VOCAB="$ROOT/llama.cpp/models"
 PLAIN="${PLAIN:-$HOME/.cache/zigtrain/gguf/plain-d6_base_005000.gguf}"
 # $PLAIN's fine-tuned sibling, beside it unless named: perplexity's KL
-# divergence cases. Until v0.6.0 the case file spelled it under $HOME, so
-# where the zigtrain models live elsewhere both sides failed to load it.
+# divergence cases.
 PLAIN_SFT="${PLAIN_SFT:-$(dirname "$PLAIN")/plain-d6_sft_001499.gguf}"
 MM="$ROOT/zig-out/mmproj-fixtures"
 # The GPU device's name, for the cases that name one (-dev, -mmdev): Metal's
@@ -67,7 +66,7 @@ MM="$ROOT/zig-out/mmproj-fixtures"
 GPU_DEV="${GPU_DEV:-$([ "$(uname -s)" = Darwin ] && echo MTL0 || echo CUDA0)}"
 export FIX VOCAB PLAIN PLAIN_SFT MM GPU_DEV
 # A case file over a model that is not there compares two failed loads, and
-# passes: on the GB10 at v0.5.0, gguf-split did, with the model gone.
+# passes: on the GB10, gguf-split once did, with the model gone.
 grep -qE '\$PLAIN([^_A-Z]|$)' "$cases" && [ ! -f "$PLAIN" ] && { echo "FAIL: missing $PLAIN, which $cases uses" >&2; exit 2; }
 grep -q '\$PLAIN_SFT' "$cases" && [ ! -f "$PLAIN_SFT" ] && { echo "FAIL: missing $PLAIN_SFT, which $cases uses" >&2; exit 2; }
 grep -q '\$FIX' "$cases" && [ ! -d "$FIX" ] && { echo "FAIL: missing $FIX -- run 'make arch-fixtures'" >&2; exit 2; }
@@ -126,7 +125,7 @@ masks=(
     's/available_memory_kb: [0-9]+/available_memory_kb: N/'
     # The two figures are right-aligned, so their padding moves with their
     # digit count: the mask takes it too (`+        N |` against `+       N |`
-    # failed six llama-mtmd-cli cases at the v0.9.0 GB10 pickup).
+    # failed six llama-mtmd-cli cases).
     's/(common_memory_breakdown_print: .*\| +[0-9]+ = +)-?[0-9]+( \+ \(.*\) \+) +-?[0-9]+ \|/\1N\2 N |/'
     's/vs\. [0-9]+ MiB of free device memory/vs. N MiB of free device memory/'
     's/will leave [0-9]+ >= /will leave N >= /'
@@ -136,7 +135,7 @@ mask() { # file: apply every mask in place
     for m in "${masks[@]+"${masks[@]}"}"; do sed -E -i '' "$m" "$f" 2>/dev/null || sed -E -i "$m" "$f"; done
 }
 
-# v0.5.0: llama_graph_n_input_tensors (llama-context.cpp) logs each input
+# llama_graph_n_input_tensors (llama-context.cpp) logs each input
 # tensor's users from an unordered_map keyed by tensor address, so the order
 # of a run of those lines is the allocator's, run to run, on either side;
 # each run is compared sorted.

@@ -4,7 +4,7 @@
 # model_loader.zig -- with the C++ that defines the same names in
 # libllama-ref.a, in one process.
 #
-# libllama swaps once, at llama.h (PLAN.md, Decision 42), so nothing calls
+# libllama swaps once, at llama.h, so nothing calls
 # these yet. This calls every one beside its C++ namesake on every
 # vocabulary file upstream ships and every local Qwen3.5 model, and
 # compares what crosses the C boundary: return codes, buffers at every size

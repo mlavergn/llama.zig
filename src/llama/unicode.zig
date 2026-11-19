@@ -109,8 +109,8 @@ pub fn lenUtf8(src: u8) usize {
 /// Ports `unicode_cpt_from_utf8` (src/unicode.cpp:30 @b1b770d90): decodes one
 /// sequence and advances `offset` past it.
 ///
-/// Since v0.7.0 an overlong form, and a four-byte form above U+10FFFF, is
-/// rejected; surrogates still decode, as there. `char` is signed on this target,
+/// An overlong form, and a four-byte form above U+10FFFF, is
+/// rejected; surrogates still decode, as in the C++. `char` is signed on this target,
 /// but every byte is masked before it is shifted, so reading it unsigned
 /// gives the same value.
 ///
@@ -1205,8 +1205,8 @@ fn byteEncodingProcess(words: *const Words) Words {
 /// Ports `unicode_regex_split` (src/unicode.cpp:1484 @b1b770d90): the text cut
 /// by each pattern in turn, every pattern refining the previous pieces.
 ///
-/// Since v0.7.0 an empty text returns no pieces before any pattern is
-/// looked at, so a pattern that would not compile no longer throws there.
+/// An empty text returns no pieces before any pattern is
+/// looked at, so a pattern that would not compile does not throw there.
 ///
 /// A pattern with a hand-written splitter uses it. Otherwise one that names
 /// a unicode category runs as a `std::regex` over a collapsed copy of the

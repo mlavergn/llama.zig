@@ -20,8 +20,8 @@ const llama = @import("llama");
 extern fn SetConsoleOutputCP(cp: c_uint) callconv(.winapi) c_int;
 extern fn SetConsoleCP(cp: c_uint) callconv(.winapi) c_int;
 
-/// Ports `common_log_get_verbosity` (common/log.cpp:548 @b1b770d90), which v0.4.0
-/// exports from `log.h`: the `common_log` verbosity a ggml log level maps to.
+/// Ports `common_log_get_verbosity` (common/log.cpp:548 @b1b770d90), which
+/// `log.h` exports: the `common_log` verbosity a ggml log level maps to.
 pub fn logGetVerbosity(level: c.ggml_log_level) c_int {
     return switch (level) {
         c.GGML_LOG_LEVEL_DEBUG => log.level_debug,
@@ -538,7 +538,7 @@ pub const GgufInfo = struct {
 };
 
 /// Ports `common_get_gguf_info` (common/common.cpp:1197 @b1b770d90), which
-/// replaces v0.6.0's `common_get_decision_type` over a file name: the
+/// replaces `common_get_decision_type` over a file name: the
 /// decision type and the training context of a GGUF file, read without
 /// loading the model.
 pub fn getGgufInfo(fname: []const u8) GgufInfo {

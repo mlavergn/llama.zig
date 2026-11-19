@@ -5,7 +5,7 @@
 //! Ported from `llama.cpp/src/llama-batch.cpp` (v1.0.0, `b1b770d90`):
 //! `llama_batch_get_one`, `llama_batch_init` and `llama_batch_free`, the
 //! `llama_batch_ext_*` functions of `llama.h`'s extended batch API
-//! (`llama_batch_ext_add_embd_row` among them since v1.0.0), and
+//! (`llama_batch_ext_add_embd_row` among them), and
 //! `llama_batch_ext_set_decision_order`, which `llama-ext.h` declares with
 //! C++ linkage and `exports.zig` therefore leaves unexported. The bodies
 //! are `batch.zig`'s.

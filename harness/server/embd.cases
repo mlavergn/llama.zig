@@ -1,4 +1,4 @@
-# Embeddings and reranking (Stage 10 step 3c): scripts/server-diff embd.
+# Embeddings and reranking: scripts/server-diff embd.
 # Qwen3-0.6B under each pooling, then as a reranker.
 # how often the idle loop logs is the scheduler's: on the GB10 an extra idle
 # pass after the refused cls request differs upstream against upstream
@@ -23,7 +23,7 @@ POST /v1/embeddings {"content": "hello"}
 POST /v1/embeddings {"nothing": "here"}
 POST /v1/embeddings {"input": ""}
 POST /v1/embeddings {"input": []}
-# v0.6.0: an entry may be an OAI content array, {"content": [parts]}, and
+# an entry may be an OAI content array, {"content": [parts]}, and
 # an invalid entry or JSON type is a 400 (upstream's test_embedding.py)
 POST /v1/embeddings {"input": ["hello world", {"content": [{"type": "text", "text": "hello "}, {"type": "text", "text": "world"}]}]}
 POST /v1/embeddings {"input": {"content": [{"type": "text", "text": "string"}]}}
@@ -68,7 +68,7 @@ POST /embeddings {"content": "short"}
 !fulllog
 POST /rerank {"query": "What is a panda?", "documents": ["hi", "The giant panda is a bear native to China.", "Pandas eat bamboo."]}
 POST /rerank {"query": "What is a panda?", "documents": ["hi", "The giant panda is a bear native to China."], "top_n": 1}
-# v0.7.0 (#30498): an embedding or rerank slot is cleared on release, its
+# (#30498) an embedding or rerank slot is cleared on release, its
 # state never reused or cached
 GET /slots
 POST /reranking {"query": "What is a panda?", "texts": ["hi", "The giant panda is a bear."], "return_text": true}
@@ -77,7 +77,7 @@ POST /v1/reranking {"query": 3, "documents": ["a"]}
 POST /rerank {"documents": ["a"]}
 POST /rerank {"query": "q", "documents": "a"}
 POST /rerank {"query": "q", "documents": [1, 2]}
-# v0.8.0: typed input: {"text": ..., "image": ...} on the query and the documents
+# typed input: {"text": ..., "image": ...} on the query and the documents
 POST /rerank {"query": {"text": "What is "}, "documents": [{"text": ["a ", "panda"]}, "plain"], "top_n": 0}
 POST /rerank {"query": {"text": ["What ", "is"]}, "documents": ["x"]}
 POST /rerank {"query": {"text": 3}, "documents": ["x"]}
@@ -96,7 +96,7 @@ POST /rerank {"query": "q", "documents": {"a": 1}}
 POST /rerank {"query": "q", "texts": [{"text": "a"}]}
 # (an embedding from the rank head is the reference's own run-to-run noise)
 
-# v0.6.0: a causal reranker (Qwen3's RANK pooling over a KV cache) splits its
+# a causal reranker (Qwen3's RANK pooling over a KV cache) splits its
 # prompt across ubatches, where it used to refuse anything over -ub; and an
 # embedding or rerank task no longer reuses the cached prompt
 !server -m $QWEN3 -c 2048 -np 1 --no-jinja --rerank -b 64 -ub 16 -lv 4

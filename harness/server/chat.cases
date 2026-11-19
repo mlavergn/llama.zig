@@ -1,4 +1,4 @@
-# Chat over Stage 9 (Stage 10 step 4): scripts/server-diff chat.
+# Chat over the Jinja chat stack: scripts/server-diff chat.
 # /v1/chat/completions through the model's Jinja template: tools, tool
 # choice, parallel calls, response formats, reasoning formats and thinking,
 # kwargs, continuation, streaming deltas, /apply-template, /props, /control.
@@ -62,7 +62,7 @@ POST /v1/chat/completions {"messages": [{"role": "user", "content": "Give me a J
 POST /v1/chat/completions {"messages": [{"role": "user", "content": "An integer between 1 and 9?"}], "response_format": {"type": "json_schema", "json_schema": {"schema": {"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]}}}, "max_tokens": 48, "temperature": 0}
 POST /v1/chat/completions {"messages": [{"role": "user", "content": "A color?"}], "json_schema": {"type": "string", "enum": ["red", "green"]}, "max_tokens": 16, "temperature": 0, "stream": true}
 POST /v1/chat/completions {"messages": [{"role": "user", "content": "x"}], "response_format": {"type": "xml"}}
-# v1.0.0 (1945793e0): a json_schema response_format whose schema is not in the json_schema wrapper
+# (1945793e0) a json_schema response_format whose schema is not in the json_schema wrapper
 POST /v1/chat/completions {"messages": [{"role": "user", "content": "An integer between 1 and 9?"}], "response_format": {"type": "json_schema", "schema": {"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]}}, "max_tokens": 48, "temperature": 0}
 POST /v1/chat/completions {"messages": [{"role": "user", "content": "x"}], "response_format": {"type": "json_schema"}, "max_tokens": 4, "temperature": 0}
 
@@ -112,7 +112,7 @@ POST /v1/chat/completions {"messages": [{"role": "user", "content": "What is the
 # error's task cancellation races the decode loop's idle line, upstream
 # against itself too
 !server -m $QWEN3 -c 4096 -np 1 -lv 4 --chat-template-file $VOCAB/templates/openai-gpt-oss-120b.jinja
-# v0.8.0: the reasoning effort levels of the template, in chat_template_caps
+# the reasoning effort levels of the template, in chat_template_caps
 GET /props
 GET /props
 POST /apply-template {"messages": [{"role": "user", "content": "Hi"}], "reasoning_effort": "high"}

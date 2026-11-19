@@ -61,7 +61,7 @@ FX_SOURCES = ["dflash-dense", "dflash-iswa", "dflash2", "dflash-dspark", "dflash
 
 GGUFS = ":".join([f"{F}/dflash-dense.gguf", f"{F}/dflash-dspark.gguf", f"{F}/dflash2.gguf", f"{F}/eagle3-dense.gguf",
                   Q, f"{F}/qwen35-dense.gguf", f"{F}/step35-moe.gguf", "/nonexistent.gguf",
-                  # v0.7.0's common_get_gguf_info: spec_fixtures --decision's metadata, and a file that is no GGUF
+                  # common_get_gguf_info: spec_fixtures --decision's metadata, and a file that is no GGUF
                   "scripts/spec-diff"] + [f"@FX/decision-{i}.gguf" for i in range(13)] +
                  [f"@FX/decision-{n}.gguf" for n in ("none", "u32", "ctx64", "noarch", "emptyarch")])
 
@@ -107,10 +107,10 @@ CASES = [
                        "--spec-ngram-mod-n-match", "4", "--spec-ngram-mod-n-max", "8", "--spec-ngram-mod-n-min", "1"] + COMMON,
          {"LLAMA_TRACE": "1"}),
     case("ngram-cache", ["-m", Q, "--spec-type", "ngram-cache", "-p", T1, "-n", "40", "--temp", "0"] + COMMON),
-    # v0.8.0: the dynamic cache is saved on destruction, so each side gets its own copy, and the bytes are compared
+    # the dynamic cache is saved on destruction, so each side gets its own copy, and the bytes are compared
     case("ngram-cache-files", ["-m", Q, "--spec-type", "ngram-cache", "-p", T3, "-n", "32", "--temp", "0"] + COMMON,
          {"SPEC_LCS": "@TMP/cache_3.bin", "SPEC_LCD": "@TMP/dyn_@SIDE.bin", "_COPY": "merged_2.bin"}),
-    # v0.8.0: a missing dynamic cache starts empty, and destruction writes it
+    # a missing dynamic cache starts empty, and destruction writes it
     case("ngram-cache-dynamic-new", ["-m", Q, "--spec-type", "ngram-cache", "-p", T3, "-n", "32", "--temp", "0"] + COMMON,
          {"SPEC_LCD": "@TMP/dyn_@SIDE.bin"}),
     case("ngram-cache-dynamic-2seq", ["-m", Q, "--spec-type", "ngram-cache", "-np", "2", "-p", T1 + "|" + T3, "-n", "24",
@@ -147,7 +147,7 @@ CASES = [
                         "-n", "16", "--temp", "0", "-dev", "none", "-devd", "none"] + FIXV),
     case("dflash", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-dense.gguf", "--spec-type", "draft-dflash", "-p", IDS,
                     "-n", "16", "--temp", "0"] + FIXV),
-    # v0.9.0: DFlash takes the target's features from its device buffer where the draft can read rows
+    # DFlash takes the target's features from its device buffer where the draft can read rows
     # of it (llama_supports_embd_row); LLAMA_DFLASH_DEV=0 keeps the host copies every case used before
     case("dflash-host", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-dense.gguf", "--spec-type", "draft-dflash",
                          "-p", IDS, "-n", "16", "--temp", "0"] + FIXV, {"LLAMA_DFLASH_DEV": "0"}),
@@ -156,7 +156,7 @@ CASES = [
          {"SPEC_SYNTH_LEN": "2"}),
     case("dflash2", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash2.gguf", "--spec-type", "draft-dflash", "-p", IDS,
                      "-n", "16", "--temp", "0", "--spec-draft-p-min", "0.2"] + FIXV),
-    # v0.8.0: DFlash2 samples its lattice and hands q to the verifier
+    # DFlash2 samples its lattice and hands q to the verifier
     case("dflash2-reject", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash2.gguf", "--spec-type", "draft-dflash",
                             "--spec-draft-sampling", "probabilistic", "-p", IDS, "-n", "24", "--temp", "0.7", "--seed", "42"] + FIXV,
          {"SPEC_REJECT": "1"}),
@@ -173,7 +173,7 @@ CASES = [
     case("mtp-gemma4-2seq-cpu", ["-m", f"{FX}/gemma4-moe.gguf", "-md", f"{FX}/gemma4-assistant.gguf", "--spec-type", "draft-mtp",
                                  "-np", "2", "-p", IDS2, "-n", "16", "--temp", "0", "-dev", "none", "-devd", "none",
                                  "--spec-draft-n-max", "4"] + FIX),
-    # probabilistic drafting verified by rejection (v0.6.0): the server's path at temp > 0
+    # probabilistic drafting verified by rejection: the server's path at temp > 0
     case("draft-simple-reject", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "--spec-draft-sampling", "probabilistic",
                                  "-p", T3, "-n", "40", "--temp", "0.8", "--spec-draft-n-max", "6"] + COMMON,
          {"SPEC_REJECT": "1"}),
@@ -193,7 +193,7 @@ CASES = [
                         "--spec-draft-sampling", "probabilistic", "-p", IDS, "-n", "16", "--temp", "0.7",
                         "--spec-draft-n-max", "4"] + FIX,
          {"SPEC_REJECT": "1"}),
-    # v0.7.0: greedy selection for an eligible temperature-zero chain (sampling.cpp:402), and where it is not
+    # greedy selection for an eligible temperature-zero chain, and where it is not
     case("greedy-topk1", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-p", T3, "-n", "24", "--temp", "0.8",
                           "--samplers", "temperature;top_k", "--top-k", "1"] + COMMON),
     case("temp0-nprobs", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-p", T3, "-n", "16", "--temp", "0"] + COMMON,
@@ -202,7 +202,7 @@ CASES = [
                             "--dynatemp-range", "0.5"] + COMMON),
     case("topk1-not-last", ["-m", Q, "--spec-type", "ngram-simple", "-p", T1, "-n", "16", "--temp", "0.8",
                             "--samplers", "top_k;temperature", "--top-k", "1"] + COMMON),
-    # v0.7.0: the draft context's own n_ubatch (DFlash's feature injection chunks by it) and the MoE cache
+    # the draft context's own n_ubatch (DFlash's feature injection chunks by it) and the MoE cache
     case("dflash-n-ubatch", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-dense.gguf", "--spec-type", "draft-dflash",
                              "-p", IDS, "-n", "16", "--temp", "0", "--spec-draft-n-ubatch", "4"] + FIXV),
     case("draft-simple-n-ubatch", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-p", T1, "-n", "16", "--temp", "0",
@@ -210,16 +210,16 @@ CASES = [
     # the experts in host memory, the target cached on the GPU; the draft (the same model) must not ask for a cache
     case("moe-cache", ["-m", f"{F}/qwen3moe-moe.gguf", "-md", f"{F}/qwen3moe-moe.gguf", "--spec-type", "draft-simple", "-p", IDS,
                        "-n", "8", "--temp", "0", "--cpu-moe", "--moe-cache-mib", "64"] + FIX),
-    # v0.7.0: the MTP drafter catches up an embedding prefill (an image's rows) instead of skipping it
+    # the MTP drafter catches up an embedding prefill (an image's rows) instead of skipping it
     case("mtp-gemma4-embd", ["-m", f"{FX}/gemma4-moe.gguf", "-md", f"{FX}/gemma4-assistant.gguf", "--spec-type", "draft-mtp",
                              "-p", IDS, "-n", "16", "--temp", "0"] + FIX,
          {"SPEC_PREFILL_EMBD": "1"}),
-    # v0.9.0: on a shared memory (Gemma 4) the MTP head keeps only the last row of a batch whose
+    # on a shared memory (Gemma 4) the MTP head keeps only the last row of a batch whose
     # other rows have no output; a prefill with its last token output reaches that arm
     case("mtp-gemma4-lastout", ["-m", f"{FX}/gemma4-moe.gguf", "-md", f"{FX}/gemma4-assistant.gguf", "--spec-type",
                                 "draft-mtp", "-np", "2", "-p", IDS2, "-n", "16", "--temp", "0"] + FIX,
          {"SPEC_PREFILL_LAST_OUT": "1"}),
-    # v0.7.0: LiliCorr (lilicorr.candidate_topk), a DFlash whose head reads the draft's own projected
+    # LiliCorr (lilicorr.candidate_topk), a DFlash whose head reads the draft's own projected
     # embeddings of the last block as a state input and walks a candidate lattice, as DFlash2 does
     case("lilicorr", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-lilicorr.gguf", "--spec-type", "draft-dflash",
                       "-p", IDS, "-n", "16", "--temp", "0"] + FIXV),
@@ -235,7 +235,7 @@ CASES = [
                                 "-p", IDS, "-n", "16", "--temp", "0"] + FIX),
     case("mtp-qwen35-devrows-2seq", ["-m", f"{F}/mtp/qwen35-mtp-dense.gguf", "--spec-type", "draft-mtp",
                                      "-np", "2", "-p", IDS2, "-n", "16", "--temp", "0"] + FIX),
-    # v0.7.0: the server's common_context_can_seq_rm probe on each context; a draft context with a
+    # the server's common_context_can_seq_rm probe on each context; a draft context with a
     # state input (MTP, LiliCorr) decodes the probe with zero state rows
     case("seq-rm-mtp", ["-m", f"{FX}/gemma4-moe.gguf", "-md", f"{FX}/gemma4-assistant.gguf", "--spec-type", "draft-mtp",
                         "-p", IDS, "-n", "8", "--temp", "0"] + FIX, {"SPEC_SEQ_RM": "1"}),
@@ -248,7 +248,7 @@ CASES = [
 ]
 
 # Cases where upstream itself aborts, and the port must abort alike.
-# Since v0.6.0 dflash-novocab is one: a draft without a mask token puts
+# dflash-novocab is one: a draft without a mask token puts
 # LLAMA_TOKEN_NULL in the noise block, which common_batch takes for an
 # embedding entry with no data, and get_sub_batch aborts.
 EXPECT_ABORT = {"ngram-cache-missing", "ngram-cache-dynamic-bad", "dflash-novocab"}
@@ -323,7 +323,6 @@ PHRASES = [
     "rb force 1",
     "  rejection",
     "failed to add embedding at index",
-    # v0.7.0
     "-> greedy  seed=",
     "-> temp-ext -> dist  seed=",
     "cparams ubatch=512/4 ",
@@ -341,7 +340,7 @@ MASKS = [
     # each side's own dynamic cache file
     (re.compile(r"dyn_(?:ref|port)\.bin"), "dyn_SIDE.bin"),
     (re.compile(r"took [0-9.]+ (ms|seconds)"), "took T"),
-    # v0.6.0's Metal backend compiles its libraries at start-up and says how long each took
+    # The Metal backend compiles its libraries at start-up and says how long each took
     (re.compile(r"library in [0-9.]+ sec"), "library in T sec"),
     (re.compile(r"embedded data in [0-9.]+ sec \(max single = [0-9.]+ sec\)"), "embedded data in T sec (max single = T sec)"),
     (re.compile(r"0x[0-9a-f]+"), "0xP"),
@@ -374,7 +373,7 @@ ABORT = re.compile(r"(?:[\w./-]*/)?((?:speculative|sampling|ngram-cache|ngram-ma
                    r"llama-[a-z-]+|ggml[a-z-]*)\.(?:cpp|c)):(\d+): (.*)$")
 
 
-# v0.5.0: llama_graph_n_input_tensors (llama-context.cpp) logs each input
+# llama_graph_n_input_tensors (llama-context.cpp) logs each input
 # tensor's users from an unordered_map keyed by tensor address, so the order
 # of a run of those lines is the allocator's, run to run, on either side;
 # each run is compared sorted.

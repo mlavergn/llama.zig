@@ -3,8 +3,8 @@
 # By default, the host: `-mcpu=baseline`, `zig-out/lib/libggml.a`, the host's
 # system libraries (scripts/platform-libs), and the harness run in place.
 #
-# With WIN_X86=1, the Windows laptop (PLAN.md, Decision 57; "Windows
-# pickup"): the harness is cross-built for `x86_64-windows-gnu` at X86_CPU
+# With WIN_X86=1, the Windows laptop:
+# the harness is cross-built for `x86_64-windows-gnu` at X86_CPU
 # against the Windows port `make win-host-diffs` builds, and run there through
 # scripts/win-run -- so the reference half is the C++ compiled for Windows
 # against Zig's libc++ over MinGW's UCRT, which is what the Windows reference

@@ -3,7 +3,7 @@
 //! **Not a port.** The harness behind `scripts/jinja-diff`, linked with
 //! `harness/jinja_ref.cpp` and the unmodified `llama.cpp/common/jinja`.
 //! Our CLI renders chat templates through `zigjinja`; upstream's through its
-//! own engine (PLAN.md, Decisions 25 and 27). Nothing else checks that two
+//! own engine. Nothing else checks that two
 //! independent Jinja implementations agree on the templates models ship.
 //!
 //! Every template in `llama.cpp/models/templates/` is rendered over a fixed
@@ -16,14 +16,14 @@
 //! - **Failure**: a template that raises on one side must raise on the
 //!   other. The messages are not compared; the engines word them
 //!   differently.
-//! - **Trust**, byte for byte, both ways (PLAN.md Decision 17). Upstream
+//! - **Trust**, byte for byte, both ways. Upstream
 //!   marks every byte that came from input, and so does ours, by the same
 //!   propagation rules (`chat.zig`'s header). A byte ours trusts and
 //!   upstream marks is the injection both exist to stop; a byte ours
 //!   untrusts and upstream trusts is a template control token tokenized as
-//!   text. No exception: since v0.7.0 upstream binds `bos_token` and
+//!   text. No exception: upstream binds `bos_token` and
 //!   `eos_token` unmarked, after the input (`jinja_ref.cpp`), and so does
-//!   `chat.zig`; until then they were marked upstream and re-trusted here.
+//!   `chat.zig`.
 //!
 //! Then the probes: the conversations upstream's capability check
 //! (`common/jinja/caps.cpp`) and differential analysis
@@ -42,7 +42,7 @@
 //! year directly. `scripts/jinja-diff` runs everything under two zones.
 //!
 //! Then the TTS norm builtins task templates render with
-//! (`common/chat-tts-norm.cpp`, v1.0.0): `tts_norm_phase.zig` holds
+//! (`common/chat-tts-norm.cpp`): `tts_norm_phase.zig` holds
 //! `cli/common_chat/tts_norm.zig`'s matcher, scan and substitution, and the
 //! builtins in a render, to upstream's, on random patterns and upstream's
 //! own cases. It needs `chat-tts-norm.cpp` among the script's sources.
@@ -111,7 +111,7 @@ const conversations = [_]Conversation{
         .{ .role = "user", .content = "Two." },
     } },
     // Empty contents, first and in the middle: upstream keeps each as an
-    // empty input part between template parts (v0.7.0's prompt parts show
+    // empty input part between template parts (the prompt parts show
     // them), so the part lists must agree, not only the bytes.
     .{ .name = "empty", .messages = &.{
         .{ .role = "user", .content = "" },

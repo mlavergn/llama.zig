@@ -48,7 +48,7 @@ compiled into neither.
 
 What "llamazig" contains at 0.0.16: all of ggml (CPU and Metal host code) and
 the sampler and grammar are Zig; the rest of libllama is still the C++ and
-swaps at once at `llama.h` (`PLAN.md`, Decision 42). So this comparison
+swaps at once at `llama.h`. So this comparison
 measures **ggml** above all, and on Metal, mostly the host layer — the
 kernels are the same MSL on both sides.
 
@@ -130,7 +130,7 @@ is the first thing to confirm.
 portable form of `sdot`. On a quiet machine, `make perf-cpu SUDO=`: at
 `9fc4cf8`, llamazig 0.21× in generation (17.2 against 82.0 tok/s) and 0.12×
 in prompt processing; with `sdot`, 0.94× (77.5 against 82.2) and 0.93×
-(217.1 against 234.0), the same tokens in every run. `NOTES.md`, "`sdot`".
+(217.1 against 234.0), the same tokens in every run.
 
 **One load stalled.** A single llamazig run took 12.3 s to load against
 0.29 s of CPU — blocked, not computing. Six repeats loaded in 267–300 ms on

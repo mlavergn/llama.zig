@@ -2,13 +2,13 @@
 // models they load against, and a validator that runs each through
 // upstream's own libmtmd.
 //
-// **Not a port.** This is test harness: it plays for Stage 8's gates the
+// **Not a port.** This is test harness: it plays for libmtmd's gates the
 // role `tests/test-llama-archs.cpp` plays for `make arch-model-diff`. No
 // mmproj file exists on this machine and upstream ships no generator, so
 // each projector type's keys and tensor shapes here are read off
 // `llama.cpp/tools/mtmd/mtmd-model.cpp` (`load_hparams`, `load_tensors`,
 // `mtmd_model::n_mmproj_embd`) and the graph builders under `models/`, at
-// v1.0.0 (`b1b770d90`) -- `clip.cpp` until v0.9.0. Weights are small and random (fixed seed per
+// v1.0.0 (`b1b770d90`). Weights are small and random (fixed seed per
 // type), so a fixture checks plumbing and numerics, not output quality.
 //
 // Every projector targets n_embd 256, the arch fixtures' width. The text
@@ -27,9 +27,9 @@
 // tts-chatterbox|tts-chatterbox-mtl|tts-drama3, or
 // expect-fail for a type upstream declares but cannot load, and inputs lists
 // what to feed, `;`-separated: `img:WxH,...` for images, `vid:WxHxN,...` for
-// N mergeable frames of one video (v0.7.0), `aud:N,...` audio sample counts,
+// N mergeable frames of one video, `aud:N,...` audio sample counts,
 // `tts:N` generation steps, `strm:N,...` PCM samples through
-// `mtmd_audio_stream` (v0.8.0). `check` runs each line in a
+// `mtmd_audio_stream`. `check` runs each line in a
 // child process (`one`), so an upstream abort is reported, not fatal.
 
 #include "ggml.h"
@@ -260,7 +260,7 @@ struct Fixture {
     std::function<void(G &)> build;
 };
 
-// v0.9.0: chatterbox's speaker side (audio modality, CHATTERBOX_SPKENC:
+// chatterbox's speaker side (audio modality, CHATTERBOX_SPKENC:
 // CAMPPlus, the voice encoder, the conditioning encoder and, when `mtl`,
 // its perceiver), beside the gen side `chatterbox_gen_fixture` writes.
 // The widths the graph and the host code fix are kept (80 fbank mels, 32
@@ -367,7 +367,7 @@ static void cbx_spkenc_fixture(G & g, bool mtl) {
     }
 }
 
-// v0.9.0: chatterbox's gen side (models/chatterbox-gen.cpp, clip.cpp's
+// chatterbox's gen side (models/chatterbox-gen.cpp, clip.cpp's
 // CHATTERBOX load_tensors arm): flow encoder, CFM estimator, HiFT vocoder,
 // S3 tokenizer, the host tables and two predefined voices. The widths the
 // graph fixes are kept (512 in the flow encoder, 1280 in the S3 tokenizer,
@@ -376,8 +376,8 @@ static void cbx_spkenc_fixture(G & g, bool mtl) {
 // the T3 position tables the multilingual pipeline reads.
 static void chatterbox_gen_fixture(G & g, bool mtl) {
     // speech codebook: all 3^8 of the S3 tokenizer's FSQ codes (turbo's silence tail is
-    // code 4299); with 4300 rows, as until v0.9.0, the speaker clip tokenized to code
-    // 5467 at v1.0.0 and the reference refused it ("speech token out of range")
+    // code 4299); with 4300 rows the speaker clip tokenized to code
+    // 5467 and the reference refused it ("speech token out of range")
     const int NC = 6561;
     const int FF = 512, C = 64, TD = 64, C0 = 32, CF = 32;
     const ggml_type H = GGML_TYPE_F16;
@@ -867,7 +867,7 @@ static std::vector<Fixture> fixtures() {
         g.w(fmt(TN_MM_DOWN, "weight"), Fm, N_TEXT);
     }});
     f.push_back({"glm5v", "qwen2vl", "vision", "img:64x64,96x48,20x12,40x200", [](G & g) {
-        // v0.6.0 (GLM-5.3-Flash): the glm4v tower without the pos-conv
+        // GLM-5.3-Flash: the glm4v tower without the pos-conv
         // norm, every SwiGLU clamped, and its own ceil-aligned resize.
         // The budgets put 96x48 above the max (the height search), 20x12
         // below the min (the upscale) and 40x200 in between (the pad)
@@ -896,7 +896,7 @@ static std::vector<Fixture> fixtures() {
         g.w(fmt(TN_MM_DOWN, "weight"), Fm, N_TEXT);
     }});
     f.push_back({"ling3vl", "qwen3vl", "vision", "img:64x64,96x48", [](G & g) {
-        // v0.6.0 (Ling 3.0 VL): Qwen3-VL's tower through build_vit, a
+        // Ling 3.0 VL: Qwen3-VL's tower through build_vit, a
         // norm-only merger over n_embd, then the mm.0/mm.2 MLP
         const int E = 64, P = 8, H = 128;
         vision(g, "ling3vl", 64, P);
@@ -971,7 +971,7 @@ static std::vector<Fixture> fixtures() {
         g.w(fmt(TN_LLAVA_PROJ, 2, "weight"), 64, N_TEXT);
         g.bias(fmt(TN_LLAVA_PROJ, 2, "bias"), N_TEXT);
     }});
-    // v1.0.0 (351025ec5): Kimi K3.1 -- K2.5's ViT RMS-normed, positions
+    // Kimi K3.1 (351025ec5) -- K2.5's ViT RMS-normed, positions
     // resized bilinearly, and patchmergerv2: no pre-norm, a bias-free MLP
     // (erf GELU), then an RMS post-norm
     f.push_back({"kimik31", "qwen3", "vision", "img:64x64,96x48", [](G & g) {
@@ -990,7 +990,7 @@ static std::vector<Fixture> fixtures() {
         g.w(fmt(TN_LLAVA_PROJ, 2, "weight"), 64, N_TEXT);
         g.norm(fmt(TN_MM_POST_NORM, "weight"), N_TEXT);
     }});
-    // v1.0.0 (9f0e5098a): MageVL-Cowork -- an F32 im2col patch embedding,
+    // MageVL-Cowork (9f0e5098a) -- an F32 im2col patch embedding,
     // 2x2 block order, M-RoPE pairs over the two halves of rope_freqs
     // (d_head 32: the smallest the 4:6:6 split allows), a 4-patch FFN
     f.push_back({"magevl", "qwen3", "vision", "img:64x64,96x48,48x80", [](G & g) {
@@ -1367,9 +1367,8 @@ static std::vector<Fixture> fixtures() {
 
     // --- DeepSeek-OCR: a SAM ViT-B at a hardcoded 1024 px / patch 16 (640
     // and 768 px tiles), its neck and two stride-2 convs, then a CLIP or a
-    // Qwen2 encoder. Since v0.5.0 the loader reads as many SAM blocks as
-    // sam.block_count says (clip.cpp:3360 @620d2225c); through v0.4.1
-    // n_sam_layers was a model constant, 12. Only the 3 the key names are
+    // Qwen2 encoder. The loader reads as many SAM blocks as
+    // sam.block_count says (clip.cpp:3360 @620d2225c). Only the 3 the key names are
     // written, so a loader that still reads 12 fails; block 2 is global
     // over 64x64 patches
     auto sam = [](G & g, int E) {
@@ -1570,7 +1569,7 @@ static std::vector<Fixture> fixtures() {
         g.w(fmt(TN_MM_AUDIO_MLP, 3, "weight"), H, N_TEXT);
         g.bias(fmt(TN_MM_AUDIO_MLP, 3, "bias"), N_TEXT);
     }});
-    // v1.0.0 (20c2e9665): Gemma 4 streams audio too; 500000 samples cross its 30 s segment
+    // Gemma 4 (20c2e9665) streams audio too; 500000 samples cross its 30 s segment
     f.push_back({"gemma4a", "qwen3", "audio", std::string(AUD) + ";strm:0,1,3000,40000,500000", [](G & g) {
         // a conformer: two stride-2 conv2d, then per layer a half-step ffn,
         // chunked attention with a relative-position term, a gated depthwise
@@ -1671,7 +1670,7 @@ static std::vector<Fixture> fixtures() {
         g.w(fmt(TN_MM_AUDIO_MLP, 3, "weight"), H, N_TEXT);
         g.bias(fmt(TN_MM_AUDIO_MLP, 3, "bias"), N_TEXT);
     }});
-    // v0.9.0: expect-fail. ggml's views are now bounded by the bytes their
+    // expect-fail. ggml's views are bounded by the bytes their
     // strides reach (ggml.c, bbb02c93e "bound views by the bytes their strides
     // reach"), and parakeet.cpp's global-attention relative shift views
     // [n_frame, pos_window] at row stride pos_window over a head of
@@ -2057,7 +2056,7 @@ static std::vector<Fixture> fixtures() {
     };
     f.push_back({"qwen3tts", "qwen3tts", "tts-qwen3", "tts:3", [qwen3tts](G & g) { qwen3tts(g, false); }});
 
-    // --- TTS: v1.0.0 (5851a8e50) drama-3 (codebook tower / Fish DAC codec,
+    // --- TTS: drama-3 (5851a8e50) (codebook tower / Fish DAC codec,
     // models/drama3-gen.cpp). What the host code fixes is kept: 10
     // codebooks (the helper's n_cb), so 9 heads and one shared layer before
     // them; a 4096-row tower vocabulary (code0 of a frame is any of the
@@ -2264,14 +2263,14 @@ static std::vector<Fixture> fixtures() {
             g.w(fmt(TN_FFN_DOWN, p, il, "weight"), Ft, D);
             g.t(fmt(TN_LS_2, p, il, "weight"), {D}, 0.05f, 0.1f);
         }
-        // v0.9.0: predefined voices, rows of the backbone width; a capital
+        // predefined voices, rows of the backbone width; a capital
         // sorts first in the voice map, and the lookup ignores case
         g.t("voice.alba", {N_TEXT, 4}, 0.5f);
         g.t("voice.Bob", {N_TEXT, 2}, 0.5f);
     }});
 
     (void) IMG;
-    // --- added at v0.4.0; last, so every earlier fixture keeps its seed
+    // --- last, so every earlier fixture keeps its seed
     // deepseek4v: an RMS-norm SwiGLU ViT with 2D M-RoPE, a 3x3 unfold
     // aligner, and the four sentinel embeddings get_rows lays out. The
     // sizes cover the min-pixel upscale (16x16), padding to the merge
@@ -2302,10 +2301,9 @@ static std::vector<Fixture> fixtures() {
     }});
     f.push_back({"qwen3tts_shared", "qwen3tts", "tts-qwen3", "tts:3", [qwen3tts](G & g) { qwen3tts(g, true); }});
 
-    // --- v0.5.0's loader range checks (clip.cpp:1450, 1507 @620d2225c): a
+    // --- the loader range checks (clip.cpp:1450, 1507 @620d2225c): a
     // good fixture with one key edited out of range must fail to load, each
-    // with its own message, where through v0.4.1 the first indexed past the
-    // layers and the second inserted the merger nowhere
+    // with its own message
     auto variant = [&f](const std::string & base, const std::string & name, std::function<void(G &)> edit) {
         for (const Fixture & x : f) {
             if (x.type != base) continue;
@@ -2323,7 +2321,7 @@ static std::vector<Fixture> fixtures() {
     variant("minicpmv4_6", "minicpmv4_6-insert-oob", [](G & g) { g.ai32(KEY_WIN_ATTN_LAYER_INDEXES, {2}); });
     variant("minicpmv4_6", "minicpmv4_6-insert-neg", [](G & g) { g.ai32(KEY_WIN_ATTN_LAYER_INDEXES, {-1}); });
 
-    // --- added at v0.8.0 (`8642541b2`): the five new projector types, last
+    // --- the five projector types of `8642541b2`, last
     // so every earlier fixture keeps its seed. Three are an older type's
     // fixture with the projector renamed and what the new arm adds.
     auto build_of = [&f](const std::string & base) -> std::function<void(G &)> {
@@ -2419,7 +2417,6 @@ static std::vector<Fixture> fixtures() {
         m47(g);
     }});
 
-    // ---- v0.8.0 ----
     // minicpm_ocr_1_0: MiniCPM-V 4.6's encoder, its own slice alignment
     f.push_back({"minicpm_ocr_1_0", "qwen3", "vision", "img:64x64,96x48,40x100,200x160", [m46 = build_of("minicpmv4_6")](G & g) {
         m46(g);
@@ -2773,7 +2770,7 @@ static std::vector<Fixture> fixtures() {
         g.u32(KEY_PREPROC_IMAGE_SIZE, 96);
     }});
 
-    // --- v0.9.0: nemotron transcribe (models/nemotron-transcribe.cpp), NeMo's
+    // --- nemotron transcribe (models/nemotron-transcribe.cpp), NeMo's
     // ParallelExpertEncoder: an ASR and a speaker transformer over stacked
     // log-mel frames, a Sortformer head and the fusion. 700000 samples is two
     // 40 s windows, 1300000 three: the speaker cache fills, is compressed and
@@ -2852,7 +2849,7 @@ static std::vector<Fixture> fixtures() {
         static const float b[4] = {0.85f, 0.38f, 0.46f, -1.27f};
         nemotron_tr(g, b);
     }});
-    // --- v0.9.0: chatterbox, turbo and multilingual (models/chatterbox-gen.cpp)
+    // --- chatterbox, turbo and multilingual (models/chatterbox-gen.cpp)
     f.push_back({"chatterbox", "qwen3-cbx", "tts-chatterbox", "tts:4", [](G & g) {
         cbx_spkenc_fixture(g, false);
         chatterbox_gen_fixture(g, false);
@@ -2903,12 +2900,12 @@ static const std::vector<std::string> k_specials_c2v = {
     "<|START_OF_IMG|>", "<|END_OF_IMG|>", "<|IMG_LINE_BREAK|>",
 };
 
-// v0.8.0: LFM3's control tokens, the stream's and the pipeline's
+// LFM3's control tokens, the stream's and the pipeline's
 static const std::vector<std::string> k_specials_lfm3 = {
     "<|audio_start|>", "<|mixed_start|>", "<|text_end|>", "<|mixed_end|>", "<|im_start|>", "<|im_end|>",
     "<|endoftext|>", "<|vision_start|>", "<|vision_end|>",
 };
-// v1.0.0: drama-3's prompt tokens (mtmd-helper-gen.cpp's drama3 pipeline);
+// drama-3's prompt tokens (mtmd-helper-gen.cpp's drama3 pipeline);
 // the <|semantic:N|> tokens fill the widened vocabulary after them
 static const std::vector<std::string> k_specials_drama3 = { "<|im_start|>", "<|im_end|>", "<|voice|>" };
 // soprano's prompt tokens (mtmd-helper-gen.cpp)
@@ -2916,7 +2913,7 @@ static const std::vector<std::string> k_specials_soprano = { "[TEXT]", "[START]"
 // voxtral realtime's pad (mtmd.cpp's stream init)
 static const std::vector<std::string> k_specials_voxtral = { "[STREAMING_PAD]" };
 
-// v0.9.0: chatterbox's fused vocabulary, text then the speech tokens
+// chatterbox's fused vocabulary, text then the speech tokens
 // (mtmd-helper-gen.cpp's ensure_cache), filled past the specials
 static const std::vector<std::string> k_specials_cbx = {};
 
@@ -2996,7 +2993,7 @@ static bool write_text_model(const std::string & in, const std::string & out, bo
         gguf_set_arr_data(dst, (std::string(arch) + ".rope.dimension_sections").c_str(), GGUF_TYPE_INT32, sections, 4);
     }
     if (delay > 0) gguf_set_val_u32(dst, (std::string(arch) + ".realtime_delay_tokens").c_str(), delay);
-    // v1.0.0 (b1c902f02): multilingual chatterbox requires its backbone to declare classifier-free guidance
+    // (b1c902f02): multilingual chatterbox requires its backbone to declare classifier-free guidance
     if (cfg) gguf_set_val_bool(dst, (std::string(arch) + ".classifier_free_guidance").c_str(), true);
     if (tmpl) gguf_set_val_str(dst, "tokenizer.chat_template", tmpl);
     if (tmpl_tts) gguf_set_val_str(dst, "tokenizer.chat_template.tts", tmpl_tts);
@@ -3057,16 +3054,16 @@ static int cmd_gen(const std::string & arch_dir, const std::string & out_dir, co
         // the slots checkpoint and must skip a media chunk's batch
         { "qwen35", "qwen35-dense", false, 0 },
         { "gemma3", "gemma3-dense", false, 0 },
-        // v0.7.0: cohere2v's image tokens in the vocabulary
+        // cohere2v's image tokens in the vocabulary
         { "qwen3-c2v", "qwen3-dense", false, 0, false, &k_specials_c2v },
-        // v0.8.0: LFM3-Audio's and Soprano's tokens, Voxtral Realtime's pad and delay
+        // LFM3-Audio's and Soprano's tokens, Voxtral Realtime's pad and delay
         { "qwen3-lfm3", "qwen3-dense", false, 0, false, &k_specials_lfm3, 0, lfm3_chat, lfm3_tts },
         { "qwen3-soprano", "qwen3-dense", false, 0, false, &k_specials_soprano },
         { "mistral3-rt", "mistral3-dense", false, 0, false, &k_specials_voxtral, 6 },
-        // v0.9.0: chatterbox's speech tokens after the text ones; 320 rows, as
+        // chatterbox's speech tokens after the text ones; 320 rows, as
         // the multilingual prompt opens with token 255
         { "qwen3-cbx", "qwen3-dense", false, 0, false, &k_specials_cbx, 0, nullptr, nullptr, 320, "<|speech_%d|>", true },
-        // v1.0.0: drama-3's Qwen3.5-MoE backbone, its 4096 semantic tokens after
+        // drama-3's Qwen3.5-MoE backbone, its 4096 semantic tokens after
         // the specials (the helper samples <|semantic:0|> + 0..4095)
         { "qwen35moe-drama3", "qwen35moe-moe", false, 0, false, &k_specials_drama3, 0, nullptr, nullptr, 4224, "<|semantic:%d|>" },
     };
@@ -3232,7 +3229,7 @@ static std::string run_tts(mtmd_context * mctx, llama_model * model, const std::
     const bool soprano = modality == "tts-soprano";
     const bool lfm3a = modality == "tts-lfm3a" || modality == "tts-lfm3a-eos";
     const bool may_end_silent = modality == "tts-lfm3a-eos";
-    // v0.9.0: chatterbox's multilingual cfg pairs seq 0 with n_seq_max / 2
+    // chatterbox's multilingual cfg pairs seq 0 with n_seq_max / 2
     const bool cbx = modality.rfind("tts-chatterbox", 0) == 0;
     llama_context_params cp = llama_context_default_params();
     cp.n_ctx = 512;

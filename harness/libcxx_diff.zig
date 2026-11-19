@@ -336,7 +336,7 @@ pub fn main() !void {
                 try offs.append(gpa, blob.items.len);
             }
             // Grown by insertion, then `reserve` of the size -- what
-            // `llama-vocab.cpp` does since v0.8.0, which keeps a power of two
+            // `llama-vocab.cpp` does, which keeps a power of two
             // -- and of less and more than it, so growth continues from a
             // reserved table, power of two or not.
             for ([_]usize{ std.math.maxInt(usize), n, n / 2, n / 2 + 1, 2 * n + 1, 2 * n }) |reserve| {

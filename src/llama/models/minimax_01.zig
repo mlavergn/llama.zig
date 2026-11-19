@@ -101,10 +101,10 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 
 /// Ports `llm_graph_input_la` (models/minimax-01.cpp:67 @b1b770d90): the
 /// lightning attention's per-head slopes and its decays relative to each
-/// sequence's first position -- since v0.4.0 for every batch, one token
-/// per sequence included, which no longer takes a path of its own.
+/// sequence's first position -- for every batch, one token
+/// per sequence included, which takes no path of its own.
 pub const InpLa = struct {
-    /// A copy, as the C++ holds it since v0.4.0: the input may outlive the
+    /// A copy, as the C++ holds it: the input may outlive the
     /// graph that built it.
     hparams: Hparams,
 

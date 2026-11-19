@@ -1,4 +1,4 @@
-# llama-server against upstream's: scripts/tools-diff server (Stage 10 step 1).
+# llama-server against upstream's: scripts/tools-diff server.
 # Only what happens before the server starts: --help, --version, the parse
 # errors and the environment. Every case must fail at parse time on both
 # sides -- a command line that parses starts upstream's server, which never
@@ -198,7 +198,7 @@
 !env LLAMA_ARG_SPEC_SYNTH_LEN=-1
 !fail --bogus
 !unenv LLAMA_ARG_SPEC_SYNTH_LEN
-# v0.5.0: six sampling options gained a variable, and --host takes a list
+# six sampling options gained a variable, and --host takes a list
 !env LLAMA_ARG_TEMPERATURE=abc
 !fail --bogus
 !unenv LLAMA_ARG_TEMPERATURE
@@ -254,7 +254,7 @@
 # drops each line's log prefix: upstream's worker writes the prefix and the
 # message in separate writes, so the fprintf can land between them --
 # measured, 3 runs in 600 under load put `error: invalid argument` after a
-# `W ` prefix, and (v0.9.0 combined pass, 1 run in 4 under load) it can
+# `W ` prefix, and (in a combined pass, 1 run in 4 under load) it can
 # land between the timestamp and the level letter, leaving a bare `T `
 # before upstream's `error:` line. The level letter is therefore not
 # compared from here on, nor a bare timestamp prefix --
@@ -287,7 +287,7 @@
 !env LLAMA_ARG_CORS_ORIGINS=http://x
 !fail ~ --tools all --no-jinja --chat-template bogus
 !unenv LLAMA_ARG_CORS_ORIGINS
-# -j and -jf (Stage 10 step 3b): parsed and converted at parse time, so a
+# -j and -jf: parsed and converted at parse time, so a
 # bad schema fails before the post-parse checks
 !fail -j '{"type":' --no-jinja --chat-template bogus
 !fail -j '{"type": "integer"}' --no-jinja --chat-template bogus

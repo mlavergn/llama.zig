@@ -19,7 +19,7 @@
 //   parse   {a, input_hex, partial}      common_chat_peg_parse with the parser
 //                                        and parser params apply record `a`
 //                                        produced (a saved parser cannot be
-//                                        loaded since v0.7.0)
+//                                        loaded)
 //   diff, ucp, acs, seg, cv              the auto-parser helpers
 // Output: per record `== <n> <op>`, then `key value` lines, every string
 // escaped onto one line; `E <class> <what>` for an exception; `L <level>
@@ -250,7 +250,7 @@ static void show_params(const common_chat_params & p) {
         kv("stop", t);
     }
     guarded([&] { kv("parser", p.parser.empty() ? std::string() : harness_peg_save(p.parser)); });
-    // the form `common_chat_msg_delimiters::to_json` wrote until v0.7.0 removed it
+    // the form `common_chat_msg_delimiters::to_json` once wrote
     guarded([&] {
         common_json d = common_json::array();
         for (const auto & x : p.message_delimiters.delimiters) {

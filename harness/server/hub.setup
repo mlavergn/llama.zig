@@ -1,6 +1,6 @@
 #!/bin/bash
 # Starts two mock hubs (harness/server/mock_hub.py), one per side, over the
-# files and repositories hub.cases downloads (Stage 10 step 7), and names
+# files and repositories hub.cases downloads, and names
 # them MOCK_REF and MOCK_PORT in $DATA/setup.env. Run by
 # scripts/server-diff, which kills what $DATA/pids lists at the end.
 set -eu
@@ -27,7 +27,7 @@ printf '# nothing here\n' > "$h/repos/test/empty/README.md"
 cp "$FIX" "$h/repos/test/nested/sub/deep-Q4_K_M.gguf"
 mkdir -p "$h/repos/test/slowpoke"
 cp "$FIX" "$h/repos/test/slowpoke/slow-Q4_K_M.gguf"
-# v0.8.0: a repository with every sidecar kind, one tag's draft shared by
+# a repository with every sidecar kind, one tag's draft shared by
 # name with no other, and two tags sharing a projector
 mkdir -p "$h/repos/test/side" "$h/repos/test/slowside" "$h/repos/test/shared"
 cp "$FIX" "$h/repos/test/side/side-Q4_K_M.gguf"
@@ -38,7 +38,7 @@ cp "$MM/gemma3.gguf" "$h/repos/test/slowside/mmproj-slow-f16.gguf"
 cp "$FIX" "$h/repos/test/shared/shared-Q4_K_M.gguf"
 cp "$FIX2" "$h/repos/test/shared/shared-Q8_0.gguf"
 cp "$MM/gemma3.gguf" "$h/repos/test/shared/mmproj-shared-f16.gguf"
-# v0.9.0: a tag matches as a whole token, so ":F16" is not the BF16 file
+# a tag matches as a whole token, so ":F16" is not the BF16 file
 # listed before it, and ":BF16" still is
 mkdir -p "$h/repos/test/floats"
 cp "$FIX" "$h/repos/test/floats/floats-BF16.gguf"
@@ -63,7 +63,7 @@ hf-repo = test/tiny:Q4_K_M
 dedup-cache-models = 1
 [tiny-plain]
 hf-repo = test/tiny:Q8_0
-# v0.5.0: the draft model's repository is deduplicated too
+# the draft model's repository is deduplicated too
 [tiny-draft]
 model = $FIX
 spec-draft-hf = test/tiny:Q8_0
@@ -78,7 +78,7 @@ cat > "$h/repos/test/nestedref.refs" <<JSON
 {"branches": [{"name": "release/v1", "targetCommit": "89abcdef0123456789abcdef0123456789abcdef"}]}
 JSON
 
-# v0.6.0: a Hugging Face cache made by hand, read offline by the router's
+# a Hugging Face cache made by hand, read offline by the router's
 # update_caps (server-models.cpp): a decision model's GGUF metadata makes
 # its output modality "decisions", and a preset's hf-file now picks the
 # file (LLAMA_ARG_HF_FILE). hub.cases copies it per side (!fresh hfcache)
@@ -102,7 +102,7 @@ hf-repo = test/judge
 hf-repo = test/vision
 no-mmproj = 1
 INI
-# v0.6.0: a model the router cannot resolve offline (update_caps logs it
+# a model the router cannot resolve offline (update_caps logs it
 # and keeps the text default) until its child has downloaded and loaded it
 # -- with the projector, which the child reports (update_status)
 cat > "$DATA/byurl.ini" <<INI

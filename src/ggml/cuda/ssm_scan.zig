@@ -8,8 +8,8 @@
 //! `llama.cpp/ggml/src/ggml-cuda/ssm-scan.cuh` at v1.0.0 (`b1b770d90`). The
 //! kernels -- `ssm_scan_f32`, `ssm_scan_f32_group` and the four
 //! `ssm_ssd_*` kernels -- stay CUDA. The SSD arm is the C's
-//! `!defined(GGML_USE_HIP)` one (v0.6.0 dropped its MUSA exclusion), which
-//! this build compiles. v0.6.0 added `d_state == 96` to Mamba-2.
+//! `!defined(GGML_USE_HIP)` one, which
+//! this build compiles. Mamba-2 takes `d_state == 96`.
 //!
 //! # The cuBLAS handle's stream
 //!
@@ -64,7 +64,7 @@ fn at(p: anytype, off: i64) @TypeOf(p) {
 
 /// Ports `ggml_cuda_ssm_scan_fused_cache` (ssm-scan.cuh:4 @b1b770d90): the
 /// fused kernel's recurrent-state output, strides in elements (the per-seq
-/// stride is always the state row size, set in-kernel). New at v0.7.0, for
+/// stride is always the state row size, set in-kernel), for
 /// the `SSM_SCAN -> CPY` fusion `fusion.zig` matches.
 pub const FusedCache = struct {
     /// Rollback slot 0.
@@ -73,8 +73,8 @@ pub const FusedCache = struct {
     slot_stride: i64,
 };
 
-/// Ports `ssm_scan_f32_cuda` (ssm-scan.cu:245 @b1b770d90). Since v1.0.0
-/// Mamba-2 takes `d_state == 64` too (Zamba2). Since v0.7.0 the
+/// Ports `ssm_scan_f32_cuda` (ssm-scan.cu:245 @b1b770d90).
+/// Mamba-2 takes `d_state == 64` too (Zamba2). The
 /// Mamba-2 kernels take the state's base and the bytes between rollback
 /// slots instead of `s_off`, so that the fused path can point them into the
 /// cache; Mamba-1 still takes `s_off`.
@@ -192,7 +192,7 @@ fn scanKernel(comptime threads: comptime_int, comptime l: comptime_int) kernels.
 
 /// Ports `ssm_scan_ssd_f32_cuda` (ssm-scan.cu:607 @b1b770d90): the SSD
 /// dispatch for Mamba-2 prefill. All strides are in elements, not bytes.
-/// Since v0.7.0 the caller passes the state, `s_cur`: the dst state tail,
+/// The caller passes the state, `s_cur`: the dst state tail,
 /// or the cache when fused.
 fn ssmScanSsdF32Cuda(
     ctx: *common.Context,
@@ -407,7 +407,7 @@ fn ssmScanSsdF32Cuda(
 }
 
 /// Ports `ggml_cuda_op_ssm_scan_impl` (ssm-scan.cu:798 @b1b770d90), the
-/// body v0.7.0 moved out of `ggml_cuda_op_ssm_scan` so that the fused entry
+/// body of `ggml_cuda_op_ssm_scan`, separate so that the fused entry
 /// point can pass a cache.
 fn opSsmScanImpl(ctx: *common.Context, dst: *Tensor, cache: ?*const FusedCache) void {
     const src0 = impl.one(Tensor, dst.src[0]); // s

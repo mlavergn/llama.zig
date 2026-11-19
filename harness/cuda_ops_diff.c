@@ -35,7 +35,7 @@
  *   copying its sources, so the self-reference comes back as
  *   the still-empty slot: the copy's `src[1]` is NULL. Upstream's CPU never
  *   reads it; the reference CUDA backend dispatches `CPY` as
- *   `ggml_cuda_cpy(ctx, src[0], src[1])` and faults. Measured on v0.4.0's
+ *   `ggml_cuda_cpy(ctx, src[0], src[1])` and faults. Measured on
  *   `test_topk_qsa`, the first whole-graph case with a cast. The copy's
  *   self-references are restored before it runs.
  * - **A difference the reference makes against itself is not the port's.**
@@ -176,8 +176,8 @@ static int cmp_u32(const void * a, const void * b) {
     return (x > y) - (x < y);
 }
 
-/* `ggml_top_k`'s indices are "in no particular order" (ggml.h), and since
- * v0.7.0 CUDA sends more shapes to radix select, whose `top_k_radix_gather`
+/* `ggml_top_k`'s indices are "in no particular order" (ggml.h), and
+ * CUDA sends more shapes to radix select, whose `top_k_radix_gather`
  * places each index at an `atomicAdd`ed position: the order changes from run
  * to run, and the reference agreeing with itself twice is luck -- 11 cases
  * failed so on the first GB10 run. So a TOP_K node whose bytes differ is
@@ -412,7 +412,7 @@ static struct ggml_tensor * build_gdn_cache(struct ggml_context * ctx, struct gg
     return ggml_cpy(ctx, snap, dst);
 }
 
-/* v0.7.0's chunked gated-delta-net kernel (`gated-delta-net-mma.cu`) on the
+/* The chunked gated-delta-net kernel (`gated-delta-net-mma.cu`) on the
  * same snapshot-copy pattern: 128-wide heads, 16 of them, 64 tokens and
  * K = 3 < n_tokens, so the fused cache write goes through `gdn_single`
  * (its `state_out` is the cache). It writes only slot 0, the final state,
@@ -438,7 +438,7 @@ static struct ggml_tensor * build_gdn_mma_cache(struct ggml_context * ctx, struc
 
 /* TOP_K at 600 columns over 64 rows: past the bitonic-short width (512)
  * and within the few-rows width (1024), but with more rows than the GB10's
- * 48 SMs, so v0.7.0's selection sends it to radix select. Upstream's rows
+ * 48 SMs, so the selection sends it to radix select. Upstream's rows
  * in that width number 2 or 6. */
 static struct ggml_tensor * build_top_k_many_rows(struct ggml_context * ctx, struct ggml_tensor ** cmp) {
     struct ggml_tensor * a = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 600, 64);
@@ -446,7 +446,7 @@ static struct ggml_tensor * build_top_k_many_rows(struct ggml_context * ctx, str
 }
 
 /* MUL_MAT with an F16 src0 whose F32 copy passes 512 MiB, at
- * `GGML_PREC_F32`: v0.7.0's cuBLAS path converts and multiplies it in
+ * `GGML_PREC_F32`: the cuBLAS path converts and multiplies it in
  * chunks of src0 rows, each writing a strided slice of dst (its `ldc` is
  * the full row). Upstream's very-large-N cases compute in F16 on a device
  * with fast FP16, so none reaches the chunks; here 8400001 rows split
@@ -522,7 +522,7 @@ static struct ggml_tensor * build_mmid_q4_k_9(struct ggml_context * c, struct gg
  * other choice `vdr` feeds, `should_use_small_k`, only moves rows between
  * blocks, and at K where the second four warps would read nothing the sum
  * is the same, so a Q6_K `vdr` of 1 passed every upstream case and K =
- * 1024, 2048 and 4096 too (v0.8.0). Each K here is the first, past four
+ * 1024, 2048 and 4096 too. Each K here is the first, past four
  * warps' reach, where the true `vdr` of 2 halves and 1 and 4 do not; the
  * types are those the GB10 table promotes, the only ones `vdr` reaches. */
 static struct ggml_tensor * build_mmvq(struct ggml_context * ctx, struct ggml_tensor ** cmp, enum ggml_type type, int64_t k) {
@@ -541,7 +541,7 @@ MMVQ_K(q5_K, GGML_TYPE_Q5_K, 2304)
 MMVQ_K(q6_K, GGML_TYPE_Q6_K, 2304)
 MMVQ_K(iq4_nl, GGML_TYPE_IQ4_NL, 2080)
 
-/* v1.0.0's per-tensor weight-scale fusions (`ggml_cuda_get_mul_mat_scale`):
+/* The per-tensor weight-scale fusions (`ggml_cuda_get_mul_mat_scale`):
  * a MUL_MAT whose output a one-element F32 tensor scales. Upstream's
  * MUL_MAT_FUSION lane scales are per row, which that pattern never
  * matches, and its scaled gate/up cases force GGML_PREC_Q8 (W4A8), so
@@ -574,7 +574,7 @@ static struct ggml_tensor * build_scaled_glu(struct ggml_context * ctx, struct g
 static struct ggml_tensor * build_scaled_glu_f8_1(struct ggml_context * c, struct ggml_tensor ** t) { return build_scaled_glu(c, t, GGML_TYPE_F8_E4M3, 1); }
 static struct ggml_tensor * build_scaled_glu_nvfp4_64(struct ggml_context * c, struct ggml_tensor ** t) { return build_scaled_glu(c, t, GGML_TYPE_NVFP4, 64); }
 
-/* LIGHTNING_INDEXER with four heads (v0.6.0) on both sides of the tile
+/* LIGHTNING_INDEXER with four heads on both sides of the tile
  * kernel's eight-token threshold (`LIGHTNING_INDEXER_TILE_TOKENS`):
  * upstream's batches are 1 and 512, so neither the boundary nor a
  * partial last token tile is asked. */
@@ -593,7 +593,7 @@ static struct ggml_tensor * build_li4_q8_0_9(struct ggml_context * c, struct ggm
 
 /* FLASH_ATTN_EXT through the tensor-core kernel with the mask scan on
  * (`Q->ne[1] >= 1024`, `K->ne[1] % FATTN_KQ_STRIDE == 0`) and GQA, so two
- * pipeline stages: v0.6.0's `prefer_whole_tiles` arm of `launch_fattn`,
+ * pipeline stages: the `prefer_whole_tiles` arm of `launch_fattn`,
  * live only on a DGX Spark (cc 1210), takes whole tiles over stream-k
  * there. Upstream's test-mode batches stop at 75. */
 static struct ggml_tensor * build_fa_scan(struct ggml_context * ctx, struct ggml_tensor ** cmp) {
@@ -607,7 +607,7 @@ static struct ggml_tensor * build_fa_scan(struct ggml_context * ctx, struct ggml
     return *cmp = out;
 }
 
-/* CONV_3D (v0.6.0) shapes upstream's list does not reach: a pointwise F16
+/* CONV_3D shapes upstream's list does not reach: a pointwise F16
  * kernel, which `ggml_cuda_op_conv3d` hands to cuBLAS, and an F16 one with
  * IC * KW * KH * KD = 1728 over 64 output positions, whose implicit GEMM
  * splits K 27 ways (the cap is 32) -- upstream's shapes never split past
@@ -688,14 +688,14 @@ static bool extra_case(const char * name, extra_build build) {
  * 32769. No upstream case builds the gated-delta-net snapshot copy that
  * `ggml_cuda_try_gdn_cache_fusion` fuses. And upstream's test-mode
  * `MUL_MAT_ID` batches are 1, 4, 5, 17, 32 and 129, so none sits on the
- * MMVQ/MMQ boundary at 8 (`get_mmvq_mmid_max_batch`). Since v0.6.0 also
+ * MMVQ/MMQ boundary at 8 (`get_mmvq_mmid_max_batch`). Also
  * the four-head lightning indexer at its tile threshold and a
  * flash-attention case that scans its mask with two pipeline stages, and
- * CONV_3D's cuBLAS and split-k arms. Since v0.7.0 the chunked
+ * CONV_3D's cuBLAS and split-k arms. The chunked
  * gated-delta-net kernel writing the snapshot cache, TOP_K's radix arm for
  * more rows than SMs at a width bitonic would otherwise take, and the F32
- * cuBLAS chunks. Since v0.8.0 one-column MUL_MAT at the K where MMVQ's
- * `vdr` chooses the kernel. Since v1.0.0 the per-tensor weight-scale
+ * cuBLAS chunks. One-column MUL_MAT at the K where MMVQ's
+ * `vdr` chooses the kernel. The per-tensor weight-scale
  * fusions (see `build_scaled_mm`). */
 static int extra_cases(const char * filter) {
     static const struct { const char * op; const char * name; extra_build build; } cases[] = {

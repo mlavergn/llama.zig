@@ -109,7 +109,7 @@ pub export fn ggml_gemv_q8_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
 }
 
 /// Ports `ggml_gemv_q8_0_4x8_q8_0` (arch/arm/repack.cpp:1829 @b1b770d90).
-/// The `__ARM_FEATURE_SVE` arm v0.9.0 added is not ported: no Apple core has
+/// The `__ARM_FEATURE_SVE` arm is not ported: no Apple core has
 /// SVE.
 pub export fn ggml_gemv_q8_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !neon.has_dotprod) return ggml_gemv_q8_0_4x8_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);

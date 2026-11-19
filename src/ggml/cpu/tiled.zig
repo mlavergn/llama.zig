@@ -4,8 +4,7 @@
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cpu/tiled/tiled.cpp` and
-//! `llama.cpp/ggml/src/ggml-cpu/tiled/tiled.h` (v1.0.0, `b1b770d90`), new at
-//! v0.6.0, where they replace `iqp.cpp`: the per-format unpackers, the
+//! `llama.cpp/ggml/src/ggml-cpu/tiled/tiled.h` (v1.0.0, `b1b770d90`): the per-format unpackers, the
 //! eligibility test, the workspace sizing, the window drivers and the two
 //! entry points `ggml-cpu.c` calls. The microkernels and the tile structs are
 //! `tiled_kernel.zig`. Each declaration names the C it replaces and the line

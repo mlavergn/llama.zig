@@ -30,8 +30,7 @@
 //!
 //! # The struct layout is checked, not trusted
 //!
-//! `CLAUDE.md` calls hand-transcription "the single largest source of
-//! silent error", and `DeviceProps` below is 18 fields of which this port
+//! Hand-transcription is the largest source of silent error here, and `DeviceProps` below is 18 fields of which this port
 //! reads a few — the rest exist only to place those at the right
 //! offsets. Getting one wrong reads an adjacent field and reports
 //! nothing.
@@ -50,9 +49,8 @@ pub const CGraph = c.ggml_cgraph;
 
 /// Mirrors `enum ggml_metal_device_id` (ggml-metal-device.h:268 @b1b770d90).
 ///
-/// Written by `scripts/gen-tuning-table`, in the enum's own order: until
-/// v0.4.1 the tuning table indexed it, and the props field below still has
-/// its width. Since v0.5.0 the port only carries it through to
+/// Written by `scripts/gen-tuning-table`, in the enum's own order: the props
+/// field below has its width, and the port only carries it through to
 /// `ggml_metal_device_id_token`. Do not edit the members; rerun the script.
 pub const DeviceId = enum(c_uint) {
     generic = 0,
@@ -105,8 +103,8 @@ pub const Pipelines = opaque {};
 ///
 /// **Returned by value by all 76 `get_pipeline_*` functions**, which makes
 /// its ABI load-bearing: it is 40 bytes with interior padding, and Zig
-/// 0.16 is known to mishandle small `extern struct`s *received* by value
-/// (see `CLAUDE.md`). `make struct-layout` checks the layout and the
+/// 0.16 is known to mishandle small `extern struct`s *received* by value.
+/// `make struct-layout` checks the layout and the
 /// return path, because a silent mismatch here would corrupt every
 /// pipeline lookup at once.
 pub const PipelineWithParams = extern struct {
@@ -124,10 +122,8 @@ pub const PipelineWithParams = extern struct {
 };
 
 /// Mirrors `struct ggml_metal_device_props` (ggml-metal-device.h:295
-/// @b1b770d90). v0.6.0 dropped `supports_gpu_family_apple7`, the last of
-/// the `bool` run; the byte becomes padding before `device_id`, so every
-/// later offset is unchanged and only `struct-layout`'s field count sees
-/// the difference.
+/// @b1b770d90). The run of `bool`s ends at `use_shared_buffers`;
+/// the byte after it is padding before `device_id`.
 ///
 /// Every field is present because the offsets have to match, not because
 /// this port reads them. `make struct-layout` checks that they do.
@@ -207,7 +203,7 @@ pub const CmdBuf = ?*anyopaque;
 pub const Encoder = opaque {};
 
 // The encoder surface `ggml-metal-ops.cpp` drives. All of it lives in
-// `ggml-metal-device.m`, which stays Objective-C (Decision 13).
+// `ggml-metal-device.m`, which stays Objective-C.
 
 pub extern fn ggml_metal_encoder_init(cmd_buf_raw: CmdBuf, concurrent: bool) ?*Encoder;
 pub extern fn ggml_metal_encoder_free(encoder: *Encoder) void;

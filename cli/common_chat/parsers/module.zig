@@ -101,7 +101,7 @@ pub fn foreachParameter(a: Allocator, function: *const Value, ctx: anytype, comp
 }
 
 /// `"<prefix><tool_index><suffix>"`: the rule and schema names upstream
-/// builds with `std::to_string` of an index since v0.7.0.
+/// builds with `std::to_string` of an index.
 ///
 /// Return: owned by `a`.
 pub fn indexName(a: Allocator, prefix: []const u8, index: usize, suffix: []const u8) Allocator.Error![]u8 {

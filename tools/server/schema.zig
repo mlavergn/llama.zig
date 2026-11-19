@@ -27,7 +27,7 @@
 //!
 //! # The chat fields
 //!
-//! Since v0.7.0 a chat request's format, grammar, triggers and parser live
+//! A chat request's format, grammar, triggers and parser live
 //! in its chat session, which `Task.applyChatSession` applies; the schema
 //! keeps `reasoning_format`, and `continue_final_message` and `echo` only
 //! for their type checks.
@@ -415,8 +415,7 @@ fn addGrammarTriggers(ctx: *EvalContext, triggers: []const tools.params.GrammarT
 
 /// `(common_grammar_trigger_type) in.at("type").get<int>()`: the C++ keeps
 /// any integer, `tools/common/params.zig`'s `GrammarTriggerType` only the
-/// four it names; another one is refused until that enum is open (see
-/// `NOTES.md`, "Stage 10 step 3a").
+/// four it names; another one is refused until that enum is open.
 fn triggerType(t: c_int) Error!tools.params.GrammarTriggerType {
     const T = tools.params.GrammarTriggerType;
     if (@typeInfo(T).@"enum".mode == .nonexhaustive) return @fromBackingInt(@intCast(t));

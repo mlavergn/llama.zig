@@ -13,12 +13,11 @@
 //! `CUB_TOP_K_AVAILABLE` needs CCCL >= 3.4.3 (`DeviceTopK` races before it)
 //! and this toolkit ships 3.0, so upstream's `cub::DeviceTopK` arm is not
 //! compiled and `top_k_cub` is not ported -- the reference does not
-//! contain it either. `GGML_CUDA_USE_CUB` is defined. v0.7.0 (#28713)
-//! chooses among three implementations by shape: bitonic argsort for short
+//! contain it either. `GGML_CUDA_USE_CUB` is defined. (#28713)
+//! It chooses among three implementations by shape: bitonic argsort for short
 //! rows (and up to 1024 columns while the rows fit in one wave of SMs),
 //! radix select for more than one long row, and CUB argsort, or radix
-//! select past 4096 columns, for one long row. The radix kernels were
-//! HIP-only through v0.6.0.
+//! select past 4096 columns, for one long row.
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -45,7 +44,7 @@ const ncols_threshold_bitonic_few_rows = 1024;
 const nrows_threshold = 1;
 
 /// Ports `top_k_radix_state` (top-k.cu:92 @b1b770d90), for its size: the
-/// host only allocates the states. Since v1.0.0 it is `alignas(128)`, one
+/// host only allocates the states. It is `alignas(128)`, one
 /// state per cache line, and has no `equal_count`.
 const RadixState = extern struct {
     prefix: u32 align(128),
@@ -59,10 +58,10 @@ comptime {
 }
 
 /// Ports `top_k_radix_cuda` (top-k.cu:261 @b1b770d90), which launches with
-/// `<<<>>>`. Since v0.7.0 the rows go in chunks that bound the histograms
-/// to 64 MB. Since v1.0.0 each block of a row reads a contiguous range of
+/// `<<<>>>`. The rows go in chunks that bound the histograms
+/// to 64 MB. Each block of a row reads a contiguous range of
 /// `block_cols` columns, and the gather breaks ties by column from the last
-/// pass's histograms, which made `top_k_radix_reset_counters` unneeded.
+/// pass's histograms.
 fn topKRadixCuda(pool: *common.Pool, src_in: [*]const f32, dst_in: [*]c_int, ncols: c_int, nrows: i64, k: c_int, stream: cu.cudaStream_t) void {
     const BLOCK_SIZE = 256;
     const RADIX_BITS = 8;

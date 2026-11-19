@@ -1,4 +1,4 @@
-//! Stage 8 workstream build file: `mtmd_audio_diff`, the gate for
+//! Build file for `mtmd_audio_diff`, the gate for
 //! `src/mtmd/audio.zig` against upstream's `tools/mtmd/mtmd-audio.cpp`.
 //!
 //! The reference is `mtmd-audio.cpp` compiled unmodified here with the flags
@@ -32,7 +32,7 @@ pub fn add(b: *std.Build, opts: mtmd.GateOptions) void {
     });
     // The port, rooted at `src/mtmd/audio.zig` itself rather than the whole
     // `mtmd` module: it reaches only `impl.zig`, `model.zig` and `names.zig`
-    // beside it, so this gate builds whatever state the rest of Stage 8 is in.
+    // beside it, so this gate builds whatever state the rest of libmtmd is in.
     const audio_mod = b.createModule(.{
         .root_source_file = b.path("src/mtmd/audio.zig"),
         .target = opts.target,

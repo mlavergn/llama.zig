@@ -1,4 +1,4 @@
-# Sleeping (Stage 10 step 3c): scripts/server-diff sleep. After a second
+# Sleeping: scripts/server-diff sleep. After a second
 # idle the server frees the model; /health, /props, /models and /metrics
 # answer from what was cached, and a request that needs the model wakes it.
 !mask (seconds_total|tokens_seconds) [0-9.e+-]+

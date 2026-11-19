@@ -108,7 +108,7 @@ const RowGrid = enum {
 /// (convert.cu:279 @b1b770d90) to `dequantize_row_mxfp4_cuda` (convert.cu:378
 /// @b1b770d90): one `<<<nb, threads>>>` launch of `dequantize_block_<name>`.
 /// `dequantize_row_iq4_nl_cuda` (convert.cu:359 @b1b770d90) passes its
-/// block count since v0.6.0, so the kernel can stop at a row's end.
+/// block count, so the kernel can stop at a row's end.
 fn DequantizeRow(comptime name: []const u8, comptime threads: comptime_int, comptime grid: RowGrid, comptime T: type) type {
     return struct {
         const k = kernels.get("convert", kernels.tmpl("dequantize_block_" ++ name, &.{kernels.typeName(T)}));
@@ -227,7 +227,7 @@ fn quantizedTo(comptime T: type, t: c.enum_ggml_type) ?ToFn {
 }
 
 /// Ports `ggml_get_to_bf16_cuda` (convert.cu:496 @b1b770d90). Every getter
-/// below takes `F8_E4M3` since v1.0.0.
+/// below takes `F8_E4M3`.
 pub fn getToBf16(t: c.enum_ggml_type) ?ToFn {
     return switch (t) {
         c.GGML_TYPE_F8_E4M3 => ConvertUnary(fp8_e4m3, bf16).cont,

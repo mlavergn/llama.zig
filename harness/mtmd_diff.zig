@@ -21,7 +21,7 @@
 //! `mtmd_helper_decode_image_chunk` with its post-decode callback's views;
 //! `mtmd_get_memory_usage`'s result (through `harness/mtmd_mem_ref.cpp` on
 //! the reference side); and for a TTS fixture the generation helper's
-//! hidden states and output WAV. Since v0.8.0 also `mtmd_gen_audio_process`
+//! hidden states and output WAV. Also `mtmd_gen_audio_process`
 //! through a state, the helpers in streaming mode and a continued sequence,
 //! `mtmd_audio_stream` fed PCM in pieces with every step's rows hashed, and a
 //! lazy video through the tokenizer with its soundtrack.
@@ -86,7 +86,7 @@ const OptP = ?*anyopaque;
 /// is this table filled from its library.
 const Api = struct {
     mtmd_context_params_default: *const fn () callconv(.c) M.ContextParams,
-    // v1.0.0: the streaming resampler of mtmd-helper.h
+    // the streaming resampler of mtmd-helper.h
     mtmd_helper_resampler_init: *const fn (i32, i32) callconv(.c) OptP,
     mtmd_helper_resampler_free: *const fn (OptP) callconv(.c) void,
     mtmd_helper_resampler_process: *const fn (P, ?[*]const f32, usize, *?[*]const f32) callconv(.c) i64,
@@ -110,7 +110,7 @@ const Api = struct {
     mtmd_bitmap_get_ny: *const fn (P) callconv(.c) u32,
     mtmd_bitmap_get_n_bytes: *const fn (P) callconv(.c) usize,
     mtmd_bitmap_is_audio: *const fn (P) callconv(.c) bool,
-    // v0.9.0: predefined voices
+    // predefined voices
     mtmd_bitmap_is_voice: *const fn (P) callconv(.c) bool,
     mtmd_bitmap_get_data: *const fn (P) callconv(.c) ?[*]const u8,
     mtmd_gen_audio_voice_name: *const fn (P, i32) callconv(.c) ?[*:0]const u8,
@@ -475,7 +475,7 @@ fn evalChunks(x: *const Ctx, chunks: P) void {
     print("\n", .{});
 }
 
-/// The post-decode callback (v0.6.0: a `mtmd_helper_embd_batch` view, not
+/// The post-decode callback (a `mtmd_helper_embd_batch` view, not
 /// a `llama_batch`): every field of each sub-batch's view, its embeddings
 /// and its section-major positions by hash.
 fn postDecode(v: ?*const H.EmbdBatchView, _: ?*anyopaque) callconv(.c) i32 {
@@ -511,7 +511,7 @@ fn decodeMediaChunks(x: *const Ctx, chunks: P) void {
 
 /// `mtmd_get_memory_usage` (C++ linkage upstream, so the reference is
 /// reached through `harness/mtmd_mem_ref.cpp`): per device, the image token
-/// budget and whether the image decodes non-causally (v0.6.0).
+/// budget and whether the image decodes non-causally.
 extern fn ref_mtmd_get_memory_usage(fname: [*:0]const u8, params: M.ContextParams, devs: [*]c.ggml_backend_dev_t, sizes: [*]usize, cap: c_int, image_max_tokens: *c_int, use_non_causal: *bool) c_int;
 
 fn memoryUsage(port: bool, fname: [*:0]const u8, params: M.ContextParams) void {
@@ -536,7 +536,7 @@ fn memoryUsage(port: bool, fname: [*:0]const u8, params: M.ContextParams) void {
         n = @intCast(ref_mtmd_get_memory_usage(fname, params, &devs, &sizes, devs.len, &imt, &nc));
     }
     print("memory-usage n {d} image_max_tokens {d} non_causal {}", .{ n, imt, nc });
-    // since v1.0.0 the weights are keyed by their buffer type's device, which
+    // the weights are keyed by their buffer type's device, which
     // is null for the CPU buffer type (ggml-cpu.cpp's FIXME): name it so
     for (0..@min(n, devs.len)) |k| print(" {s}={d}", .{ if (devs[k] != null) std.mem.span(c.ggml_backend_dev_name(devs[k])) else "(null)", sizes[k] });
     print("\n", .{});
@@ -555,7 +555,7 @@ fn runMedia(x: *const Ctx, tmp: []const u8, inputs: []const u8, vision: bool, au
         for (placeholders.items) |b| api.mtmd_bitmap_free(b);
         placeholders.deinit(x.a);
     }
-    // v0.7.0: the frames of one video, mergeable, each with its placeholder
+    // the frames of one video, mergeable, each with its placeholder
     var frames: std.ArrayList(P) = .empty;
     defer {
         for (frames.items) |b| api.mtmd_bitmap_free(b);
@@ -646,7 +646,7 @@ fn runMedia(x: *const Ctx, tmp: []const u8, inputs: []const u8, vision: bool, au
         print("video {d} frames\n", .{frames.items.len});
         try tokenizeAndRunAdjacent(x, frames.items, true, true);
         try tokenizeAndRunAdjacent(x, frame_placeholders.items, false, true);
-        // mergeable alone does not make a video frame (v0.8.0)
+        // mergeable alone does not make a video frame
         for (frames.items) |b| api.mtmd_bitmap_set_is_video(b, false);
         print("merged images {d}\n", .{frames.items.len});
         try tokenizeAndRunAdjacent(x, frames.items, true, true);
@@ -754,7 +754,7 @@ fn tokenizeAndRunAdjacent(x: *const Ctx, bitmaps: []const P, run: bool, adjacent
     flush();
 }
 
-/// v1.0.0: `mtmd_helper_resampler` (3d94ffe45) through the C entry points:
+/// `mtmd_helper_resampler` (3d94ffe45) through the C entry points:
 /// invalid rates, equal rates, both directions, streamed in uneven chunks
 /// with an empty one; every output's count and bits.
 fn runResampler(api: *const Api) void {
@@ -782,7 +782,7 @@ fn runResampler(api: *const Api) void {
     flush();
 }
 
-/// v1.0.0: the caller's frame temperature (`mtmd_helper_gen_audio_inp.temp`,
+/// The caller's frame temperature (`mtmd_helper_gen_audio_inp.temp`,
 /// 2d99adb10) for the next generations; -1 is the model default.
 var g_tts_temp: f32 = -1.0;
 
@@ -831,7 +831,7 @@ fn runTts(x: *const Ctx, modality: []const u8, steps: c_int) void {
     runGenApi(x, modality);
     runTtsStream(x, modality, .pcm, steps);
     runTtsStream(x, modality, .wav, steps);
-    // v0.9.0: a predefined voice as the speaker reference, by a name cased
+    // a predefined voice as the speaker reference, by a name cased
     // differently from the model's
     if (x.api.mtmd_gen_audio_voice_name(x.mctx, 0)) |name0| {
         var buf: [256]u8 = undefined;
@@ -845,7 +845,7 @@ fn runTts(x: *const Ctx, modality: []const u8, steps: c_int) void {
     }
 }
 
-/// v0.9.0: the predefined voices and the gen-side tensor reader, on every
+/// The predefined voices and the gen-side tensor reader, on every
 /// fixture (none on most): each voice's bitmap, then a voice through the
 /// tokenizer and the encoder, where a voice needs no audio encoder.
 fn runVoices(x: *const Ctx) void {
@@ -909,7 +909,7 @@ fn runTtsPromptRef(x: *const Ctx, modality: []const u8, steps: c_int, prompt: [:
     runTtsPromptRefLang(x, modality, steps, prompt, spk, "");
 }
 
-/// v0.9.0: chatterbox's backbone token at step `s`: speech tokens, a text
+/// Chatterbox's backbone token at step `s`: speech tokens, a text
 /// token (decoded, but no speech code) at step 2, the end of speech at 5.
 fn cbxToken(x: *const Ctx, s: c_int) c.llama_token {
     if (s == 5) return x.api.llama_vocab_eos(x.api.llama_model_get_vocab(x.model));
@@ -982,7 +982,7 @@ fn runTtsPromptRefLang(x: *const Ctx, modality: []const u8, steps: c_int, prompt
 }
 
 // -----------------------------------------------------------------------------
-// v0.8.0: audio streams, gen state and the soundtrack of a video
+// audio streams, gen state and the soundtrack of a video
 
 /// The token whose text is `text`, -1 if the vocabulary has none.
 fn tokenOf(x: *const Ctx, text: []const u8) c.llama_token {
@@ -1242,7 +1242,7 @@ fn runGenApi(x: *const Ctx, modality: []const u8) void {
         return;
     }
     if (std.mem.startsWith(u8, modality, "tts-chatterbox")) {
-        // v0.9.0: one TTS decode over the whole utterance, after the voice's
+        // one TTS decode over the whole utterance, after the voice's
         // reference is taken from the last encode
         var codes = [_]i32{ 3, 10, 4299, 0, 17 };
         inp.type = .gen_wav;
@@ -1547,7 +1547,7 @@ pub fn main(init: std.process.Init) !u8 {
     cp.n_batch = 2048;
     cp.n_ubatch = 2048;
     cp.embeddings = std.mem.startsWith(u8, modality, "tts");
-    // v0.9.0: chatterbox's multilingual cfg pairs seq 0 with n_seq_max / 2
+    // chatterbox's multilingual cfg pairs seq 0 with n_seq_max / 2
     if (std.mem.startsWith(u8, modality, "tts-chatterbox")) cp.n_seq_max = 2;
     cp.n_threads = 4;
     cp.n_threads_batch = 4;

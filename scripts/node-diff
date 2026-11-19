@@ -10,7 +10,7 @@
 # This is the gate between `make ops-diff` (exact, but only the shapes it was
 # written for) and token parity (the model's real graph, but coarse: a
 # last-bit difference has to move an argmax to show). It found three
-# dot-product epilogues the vec_dot goldens had passed -- see NOTES.md.
+# dot-product epilogues the vec_dot goldens had passed (`q5_K`, `tq1_0`, `tq2_0`).
 #
 # By default the model runs on the CPU device alone: on a Metal machine the
 # CPU kernels are otherwise never reached by inference. `--gpu` runs it on
@@ -83,7 +83,7 @@ done
 # graph at every node -- so Metal's fusion (`ggml_metal_op` folding a
 # RMS_NORM + MUL + ADD, a MUL_MAT + ADD, ...) and its concurrent encoding
 # never run on either side, and a broken fusion path passes every node.
-# Measured on CUDA (NOTES.md, "Stage 6"). Full logits, bit for bit, for the
+# Measured on CUDA. Full logits, bit for bit, for the
 # prompt and STEPS greedy steps.
 STEPS=${STEPS:-32}
 for nt in 1 4; do

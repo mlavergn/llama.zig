@@ -10,15 +10,14 @@
 //!
 //! # Flag compatibility is the contract
 //!
-//! Decision 20: this is a drop-in replacement for what we support, not a new
+//! This is a drop-in replacement for what we support, not a new
 //! CLI with its own ideas. So flags keep upstream's names, aliases, argument
 //! forms and defaults even where something else would read better. A flag we
-//! have not implemented is **refused**, never silently ignored (Decision 22) --
+//! have not implemented is **refused**, never silently ignored --
 //! silently ignoring `--temp` would make a wrong answer look like a right one.
 //!
 //! # One-shot only, for now
 //!
-//! Decision 30 sequences one-shot generation before interactive conversation.
 //! Upstream's `llama-cli` is interactive *by default*; this binary is not, so
 //! it says so rather than quietly behaving differently -- see `Args.one_shot`.
 //!
@@ -31,7 +30,7 @@
 //!
 //! Both are accepted here. Refusing either would break a command line that
 //! works against one of the two upstream binaries, which is the opposite of
-//! what Decision 20 promises.
+//! a drop-in.
 
 const std = @import("std");
 const upstream = @import("upstream_flags.zig");
@@ -99,7 +98,7 @@ pub const Args = struct {
     /// correct flag for one of the upstream binaries.
     ///
     /// When *none* of them is given, upstream would have been interactive and
-    /// we are not, so `main` warns. Decision 30: say so plainly rather than
+    /// we are not, so `main` warns: say so plainly rather than
     /// behaving differently in silence.
     one_shot: bool = false,
     /// `-cnv`, `--conversation`, `-i`, `--interactive`.
@@ -294,7 +293,7 @@ pub const Failure = struct {
                 "error: {s} needs a value\n",
                 .{self.arg},
             ),
-            // The distinction Decision 22 is really about: the user's command
+            // The distinction that matters: the user's command
             // line is fine and we are behind, which is worth saying plainly.
             error.UnsupportedFlag => try w.print(
                 "error: {s} is a llama.cpp flag that llamazig does not support yet\n" ++
@@ -930,7 +929,7 @@ test "every alias of a flag reaches the same field" {
 }
 
 test "a real upstream flag is refused differently from a typo" {
-    // The distinction Decision 22 exists for: one of these is the user's
+    // The distinction refusal exists for: one of these is the user's
     // mistake, the other is ours.
     const known = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--mirostat", "2" });
     try testing.expectEqual(Error.UnsupportedFlag, known.fail.err);
@@ -939,7 +938,7 @@ test "a real upstream flag is refused differently from a typo" {
     try testing.expectEqual(Error.UnknownFlag, typo.fail.err);
 }
 
-test "v0.6.0's new flags are real upstream flags this CLI does not take" {
+test "upstream flags this CLI does not take are reported as unsupported" {
     // `--spec-draft-sampling` (no speculative decoding here), `--rpc` (no RPC
     // backend) and `--nextn` (llama-imatrix's) are refused as ours to add,
     // not as typos: cli/upstream_flags.zig lists them at b1b770d90.

@@ -9,7 +9,7 @@
 //!
 //! **The first C++ translation unit ported.** It is here as the warm-up: the
 //! contract is three symbols, the callers are all already Zig, and it proves
-//! the Stage 3 swap mechanism carries over to a `.cpp` file unchanged.
+//! the C-ABI swap carries over to a `.cpp` file unchanged.
 //!
 //! # Why libc++'s primitive and not a Zig mutex
 //!
@@ -19,7 +19,7 @@
 //! `impl.CxxMutex`, which drives exactly those, is the closer translation
 //! rather than a substitution.
 //!
-//! It is also the only workable one. Decision 39: Zig 0.16's `std.Io.Mutex`
+//! It is also the only workable one: Zig 0.16's `std.Io.Mutex`
 //! takes an `Io` on every lock, and a function entered through a C ABI has
 //! none to thread through. `src/ggml/cpu/threading.zig` reaches the same
 //! conclusion for the threadpool's mutex and condition variable.

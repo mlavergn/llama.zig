@@ -1,5 +1,5 @@
-// A backend device that is the CPU without GGML_OP_GATED_DELTA_NET and, since
-// v0.8.0, GGML_OP_TOP_K_MASK, whose unfused selection graphs (the k-pool
+// A backend device that is the CPU without GGML_OP_GATED_DELTA_NET and
+// GGML_OP_TOP_K_MASK, whose unfused selection graphs (the k-pool
 // indexers', `build_top_k_mask`'s) are likewise otherwise never run.
 //
 // **Not a port.** The harness's way into the paths a backend takes when it

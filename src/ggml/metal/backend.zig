@@ -11,7 +11,7 @@
 //!
 //! Nothing here talks to Metal. Every Metal call goes through
 //! `device_c.zig` to `ggml-metal-device.m` and `ggml-metal-context.m`,
-//! which stay Objective-C permanently (Decision 13). This file is the
+//! which stay Objective-C permanently. This file is the
 //! `ggml_backend` vtable plumbing around them, and its shape is the one
 //! `cpu/cpu_backend.zig` already established: iface structs of function
 //! pointers, magic statics for the per-device singletons, and a registry.
@@ -168,7 +168,7 @@ fn BufferIface(comptime shared: bool) type {
         /// `ggml_backend_metal_buffer_private_i`
         /// (ggml-metal.cpp:121, 230 @b1b770d90).
         ///
-        /// Since v0.9.0 both implement the three batched slots; every
+        /// Both implement the three batched slots; every
         /// slot is listed, since translate-c defaults an omitted one to
         /// null.
         pub const iface = c.ggml_backend_buffer_i{
@@ -335,7 +335,7 @@ fn BufferType(comptime kind: Kind) type {
             return false;
         }
 
-        // v0.6.0's `alloc_buffer_n` and `get_alloc_size_n` are null in all
+        // `alloc_buffer_n` and `get_alloc_size_n` are null in all
         // three, so `ggml_backend_buft_alloc_buffer_n` takes its default
         // planner over `alloc_buffer`
         const iface = c.struct_ggml_backend_buffer_type_i{
@@ -472,7 +472,7 @@ fn backendEventWait(backend: c.ggml_backend_t, event: c.ggml_backend_event_t) ca
 /// Ports `ggml_backend_metal_graph_optimize` (ggml-metal.cpp:640
 /// @b1b770d90).
 ///
-/// Since v0.5.0 it first tells the scheduler which inputs a fused kernel
+/// It first tells the scheduler which inputs a fused kernel
 /// still reads after the nodes it elides (`fusion.zig`'s
 /// `ggml_metal_fusion_add_alloc_deps`), so the allocator cannot reuse
 /// them early -- the MoE reduction's expert views are the case. Then the

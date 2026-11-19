@@ -1,6 +1,6 @@
 //! Build-time tool that writes the CUDA kernel table, `cuda_kernels.zig`.
 //!
-//! **Not a port.** PLAN.md Decisions 44 and 45: every upstream `.cu` is
+//! **Not a port.** Every upstream `.cu` is
 //! compiled to a fatbin and embedded; the Zig host layer names a kernel by
 //! the translation unit it lives in and its demangled template spelling,
 //! `mul_mat_q<(ggml_type)12, (int)64, (bool)0>`, and this table turns that

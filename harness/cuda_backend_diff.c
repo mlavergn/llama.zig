@@ -34,11 +34,11 @@
  *   ending the graph) and on MoE weighted reductions. They only keep
  *   tensors allocated longer, so a missing one shows in no result until the
  *   allocator happens to reuse the memory -- and `test-backend-ops` never
- *   calls `graph_optimize` at all. Since v0.6.0 also the shared-expert
+ *   calls `graph_optimize` at all. Also the shared-expert
  *   reordering: the node order it leaves and the two dependencies it adds;
- * - since v0.6.0, whether each buffer type sets `alloc_buffer_n` and
+ * - whether each buffer type sets `alloc_buffer_n` and
  *   `get_alloc_size_n`, and `get_alloc_size_n` over short tensor lists;
- * - since v0.9.0, the device buffer's batched slots (`set_tensor_n`,
+ * - the device buffer's batched slots (`set_tensor_n`,
  *   `get_tensor_n`, `cpy_tensor_n`): whether each is set, and the bytes a
  *   round trip through them gives back -- 200 small reads and two above the
  *   128 KiB gather limit packed into one host span (batch-get.cu's gather,
@@ -74,7 +74,7 @@ static void ask_reg(ggml_backend_reg_t reg) {
         "ggml_backend_comm_init", "ggml_backend_comm_free", "ggml_backend_comm_allreduce_tensor",
         "ggml_backend_register_host_buffer", "ggml_backend_unregister_host_buffer",
         "ggml_backend_get_features", "ggml_backend_split_buffer_type", "no_such_function",
-        /* v0.9.0, NCCL only: null without GGML_USE_NCCL on both sides. */
+        /* NCCL only: null without GGML_USE_NCCL on both sides. */
         "ggml_backend_comm_init_rank",
     };
     for (size_t i = 0; i < sizeof(procs) / sizeof(procs[0]); i++) {
@@ -94,7 +94,7 @@ static void ask_buft(const char * what, ggml_backend_buffer_type_t buft) {
     SAY("%s alignment = %zu", what, ggml_backend_buft_get_alignment(buft));
     SAY("%s max_size = %zu", what, ggml_backend_buft_get_max_size(buft));
     SAY("%s is_host = %d", what, ggml_backend_buft_is_host(buft));
-    /* v0.6.0's list entry points: CUDA sets neither, so the generic
+    /* The list entry points: CUDA sets neither, so the generic
      * planner in ggml-backend.cpp serves both. */
     SAY("%s iface alloc_buffer_n = %s", what, buft->iface.alloc_buffer_n ? "set" : "null");
     SAY("%s iface get_alloc_size_n = %s", what, buft->iface.get_alloc_size_n ? "set" : "null");
@@ -329,7 +329,7 @@ static struct ggml_cgraph * build_moe_reduce(struct ggml_context * ctx, int64_t 
  * @620d2225c) -- routed experts' gate/up/GLU over a reshaped input and a
  * shared expert's over the same input -- with `n_between` unrelated nodes
  * expanded between the two, and with `blocker` another routed gate/up pair
- * among them instead. v0.6.0's graph_optimize moves the shared expert's
+ * among them instead. The graph_optimize moves the shared expert's
  * three nodes to right after the routed GLU and keeps the routed input and
  * ids alive until the shared GLU; the blocker stops its search. The
  * weights live in `wctx`, allocated in the device's buffer, because the
@@ -457,7 +457,7 @@ static void ask_graph_optimize(ggml_backend_dev_t dev) {
             ggml_free(ctx);
         }
     }
-    /* The shared expert (v0.6.0), with quantized weights in this device's
+    /* The shared expert, with quantized weights in this device's
      * buffer and, as a negative, F16 ones the match refuses. */
     static const enum ggml_type wtypes[] = { GGML_TYPE_Q4_0, GGML_TYPE_F16 };
     for (size_t wt = 0; wt < sizeof(wtypes) / sizeof(wtypes[0]); wt++) {
@@ -514,7 +514,7 @@ static bool tensor_n_ref_bad;
 
 enum { TN_SMALL = 200, TN_BIG = 2, TN_N = TN_SMALL + TN_BIG };
 
-/* The batched slots, v0.9.0. */
+/* The batched slots. */
 static void ask_tensor_n(ggml_backend_buffer_type_t buft) {
     const int64_t ne_small = 64;      /* 256 bytes: gathered */
     const int64_t ne_big = 64 * 1024; /* 256 KiB: above max_gather_read_bytes, DMA */
@@ -689,7 +689,7 @@ int main(void) {
     ask("port", ggml_backend_cuda_reg());
     ask("ref", ref_ggml_backend_cuda_reg());
     /* A gate that recorded no top-k dependency on the reference compared
-     * nothing about the v0.5.0 arm: say so rather than pass. */
+     * nothing about that arm: say so rather than pass. */
     if (opt_deps_topk == 0) {
         fprintf(stderr, "cuda_backend_diff: graph_optimize recorded no top-k MoE dependency\n");
         return 3;
@@ -698,7 +698,7 @@ int main(void) {
         fprintf(stderr, "cuda_backend_diff: a batched round trip on the reference gave back other bytes\n");
         return 3;
     }
-    /* Likewise for v0.6.0's shared-expert reordering. */
+    /* Likewise for the shared-expert reordering. */
     if (opt_deps_shared == 0) {
         fprintf(stderr, "cuda_backend_diff: graph_optimize recorded no shared-expert dependency\n");
         return 3;

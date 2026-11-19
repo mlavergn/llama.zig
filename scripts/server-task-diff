@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Compare tools/server/'s data layer with upstream's server-common,
-server-task and server-schema (Stage 10 step 3a).
+server-task and server-schema.
 
 `harness/server_task_ref.cpp` compiles beside upstream's `server-common.cpp`,
 `server-task.cpp`, `server-schema.cpp` and `server-chat.cpp`, unmodified,
@@ -26,7 +26,7 @@ The records, generated here from a fixed seed:
       with the session applied, and into a task_result_state; then R
       partials and a final fed a reply in pieces, as text or tokenized
       (common_chat_input_tokenize): the request's own PEG parser, streamed
-      (Stage 10 step 4; v0.7.0's chat session)
+      (the chat session)
 - RC, AC, TC  server-chat.cpp's conversions: Responses, Anthropic and
       transcriptions requests into /chat/completions bodies
 - T   tokenize_input_prompts / tokenize_mixed over six vocabularies, and
@@ -261,7 +261,7 @@ def chat_message(p):
             elif t < 0.87:
                 parts.append({"type": "input_video", "input_video": {"url": B64_1}})
             elif t < 0.9:
-                # v0.5.0: "video_url" is an alias of "input_video", under its own key
+                # "video_url" is an alias of "input_video", under its own key
                 parts.append(rng.choice([{"type": "video_url", "video_url": {"url": B64_1}},
                                          {"type": "video_url", "video_url": {"data": B64_1}, "input_video": {"url": "x"}},
                                          {"type": "video_url", "input_video": {"url": B64_1}}]))
@@ -501,7 +501,7 @@ def targeted():
         yield ("C", {"v": 0, "tmpl": tmpl, "opt": {}, "body": {"messages": [{"role": "system", "content": "s"}, u, a, u]}})
     yield "ST", {"tokens": [5, 6, 7], "ops": [["serialize", 1000], ["serialize", 6], ["serialize", 7, 1, 2], ["serialize", 7, 0, 7]]}
     probs = [{"tok": 5, "prob": 0.5, "text": "h\u00e9", "probs": [{"tok": 6, "txt": "x\u00e9", "prob": 0.25}]}]
-    # v0.7.0: a state's chat session parses each final once (feed() or
+    # a state's chat session parses each final once (feed() or
     # finish() after finish() is a GGML_ASSERT), so every final gets a fresh one
     for post in (False, True):
         yield "S", {"id": 999, "parser": {"format": 0}}
@@ -522,7 +522,7 @@ def targeted():
         ["alloc", [1, 2, 3], 10, 0, []], ["alloc", [4, 5, 6], 10, 0, []], ["update"], ["alloc", [7, 8, 9, 9, 9], 10, 0, []], ["update"]]}
     yield "PC", {"limit_mib": 1, "limit_tokens": 2, "ops": [
         ["alloc", [1, 2, 3], 1000, 0, []], ["alloc", [4, 5, 6], 1000, 0, []], ["update"]]}
-    # v1.0.0: the full-restore tag reads the lcp of the prompt chosen, not of the slot's own
+    # the full-restore tag reads the lcp of the prompt chosen, not of the slot's own
     yield "PC", {"limit_mib": 0, "limit_tokens": 0, "ops": [
         ["alloc", [1, 2, 9], 10, 0, []], ["alloc", [1, 2, 3, 4], 10, 0, [10, 20]], ["cur", []], ["load", [1, 2, 3, 4, 5]]]}
     yield "PC", {"limit_mib": 0, "limit_tokens": 0, "ops": [
@@ -688,7 +688,7 @@ def records():
 
 
 # ---------------------------------------------------------------------------
-# v0.6.0: the typed decision API, the model architecture object, /embeddings
+# the typed decision API, the model architecture object, /embeddings
 # content arrays
 
 # harness/server/decision.setup's models, after VOCABS on the command line
@@ -811,7 +811,7 @@ def decision_records():
             body["videos"] = rng.choice([[], None, ["v"]])
         yield "D", {"v": base + rng.randrange(6), "body": body, "pool": pool(), "n_slots": rng.choice([1, 2, 3, 8]),
                     "nan_at": rng.choice([-1, -1, -1, 0, 1]), "short": rng.random() < 0.05}
-    # v0.9.0: a shared prefix stops before the first position a task reads,
+    # a shared prefix stops before the first position a task reads,
     # here kev's option markers, which questions with the same instructions
     # and options share
     d_kev = DEC_NAMES.index("KEV")
@@ -823,7 +823,7 @@ def decision_records():
                 "c": {"type": "choice", "instructions": "same", "criteria": {"x": None, "w": None}}}):
         for n_slots in (2, 3):
             yield "D", {"v": base + d_kev, "body": {"state": "a shared state", "questions": qs}, "pool": pool(), "n_slots": n_slots}
-    # v0.8.0's types: granite-switch, h2o-lightning, lfm3-d1, lfm3-d1-omni, minicpm-ocr-jev
+    # types: granite-switch, h2o-lightning, lfm3-d1, lfm3-d1-omni, minicpm-ocr-jev
     d_granite, d_h2o, d_lfm3, d_omni, d_ocr = (DEC_NAMES.index(n) for n in ("GRANITE", "H2OQ", "LFM3D1", "LFM3OMNI", "OCR"))
     deep = lambda n: {"a": deep(n - 1)} if n else "x"
     deep_arr = lambda n: [deep_arr(n - 1)] if n else 1
@@ -902,7 +902,7 @@ def decision_records():
 
 
 # ---------------------------------------------------------------------------
-# Stage 10 step 4: chat over Jinja, the request conversions, parsed streams
+# Chat over Jinja, the request conversions, parsed streams
 
 TEMPLATES_DIR = "llama.cpp/models/templates"
 TEMPLATES = sorted(f for f in os.listdir(TEMPLATES_DIR) if f.endswith(".jinja"))
@@ -993,7 +993,7 @@ def response_items():
         elif k < 0.8:
             it = {"type": "function_call_output", "call_id": "call_1",
                   "output": rng.choice(["sunny", [{"type": "input_text", "text": "x"}], [{"type": "text", "text": "y"}], [{}], 5,
-                                        # v0.5.0: an image is a tool output too
+                                        # an image is a tool output too
                                         [{"type": "input_image", "image_url": B64_1}],
                                         [{"type": "input_image", "image_url": "data:image/png;base64," + B64_1, "detail": "auto"},
                                          {"type": "input_text", "text": "z"}],
@@ -1149,7 +1149,7 @@ def chat_step4():
             reply = rng.choice(REPLIES)
             res_type = rng.choice([1, 1, 3, 6, 0])
             stream = rng.random() < 0.6
-            # v0.7.0: the session parses text and tokens; a tokenized
+            # the session parses text and tokens; a tokenized
             # chunk carries the tokens common_chat_input_tokenize gives
             tok = rng.random() < 0.5
             pos = 0
@@ -1192,7 +1192,7 @@ def chat_step4():
             yield "R", {"kind": "final", "state": sid, "index": 0, "f": {"content": " is sunny</think>\n\nYes.", "stream": True,
                                                                         "res_type": 1, "stop": 1, "model": "m", "cmpl_id": "chatcmpl-x"}}
             sid += 1
-    # v0.7.0: the session's additional stops reach the task's antiprompt
+    # the session's additional stops reach the task's antiprompt
     # (server_task::apply_chat_session), and the request's own sampler keys
     # the session owns are dropped from the parameters
     for t in ("inclusionai-ling-3.0-flash.jinja", "ibm-granite-granite-4.1.jinja", "poolside-Laguna-XS-2.1.jinja"):
@@ -1236,7 +1236,7 @@ def chat_step4():
                          {"role": "assistant", "type": "message", "content": "plain"}]},
               {"input": "x", "tools": [{"type": "function", "name": "f"}, {"type": "web_search"}, {"type": 3}]},
               {"input": "x", "tools": {"a": 1}}, {"input": "x", "tools": []}, [1, 2], "x",
-              # v0.9.0: the members of extra_params merged into the converted body, over what it set
+              # the members of extra_params merged into the converted body, over what it set
               {"input": "hi", "extra_params": {"seed": 7, "min_p": 0.5, "model": "x"}},
               {"input": "hi", "max_output_tokens": 8, "reasoning": {"effort": "low"},
                "extra_params": {"max_tokens": 2, "reasoning_effort": "high", "messages": 5}},
@@ -1263,7 +1263,7 @@ def chat_step4():
               {"max_tokens": 9}, {"n_predict": 4, "max_tokens": 9}, {"n_predict": -2}, {"repeat_penalty": 1.5},
               {"stream": True}, {"stream": 1}, {"top_k": "x"}, {"top_p": "y"}, {"seed": "z"}, {"n_predict": "w"},
               {"repeat_penalty": None}, {"unknown": 1},
-              # v1.0.0: temperature
+              # temperature
               {"temperature": 0.7}, {"temperature": 0}, {"temperature": -1}, {"temperature": 1e9}, {"temperature": "x"}):
         yield "TS", b
     # v1.0.0 (08f945ffb): the OpenAI speech API's body into /tts's
@@ -1276,7 +1276,7 @@ def chat_step4():
               {"model": "tts-1", "input": "a", "voice": "b", "response_format": "pcm", "stream_format": "audio", "speed": 1,
                "extra": [1, 2]}, [1], "x"):
         yield "SP", b
-    # v1.0.0: pcm_f32_to_s16 -- the clamp, NaN, rounding halves away from zero, the ends
+    # pcm_f32_to_s16 -- the clamp, NaN, rounding halves away from zero, the ends
     vals = [0.0, -0.0, 1.0, -1.0, 2.0, -2.0, 0.5 / 32767, -0.5 / 32767, 1.5 / 32767, 0.25, -0.75, 1e-30,
             float("inf"), float("-inf"), float("nan"), 0.99999, -0.99999, 3.4e38]
     vals += [rng.uniform(-1.2, 1.2) for _ in range(64)]
@@ -1299,7 +1299,7 @@ def chat_step4():
               {"messages": [{"role": "assistant"}, {"role": "user"}, {"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "f", "input": {"a": [1, 2]}}]},
                             {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "r"}, {"type": "text", "text": "next"}]}]},
               {"messages": [], "thinking": {"type": "enabled"}, "metadata": {"user_id": "me"}, "tool_choice": {"type": "any"}}, [1], "x",
-              # v0.8.0: id_slot, extra_params, defer_loading, tool_reference
+              # id_slot, extra_params, defer_loading, tool_reference
               {"messages": [], "id_slot": 1}, {"messages": [], "extra_params": {"seed": 7, "min_p": 0.5, "max_tokens": 3}},
               {"messages": [], "extra_params": 5}, {"messages": [], "extra_params": []},
               {"messages": [], "tools": [{"name": "f", "defer_loading": True}, {"name": "g"}, {"name": "h", "defer_loading": None}]},
@@ -1330,7 +1330,7 @@ def chat_step4():
 # ---------------------------------------------------------------------------
 
 COVERAGE = [
-    # v0.6.0: the decision API (server-decision.cpp) and /embeddings content arrays
+    # the decision API (server-decision.cpp) and /embeddings content arrays
     "\"state\" must be provided", "\"questions\" must be a non-empty object", ": must be an object",
     "\"instructions\" must be provided", "\"criteria\" must be a non-empty object",
     "\"criteria\" must be an array of 2 to 10 levels", "\"criteria\" must be an object",
@@ -1369,7 +1369,7 @@ COVERAGE = [
     "spec_decode_num_accepted_tokens_per_pos_total{position=", "response.output_text.delta", "content_block_start",
     "message_stop", "transcript.text.done", "n_restored", "n_written", "alora_invocation_tokens", "router_clone",
     "restored_bad", "n_prompts 2", "media_marker", "cache 1", "load 0", "load 1", "pipe w1 r1",
-    # Stage 10 step 4
+    # chat over Jinja
     "'input' is required", "does not support 'previous_response_id'", "'Input text' requires 'text'",
     "'image_url' is required", "'input_file' is not supported", "'type' must be one of 'input_text'",
     "'Output text' requires 'text'", "'Refusal' requires 'refusal'", "'type' must be one of 'output_text' or 'refusal'",
@@ -1381,12 +1381,11 @@ COVERAGE = [
     "__metadata_user_id", "thinking_budget_tokens", "Perform ASR", "Transcribe audio to text", "cch=fffff",
     "\"tool_calls\":[{", "reasoning_content", "Cannot use custom grammar constraints with tools",
     "logprobs is not supported with tools + stream", "Unable to generate parser", "reasoning_budget_end_tags",
-    # v0.7.0: the chat session (#30210), its format applied to the task,
+    # the chat session (#30210), its format applied to the task,
     # its sampling, tokenized chunks
     "sp.grammar_lazy\":true", "\"has_template\":false", "\"format\":\"peg-native\"",
     "chat_format_int\":2", "chat_format_int\":3", "chat_format_int\":4", "\"chat_format\":\"peg-gemma4\"", "ctoks ",
     "does not match the expected", "response.function_call_arguments.delta", "tool_use",
-    # v1.0.0
     "'text' must be an object", "'text.format' must be an object", "'text.format.type' must be one of",
     "\"response_format\":{\"type\":\"json_schema\",\"json_schema\":{\"name\":\"n\"",
     "Only 'wav' and 'pcm' response_format are supported for speech", "Only 'audio' stream_format is supported for speech",
@@ -1401,7 +1400,6 @@ LOG_COVERAGE = [
     "No parser definition detected", "Parsed message", "Grammar (tool_calls)", "Grammar (", "n_prefix_take",
     "loading image from local file", "cache state:",
     "unsupported Responses tool type", "anthropic string not as expected", "Forcing pure content template",
-    # v1.0.0
     "'instructions' is not supported for speech and is ignored", "__TEST_TAG_PROMPT_CACHE_RESTORE__",
     "__TEST_TAG_PROMPT_CACHE_FULL_RESTORE__",
 ]
@@ -1413,7 +1411,7 @@ LABELLED = re.compile(r"^(\w+)\(\d+\):")
 def same_jinja(ref, port):
     """A port line holding the Jinja engine's failure (`jinja: `) matches a
     reference line equal up to there, the length labels aside: the engine's
-    own text is not reproduced (NOTES.md, "Stage 9 step 4")."""
+    own text is not reproduced."""
     if "jinja: " not in port:
         return False
     r = LABELLED.sub(r"\1:", ref)
@@ -1529,8 +1527,7 @@ def main():
             a = sides["ref"][idx].splitlines()
             b = sides["port"][idx].splitlines()
             total += len(a)
-            # a Jinja engine's own message is not reproduced (NOTES.md, "Stage
-            # 9 step 4"): where the port's reads `jinja: `, the class alone
+            # a Jinja engine's own message is not reproduced: where the port's reads `jinja: `, the class alone
             b = align_jinja(a, b)
             if a != b:
                 failures += 1

@@ -1,4 +1,4 @@
-# The transcriptions API (Stage 10 step 4): scripts/server-diff asr.
+# The transcriptions API: scripts/server-diff asr.
 # /v1/audio/transcriptions and /audio/transcriptions: a multipart upload
 # converted into chat over the template's ASR preset (server-chat.cpp),
 # then run through the audio projector. The text model and projector are

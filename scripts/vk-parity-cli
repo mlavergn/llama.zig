@@ -1,7 +1,7 @@
 #!/bin/bash
 # `parity-cli` for Vulkan: the actual `llama-cli` binary against a reference
 # driver, both greedy, on the Vulkan device -- `cuda-parity-cli`'s
-# counterpart (PLAN.md, "Stage 7 — Vulkan").
+# counterpart.
 #
 # The reference side is `harness/raw_completion.c` -- the driver `make ref`
 # and `cuda-parity-cli` use -- linked against upstream's libllama

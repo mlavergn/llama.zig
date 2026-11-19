@@ -17,9 +17,8 @@ const c = impl.c;
 
 /// Whether the C++ dispatch layer of `repack.cpp` has been ported.
 ///
-/// **This exists because the symbol count lies for this file.** `repack.cpp`
-/// is one of the four translation units `CLAUDE.md` names as exceptions to
-/// the unmangled-exports contract. Its 36 unmangled symbols are the
+/// **This exists because the symbol count lies for this file.** For
+/// `repack.cpp` the unmangled exports are not the whole contract. Its 36 unmangled symbols are the
 /// gemv/gemm and quantize kernels; the buffer type,
 /// `extra_buffer_type::{supports_op, get_tensor_traits}` and the
 /// `tensor_traits` instantiations that decide when to call them all have

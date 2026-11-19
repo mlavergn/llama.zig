@@ -175,7 +175,7 @@ static void api_gguf() {
         if (!path.empty()) {
             auto t = common_speculative_types_from_gguf(path);
             printf("from_gguf %s -> '%s'\n", path.c_str(), common_speculative_type_name_str(t).c_str());
-            // v0.7.0: common_get_gguf_info replaces common_get_decision_type(fname)
+            // common_get_gguf_info replaces common_get_decision_type(fname)
             const auto info = common_get_gguf_info(path);
             printf("gguf_info %s -> decision %d n_ctx_train %u\n", path.c_str(), (int) info.decision_type, info.n_ctx_train);
         }
@@ -417,7 +417,7 @@ static void api_sampler_tables() {
     for (int t = 0; t <= 13; t++) printf("type %d %s %c\n", t, common_sampler_type_to_str((common_sampler_type) t).c_str(), common_sampler_type_to_chr((common_sampler_type) t));
 }
 
-// v0.7.0's common_sampling_add_preserved_tokens and common_sampling_add_grammar_triggers
+// common_sampling_add_preserved_tokens and common_sampling_add_grammar_triggers
 static void print_sampling_lists(const common_params_sampling & s) {
     printf("  preserved");
     for (auto t : s.preserved_tokens) printf(" %d", t);
@@ -538,7 +538,7 @@ static void run_api(const common_params & params, const llama_vocab * vocab) {
     api_utf8();
     api_sampler_tables();
     api_sampling_lists(vocab);
-    // v0.7.0's common_log_set_stdo: off, a line is written nowhere; on again, the next one is
+    // common_log_set_stdo: off, a line is written nowhere; on again, the next one is
     common_log_set_stdo(common_log_main(), false);
     LOG_INF("%s: stdo off, not written\n", __func__);
     common_log_set_stdo(common_log_main(), true);
@@ -604,7 +604,7 @@ static int run_decode(common_params & params) {
             params_dft.model.path.c_str(), params_dft.n_gpu_layers, (int) params_dft.split_mode, (int) params_dft.cache_type_k, (int) params_dft.cache_type_v,
             params_dft.n_outputs_max, params_dft.n_outputs_max_per_seq, (int) params_dft.embedding, (int) params_dft.pooling_type,
             params_dft.cpuparams.n_threads, params_dft.cpuparams_batch.n_threads);
-        // v0.7.0: the draft's own n_ubatch and no MoE cache, beside the target's context parameters
+        // the draft's own n_ubatch and no MoE cache, beside the target's context parameters
         const llama_context_params cp_tgt = common_context_params_to_llama(params);
         const llama_context_params cp_dft = common_context_params_to_llama(params_dft);
         printf("cparams ubatch=%u/%u moe_cache=%zu/%zu\n", cp_tgt.n_ubatch, cp_dft.n_ubatch, cp_tgt.moe_cache_size, cp_dft.moe_cache_size);
@@ -613,7 +613,7 @@ static int run_decode(common_params & params) {
         params.speculative.draft.ctx_dft = spec_init->context();
         printf("draft model=%d ctx=%d\n", (int) (spec_init->model() != nullptr), (int) (spec_init->context() != nullptr));
         // SPEC_SEQ_RM: the server's probe of both contexts, before anything is decoded; a draft
-        // context with a state input decodes it with zeros (v0.7.0's common_batch_set_zero_state)
+        // context with a state input decodes it with zeros (common_batch_set_zero_state)
         if (getenv("SPEC_SEQ_RM")) {
             printf("seq_rm tgt=%d\n", (int) common_context_can_seq_rm(ctx_tgt));
             if (spec_init->context()) printf("seq_rm dft=%d\n", (int) common_context_can_seq_rm(spec_init->context()));
@@ -692,7 +692,7 @@ static int run_decode(common_params & params) {
         (void) n;
         common_batch b(ctx_tgt);
         // SPEC_PREFILL_EMBD: the prefill as embedding rows, as an image's are, a
-        // fixed pattern per position (v0.7.0's MTP drafter catches them up too)
+        // fixed pattern per position (the MTP drafter catches them up too)
         std::vector<float> embd;
         const bool as_embd = getenv("SPEC_PREFILL_EMBD") != nullptr;
         if (as_embd) {
@@ -712,7 +712,7 @@ static int run_decode(common_params & params) {
             }
         } else {
             // SPEC_PREFILL_LAST_OUT: an output on each sequence's last prefill token, as the
-            // server's prompt batch has (v0.9.0's MTP keeps only that row on a shared memory)
+            // server's prompt batch has (MTP keeps only that row on a shared memory)
             const bool last_out = getenv("SPEC_PREFILL_LAST_OUT") != nullptr;
             for (int s = 0; s < n_seq; s++) {
                 for (size_t i = 0; i + 1 < inp[s].size(); i++) b.add(inp[s][i], (llama_pos) i, s, last_out && i + 2 == inp[s].size());

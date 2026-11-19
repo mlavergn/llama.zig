@@ -1,7 +1,6 @@
 #!/bin/bash
 # Writes the multimodal cases' media into $DATA and names their base64 in
-# $DATA/setup.env, so a case line can carry an image as $PNG1 (Stage 10
-# step 8). Run once by scripts/server-diff vision and audio.
+# $DATA/setup.env, so a case line can carry an image as $PNG1. Run once by scripts/server-diff vision and audio.
 #   PNG1, PNG2   64x64 and 100x60 RGB PNGs, PNG3 a 96x48 grey-alpha one
 #   JPG          upstream's tools/mtmd/test-1.jpeg (304x224 slices)
 #   WAV          0.4 s of a 16 kHz mono tone; WAV44 0.3 s of 44.1 kHz stereo

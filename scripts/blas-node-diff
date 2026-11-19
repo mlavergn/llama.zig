@@ -1,6 +1,6 @@
 #!/bin/bash
 # Diff every node of a decode with ggml's BLAS backend in the scheduler,
-# ported against upstream's `ggml-blas.cpp` (PLAN.md, Decision 60).
+# ported against upstream's `ggml-blas.cpp`.
 #
 # `harness/node_dump.c` is linked against two `-Dblas` builds of this
 # repository that differ only in the BLAS backend -- upstream's translation

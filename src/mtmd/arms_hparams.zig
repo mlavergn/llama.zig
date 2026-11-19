@@ -3,8 +3,7 @@
 //! # Provenance
 //!
 //! Ports the per-projector `switch` inside `mtmd_model_loader::load_hparams`
-//! of `llama.cpp/tools/mtmd/mtmd-model.cpp` at v1.0.0 (`b1b770d90`) --
-//! `clip.cpp`'s `clip_model_loader` until v0.9.0. The code before and after the switch is `clip.zig`'s
+//! of `llama.cpp/tools/mtmd/mtmd-model.cpp` at v1.0.0 (`b1b770d90`). The code before and after the switch is `clip.zig`'s
 //! `Loader.loadHparams`, which calls `load` here. Each arm keeps upstream's
 //! keys, required flags, defaults, log lines and messages verbatim; a comment
 //! names the `case` labels it covers.

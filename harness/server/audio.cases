@@ -1,4 +1,4 @@
-# Audio through llama-server (Stage 10 step 8): scripts/server-diff audio.
+# Audio through llama-server: scripts/server-diff audio.
 # As in vision.cases, the fixtures are random and what is compared is the
 # prompt as tokenized, the chunks, the slots' decisions in the whole log and
 # the refusals. The media are vision.setup's ($WAV a 0.4 s 16 kHz tone,

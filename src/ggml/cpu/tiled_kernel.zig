@@ -4,7 +4,7 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cpu/tiled/tiled-kernel.h` and
 //! `llama.cpp/ggml/src/ggml-cpu/tiled/tiled-kernel.cpp` (v1.0.0,
-//! `b1b770d90`), new at v0.6.0 and replacing `iqp.cpp`. Each declaration
+//! `b1b770d90`). Each declaration
 //! names the C it replaces and the line it began at; the driver that calls
 //! these is `tiled.zig`.
 //!

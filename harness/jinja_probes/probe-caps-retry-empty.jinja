@@ -1,4 +1,4 @@
-{#- v0.7.0: caps_get's retry adds an empty reasoning_content, and this template accepts only an empty one on a tool-calling turn. -#}
+{#- caps_get's retry adds an empty reasoning_content, and this template accepts only an empty one on a tool-calling turn. -#}
 {%- for m in messages -%}
 {%- if m.role == 'assistant' and m.reasoning_content is not defined -%}{{ raise_exception('assistant turn without reasoning_content') }}{%- endif -%}
 {%- if m.tool_calls is defined and m.reasoning_content | length > 0 -%}{{ raise_exception('a tool-calling turn must not think') }}{%- endif -%}

@@ -11,9 +11,9 @@
 //! `llama.cpp/ggml/src/ggml-cuda/common.cuh`. The kernels --
 //! `flash_attn_mask_to_KV_max`, `flash_attn_stream_k_fixup_uniform`,
 //! `flash_attn_stream_k_fixup_general` and `flash_attn_combine_results` --
-//! stay CUDA. The sparse K/V path v0.4.0 added (`use_sparse`) reuses the
+//! stay CUDA. The sparse K/V path (`use_sparse`) reuses the
 //! `KV_max` buffer for the indices `fattn.compactMask` writes, which is
-//! `fattn.cu`'s and launches from that translation unit. Since v0.5.0 there
+//! `fattn.cu`'s and launches from that translation unit. There
 //! is one index list per query tile of `ncols1` queries, not per query, and
 //! each list's live count follows the lists in the same buffer.
 //!
@@ -68,7 +68,7 @@ const cc_rdna1 = common.cc.offset_amd + 0x1010;
 const cc_rdna3 = common.cc.offset_amd + 0x1100;
 /// `GGML_CUDA_CC_RDNA3_5` (common.cuh:83 @b1b770d90).
 const cc_rdna3_5 = common.cc.offset_amd + 0x1150;
-/// `GGML_CUDA_CC_RDNA4_M` (common.cuh:84 @b1b770d90), gfx117X, new at v0.9.0.
+/// `GGML_CUDA_CC_RDNA4_M` (common.cuh:84 @b1b770d90), gfx117X.
 const cc_rdna4_m = common.cc.offset_amd + 0x1170;
 /// `GGML_CUDA_CC_RDNA4` (common.cuh:85 @b1b770d90).
 const cc_rdna4 = common.cc.offset_amd + 0x1200;
@@ -222,7 +222,7 @@ pub const LaunchArgs = struct {
     /// length; no default, as the C has none.
     use_sparse: bool,
     warp_size: c_int = common.warp_size,
-    /// Since v0.6.0: the kernel preloads K/V asynchronously (two pipeline
+    /// The kernel preloads K/V asynchronously (two pipeline
     /// stages, no sparse gather), which on a DGX Spark makes whole tiles
     /// preferable to stream-k after a mask scan.
     async_kv_preload: bool = false,

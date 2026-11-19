@@ -2,8 +2,7 @@
 // `harness/jinja_diff.zig`, the harness behind `scripts/jinja-diff`.
 //
 // `llama.cpp/common/jinja` is the Jinja engine upstream's `llama-cli` renders
-// chat templates with; ours renders them through `zigjinja` (PLAN.md,
-// Decisions 25 and 27). This compiles the unmodified engine and renders a
+// chat templates with; ours renders them through `zigjinja`. This compiles the unmodified engine and renders a
 // template the way `common_chat_template` and
 // `common_chat_template_direct_apply_impl` do (chat.cpp:1445, 1074
 // @b1b770d90): `lexer::tokenize`, `parse_from_tokens`, a `context` over the

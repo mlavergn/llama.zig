@@ -34,7 +34,7 @@
 //!
 //! The C parallelises the neighbour search with OpenMP, in three passes so the
 //! output is order-independent: count per entry, prefix-sum the offsets, then
-//! fill. Our build has OpenMP off (see `CLAUDE.md`), so the `#pragma`s compile
+//! fill. Our build has OpenMP off, so the `#pragma`s compile
 //! away and the C runs exactly the serial loop written here. The three-pass
 //! structure is kept regardless -- it is what makes the result deterministic,
 //! and it is the shape a future `std.Thread` version would need.

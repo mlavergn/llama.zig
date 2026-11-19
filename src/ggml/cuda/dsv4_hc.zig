@@ -113,7 +113,7 @@ pub fn opDsv4HcPre(ctx: *common.Context, dst: *Tensor) void {
 /// Ports `ggml_cuda_op_dsv4_hc_post` (dsv4-hc.cu:283 @b1b770d90). A null
 /// `comb` (`src[3]`) is the identity: each stream adds its own residual,
 /// through `dsv4_hc_post_f32<false, gated>`, which never reads `comb` or its
-/// strides, both passed as zero. Since v0.8.0 `gate_scale_in` and
+/// strides, both passed as zero. `gate_scale_in` and
 /// `gate_scale_out` are the `SCALE` nodes of a fused `SCALE -> SIGMOID ->
 /// SCALE` chain feeding `src[2]` (qwen4exp's `hc_combine`): the kernel reads
 /// the raw weights from before the chain and applies it.

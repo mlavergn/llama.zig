@@ -12,7 +12,7 @@
 //! through its `_f32` one. Nothing is converted, so the element types below
 //! are chosen by width alone — `u16` where the C says `ggml_fp16_t`, `f32`
 //! where it says `float` — and a value is only ever loaded and stored.
-//! `concat` has had one body for every type since v0.8.0, which moves rows,
+//! `concat` has one body for every type, which moves rows,
 //! or elements of a strided source, by `ggml_type_size`.
 //!
 //! # Loop index names

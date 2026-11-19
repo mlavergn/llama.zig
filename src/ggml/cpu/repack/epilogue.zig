@@ -13,8 +13,7 @@
 //!
 //! # The fusion is named, because there is an oracle
 //!
-//! `CLAUDE.md`'s rule is to name a fusion only when something can tell you
-//! you got it wrong. `scripts/repack-diff` is that something: it runs
+//! A fusion is named only when something can tell you you got it wrong. `scripts/repack-diff` is that something: it runs
 //! every one of these kernels against the reference C++ in one process and
 //! compares on bits. Before this helper existed it reported 12 of 36
 //! kernels differing, every one of them by one ULP.
@@ -31,7 +30,7 @@
 //! ```
 //!
 //! So the *inner* product rounds and the *outer* one fuses with the add.
-//! That is the same shape `CLAUDE.md` records for `xielu`: the left
+//! That is the same shape as `xielu`'s: the left
 //! operand of the `+`.
 
 const std = @import("std");

@@ -24,8 +24,7 @@
 //! # libllama
 //!
 //! The model is reached through libllama's port, `@import("llama").api`,
-//! never a `llama_*` C symbol: in a harness the C symbols are upstream's
-//! (`CLAUDE.md`, the libmtmd note).
+//! never a `llama_*` C symbol: in a harness the C symbols are upstream's.
 
 const std = @import("std");
 const json = @import("json");

@@ -139,11 +139,11 @@ const NormalizationResult = struct {
 /// Ports `llm_tokenizer_ugm_session`'s `tokenize` (llama-vocab.cpp:1068
 /// @b1b770d90).
 ///
-/// Since v0.7.0 a vocabulary with `tokenizer.ggml.normalizer.nfc` set has
+/// A vocabulary with `tokenizer.ggml.normalizer.nfc` set has
 /// its text NFC-normalized before the charsmap sees it. The C++ catches
 /// `std::invalid_argument` around that and normalizes the raw text instead;
 /// only `unicode_cpt_to_utf8` could throw it there, on a code point no
-/// decode or composition can now produce, but the fallback is kept.
+/// decode or composition can produce, but the fallback is kept.
 ///
 /// Parameters:
 /// - `vocab`: the vocabulary.

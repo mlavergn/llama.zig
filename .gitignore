@@ -22,5 +22,5 @@ llama.cpp.zmake
 llama.cpp.xxx
 
 # Jinja engine for chat templates. Its own repository, carrying the Zig 0.16
-# migration on top of upstream. See PLAN.md Decisions 25 and 27.
+# migration on top of upstream; the one dependency the port allows.
 

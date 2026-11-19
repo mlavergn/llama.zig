@@ -5,7 +5,7 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/sum.cu` at v1.0.0 (`b1b770d90`),
 //! the `GGML_CUDA_USE_CUB` arm. `cub::DeviceReduce::Sum` is reached through
-//! `cub_shim.cu` (PLAN.md, Decision 47).
+//! `cub_shim.cu`.
 
 const impl = @import("../impl.zig");
 const common = @import("common.zig");

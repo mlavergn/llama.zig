@@ -17,7 +17,7 @@
 //!
 //! # Why this exists
 //!
-//! Decision 22 says an unsupported flag is rejected with a clear error. "Clear"
+//! An unsupported flag is rejected with a clear error. "Clear"
 //! means distinguishing two cases a user cannot otherwise tell apart:
 //!
 //! - `--typo` -- not a flag at all, probably a mistake.

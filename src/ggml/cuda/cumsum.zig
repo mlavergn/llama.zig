@@ -11,7 +11,7 @@
 //! `GGML_CUDA_USE_CUB` is defined for this build (common.cuh:117 @b1b770d90). Long
 //! contiguous rows go to `cub::DeviceScan::InclusiveSum`, whose host-side
 //! dispatch is CUB's header templates; `cub_shim.cu` wraps that one call
-//! behind a C ABI (PLAN.md, Decision 47). Only `float` is instantiated:
+//! behind a C ABI. Only `float` is instantiated:
 //! upstream comments out the `F16` and `BF16` cases.
 
 const std = @import("std");

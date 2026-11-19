@@ -1,14 +1,13 @@
 #!/bin/bash
 # Diff every graph node of a real model's decode on the Vulkan device, ported
-# host layer against upstream's -- `cuda-node-diff`'s Vulkan counterpart
-# (PLAN.md, "Stage 7 — Vulkan").
+# host layer against upstream's -- `cuda-node-diff`'s Vulkan counterpart.
 #
 # Two passes, each linked twice against libggml and libllama built from this
 # repository with `-Dvulkan -Dcuda=false` (so the only GPU device is
 # Vulkan's), differing only in the Vulkan host layer: upstream's
 # `ggml-vulkan.cpp` (`-Dvulkan-port=false`) and `src/ggml/vulkan/`
 # (`-Dvulkan-port`). Both embed the same generation's SPIR-V by
-# construction (Decision 59).
+# construction.
 #
 # - **Per node.** `harness/node_dump.c` hashes every node's output over one
 #   prompt decode and one single-token decode; the first differing line
@@ -20,8 +19,8 @@
 #
 # Both passes run on every arm the GB10 has (`ARMS`): coopmat2, KHR
 # coopmat, no matrix cores, and no matrix cores without integer dot --
-# each selects different shaders and different host paths -- and, since
-# v1.0.0, `xefa`: the KHR arm with `GGML_VK_FORCE_XE_FA`, which puts flash
+# each selects different shaders and different host paths -- and
+# `xefa`: the KHR arm with `GGML_VK_FORCE_XE_FA`, which puts flash
 # attention on the Intel Xe prefill and two-phase decode kernels. The GB10
 # has the subgroup size, the 16x16x16 coopmat and the explicit workgroup
 # memory layout they need, so the vendor arm runs here.

@@ -11,6 +11,34 @@
 //! `llama.cpp/common/sampling.cpp`: **order matters**, and getting it wrong
 //! changes what the model says without failing anything.
 //!
+//! # Behaviour
+//!
+//! - **Tokenization** (raw completion): BOS added, control tokens in the
+//!   prompt honoured, no template. A prompt at least as long as the context
+//!   is an error before generation.
+//! - **Sampler chain**, upstream's default order, `min_keep` 0:
+//!   1. penalties (`repeat-last-n`, `repeat-penalty`; frequency and presence 0.0)
+//!   2. top-k, 3. top-p, 4. min-p
+//!   5. extended temperature (dynatemp range 0.0, exponent 1.0); `--temp 0`
+//!      is argmax here, after penalties -- there is no greedy path
+//!   6. seeded distribution
+//! - **Grammar** (`--grammar`, `--json-schema`, file forms), as
+//!   `common_sampler_sample`: the chain picks from the full logits; if the
+//!   grammar rejects the token, the logits are reloaded, the grammar
+//!   applied, and the chain picks again (a second RNG draw). Accepted by the
+//!   grammar, then the chain. Under `-cnv` the grammar restarts each turn,
+//!   the chain does not. No output-format prefill.
+//! - **Reasoning budget** applies before the chain and before the grammar
+//!   on a resample, and accepts each token first.
+//! - **Stops** at the first of: end-of-generation (unless `--ignore-eos`);
+//!   `n_predict` tokens; a full context; in a chat, a stop string or an
+//!   unparseable reply. The last token sampled when `n_predict` or the
+//!   context stops is not decoded.
+//! - **Warmup** (unless `--no-warmup`): a throwaway decode, a memory clear,
+//!   `llama_perf_context_reset`.
+//! - **Timings** (unless `--no-show-timings`): one stdout line,
+//!   `[ Prompt: <N> t/s | Generation: <N> t/s ]`.
+//!
 //! # Lifetimes
 //!
 //! Everything libllama hands back is owned by libllama and freed through it, in
@@ -184,7 +212,7 @@ pub const Session = struct {
         @memset(load.tensor_buft_overrides, .{ .pattern = null, .buft = null });
 
         // `common_model_params_to_llama` (common/common.cpp:1686 @b1b770d90).
-        // `load_mode` and v0.4.0's `lazy_mode` stay libllama's defaults,
+        // `load_mode` and `lazy_mode` stay libllama's defaults,
         // `AUTO` both, which are `common_params`' too: `--load-mode` and
         // `--lazy-mode` are not among the flags this CLI takes.
         var model_params = c.llama_model_default_params();

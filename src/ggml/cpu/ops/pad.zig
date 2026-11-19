@@ -388,7 +388,7 @@ inline fn wrapAround(coord: i64, size: i64) i64 {
 /// Ports `ggml_compute_forward_pad_f32` (ops.cpp:8302 @b1b770d90).
 ///
 /// `template<bool circular_t>` in the C; a comptime `bool` here, so the
-/// `if constexpr` folds the same way. Since v0.7.0 the threads split the
+/// `if constexpr` folds the same way. The threads split the
 /// output rows (`ne1 * ne2 * ne3` of them) rather than `ne1` alone, and a
 /// non-circular row is zeroed whole when it lies in the padding, or filled
 /// with `memset`/`memcpy`/`memset` when the source row is contiguous and both

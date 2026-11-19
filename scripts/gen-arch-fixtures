@@ -24,16 +24,15 @@
 # them: neither has a usable implementation. Granite-Switch, eagle3 and
 # DFlash need more than the recipe's keys and tensors, and
 # `harness/arch_fixtures_draft.cpp` writes them, with a Gemma-style DFlash
-# and a Qwen3.5 whose full-attention projections are fused (since v0.5.0),
+# and a Qwen3.5 whose full-attention projections are fused,
 # and clef, which the recipe skips and the user-data path cannot build, and a
-# ModernBERT decision model (since v0.6.0), vllm-decision2 and an LFM2
-# decision model (since v0.7.0), and Voxtral Realtime's adaptive norm, the
-# Qwen4exp merged weights and the DSpark draft of DeepSeek-V4.1 (since v0.8.0),
-# and Mistral Large 4's DSpark draft, with and without its RNN Markov head
-# (since v0.9.0), and Qwen3.5 with the merged linear-attention weights
-# (since v1.0.0).
+# ModernBERT decision model, vllm-decision2 and an LFM2
+# decision model, and Voxtral Realtime's adaptive norm, the
+# Qwen4exp merged weights and the DSpark draft of DeepSeek-V4.1,
+# and Mistral Large 4's DSpark draft, with and without its RNN Markov head,
+# and Qwen3.5 with the merged linear-attention weights.
 #
-# Since v0.7.0 the architectures with an MTP (NextN) head also get a fixture
+# The architectures with an MTP (NextN) head also get a fixture
 # with one NextN block, `--variant mtp`, in `<out-dir>/mtp/`: the C++ loads a
 # file holding NextN tensors only with `load_mtp`, which `arch-model-diff`
 # never sets, so `scripts/mtp-diff` runs them. DeepSeek V4 and MiMo-2 have
@@ -95,8 +94,8 @@ if [ "$rc" -ne 0 ] || [ "$n" -eq 0 ]; then
     exit 1
 fi
 # The architectures `-o` skipped, and the ones its loops skip silently: the
-# Gemma 4 assistant (eagle3 and DFlash are arch_fixtures_draft's). Since
-# v0.9.0 `-o` writes Gemma 4 itself.
+# Gemma 4 assistant (eagle3 and DFlash are arch_fixtures_draft's).
+# `-o` writes Gemma 4 itself.
 extra=$( { grep 'unsupported, skipping' "$tmp/run.log" | sed 's/^save_models: \([^ ]*\) model.*/\1/'; printf '%s\n' gemma4-assistant; } \
          | grep -v -x -e clip -e gptj -e graniteswitch -e eagle3 -e dflash -e clef -e vllm-decision2 | sort -u )
 : > "$tmp/extra.log"
@@ -144,7 +143,7 @@ done
 # K2 Horizon's single value expert, softmax routing, no output gate (see arch_fixtures_extra.cpp).
 "$tmp/extra" "$OUT" "$SEED" --variant mova1 k2-horizon >> "$tmp/extra.log" 2>&1 \
     || [ "$?" -le 1 ] || echo "failed k2-horizon (mova1): the C++ aborted" >> "$tmp/extra.log"
-# Since v0.8.0: Mellum's MTP head without a sliding window and on a sliding one, Nemotron's Q wider
+# Mellum's MTP head without a sliding window and on a sliding one, Nemotron's Q wider
 # than n_embd, LFM3 without its sandwich norms, LFM3 as a decision model, and Beam with no
 # softcap key.
 for v in mtpnoswa mtpswa; do

@@ -6,11 +6,10 @@
  * `ggml_metal_device_props` rather than importing `ggml-metal-device.h`,
  * because that header would have to go into `impl.zig`'s single `cImport`
  * and widen the `c` namespace every ported file sees. The struct is 18
- * fields since v0.6.0 dropped `supports_gpu_family_apple7`, and most of
+ * fields, and most of
  * them exist only to place the few the port reads at the right offsets.
  *
- * `CLAUDE.md` calls hand-transcription "the single largest source of
- * silent error", and this is the shape of error it means: a field typed
+ * Hand-transcription is the largest source of silent error here, and this is the shape of error it means: a field typed
  * `int` where the C has `size_t` leaves every later field at the wrong
  * offset, and the port then reads `max_working_set_size` as
  * `max_buffer_size` and reports nothing.

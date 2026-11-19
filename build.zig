@@ -228,12 +228,12 @@ fn cudaOptions(b: *std.Build, target: std.Build.ResolvedTarget) ?llamacpp.Cuda {
     };
     // nvcc compiles host code with the system g++; ask it where its runtime is.
     const libstdcxx = std.mem.trim(u8, b.run(&.{ "g++", "-print-file-name=libstdc++.so" }), " \r\n\t");
-    // The swap (PLAN.md, Decision 48): the Zig host layer is the CUDA
+    // The swap: the Zig host layer is the CUDA
     // backend. `-Dcuda-port=false` builds upstream's instead, which only the
     // gates want -- `scripts/cuda-node-diff` diffs the two.
     const port = b.option(bool, "cuda-port", "Use the Zig CUDA host layer (default: true; false builds upstream's, for the gates)") orelse true;
-    // Upstream's `GGML_CUDA_FA_QUANTS`. "all" is what this build compiled
-    // through v0.4.0 as `GGML_CUDA_FA_ALL_QUANTS`; a shorter list is how the
+    // Upstream's `GGML_CUDA_FA_QUANTS`. "all" is every K/V pair
+    // (`GGML_CUDA_FA_ALL_QUANTS`); a shorter list is how the
     // f16 fallback of a K/V pair with no vector instance gets gated.
     const fa_quants = b.option([]const u8, "cuda-fa-quants", "FlashAttention K-V type combinations to compile, \"all\" or e.g. \"q8_0-q8_0;q8_0-q4_0\" (default: all)") orelse "all";
     return .{ .toolkit = toolkit, .arch = arch, .libstdcxx = libstdcxx, .port = port, .fa_quants = fa_quants };
@@ -241,7 +241,7 @@ fn cudaOptions(b: *std.Build, target: std.Build.ResolvedTarget) ?llamacpp.Cuda {
 
 /// Resolves `-Dblas`: ggml's BLAS backend over Apple's Accelerate.
 ///
-/// Off unless `-Dblas`, and Apple only (PLAN.md, Decision 60): every other
+/// Off unless `-Dblas`, and Apple only: every other
 /// BLAS is a vendor library the library may not gain, while Accelerate is
 /// already linked on every Darwin target. The port is the default;
 /// `-Dblas-port=false` builds upstream's `ggml-blas.cpp` instead, for the
@@ -257,7 +257,7 @@ fn blasOptions(b: *std.Build, target: std.Build.ResolvedTarget) ?llamacpp.Blas {
     const port = b.option(bool, "blas-port", "Use the Zig BLAS backend (default: true; false builds upstream's, for the gates)") orelse true;
     if (!enabled) return null;
     if (!target.result.os.tag.isDarwin()) {
-        std.debug.panic("-Dblas: the BLAS backend is built over Apple's Accelerate only; any other BLAS is an external library (PLAN.md, Decision 60)", .{});
+        std.debug.panic("-Dblas: the BLAS backend is built over Apple's Accelerate only; any other BLAS is an external library", .{});
     }
     return .{ .port = port };
 }
@@ -267,13 +267,12 @@ fn blasOptions(b: *std.Build, target: std.Build.ResolvedTarget) ?llamacpp.Blas {
 /// `configureVulkan` do.
 ///
 /// Off unless `-Dvulkan`. The toolchain defaults to the pinned one in
-/// `.tools/vulkan/` (`scripts/vk-toolchain`, PLAN.md Decision 59) where it
+/// `.tools/vulkan/` (`scripts/vk-toolchain`) where it
 /// exists, else `glslc` on PATH and `/usr/include`: which `glslc` and which
 /// headers decide which C++ compiles, so the gates pass the same ones to both
 /// sides. A probe counts as supported unless `glslc`'s diagnostics say
 /// `extension not supported: <name>`, CMake's rule, so `glslc` must be shown
-/// to run first -- otherwise a missing one passes every probe (`NOTES.md`,
-/// "Stage 7: the GB10 pickup").
+/// to run first -- otherwise a missing one passes every probe.
 ///
 /// Parameters:
 /// - `b`: the build graph the options are registered on.
@@ -284,7 +283,7 @@ fn vulkanOptions(b: *std.Build) ?llamacpp.Vulkan {
     const glslc_opt = b.option([]const u8, "glslc", "The glslc to compile the Vulkan shaders with (default: .tools/vulkan/bin/glslc, else PATH)");
     const include_opt = b.option([]const []const u8, "vulkan-include", "Directories holding vulkan/ and spirv/ (default: .tools/vulkan/include, else /usr/include)");
     const lib_opt = b.option([]const []const u8, "vulkan-lib", "Extra directories to find libvulkan in (default: .tools/vulkan/lib)");
-    // The swap (PLAN.md, "Stage 7 — Vulkan"): the Zig host layer is the
+    // The swap: the Zig host layer is the
     // Vulkan backend. `-Dvulkan-port=false` builds upstream's
     // `ggml-vulkan.cpp` instead, which only the gates want --
     // `scripts/vk-node-diff` and `scripts/vk-parity-cli` diff the two.
@@ -551,7 +550,7 @@ pub fn build(b: *std.Build) !void {
     //
     // Declared after the reference build because it links against it. The CLI
     // is our own Zig binary talking to libllama's C ABI, not upstream's
-    // `llama-cli` relinked -- see PLAN.md Decision 20. As `ggml.c` and then
+    // `llama-cli` relinked. As `ggml.c` and then
     // llama's own sources are ported, the library underneath changes and this
     // does not.
 
@@ -572,8 +571,7 @@ pub fn build(b: *std.Build) !void {
     });
     cli_module.addOptions("config", options);
     // The one permitted dependency, and only here: chat templates are Jinja,
-    // and `libllamazig` must stay dependency-free. See PLAN.md Decisions 25
-    // and 27.
+    // and `libllamazig` must stay dependency-free.
     cli_module.addImport("zigjinja", jinja_module);
     cli_module.addImport("llama_h", llama_h_module);
     // libllama's own module, compiled into the CLI rather than linked as
@@ -582,7 +580,7 @@ pub fn build(b: *std.Build) !void {
     // compilation, so the `llama.h` calls and the Zig ones reach the same
     // code; the module links `libggml` itself.
     cli_module.addImport("llama", reference.llama.root_module);
-    // Stage 9's chat stack, which the conversation loop renders and parses
+    // The chat stack, which the conversation loop renders and parses
     // through (`cli/conversation.zig`). `cli/common_chat/` and `cli/peg/`
     // import `json` by name, and `cli/fit.zig` already compiles `cli/json/`
     // by a relative import, so `fit.zig` is a module of its own here, as the
@@ -618,7 +616,7 @@ pub fn build(b: *std.Build) !void {
 
     // upstream embeds `common/win-app.manifest` (the UTF-8 active code page
     // and long paths) in every executable under `tools/`, `llama-cli`
-    // included, since v0.9.0 (cmake/win-app.cmake); Zig ignores it off
+    // included (cmake/win-app.cmake); Zig ignores it off
     // Windows.
     const cli = b.addExecutable(.{
         .name = cfg.cli_name,
@@ -646,10 +644,10 @@ pub fn build(b: *std.Build) !void {
     run_step.dependOn(&cli_run.step);
 
     // -------------------------------------------------------------------------
-    // Upstream's other tools (PLAN.md, Decision 61): our ports, `zig build
+    // Upstream's other tools: our ports, `zig build
     // tools`, and upstream's own over libllama-ref, `zig build tools-ref`.
 
-    // Upstream's libmtmd, the reference for every Stage 8 gate.
+    // Upstream's libmtmd, the reference for every libmtmd gate.
     const mtmd_ref = tools_build.addMtmdRef(b, .{ .target = cfg.target, .optimize = cfg.optimize, .sdk = sdk });
 
     // The web UI both llama-servers embed under -Dui (build/ui.zig).
@@ -667,9 +665,9 @@ pub fn build(b: *std.Build) !void {
         .ui = ui,
     });
 
-    // Stage 10 step 2: the http-diff harnesses (build/server_http.zig).
+    // The http-diff harnesses (build/server_http.zig).
     server_http_build.add(b, .{ .target = cfg.target, .optimize = cfg.optimize, .sdk = sdk, .reference = reference, .mtmd_ref = mtmd_ref, .cuda = cuda, .ui = ui });
-    // Stage 10 step 3a: the server's data layer, its tests and the
+    // The server's data layer, its tests and the
     // server-task-diff harness (build/server_task.zig).
     server_task_build.add(b, .{ .target = cfg.target, .optimize = cfg.optimize, .sdk = sdk, .reference = reference, .cuda = cuda, .jinja = jinja_module });
 

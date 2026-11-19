@@ -1,4 +1,4 @@
-# POST /tts (v0.8.0): scripts/server-diff tts. The fixtures' Qwen3-TTS and
+# POST /tts: scripts/server-diff tts. The fixtures' Qwen3-TTS and
 # pocket-tts pipelines; the audio is noise and is compared by its bytes, which
 # the seed fixes; a stream's chunks are compared by what they add up to.
 # how often the idle loop logs is the scheduler's: it differs upstream against upstream
@@ -49,14 +49,14 @@ POST /tts {"input": "hello", "n_predict": 4, "seed": 7}
 POST /tts {"input": "stream", "n_predict": 4, "seed": 7, "stream": true}
 POST /tts {"input": "ref", "n_predict": 3, "seed": 1, "speaker_ref_b64": "$WAV"}
 GET /v1/models
-# v0.9.0: the fixture's two predefined voices, "alba" and "Bob"
+# the fixture's two predefined voices, "alba" and "Bob"
 GET /props
 POST /tts {"input": "voiced", "n_predict": 3, "seed": 1, "voice": "alba"}
 POST /tts {"input": "voiced", "n_predict": 3, "seed": 1, "voice": "ALBA"}
 POST /tts {"input": "voiced", "n_predict": 3, "seed": 1, "voice": "carol"}
 POST /tts {"input": "voiced", "n_predict": 3, "seed": 1, "voice": "Bob", "speaker_ref_b64": "$WAV"}
 
-# v0.9.0: predefined voices. An LFM3-Audio generator has two, "female" and
+# predefined voices. An LFM3-Audio generator has two, "female" and
 # "male": GET /props lists them, a request speaks with the one it names, or
 # with the first; an unknown one, or one beside a speaker reference, is
 # refused, and so is a speaker reference to a model with no voice encoder
@@ -83,7 +83,7 @@ POST /tts {"input": "x"}
 POST /tts {"input": ""}
 GET /v1/models
 
-# v1.0.0 (08f945ffb): /v1/audio/speech and /audio/speech, OpenAI's speech API
+# (08f945ffb) /v1/audio/speech and /audio/speech, OpenAI's speech API
 # converted to /tts -- wav or pcm (16-bit signed, converted from the float32
 # output), stream_format audio, a custom voice {"id": ...}; mp3, sse and speed
 # refused, instructions ignored with a warning. /tts takes "pcm16" and
@@ -113,7 +113,7 @@ POST /tts {"input": "warm", "n_predict": 3, "seed": 7, "temperature": 1.5}
 POST /tts {"input": "warm", "n_predict": 3, "seed": 7, "temperature": -1}
 FORM /tts {"input": "warm", "n_predict": "3", "seed": "7", "temperature": "0.25"}
 
-# v1.0.0 (203b5f404): --tts-voice and --tts-lang are server flags now, the
+# (203b5f404) --tts-voice and --tts-lang are server flags now, the
 # default voice and language; a request's own, or a speaker reference, wins
 !server -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -c 4096 -np 1 --no-warmup --seed 42 --tts-voice male --tts-lang en -lv 4
 !fulllog

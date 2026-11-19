@@ -2,13 +2,12 @@
 //!
 //! # Provenance
 //!
-//! **Not a port.** This is our own code, a companion to `upstream_map.zig`
-//! (`MAINTENANCE.md`, Phase 3), written at the v0.9.0 -> v1.0.0 sync.
+//! **Not a port.** This is our own code, a companion to `upstream_map.zig`.
 //!
 //! # Why it exists
 //!
 //! `upstream_map.zig` diffs `A..B` with `--no-renames` and repins a citation
-//! only within its own file. At v1.0.0 upstream deleted `tools/mtmd/clip.cpp`
+//! only within its own file. Upstream deleted `tools/mtmd/clip.cpp`
 //! and renamed `clip-impl.h`, `clip-model.h` and `clip-graph.h` to `mtmd-*`,
 //! moving their definitions across seven new files. Every citation into them
 //! then fails `port-links` -- the file no longer exists at `B` -- and

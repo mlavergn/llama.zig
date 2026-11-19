@@ -1,4 +1,4 @@
-# Model downloads (Stage 10 step 7, common/download.cpp and hf-cache.cpp)
+# Model downloads (common/download.cpp and hf-cache.cpp)
 # against a plain-HTTP mock hub, one per side (hub.setup): the reference is
 # built without SSL, so only plain HTTP downloads. $MOCK is each side's
 # hub; downloads land in each side's own cache ($CWD/cache), never shared.
@@ -68,7 +68,7 @@ GET /props
 !fulllog
 !mocklog
 
-# --- v0.8.0: a partial is kept, and resumed only when it can be. /trunc
+# --- a partial is kept, and resumed only when it can be. /trunc
 # leaves half of p1 and its ETag; a changed ETag discards it
 !server -m $CWD/dl/p1.gguf -mu $MOCK/trunc/p1.gguf -c 256 -np 1 -lv 4
 !mocklog
@@ -102,7 +102,7 @@ GET /props
 !fulllog
 !mocklog
 
-# --- v0.8.0: HTTP_PROXY, the absolute-form target; its credentials go to the
+# --- HTTP_PROXY, the absolute-form target; its credentials go to the
 # proxy; loopback and NO_PROXY go direct; a malformed one is ignored
 !env HTTP_PROXY=$MOCK
 !server -m $CWD/dl/p3.gguf -mu http://example.invalid/files/p3.gguf -c 256 -np 1
@@ -164,7 +164,7 @@ GET /props
 !server -hf test/nested -c 256 -np 1
 !mocklog
 !server -hf test/tiny:Q5_0 -c 256 -np 1
-# v0.9.0: the tag as a whole token
+# the tag as a whole token
 !server -hf test/floats:F16 -c 256 -np 1 -lv 4
 !fulllog
 GET /props
@@ -245,7 +245,7 @@ DELETE /models?model=test/split:Q8_0
 GET /models
 !mocklog
 
-# --- v0.8.0: POST /models takes the sidecars to pull, by kind; GET /models
+# --- POST /models takes the sidecars to pull, by kind; GET /models
 # reports the ones on disk; DELETE takes one off
 !server -c 256 -np 1 -lv 4
 !fulllog
@@ -284,7 +284,7 @@ GET /models
 # a preset or local model is not a download; a cached one downloads again
 !mocklog
 
-# --- v0.8.0: a download cancelled leaves its record and its partial file. A
+# --- a download cancelled leaves its record and its partial file. A
 # restarted router lists it as incomplete, and a POST resumes it; a DELETE
 # drops its record and partial. The model and its projector download at once,
 # so their two threads' lines come in either order
@@ -310,7 +310,7 @@ GET /models
 GET /models
 DELETE /models?model=test/slowside&sidecar=mmproj
 GET /models
-# v1.0.0: other clients hear that the paused download is gone (model_remove)
+# other clients hear that the paused download is gone (model_remove)
 !sse /models/sse
 DELETE /models?model=test/slowside
 GET /models
@@ -324,7 +324,7 @@ DELETE /models?model=test/slowside
 !fulllog
 GET /models
 
-# --- v0.6.0: the cache directory is a path. LLAMA_CACHE is taken as it is,
+# --- the cache directory is a path. LLAMA_CACHE is taken as it is,
 # so a file there fails without a separator added to its name
 !env LLAMA_CACHE=$DATA/hub/files/tiny.gguf
 !server -m $CWD/dl/tiny.gguf -mmu $MOCK/files/mmproj.gguf -c 256 -np 1
@@ -342,7 +342,7 @@ GET /props
 !env HOME=$DATA/hub/files/tiny.gguf
 !server -m $CWD/dl/tiny.gguf -mmu $MOCK/files/mmproj.gguf -c 256 -np 1
 
-# --- v0.6.0: input and output modalities resolved offline from a cache
+# --- input and output modalities resolved offline from a cache
 # (hub.setup's hfcache): a decision model's metadata, a preset's hf-file,
 # a preset's no-mmproj, and the router's --no-mmproj for every child
 !noenv
@@ -356,7 +356,7 @@ GET /models
 GET /models
 !mocklog
 
-# --- v0.6.0: the router's own -mu and -mmu reach every model's offline
+# --- the router's own -mu and -mmu reach every model's offline
 # resolution (update_caps copies its model), which cannot find them: the
 # text default until a child has downloaded and loaded them, when the
 # child's own modalities replace it (update_status)
@@ -374,7 +374,7 @@ POST /models/unload {"model":"byurl"}
 !waitfor /models "id":"byurl"[^{]*\{"value":"unloaded"
 GET /models
 
-# --- v1.0.0 (bbc2e4b65): a -mu, -mmu or draft URL gets the token only when it
+# --- (bbc2e4b65) a -mu, -mmu or draft URL gets the token only when it
 # is an hf_ token and the URL is on the model endpoint (here the mock hub)
 !server -m $CWD/dl/tk1.gguf -mu $MOCK/files/tk1.gguf -hft hf_secret -c 256 -np 1 -lv 4
 !mocklog

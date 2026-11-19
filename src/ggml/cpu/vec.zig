@@ -20,8 +20,7 @@
 //!
 //! `vec.cpp` is 613 lines of which **169 compile on this target** — the rest
 //! is behind `__ARM_FEATURE_SVE`, `__AVX512F__` and friends. Every citation
-//! below names the arm this build takes, per `CLAUDE.md`'s rule for a symbol
-//! with several `#if` arms. `ggml_vec_dot_bf16` is the notable one: it has
+//! below names the arm this build takes. `ggml_vec_dot_bf16` is the notable one: it has
 //! **no SIMD arm at all here** and is a plain scalar loop accumulating in
 //! `double`.
 //!
@@ -331,7 +330,7 @@ pub export fn ggml_vec_dot_bf16(
 /// Ports `ggml_vec_dot_f16` (vec.cpp:264 @b1b770d90), the `GGML_SIMD` arm
 /// without SVE or RVV.
 ///
-/// Since v0.6.0 the C writes this against `GGML_F16_DOT_*`, which differ
+/// The C writes this against `GGML_F16_DOT_*`, which differ
 /// from `GGML_F16_*` only on AVX512-FP16; `simd.F16Dot` is that alias.
 ///
 /// `GGML_F16_ARR` accumulators over steps of `GGML_F16_STEP`, reduced by
@@ -386,10 +385,10 @@ pub export fn ggml_vec_dot_f16(
     s.* = @floatCast(sumf);
 }
 
-/// Ports `ggml_vec_dot_f16_f32` (vec.cpp:380 @b1b770d90), new at v1.0.0
-/// (#31854): the `F16` row of `type_traits_cpu` now dots an `f16` weight row
-/// against an `f32` activation row, where it used to round the activations
-/// to `f16` first.
+/// Ports `ggml_vec_dot_f16_f32` (vec.cpp:380 @b1b770d90)
+/// (#31854): the `F16` row of `type_traits_cpu` dots an `f16` weight row
+/// against an `f32` activation row, without rounding the activations to `f16`
+/// first.
 ///
 /// Three arms, each with its own accumulator shape, all ending in a `double`
 /// scalar tail of rounded `f32` products:
@@ -487,7 +486,7 @@ pub export fn ggml_vec_dot_f16_f32(
 // constant is a hex float and every fused site is an explicit `vfmaq_f32` /
 // `vfmsq_f32` or `_mm256_fmadd_ps` / `_mm256_fnmadd_ps`, so the port names the
 // same fusions with `@mulAdd` and the result is bit-identical rather than
-// merely close. That is the condition `CLAUDE.md` sets for naming a fusion,
+// merely close. That is the condition for naming a fusion,
 // and `vec_golden.zig` is the something that can say it is wrong.
 //
 // The two arms were read side by side: the AVX2 one computes `z`, `b`, the
@@ -669,9 +668,9 @@ pub export fn ggml_vec_swiglu_f32(n: c_int, y: [*]f32, x: [*]const f32, g: [*]co
     }
 }
 
-/// Ports `ggml_vec_gelu_quick_f32` (vec.cpp:544 @b1b770d90), new at v0.8.0,
-/// when `vec.h` stopped defining `GGML_GELU_QUICK_FP16`: the NEON, AVX2 and
-/// AVX-512 arms, computed in `f32` where the table lost precision.
+/// Ports `ggml_vec_gelu_quick_f32` (vec.cpp:544 @b1b770d90): the NEON,
+/// AVX2 and AVX-512 arms, computed in `f32` since `vec.h` does not define
+/// `GGML_GELU_QUICK_FP16`.
 pub export fn ggml_vec_gelu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32) callconv(.c) void {
     var i: c_int = 0;
     while (i + (lanes - 1) < n) : (i += lanes) {
@@ -685,8 +684,7 @@ pub export fn ggml_vec_gelu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32) call
     }
 }
 
-/// Ports `ggml_vec_geglu_quick_f32` (vec.cpp:585 @b1b770d90), new at v0.8.0:
-/// the NEON, AVX2 and AVX-512 arms.
+/// Ports `ggml_vec_geglu_quick_f32` (vec.cpp:585 @b1b770d90): the NEON, AVX2 and AVX-512 arms.
 pub export fn ggml_vec_geglu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32, g: [*]const f32) callconv(.c) void {
     var i: c_int = 0;
     while (i + (lanes - 1) < n) : (i += lanes) {

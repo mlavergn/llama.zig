@@ -105,7 +105,7 @@ static void dump(const char * label, struct ggml_cgraph * graph) {
 
 
 // -----------------------------------------------------------------------------
-// The copy and realloc callbacks (v0.7.0)
+// The copy and realloc callbacks
 //
 // `ggml_backend_sched_set_copy_callback` and `_set_realloc_callback` are what
 // libllama's MoE cache uses to copy only the experts a batch selects. Only a
@@ -114,8 +114,8 @@ static void dump(const char * label, struct ggml_cgraph * graph) {
 // type that claims only GGML_OP_ADD and offloads it, and computes ADD in f32
 // itself. The CPU backend is the real one, holding the weights. Printed: each
 // copy callback's src, dst and what the dst of the split's *non-weight* input
-// already holds when a weight is offered (host weights are copied last since
-// v0.7.0, so it holds the input's data), each realloc callback's two flags,
+// already holds when a weight is offered (host weights are copied last,
+// so it holds the input's data), each realloc callback's two flags,
 // and the result, which shows which half of a weight the callback copied.
 
 static struct ggml_backend_buffer_type g_acc_buft;
@@ -339,7 +339,7 @@ static void callbacks(void) {
     ggml_backend_free(cpu);
 }
 
-// v1.0.0's input copies (#31419, #32100). The ACC stub gains an async read and
+// The input copies (#31419, #32100). The ACC stub gains an async read and
 // events, which `ggml_backend_sched_prefetch_inputs` needs; each logs.
 static void acc_get_async(ggml_backend_t backend, const struct ggml_tensor * t, void * data, size_t off, size_t size) {
     (void) backend; memcpy(data, (const char *) t->data + off, size);
@@ -528,7 +528,7 @@ int main(void) {
         struct ggml_tensor * t = ggml_add(ctx, a, b);
         // Pin an intermediate *node*: pass 2 walks nodes, not leafs, so a
         // flagged leaf would leave it with nothing to expand from. The flag
-        // is set by hand: since v0.6.0 `ggml_set_input` asserts the tensor
+        // is set by hand: `ggml_set_input` asserts the tensor
         // is a leaf (`op == GGML_OP_NONE`).
         t->flags |= GGML_TENSOR_FLAG_INPUT;
         for (int i = 0; i < 3; i++) t = ggml_add(ctx, t, b);

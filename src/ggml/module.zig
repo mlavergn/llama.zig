@@ -12,8 +12,8 @@
 //!
 //! Within a file, each ported declaration names the C function and the line it
 //! started at, using the bare filename since the header has already established
-//! the path. Line numbers are as of the pinned commit and only move if the pin
-//! moves, which per Decision 3 it does not.
+//! the path. Line numbers are as of each citation's commit and move when a
+//! sync re-reads the definition.
 //!
 //! This file is the exception: it is a barrel, not a port of anything, and
 //! `ported.zig` is likewise scaffolding.
@@ -64,17 +64,17 @@ comptime {
     // backend". Importing this unconditionally made `make validate` fail
     // with 39 undefined symbols at that step.
     if (config.use_metal) _ = @import("metal/module.zig");
-    // ggml-cuda/, the host layer; the kernels travel as fatbins (PLAN.md,
-    // Decision 44). Behind `config.cuda_port` until the swap (Decision 48):
+    // ggml-cuda/, the host layer; the kernels travel as fatbins.
+    // Behind `config.cuda_port` until the swap:
     // until then the default build links upstream's host objects, which
     // export the same ten `ggml-cuda.h` symbols.
     if (config.cuda_port) _ = @import("cuda/module.zig");
     // ggml-vulkan/, the host layer; the shaders travel as the reference
-    // generator's SPIR-V (PLAN.md, Decisions 55 and 59). Behind
+    // generator's SPIR-V. Behind
     // `config.vulkan_port` until the swap: until then the default build
     // compiles upstream's `ggml-vulkan.cpp`, which exports the same symbols.
     if (config.vulkan_port) _ = @import("vulkan/module.zig");
-    // ggml-blas/, over Accelerate only (PLAN.md, Decision 60). Behind
+    // ggml-blas/, over Accelerate only. Behind
     // `config.blas_port`: `-Dblas-port=false` compiles upstream's
     // `ggml-blas.cpp` instead, for the gates, which exports the same four
     // symbols.

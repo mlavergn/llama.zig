@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Run our llama-server and upstream's on the same request transcripts and
-require the same answers (PLAN.md, Decision 65, "Stage 10").
+require the same answers.
 
 Each case file, harness/server/<name>.cases, is a sequence of lines:
 
@@ -122,7 +122,7 @@ hub's URL. In what comes back, each side's own $WORK, $CWD, $MOCK and
 binary ($BIN) are written as those names, and 127.0.0.1:<its port> as
 127.0.0.1:$SPORT, so the two compare.
 
-Router mode (Stage 10 step 7): a router forwards each child's output into
+Router mode: a router forwards each child's output into
 its own log as "[<port>] <line>". Those lines are taken out of the
 router's log and compared child by child -- each child named by the
 "spawning server instance with name=<n> on port <p>" line before it --
@@ -196,13 +196,13 @@ MONITOR_LINE = re.compile(r"srv +run: (instance name=|force-killing)|srv +handle
 HTTP_THREAD_LINES = r"srv +stop: |srv +evict_and_ca|srv +server_strea|DELETE /v1/stream conv_id|srv +operator\(\): got (another )?exception|srv +operator\(\): \(CORS\)|unauthorized: Invalid API Key"
 LOG_MASKS = [
     # common_log timestamps, after any colour codes a previous line's message
-    # left open: since v0.7.0 the differential analysis's "Phase N" lines,
+    # left open: the differential analysis's "Phase N" lines,
     # logged at template init (debug, colourised), each start with ESC[0m.
     r"^(?:\x1b\[[0-9;]*m)*\d+\.\d{2}\.\d{3}\.\d{3} ",
     r" *\d+(\.\d+)? ms",                       # timings, with their padding
     r" *\d+(\.\d+)? tokens per second",
     r"took \d+\.\d+ seconds",                 # the fit's time
-    r"in \d+\.\d+ sec \(max single = \d+\.\d+ sec\)",  # Metal's library load (v0.6.0)
+    r"in \d+\.\d+ sec \(max single = \d+\.\d+ sec\)",  # Metal's library load
     r"library in \d+\.\d+ sec",              # and each library's, at debug verbosity
     r"0x[0-9a-f]+",                              # %p
     r"port \d+", r"127\.0\.0\.1:\d+",
@@ -217,7 +217,7 @@ LOG_MASKS = [
     r"will leave -?\d+ [<>]=? \d+ MiB",
     r"final available_memory_kb: \d+", r" - \d+ MiB free$",
     # and the same two columns in a --log-format json `fit_memory_breakdown`
-    # record (the router's jsonlog child, v0.6.0)
+    # record (the router's jsonlog child)
     r'"free":\d+', r'"unaccounted":-?\d+',
 ]
 
@@ -249,7 +249,7 @@ class Server:
         self.port = free_port()
         self.log_path = os.path.join(self.workdir, f"server{self.n}.log")
         log = open(self.log_path, "wb")
-        # a case that names its own --host (v1.0.0: tools refused on a non-loopback
+        # a case that names its own --host (tools refused on a non-loopback
         # address) keeps it; requests still go to 127.0.0.1, which 0.0.0.0 covers
         host = [] if "--host" in args else ["--host", "127.0.0.1"]
         argv = [self.binary] + args + host + ["--port", str(self.port)]
@@ -454,7 +454,7 @@ def dechunk(b):
     return out
 
 
-# v0.5.0: llama_graph_n_input_tensors (llama-context.cpp) logs each input
+# llama_graph_n_input_tensors (llama-context.cpp) logs each input
 # tensor's users from an unordered_map keyed by tensor address, so the order
 # of a run of those lines is the allocator's, run to run, on either side;
 # each run is compared sorted.

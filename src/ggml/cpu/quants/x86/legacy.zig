@@ -145,9 +145,7 @@ inline fn q2_0_acc_block_avx2(x: *const blocks.Q2_0, y: [*]const blocks.Q8_0, ac
 }
 
 /// Ports `ggml_vec_dot_q2_0_q8_0` (arch/x86/quants.c:734 @b1b770d90), its
-/// `__AVX2__` arm (#30447). Until v0.7.0 `arch-fallback.h` renamed
-/// `quants.c`'s generic body to this name on x86, and this file ported that
-/// body as x86 compiled it, fused; the generic is now dead on x86 as on ARM.
+/// `__AVX2__` arm (#30447). The generic body is dead on x86 as on ARM.
 ///
 /// Two Q2_0 blocks per step, each into its own accumulator (two FMA chains),
 /// an odd final block into the first. The `#else` arm, the generic, is for

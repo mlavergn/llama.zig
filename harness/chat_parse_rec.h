@@ -230,7 +230,7 @@ inline common_chat_msg rec_common_chat_parse(const common_chat_input & input, bo
     return common_chat_parse(input, is_partial, params);
 }
 
-// A chat session (v0.7.0) applies and parses inside chat.cpp, where nothing
+// A chat session applies and parses inside chat.cpp, where nothing
 // is renamed: its constructor is recorded as the apply it makes, and every
 // feed and finish as the parse of the reply so far it makes -- the
 // constructor's own parse of a continued message's prefill included.

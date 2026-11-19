@@ -183,7 +183,7 @@ fn apiGguf() void {
         const t = spec_mod.typesFromGguf(gpa, z) catch unreachable;
         const s = spec_mod.typeNameStr(gpa, t) catch unreachable;
         _ = printf("from_gguf %s -> '%s'\n", z.ptr, s.ptr);
-        // v0.7.0: common_get_gguf_info replaces common_get_decision_type(fname)
+        // common_get_gguf_info replaces common_get_decision_type(fname)
         const info = tc.common.getGgufInfo(path);
         _ = printf("gguf_info %s -> decision %d n_ctx_train %u\n", z.ptr, @backingInt(info.decision_type), info.n_ctx_train);
     }
@@ -465,7 +465,7 @@ fn apiSamplerTables() void {
     while (t <= 13) : (t += 1) _ = printf("type %d %s %c\n", t, typeStr(t), typeChr(t));
 }
 
-// v0.7.0's common_sampling_add_preserved_tokens and common_sampling_add_grammar_triggers
+// common_sampling_add_preserved_tokens and common_sampling_add_grammar_triggers
 fn printSamplingLists(s: *const params_mod.Sampling) void {
     _ = printf("  preserved");
     for (s.preserved_tokens.items) |t| _ = printf(" %d", t);
@@ -590,7 +590,7 @@ fn runApi(vocab: ?*const c.llama_vocab) void {
     apiUtf8();
     apiSamplerTables();
     apiSamplingLists(vocab);
-    // v0.7.0's common_log_set_stdo: off, a line is written nowhere; on again, the next one is
+    // common_log_set_stdo: off, a line is written nowhere; on again, the next one is
     tc.log.setStdo(false);
     tc.log.inf("%s: stdo off, not written\n", .{@as([*:0]const u8, "run_api")});
     tc.log.setStdo(true);
@@ -667,7 +667,7 @@ fn runDecode(params: *params_mod.Params) !u8 {
         var params_dft = spec_mod.baseParamsToSpeculative(params);
         const mp = try gpa.dupeSentinel(u8, params_dft.model.path, 0);
         _ = printf("params_dft model='%s' ngl=%d split=%d ctk=%d ctv=%d outs=%d per_seq=%d embd=%d pool=%d threads=%d/%d\n", mp.ptr, params_dft.n_gpu_layers, @as(c_int, @intCast(params_dft.split_mode)), @as(c_int, @intCast(params_dft.cache_type_k)), @as(c_int, @intCast(params_dft.cache_type_v)), params_dft.n_outputs_max, params_dft.n_outputs_max_per_seq, @as(c_int, @intFromBool(params_dft.embedding)), @as(c_int, @intCast(params_dft.pooling_type)), params_dft.cpuparams.n_threads, params_dft.cpuparams_batch.n_threads);
-        // v0.7.0: the draft's own n_ubatch and no MoE cache, beside the target's context parameters
+        // the draft's own n_ubatch and no MoE cache, beside the target's context parameters
         const cp_tgt = tc.common.contextParamsToLlama(params);
         const cp_dft = tc.common.contextParamsToLlama(&params_dft);
         _ = printf("cparams ubatch=%u/%u moe_cache=%zu/%zu\n", cp_tgt.n_ubatch, cp_dft.n_ubatch, cp_tgt.moe_cache_size, cp_dft.moe_cache_size);
@@ -676,7 +676,7 @@ fn runDecode(params: *params_mod.Params) !u8 {
         params.speculative.draft.ctx_dft = spec_init.context();
         _ = printf("draft model=%d ctx=%d\n", @as(c_int, @intFromBool(spec_init.model() != null)), @as(c_int, @intFromBool(spec_init.context() != null)));
         // SPEC_SEQ_RM: the server's probe of both contexts, before anything is decoded; a draft
-        // context with a state input decodes it with zeros (v0.7.0's common_batch_set_zero_state)
+        // context with a state input decodes it with zeros (common_batch_set_zero_state)
         if (c.getenv("SPEC_SEQ_RM") != null) {
             _ = printf("seq_rm tgt=%d\n", @backingInt(tc.common.contextCanSeqRm(ctx_tgt)));
             if (spec_init.context()) |cd| _ = printf("seq_rm dft=%d\n", @backingInt(tc.common.contextCanSeqRm(cd)));
@@ -763,7 +763,7 @@ fn runDecode(params: *params_mod.Params) !u8 {
         var b = tc.common.Batch.init(gpa, ctx_tgt);
         defer b.deinit();
         // SPEC_PREFILL_EMBD: the prefill as embedding rows, as an image's are, a
-        // fixed pattern per position (v0.7.0's MTP drafter catches them up too)
+        // fixed pattern per position (the MTP drafter catches them up too)
         var embd: []f32 = &.{};
         defer gpa.free(embd);
         if (c.getenv("SPEC_PREFILL_EMBD") != null) {
@@ -788,7 +788,7 @@ fn runDecode(params: *params_mod.Params) !u8 {
             }
         } else {
             // SPEC_PREFILL_LAST_OUT: an output on each sequence's last prefill token, as the
-            // server's prompt batch has (v0.9.0's MTP keeps only that row on a shared memory)
+            // server's prompt batch has (MTP keeps only that row on a shared memory)
             const last_out = c.getenv("SPEC_PREFILL_LAST_OUT") != null;
             for (0..n_seq) |s| {
                 var i: usize = 0;

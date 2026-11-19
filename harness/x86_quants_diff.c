@@ -1,7 +1,6 @@
 // Diff every x86 quant kernel against the reference C, on bits: the 28
-// exports of `arch/x86/quants.c`. Until v0.7.0 `ggml_vec_dot_q2_0_q8_0` was
-// `quants.c`'s generic body under the real name; since #30447 it is the
-// AVX2 kernel there.
+// exports of `arch/x86/quants.c`. `ggml_vec_dot_q2_0_q8_0` is the
+// AVX2 kernel there (#30447), not `quants.c`'s generic body.
 //
 // Not a port. This is a gate, driven by `scripts/x86-quants-diff`.
 //
@@ -317,8 +316,8 @@ static void fill_x(float * x, int k, int qk, int pattern) {
         const int b = (int)(rng() % (uint64_t)(k / qk));
         for (int i = 0; i < qk; i++) x[b * qk + i] = 0.0f;
     } else if (pattern == 4) {
-        // a block of NaNs with a payload: its scale is that NaN, and since
-        // v0.7.0 `GGML_CPU_FP32_TO_FP16` is F16C's `vcvtps2ph` here, which
+        // a block of NaNs with a payload: its scale is that NaN, and
+        // `GGML_CPU_FP32_TO_FP16` is F16C's `vcvtps2ph` here, which
         // keeps the payload's top bits where the software narrowing writes
         // 0x7E00 -- the only inputs on which the two differ
         const uint32_t nan_bits = 0x7fc12345u;

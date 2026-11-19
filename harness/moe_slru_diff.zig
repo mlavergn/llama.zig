@@ -1,5 +1,5 @@
 //! Compares `src/llama/moe_cache.zig`'s `Lru` with llama.cpp's
-//! `moe_cache_lru` (the ClassLRU since v1.0.0, the SLRU before).
+//! `moe_cache_lru` (the ClassLRU).
 //!
 //! **Not a port.** The harness behind `scripts/moe-slru-diff`. `context-diff`
 //! cannot see the eviction policy: an expert read from a different slot

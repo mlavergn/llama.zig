@@ -1,4 +1,4 @@
-# The OpenAI Responses API (Stage 10 step 4): scripts/server-diff responses.
+# The OpenAI Responses API: scripts/server-diff responses.
 # /v1/responses and /responses converted into chat (server-chat.cpp), every
 # input item kind, tools and function-call round trips, reasoning, the
 # streamed event sequence, and its token count. Qwen3-0.6B, greedy.

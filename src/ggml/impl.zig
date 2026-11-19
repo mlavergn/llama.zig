@@ -40,7 +40,7 @@ pub const c = @import("ggml_c");
 /// `AcquireSRWLockExclusive` (`__thread/support/windows.h`,
 /// `src/support/win32/thread_win32.cpp`). `.{}` is a static initialisation on
 /// both, with no runtime setup -- the same as libc++'s `constexpr mutex()`.
-/// The pthread arm is Decision 39's; the threadpool's own lock is
+/// The pthread arm is pthreads, not `std.Io`, as everywhere here; the threadpool's own lock is
 /// `ggml_mutex_t`, in `cpu/defs.zig`, and is not this.
 pub const CxxMutex = extern struct {
     raw: Raw = .{},

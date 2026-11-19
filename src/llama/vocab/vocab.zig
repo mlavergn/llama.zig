@@ -11,11 +11,9 @@
 //!
 //! # Contract
 //!
-//! Nothing is exported yet. libllama swaps once, at `llama.h` (`PLAN.md`,
-//! Decision 42), so until then this is reached only through
-//! `scripts/vocab-diff`, which loads the same files through the C++ and
-//! compares. The `llama_vocab_*` and `llama_tokenize` entry points move
-//! with the swap.
+//! The `llama_vocab_*` and `llama_tokenize` entry points are in `api/`.
+//! `scripts/vocab-diff` loads the same files through the C++ and this, and
+//! compares.
 //!
 //! # What is libc++'s and not the C++'s
 //!
@@ -160,7 +158,7 @@ pub const TokenData = struct {
 
 /// Ports `llama_vocab`'s `normalizer_options` (llama-vocab.h:97 @b1b770d90).
 pub const NormalizerOptions = struct {
-    /// Since v0.7.0: Unigram text is NFC-normalized first.
+    /// Unigram text is NFC-normalized first.
     nfc: bool = false,
     lowercase: bool = true,
     strip_accents: bool = true,
@@ -816,8 +814,7 @@ pub const Vocab = struct {
         }
     }
 
-    /// The pre-tokenizer names: the `if` chain at llama-vocab.cpp:2456
-    /// (v0.8.0).
+    /// The pre-tokenizer names: the `if` chain in `impl::load`.
     fn setPreType(self: *Vocab, exc: *Exception) Thrown!void {
         const p = self.tokenizer_pre.items;
         if (p.len == 0) {
@@ -1039,7 +1036,7 @@ pub const Vocab = struct {
         }
     }
 
-    /// The token list, scores and types: llama-vocab.cpp:2794-2877 (v0.8.0).
+    /// The token list, scores and types, from `impl::load`.
     fn readTokens(self: *Vocab, ml: *const gguf_meta.Meta, exc: *Exception) Thrown!void {
         const ctx = ml.ctx;
 
@@ -1088,7 +1085,7 @@ pub const Vocab = struct {
         }
 
         self.id_to_token.ensureTotalCapacity(allocator, n_tokens) catch oom();
-        // Since v0.8.0, and it moves `token_to_id`'s iteration order, which
+        // Reserving moves `token_to_id`'s iteration order, which
         // every text-keyed pass below reads.
         self.token_to_id.reserve(n_tokens) catch oom();
 
@@ -1188,8 +1185,8 @@ pub const Vocab = struct {
         }
     }
 
-    /// Special tokens, EOG detection and their workarounds:
-    /// llama-vocab.cpp:2931-3407 (v0.8.0).
+    /// Special tokens, EOG detection and their workarounds, from
+    /// `impl::load`.
     fn loadSpecialTokens(self: *Vocab, ml: *const gguf_meta.Meta, exc: *Exception) Thrown!void {
         const n_vocab = self.id_to_token.items.len;
         const Special = struct { kv: gguf_meta.Kv, id: *Token };
@@ -1500,7 +1497,7 @@ pub const Vocab = struct {
         return ctx.v.id_to_token.items[@intCast(a)].len > ctx.v.id_to_token.items[@intCast(b)].len;
     }
 
-    /// The special-token cache: llama-vocab.cpp:3408-3423 (v0.8.0).
+    /// The special-token cache, from the end of `impl::load`.
     fn buildSpecialTokensCache(self: *Vocab) void {
         const n: Token = @intCast(self.id_to_token.items.len);
         var id: Token = 0;
@@ -1513,7 +1510,7 @@ pub const Vocab = struct {
         impl.logInfo("%s: special tokens cache size = %u\n", .{ "load", @as(u32, @intCast(self.cache_special_tokens.items.len)) });
     }
 
-    /// The piece cache: llama-vocab.cpp:3425-3440 (v0.8.0), through
+    /// The piece cache, from the end of `impl::load`, through
     /// `token_to_piece_for_cache` (llama-vocab.cpp:3764 @b1b770d90). The C++
     /// starts with a 22-byte buffer and retries at the size reported; the
     /// piece is the same either way, so here it is written once at full
@@ -1545,7 +1542,7 @@ pub const Vocab = struct {
         impl.logInfo("%s: token to piece cache size = %.4f MB\n", .{ "load", mb });
     }
 
-    /// Per-token attributes by model name: llama-vocab.cpp:3442-3509 (v0.8.0).
+    /// Per-token attributes by model name, from the end of `impl::load`.
     fn setPerTokenAttributes(self: *Vocab, ml: *const gguf_meta.Meta, exc: *Exception) Thrown!void {
         var model_name_buf: std.ArrayList(u8) = .empty;
         defer model_name_buf.deinit(allocator);

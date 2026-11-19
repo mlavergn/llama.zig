@@ -1,7 +1,7 @@
 # llama.xcframework: the port as a drop-in for the xcframework upstream's
 # build-xcframework.sh produces. Same name, module, slices, architectures,
 # minimum OS versions, headers, module map, Info.plist, install names and
-# dSYMs; see README.md for consumers, the decisions behind it, and the gates.
+# dSYMs.
 #
 #   make              build/llama.xcframework
 #   make verify       the structural gates, on every slice and the xcframework
@@ -105,8 +105,7 @@ BUILDS := ios-sim ios-device macos visionos visionos-sim tvos-sim tvos-device
 # x86_64_v3 (AVX2), the floor of the port's x86 kernels; every Mac macOS 26.0
 # supports has it.
 #
-# Every Apple platform's minimum is 26.0 since v0.9.0 (Marc, 2026-11-09: the
-# Apple frameworks are pinned at 26.0 and up), above upstream's
+# Every Apple platform's minimum is 26.0, above upstream's
 # build-xcframework.sh (iOS 16.4, macOS 13.3, tvOS 16.4, visionOS 1.0).
 # `compat` holds the slices to 26.0 instead of to upstream's minimum
 # (COMPAT_MINOS).
@@ -442,7 +441,7 @@ smoke-macos: xcframework build/test/driver-apple_m1
 # it -- no relink. Metal must be identical between the two (the GPU kernels
 # and their host layer are upstream's own source on both sides) and ours
 # must equal the port's driver. Upstream's CPU path is not ours -- its macOS
-# slice compiles ggml-cpu generic, see README -- so CPU is reported only.
+# slice compiles ggml-cpu generic -- so CPU is reported only.
 dropin-macos: xcframework build/test/driver-apple_m1
 	@printf '\n== drop-in: an app linked against upstream'"'"'s framework, run on ours ==\n'
 	@test -d "$(UPSTREAM)" || { echo "FAIL: no $(UPSTREAM) -- run 'make upstream'"; exit 1; }
@@ -490,7 +489,7 @@ smoke-sim: xcframework build/test/driver-apple_m1
 # the console and is compared with test/driver.c on the port's own apple_a7
 # libraries here -- CPU and Metal both, since the Mac's Metal computes the
 # same bits as the phone's (measured on an iPhone 15). The app carries the
-# increased-memory-limit entitlement a 2B model needs (README, "Memory").
+# increased-memory-limit entitlement a 2B model needs.
 smoke-device: xcframework build/test/driver-apple_a7
 	@printf '\n== smoke: iOS device (%s) ==\n' "$(DEVICE_ID)"
 	rm -rf "$(B)/device" && mkdir -p "$(B)/device"

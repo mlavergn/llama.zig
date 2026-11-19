@@ -7,8 +7,7 @@
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-buffers.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-debug.cpp`, and
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v1.0.0
-//! (`b1b770d90`). Upstream split `ggml-vulkan.cpp` into those files at
-//! v0.5.0. A `vk_buffer` is a `std::shared_ptr` whose destructor frees the
+//! (`b1b770d90`). A `vk_buffer` is a `std::shared_ptr` whose destructor frees the
 //! memory; here it is reference counted by hand, and only the holders the
 //! C++'s lifetimes depend on take a reference.
 

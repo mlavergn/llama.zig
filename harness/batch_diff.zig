@@ -7,7 +7,7 @@
 //! memory -- a table both sides' `seq_pos_min`/`seq_pos_max` read -- and
 //! compares:
 //!
-//! - since v0.6.0, the `llama_batch_ext` each side builds -- from a
+//! - the `llama_batch_ext` each side builds -- from a
 //!   `llama_batch` through `llama_batch_compat::init`, or call by call
 //!   through the twelve `llama_batch_ext_*` functions and
 //!   `llama_batch_ext_set_decision_order` -- every return value, and every
@@ -254,7 +254,7 @@ const Input = struct {
     n_seq_max: u32,
     output_all: bool,
     use_memory: bool,
-    /// v0.7.0: a token batch that carries an embedding beside each token,
+    /// A token batch that carries an embedding beside each token,
     /// for a context that takes it as a state embedding (`llama_batch`'s
     /// legacy MTP hook batches): the extended batch's `n_embd_state`.
     n_embd_state: u32 = 0,
@@ -344,10 +344,10 @@ const Gen = struct {
         const n_seq_max: i32 = self.pick(i32, &.{ 1, 1, 2, 3, 4, 8 });
         const n_tokens_max: usize = if (self.chance(15)) 1 + self.below(6) else 64;
         const use_memory = self.chance(60);
-        // v0.7.0: a context that takes state embeddings (MTP, LiliCorr),
+        // A context that takes state embeddings (MTP, LiliCorr),
         // and then mostly every entry given one, sometimes some
         const n_embd_state: usize = if (self.chance(40)) 1 + self.below(6) else 0;
-        // every entry with a state row instead (v1.0.0), and then no state embeddings
+        // every entry with a state row instead, and then no state embeddings
         const state_row_all = self.chance(15);
         const state_all = n_embd_state > 0 and !state_row_all and self.chance(70);
         const e = Exts.create(n_tokens_max, n_embd_inp, n_embd_inp_enc, n_seq_max, use_memory, @intCast(self.n_vocab), n_pos, n_embd_state);
@@ -364,7 +364,7 @@ const Gen = struct {
         }
 
         // 0 tokens, 1 embeddings, 2 mixed, 3 both on every entry, 4 rows of
-        // ctx_other's layer input device buffer (v0.9.0), sometimes mixed
+        // ctx_other's layer input device buffer, sometimes mixed
         // with an entry of another kind, which init refuses
         const kind = self.below(5);
         const n = 1 + self.below(if (self.chance(10)) 40 else 12);
@@ -428,7 +428,7 @@ const Gen = struct {
                 // a second state for the entry, which is refused
                 if (self.chance(5)) _ = both(e, "llama_batch_ext_set_embd_state", .{ idx, self.embdArg(w, n_embd_inp) }, ref_log, port_log);
             }
-            // a state row (v1.0.0), on its own or beside a state embedding,
+            // a state row, on its own or beside a state embedding,
             // which init refuses; invalid indices and negative rows too
             if (state_row_all or self.chance(8)) {
                 const at: i32 = if (self.chance(10)) self.pick(i32, &.{ -1, 9999 }) else idx;
@@ -597,7 +597,7 @@ const Gen = struct {
         const n = toks.items.len;
         var b: Builder = .{ .ar = self.ar, .n = n };
 
-        // v0.7.0: sometimes a token batch carries an embedding per token
+        // Sometimes a token batch carries an embedding per token
         // too, the legacy MTP hook batch, read as a state embedding by a
         // context that takes one and as an embedding otherwise
         const token_and_embd = !embd_input and n_embd > 0 and self.chance(15);
@@ -631,7 +631,7 @@ const Gen = struct {
             for (toks.items, 0..) |t, i| b.setSeqs(i, t.set);
         } else if (self.chance(30)) {
             const ns = self.ar.alloc(i32, n) catch unreachable;
-            // never 0 since v0.6.0: a token in no sequence makes upstream's
+            // never 0: a token in no sequence makes upstream's
             // `init` point `seq_id[i]` at the end of its flat id array, and
             // the splits read `seq_id[i][0]` there -- past the end, or
             // through null when no token has a sequence

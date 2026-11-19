@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """A plain-HTTP stand-in for the Hugging Face hub and for a file host, for
-`server-diff`'s download cases (Stage 10 step 7). Standard library only.
+`server-diff`'s download cases. Standard library only.
 
     mock_hub.py <root> <portfile> <logfile>
 

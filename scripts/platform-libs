@@ -35,7 +35,7 @@ platform_libs() {
             fi
             PLATFORM_LIBS+=(-lgcc_s -lm -lpthread)
             # gcc's static libgcc, ahead of Zig's compiler_rt, which is
-            # searched last and drops -lgcc_s. Since v0.4.0 the reference's
+            # searched last and drops -lgcc_s. The reference's
             # ggml-backend-reg.o calls `fs::current_path(ec)`, whose libc++
             # object needs `__divti3`; from compiler_rt it brings that
             # archive's single object, and with it compiler_rt's `expf` and
@@ -80,7 +80,7 @@ platform_libs() {
 # shared one. The CUDA build's `@panic("OOM")` did exactly that, through the
 # panic handler's `std.Io.Threaded`, and every `expf`/`logf` the port called
 # moved by an ULP against glibc's while `expm1f` and `tanhf`, which
-# compiler_rt lacks, did not (NOTES.md, "The GB10 pickup"). A bit-exact gate
+# compiler_rt lacks, did not. A bit-exact gate
 # would report that as a kernel fault; this names it.
 libm_check() {
     local f defs ref port

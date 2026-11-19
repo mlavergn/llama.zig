@@ -39,8 +39,8 @@
 //! - **`skewed` is the only one that separates the *pairwise* final reduce
 //!   from an ordered one**, and it exists because of an escape. With the
 //!   original six, replacing `vaddvq_f32` with `@reduce(.Add, ...)` passed
-//!   every pattern at both lengths — the exact trap `CLAUDE.md` warns
-//!   about, invisible to the gate meant to catch it. A brute-force search
+//!   every pattern at both lengths — the exact pairwise-reduction
+//!   trap, invisible to the gate meant to catch it. A brute-force search
 //!   over random lane vectors puts the two reductions at odds 23.5% of the
 //!   time, so six patterns agreeing was luck rather than a property of the
 //!   reduction. `skewed` keys the magnitude on `i % 4`, which is the lane

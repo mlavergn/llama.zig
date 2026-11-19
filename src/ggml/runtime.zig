@@ -342,8 +342,7 @@ const tsan_enabled = builtin.sanitize_thread;
 
 /// True where `ggml_aligned_malloc` and `ggml_aligned_free` take the C's
 /// `#elif defined(__APPLE__) && !defined(GGML_TSAN_ENABLED)` arm, the Mach VM.
-/// Every Apple OS since v0.9.0; through v0.8.0 it was `TARGET_OS_OSX`, macOS
-/// alone, and iOS took `posix_memalign`.
+/// Every Apple OS.
 const use_vm_allocate = builtin.os.tag.isDarwin() and !tsan_enabled;
 
 /// Ports `ggml_aligned_malloc` (ggml.c:343 @b1b770d90).
@@ -487,7 +486,7 @@ export fn ggml_fp32_to_fp16(x: f32) c.ggml_fp16_t {
 /// ported, and no gate saw it; `harness/abi_structs.zig` is the gate that
 /// does now. `u16` has the same size and is passed correctly, and the C
 /// caller is unaffected: `ggml_bf16_t` is a one-field struct over exactly
-/// those bits. See `CLAUDE.md`, "Threads in ported code".
+/// those bits.
 export fn ggml_bf16_to_fp32(x: u16) f32 {
     return impl.bf16ToFp32(x);
 }

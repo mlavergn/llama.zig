@@ -1,4 +1,4 @@
-# /v1/realtime (v0.8.0): scripts/server-diff realtime. The websocket route of
+# /v1/realtime: scripts/server-diff realtime. The websocket route of
 # server-context.cpp and the conversation of server-realtime.cpp: every event
 # is compared, ids masked. A session's slot is released after its socket closes
 # and every control is a task, so upstream differs from itself in task ids, in
@@ -117,7 +117,7 @@ WS /v1/realtime [{"$until": "session.created"}, {"type": "session.update", "sess
 WS /v1/realtime [{"$until": "session.created"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Go on and on"}]}}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"max_output_tokens": 256, "output_modalities": ["text"]}}, {"$first": "response.output_text.delta"}, {"type": "response.cancel"}, {"$last": "response.done"}]
 !sleep 2
 
-# v1.0.0 (3d94ffe45, 6f1e65437, c55b09488): the input audio rate is any of
+# (3d94ffe45, 6f1e65437, c55b09488) the input audio rate is any of
 # 8000 to 192000 Hz, resampled to the model's; a session that is not an object
 # is refused; an exception becomes an error event. The $pcm tone is 16 kHz, so
 # a session at another rate hears it slower or faster
@@ -127,11 +127,11 @@ WS /v1/realtime [{"$until": "session.created"}, {"type": "session.update", "sess
 !sleep 2
 WS /v1/realtime [{"$until": "session.created"}, {"type": "session.update", "session": {"audio": {"input": {"format": {"rate": 7999}}}}}, {"$until": "error"}, {"type": "session.update", "session": {"audio": {"input": {"format": {"rate": 192001}}}}}, {"$until": "error"}, {"type": "session.update", "session": {"audio": {"input": {"format": {"rate": "fast"}}}}}, {"$until": "session.updated"}, {"type": "session.update", "session": {"audio": {"input": {"format": {"rate": 192000}}}}}, {"$until": "session.updated"}, {"$pcm": [200, 220]}, {"type": "input_audio_buffer.commit"}, {"$until": "conversation.item.done"}]
 !sleep 2
-# v1.0.0 (b1c902f02 is not this): a tool whose schema the grammar builder refuses is refused at session.update
+# (b1c902f02 is not this) a tool whose schema the grammar builder refuses is refused at session.update
 WS /v1/realtime [{"$until": "session.created"}, {"type": "session.update", "session": {"tools": [{"type": "function", "name": "f", "parameters": {"type": "object", "properties": {"a": {"$ref": "#/definitions/nope"}}}}]}}, {"$until": "error"}, {"type": "session.update", "session": {"tools": [{"type": "function", "name": "f", "parameters": {"type": "object", "properties": {"a": {"type": "string", "pattern": "("}}}}]}}, {"$until": "error"}, {"$until": "session.updated"}]
 !sleep 2
 
-# v1.0.0 (203b5f404): the output voice and language of a speaking model, from
+# (203b5f404) the output voice and language of a speaking model, from
 # --tts-voice and --tts-lang or audio.output in session.update; an unknown
 # voice, or a change after the first audio or message, is refused
 !server -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -c 4096 -np 1 --no-warmup --temp 1 --seed 42 -lv 4 --tts-voice female --tts-lang en
@@ -143,7 +143,7 @@ WS /v1/realtime [{"$until": "session.created"}, {"type": "session.update", "sess
 WS /v1/realtime [{"$until": "session.created"}, {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Hi"}]}}, {"$until": "conversation.item.done"}, {"type": "response.create", "response": {"max_output_tokens": 4, "output_modalities": ["audio"]}}, {"$until": "response.done"}]
 !sleep 2
 
-# v1.0.0 (3d94ffe45): live transcription at another input rate, resampled
+# (3d94ffe45) live transcription at another input rate, resampled
 !server -m $MM/text-mistral3-rt.gguf -mm $MM/voxtral_rt.gguf -c 4096 -np 1 --no-warmup --temp 0 --seed 42 -lv 4
 !fulllog
 WSL /v1/realtime [{"$until": "session.created"}, {"type": "session.update", "session": {"audio": {"input": {"format": {"rate": 4000}}}}}, {"$until": "error"}, {"type": "session.update", "session": {"audio": {"input": {"format": {"rate": 8000}}}}}, {"$until": "session.updated"}, {"type": "transcription_session.update", "session": 5}, {"$until": "session.updated"}, {"$pcm": [800, 220]}, {"type": "input_audio_buffer.commit", "final": true}, {"$until": "conversation.item.input_audio_transcription.completed"}]

@@ -17,7 +17,7 @@
 //!
 //! # The chat parse
 //!
-//! Since v0.7.0 a `TaskResultState` owns a copy of the request's chat
+//! A `TaskResultState` owns a copy of the request's chat
 //! session (`cli/common_chat`'s `common_chat_session`), which holds the
 //! request's PEG parser and everything generated so far, text and tokens;
 //! `update_chat_msg` feeds it each chunk.
@@ -648,7 +648,7 @@ pub fn cloneDiff(a: Allocator, d: chat.MsgDiff) Error!chat.MsgDiff {
 /// Ports `gen_audio`'s `inp` (mtmd-helper.h:364 @b1b770d90), the RAII wrapper
 /// of `mtmd_helper_gen_audio_inp`. A `set_*` keeps its own
 /// copy; `get` hands out pointers valid as long as this is alive. Since
-/// v0.9.0 a voice is a speaker reference (a voice bitmap), not a string.
+/// A voice is a speaker reference (a voice bitmap), not a string.
 pub const TtsInp = struct {
     data: c.mtmd_helper_gen_audio_inp = undefined,
     prompt_str: [:0]const u8 = "",

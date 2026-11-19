@@ -2,8 +2,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/mtmd-model.h` at v1.0.0 (`b1b770d90`) --
-//! `clip-model.h` until v0.9.0 -- field for field. The tensor-pointer fields were extracted from the header
+//! Ports `llama.cpp/tools/mtmd/mtmd-model.h` at v1.0.0 (`b1b770d90`) field for field. The tensor-pointer fields were extracted from the header
 //! mechanically, in the header's order, so a struct here reads against the
 //! C++ line by line; the rest is written by hand. Each declaration names
 //! what it ports and the line it began at.
@@ -280,7 +279,7 @@ pub const Hparams = struct {
     }
 
     /// Ports `set_warmup_n_tokens` (mtmd-model.h:269 @b1b770d90), a member of `mtmd_hparams`:
-    /// since v0.6.0 never more tokens than `custom_image_max_tokens` allows.
+    /// never more tokens than `custom_image_max_tokens` allows.
     pub fn setWarmupNTokens(self: *Hparams, n_tokens: c_int) void {
         var n_tok_per_side: c_int = @intFromFloat(@sqrt(@as(f64, @floatFromInt(n_tokens))));
         impl.ggmlAssert(n_tok_per_side * n_tok_per_side == n_tokens, "mtmd-model.h", 271, "n_tok_per_side * n_tok_per_side == n_tokens && \"n_tokens must be n*n\"");
@@ -936,8 +935,8 @@ pub const Drama3Layer = struct {
 };
 
 /// Ports `mtmd_model` (mtmd-model.h:885 @b1b770d90): the weights and hparams
-/// of one modality of an mmproj file, read-only once loaded. Since v1.0.0 it
-/// owns its weights, which `clip_ctx` held until v0.9.0.
+/// of one modality of an mmproj file, read-only once loaded. It
+/// owns its weights.
 pub const Model = struct {
     modality: impl.Modality = .vision,
     proj_type: names.ProjectorType = .mlp,

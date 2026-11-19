@@ -485,7 +485,7 @@ pub fn gbnfFormatLiteral(gpa: std.mem.Allocator, literal: []const u8) Error![]u8
 /// Ports `gbnf_escape_length` (json-schema-to-grammar.cpp:328 @b1b770d90):
 /// the length of a GBNF-compatible escape at `pos`, 0 if there is none.
 /// The two-byte escapes are the ones `parse_char` in `llama-grammar.cpp`
-/// reads; `\-` joined them at v0.5.0.
+/// reads; `\-` is one of them.
 fn gbnfEscapeLength(pattern: []const u8, pos: usize) usize {
     if (pos + 1 >= pattern.len or pattern[pos] != '\\') return 0;
     const n_hex: usize = switch (pattern[pos + 1]) {

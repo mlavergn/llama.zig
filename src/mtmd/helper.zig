@@ -57,8 +57,7 @@ pub const BitmapWrapper = extern struct {
     video_ctx: ?*anyopaque,
 };
 
-/// Ports `mtmd_helper_embd_batch` (mtmd-helper.h:132 @b1b770d90), new at
-/// v0.6.0: one decoded sub-batch of embeddings, passed to
+/// Ports `mtmd_helper_embd_batch` (mtmd-helper.h:132 @b1b770d90): one decoded sub-batch of embeddings, passed to
 /// `mtmd_helper_post_decode_callback`.
 pub const EmbdBatchView = extern struct {
     n_tokens: i32,
@@ -70,7 +69,7 @@ pub const EmbdBatchView = extern struct {
 };
 
 /// Ports `mtmd_helper_post_decode_callback` (mtmd-helper.h:141 @b1b770d90):
-/// since v0.6.0 it takes the sub-batch's view, not a `llama_batch`.
+/// it takes the sub-batch's view, not a `llama_batch`.
 pub const PostDecodeCallback = ?*const fn (?*const EmbdBatchView, ?*anyopaque) callconv(.c) i32;
 
 /// Ports `mtmd_helper_video_info` (mtmd-helper.h:166 @b1b770d90).
@@ -173,7 +172,7 @@ pub fn logErr(comptime fmt: [*:0]const u8, args: anytype) void {
 
 /// Ports `decode_embd_batch` (mtmd-helper-common.h:74 @b1b770d90): precomputed
 /// embeddings and their positions, rendered into a `llama_batch_ext` one
-/// sub-batch at a time. Since v0.6.0 it no longer is a `llama_batch`.
+/// sub-batch at a time.
 pub const EmbdBatch = struct {
     n_pos_per_embd: c_int,
     n_mmproj_embd: c_int,
@@ -449,7 +448,7 @@ pub fn mtmd_helper_decode_image_chunk(
 }
 
 /// Ports `mtmd_helper_eval_chunk_single` (mtmd-helper.cpp:204 @b1b770d90):
-/// since v0.6.0 a text chunk goes through a `llama_batch_ext`.
+/// a text chunk goes through a `llama_batch_ext`.
 pub fn mtmd_helper_eval_chunk_single(
     ctx: *Context,
     lctx: ?*c.struct_llama_context,

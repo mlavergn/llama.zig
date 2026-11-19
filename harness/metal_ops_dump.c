@@ -9,13 +9,12 @@
  * ------------------
  * `make backend-ops` runs Metal against the CPU with a tolerance, so it
  * cannot tell a reduction split over the wrong thread count from a right
- * one, and its largest ARGMAX row takes two parts of the 256 v0.8.0's
+ * one, and its largest ARGMAX row takes two parts of the 256 the
  * two-stage kernel can use. `make node-diff ARGS=--gpu` is exact but reaches
  * only what one decode reaches: nothing there calls TOP_K_MASK, POOL_1D or
  * a MUL_MAT_ID with `-1` ids. `make metal-diff` compares the vtables and
- * dispatches nothing. New at v0.8.0, for the encoders that release moved;
- * v0.9.0 added FLASH_ATTN_EXT over K/V row lists, the contiguous unary and
- * binary kernels' and GLU's new threadgroup shapes, and MXFP4's `mul_mv`.
+ * dispatches nothing. It covers FLASH_ATTN_EXT over K/V row lists, the contiguous unary and
+ * binary kernels' and GLU's threadgroup shapes, and MXFP4's `mul_mv`.
  *
  * What a line means
  * -----------------
@@ -337,7 +336,7 @@ static void top_k_mask_cases(void) {
     }
 }
 
-/* Since v0.8.0 a threadgroup per output and a window split over its
+/* A threadgroup per output and a window split over its
  * threads: AVG sums in a different order at any other thread count. */
 static void pool_1d_cases(void) {
     const int k0s[] = { 1, 2, 3, 31, 32, 33, 255, 256, 257, 700 };
@@ -366,7 +365,7 @@ static void pool_1d_cases(void) {
 
 /* ids with `-1` slots, on the map path (many tokens) and the mul_mv path
  * (one or two), with a token that has no expert at all. `n_used` 9 is the
- * map kernel v0.8.0 added. */
+ * map kernel. */
 static void fill_ids(struct ggml_tensor * ids, int n_mats, int skip) {
     const int64_t n_used = ids->ne[0], n_tokens = ids->ne[1];
     int32_t * v = malloc(n_used * n_tokens * sizeof(int32_t));
@@ -428,7 +427,7 @@ static void mul_mat_id_cases(void) {
         finish(label, out);
     }
 
-    /* F32 `src[1]` precision: through v0.7.0 its own specialisation and two more kernels */
+    /* F32 `src[1]` precision: its own specialisation and two more kernels */
     for (int skip = 0; skip < 2; skip++) {
         begin(seed++);
         struct ggml_tensor * w = ggml_new_tensor_3d(ctx, GGML_TYPE_F16, 128, 96, 16);
@@ -459,7 +458,7 @@ static void mul_mat_id_cases(void) {
     }
 }
 
-/* v0.8.0's constructor takes F16 and BF16, and `supports_op` says so. */
+/* The constructor takes F16 and BF16, and `supports_op` says so. */
 static void scale_cases(void) {
     const enum ggml_type types[] = { GGML_TYPE_F32, GGML_TYPE_F16, GGML_TYPE_BF16 };
     char label[128];
@@ -477,7 +476,7 @@ static void scale_cases(void) {
     }
 }
 
-/* FLASH_ATTN_EXT over K/V row lists (`ggml_flash_attn_ext_rows`, v0.9.0):
+/* FLASH_ATTN_EXT over K/V row lists (`ggml_flash_attn_ext_rows`):
  * each stream attends to its own list of cache rows, `-1` entries padding
  * with a `-inf` mask column. Every path the encoder has for it -- the vec
  * kernel reading rows through the list, the half8x8 and tensor kernels over
@@ -570,8 +569,8 @@ static void fa_rows_cases(void) {
     }
 }
 
-/* The contiguous unary and binary kernels and GLU (v0.9.0): a threadgroup
- * of up to 256 threads where there was one, and GLU's rows split over
+/* The contiguous unary and binary kernels and GLU: a threadgroup
+ * of up to 256 threads, and GLU's rows split over
  * several threadgroups. Sizes either side of 256, of the vector width, and
  * of the contiguous kernels' element limits (32768 for unary, 65536 for a
  * one-row broadcast). */
@@ -655,7 +654,7 @@ static void elementwise_cases(void) {
     }
 }
 
-/* MXFP4 `mul_mv` and `mul_mv_id` (v0.9.0 drops their shared memory). */
+/* MXFP4 `mul_mv` and `mul_mv_id` (no shared memory). */
 static void mxfp4_cases(void) {
     char label[128];
     uint64_t seed = 8000;
@@ -688,9 +687,9 @@ static void mxfp4_cases(void) {
     }
 }
 
-/* v1.0.0's GROUP_NORM (#31852): one threadgroup row per ne03 and the
+/* GROUP_NORM (#31852): one threadgroup row per ne03 and the
  * `_strided` kernel for a source whose rows are contiguous but whose planes
- * are not, beside the flat case the encoder had. */
+ * are not, beside the flat case. */
 static void group_norm_cases(void) {
     char label[128];
     uint64_t seed = 9000;
@@ -709,10 +708,10 @@ static void group_norm_cases(void) {
     }
 }
 
-/* v1.0.0's unary-gated MoE routing (#31615), fused into one kernel: the
+/* The unary-gated MoE routing (#31615), fused into one kernel: the
  * sigmoid (GLM) and sqrt(softplus) (DeepSeek-V4) gates, ranked with a
  * selection bias, the weights renormalised by a sum offset by a SCALE's
- * bias or clamped, optionally scaled; and the softmax chain with the new
+ * bias or clamped, optionally scaled; and the softmax chain with the
  * SCALE-bias norm. The weights are hashed; the ids are the fused kernel's
  * other output. */
 static void topk_moe_gate_cases(void) {

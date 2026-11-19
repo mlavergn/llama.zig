@@ -22,7 +22,7 @@
 //! Everything `llama_model_load` does before `load_tensors`. The C++ makes
 //! one subclass per architecture; the port has one `Model` and dispatches
 //! the architecture-specific step on `arch`, and only Qwen3.5's exists so
-//! far (PLAN.md, Decision 5). Any other architecture the C++ knows loads a
+//! far. Any other architecture the C++ knows loads a
 //! vocabulary-only model completely, and otherwise stops at `error.Unported`
 //! once the base hyperparameters are read -- distinct from a C++ exception,
 //! so the gate can tell "not yet ported" from "the C++ would have thrown".
@@ -1325,7 +1325,7 @@ pub const Model = struct {
         if (try meta.getKey(u32, .nextn_predict_layers, false, exc)) |v| hp.n_layer_nextn = v;
         impl.assert(hp.n_layer_nextn <= hp.n_layer_all, "llama-model.cpp", 1503, "hparams.n_layer_nextn <= hparams.n_layer_all");
         if (try meta.getKey(u32, .expert_count, false, exc)) |v| hp.n_expert = v;
-        // the routing count may be given per layer since v0.4.0
+        // the routing count may be given per layer
         hp.n_expert_used_arr = @splat(0);
         _ = try meta.getKeyOrArr(u32, .expert_used_count, &hp.n_expert_used_arr, hp.n_layer_all, false, exc);
         if (try meta.getKey(u32, .expert_group_count, false, exc)) |v| hp.n_expert_groups = v;
@@ -3615,7 +3615,7 @@ pub const LoadResult = struct {
 /// An architecture whose `load_arch_hparams` or `load_arch_tensors` is not
 /// ported fails here as the C++ fails on an unknown architecture, with
 /// `unsupported model architecture` in the error: once libllama swaps, a
-/// model the port cannot run must not load (`PLAN.md`, Decision 36).
+/// model the port cannot run must not load.
 ///
 /// Parameters:
 /// - `source`: where the model comes from.

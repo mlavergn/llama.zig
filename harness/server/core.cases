@@ -1,4 +1,4 @@
-# The server's core without Jinja (Stage 10 step 3): scripts/server-diff core.
+# The server's core without Jinja: scripts/server-diff core.
 # Qwen3-0.6B (`make qwen3`), one slot, greedy unless a case says otherwise.
 !server -m $QWEN3 -c 4096 -np 1 --no-jinja -lv 4
 !fulllog

@@ -5,9 +5,9 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/lightning-indexer.cu` at v1.0.0
 //! (`b1b770d90`), the host half. The kernels,
-//! `lightning_indexer_kernel_mma` (v1.0.0's rename of `_wmma`, now on
+//! `lightning_indexer_kernel_mma` (on
 //! `mma.cuh` with four warps a block), `lightning_indexer_kernel_vec` and
-//! (v0.6.0, for four heads) `lightning_indexer_kernel_tile`, stay CUDA. The
+//! (for four heads) `lightning_indexer_kernel_tile`, stay CUDA. The
 //! HIP/MUSA arms (AMD MFMA and WMMA) are not compiled here.
 
 const std = @import("std");
@@ -43,7 +43,7 @@ fn launchCase(comptime family: []const u8, comptime warps_per_block: c_int, comp
 
 /// `n_head == 4` has no mma instantiation (upstream's four-head arm names
 /// only the tile and vec kernels), so its mma branch must not be analysed.
-/// Since v1.0.0 the mma kernel runs four warps of the device's warp size.
+/// The mma kernel runs four warps of the device's warp size.
 fn shapeCase(comptime n_head: i64, use_mma: bool, k_type: c.enum_ggml_type, n_kv: c_int, n_batch: c_int, n_stream: c_int, warp_size: c_int, stream: common.cu.cudaStream_t, args: anytype) void {
     if (n_head != 4 and use_mma) {
         const k_vecs_per_block = 32;
@@ -75,7 +75,7 @@ fn shapeCase(comptime n_head: i64, use_mma: bool, k_type: c.enum_ggml_type, n_kv
 const tile_tokens = 8;
 
 /// Ports `ggml_cuda_lightning_indexer` (lightning-indexer.cu:504 @b1b770d90).
-/// v1.0.0 asks `turing_mma_available` alone on NVIDIA (the AMD MFMA and WMMA
+/// It asks `turing_mma_available` alone on NVIDIA (the AMD MFMA and WMMA
 /// arms join it on HIP).
 pub fn opLightningIndexer(ctx: *common.Context, dst: *Tensor) void {
     const q = impl.one(Tensor, dst.src[0]);

@@ -37,7 +37,7 @@ pub const Args = struct {
 };
 
 /// Ports `topk_moe_config` (topk-moe.cu:9 @b1b770d90); passed to the kernel
-/// by value: four `bool`s and, since v0.8.0, two `int`s, 12 bytes in all.
+/// by value: four `bool`s and two `int`s, 12 bytes in all.
 const Config = extern struct {
     use_sigmoid: bool,
     use_sqrt_softplus: bool,

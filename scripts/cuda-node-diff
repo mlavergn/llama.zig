@@ -5,7 +5,7 @@
 # Two passes, each linked twice against the same Zig ggml and libllama,
 # differing only in the CUDA host layer: once with upstream's `ggml-cuda`
 # objects (`-Dcuda-port=false`) and once with `src/ggml/cuda/` and the
-# fatbins (the default since the swap, PLAN.md Decision 48).
+# fatbins (the default since the swap).
 #
 # - **Per node.** `harness/node_dump.c` hashes every node's output over one
 #   prompt decode and one single-token decode; the first differing line

@@ -1,5 +1,4 @@
-//! `get_rows`, `get_rows_back`, `set_rows` and `diag`. `diag_mask_inf` and
-//! `diag_mask_zero` lived here until v1.0.0 removed both ops (#29801).
+//! `get_rows`, `get_rows_back`, `set_rows` and `diag`.
 //!
 //! # Provenance
 //!

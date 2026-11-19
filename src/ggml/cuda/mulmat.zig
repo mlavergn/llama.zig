@@ -66,7 +66,7 @@ fn traitsOf(comptime t: c.enum_ggml_type) Traits {
 }
 
 /// Ports `ggml_cuda_mul_mat_cublas_impl` (ggml-cuda.cu:1831 @b1b770d90).
-/// Since v0.7.0 `dst`'s leading dimension is `nb1 / sizeof(float)`, not
+/// `dst`'s leading dimension is `nb1 / sizeof(float)`, not
 /// `ne0`: an F32 chunk from `mulMatCublas` keeps the full destination's row
 /// stride.
 fn mulMatCublasImpl(comptime compute_type: c.enum_ggml_type, ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
@@ -267,10 +267,9 @@ fn mulMatCublasImpl(comptime compute_type: c.enum_ggml_type, ctx: *common.Contex
     }
 }
 
-/// Ports `ggml_cuda_mul_mat_cublas` (ggml-cuda.cu:2044 @b1b770d90). Since
-/// v0.7.0 an F32 product over an F16 or BF16 `src0` whose F32 copy would
+/// Ports `ggml_cuda_mul_mat_cublas` (ggml-cuda.cu:2044 @b1b770d90). An F32 product over an F16 or BF16 `src0` whose F32 copy would
 /// pass 512 MiB is done in chunks of `src0` rows, each converted on its own.
-/// Since v1.0.0 the precision is `ggml_prec_get_acc`'s and an `F8_E4M3`
+/// The precision is `ggml_prec_get_acc`'s and an `F8_E4M3`
 /// weight converts as a quantized one does.
 pub fn mulMatCublas(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
     const x = common.info().devices[@intCast(ctx.device)].cc;
@@ -416,7 +415,7 @@ pub fn shouldFuseMulMat(ffn_up: *const Tensor, ffn_gate: *const Tensor, glu: *co
 }
 
 /// Ports `ggml_cuda_should_fuse_mul_mat_vec_f` (ggml-cuda.cu:2219 @b1b770d90).
-/// Since v1.0.0 an `F8_E4M3` weight qualifies, and the gate's weight, when
+/// An `F8_E4M3` weight qualifies, and the gate's weight, when
 /// given, must take MMVF too.
 pub fn shouldFuseMulMatVecF(tensor: *const Tensor, gate: ?*const Tensor) bool {
     const src0 = impl.one(Tensor, tensor.src[0]);
@@ -446,7 +445,7 @@ pub fn shouldFuseMulMatVecF(tensor: *const Tensor, gate: ?*const Tensor) bool {
 }
 
 /// Ports `ggml_cuda_should_fuse_mul_mat_vec_q` (ggml-cuda.cu:2252 @b1b770d90).
-/// Since v1.0.0 it asks `ggml_cuda_should_use_mmvq` for the batch limit.
+/// It asks `ggml_cuda_should_use_mmvq` for the batch limit.
 pub fn shouldFuseMulMatVecQ(tensor: *const Tensor) bool {
     const src0 = impl.one(Tensor, tensor.src[0]);
     const src1 = impl.one(Tensor, tensor.src[1]);
@@ -470,8 +469,8 @@ pub fn shouldFuseMulMatVecQ(tensor: *const Tensor) bool {
 
 /// Ports `ggml_cuda_get_mul_mat_scale` (ggml-cuda.cu:2335 @b1b770d90): the
 /// weight scale that `scale_node` (`MUL`) applies to the output of `mm_node`
-/// (`MUL_MAT`), or null. A lambda in `ggml_cuda_try_fuse` until v1.0.0,
-/// which shares it with `graph_optimize` and accepts `F8_E4M3` weights too.
+/// (`MUL_MAT`), or null. It is shared with `graph_optimize`,
+/// and accepts `F8_E4M3` weights too.
 pub fn getMulMatScale(scale_node: *const Tensor, mm_node: *const Tensor) ?*const Tensor {
     const scale_lhs_mm = scale_node.src[0] == mm_node;
     const scale_rhs_mm = scale_node.src[1] == mm_node;
@@ -503,12 +502,12 @@ pub fn getMulMatIdScale(reshape: *const Tensor, repeat: *const Tensor, getrows_n
     return scale;
 }
 
-/// Ports `ggml_cuda_mul_mat_q_fusion_matches` (ggml-cuda.cu:2375 @b1b770d90),
-/// new at v0.8.0: whether gate/up/GLU has a fused MMQ kernel at all. Buffer-
+/// Ports `ggml_cuda_mul_mat_q_fusion_matches` (ggml-cuda.cu:2375 @b1b770d90):
+/// whether gate/up/GLU has a fused MMQ kernel at all. Buffer-
 /// and batch-size independent, so `graph_optimize` produces the same graph
 /// topology for every ubatch size. `up` may be any node here, so its sources
-/// are not read until its op says they exist. Since v0.9.0 `up` may be a
-/// `MUL_MAT_ID` too (the MoE gate/up/GLU). Since v1.0.0 `up_scale` and
+/// are not read until its op says they exist. `up` may be a
+/// `MUL_MAT_ID` too (the MoE gate/up/GLU). `up_scale` and
 /// `gate_scale` are the `MUL` nodes applying the NVFP4 weight scales between
 /// the matmuls and the GLU, and both matmuls must ask one `src1` precision.
 pub fn mulMatQFusionMatches(up: *const Tensor, gate: *const Tensor, glu: *const Tensor, device: c_int, up_scale: ?*const Tensor, gate_scale: ?*const Tensor) bool {
@@ -542,11 +541,10 @@ fn badPaddingClear(x: *const Tensor) bool {
         c.ggml_nbytes(x) != c.ggml_backend_buffer_get_alloc_size(x.buffer, x) and x.view_src != null;
 }
 
-/// Ports `ggml_cuda_should_fuse_mul_mat_q` (ggml-cuda.cu:2407 @b1b770d90),
-/// new at v0.8.0: `mulMatQFusionMatches` and the checks that depend on the
-/// buffers and the batch. For `MUL_MAT_ID` (v0.9.0) the kernel choice is
-/// `ggml_cuda_mul_mat_id`'s, with the nominal tiles of all experts. Since
-/// v1.0.0 a `MUL_MAT` that few-row MMQ takes is not fused.
+/// Ports `ggml_cuda_should_fuse_mul_mat_q` (ggml-cuda.cu:2407 @b1b770d90):
+/// `mulMatQFusionMatches` and the checks that depend on the
+/// buffers and the batch. For `MUL_MAT_ID` the kernel choice is
+/// `ggml_cuda_mul_mat_id`'s, with the nominal tiles of all experts. A `MUL_MAT` that few-row MMQ takes is not fused.
 pub fn shouldFuseMulMatQ(up: *const Tensor, gate: *const Tensor, glu: *const Tensor, up_scale: ?*const Tensor, gate_scale: ?*const Tensor) bool {
     // A hinted matmul can be fused, but its unfused path may be faster (e.g. FWHT for GGML_HINT_SRC0_IS_HADAMARD).
     if (impl.getOpParamsI32(up, 1) != c.GGML_HINT_NONE or impl.getOpParamsI32(gate, 1) != c.GGML_HINT_NONE) return false;
@@ -572,8 +570,7 @@ pub fn shouldFuseMulMatQ(up: *const Tensor, gate: *const Tensor, glu: *const Ten
     return mmq.fusionIsEfficient(x_up.type, c.ggml_prec_get_src(up, 1), x_up.ne[1], ncols, nchannels, device);
 }
 
-/// Ports `ggml_cuda_mul_mat` (ggml-cuda.cu:2446 @b1b770d90). Since v1.0.0
-/// few-row MMQ takes a per-type number of `src1` columns up to 24 ahead of
+/// Ports `ggml_cuda_mul_mat` (ggml-cuda.cu:2446 @b1b770d90). Few-row MMQ takes a per-type number of `src1` columns up to 24 ahead of
 /// MMVQ and MMQ, and an `F8_E4M3` weight tries cuBLASLt's FP8 GEMM before
 /// cuBLAS.
 pub fn mulMat(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
@@ -667,8 +664,8 @@ pub fn mulMatIdNeedsSync(dst: *const Tensor, x: c_int) bool {
     return true;
 }
 
-/// Ports `ggml_cuda_mul_mat_id` (ggml-cuda.cu:2545 @b1b770d90). Since v1.0.0
-/// an `F8_E4M3` weight takes MMVF at a small batch on every vendor.
+/// Ports `ggml_cuda_mul_mat_id` (ggml-cuda.cu:2545 @b1b770d90). An
+/// `F8_E4M3` weight takes MMVF at a small batch on every vendor.
 pub fn mulMatId(ctx: *common.Context, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
     const src1 = impl.one(Tensor, dst.src[1]);

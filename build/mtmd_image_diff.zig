@@ -1,4 +1,4 @@
-//! Stage 8 workstream build file: `mtmd_image_diff`. Owned by that workstream; wired
+//! Build file for `mtmd_image_diff`, wired
 //! into `build.zig` through `build/mtmd.zig`'s `Gates`.
 //!
 //! **Not a port.** This is build description. It adds `mtmd-image-diff`:

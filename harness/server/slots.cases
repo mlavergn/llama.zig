@@ -1,5 +1,4 @@
-# Slots, their save/restore/erase actions, metrics and props (Stage 10
-# step 3c): scripts/server-diff slots. Qwen3-0.6B, two slots; each side saves
+# Slots, their save/restore/erase actions, metrics and props: scripts/server-diff slots. Qwen3-0.6B, two slots; each side saves
 # into its own working directory (--slot-save-path ./).
 !mask (seconds_total|tokens_seconds) [0-9.e+-]+
 !mask-key Process-Start-Time-Unix
@@ -46,7 +45,7 @@ POST /slots/0?action=save {"filename": "s0.bin"}
 POST /props {}
 GET /metrics
 
-# v0.7.0 (#30567): with no slot named, an empty slot is taken before the
+# (#30567) with no slot named, an empty slot is taken before the
 # least recently used one; children of an n_cmpl request save the states
 # they overwrite to the prompt cache. --slot-save-path from its environment
 # variable (#30272)

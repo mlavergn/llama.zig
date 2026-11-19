@@ -53,7 +53,7 @@
 -m $ROOT/Qwen3-0.6B-Q8_0.gguf -f $DATA/hs.txt -c 512 --hellaswag --hellaswag-tasks 4
 !fail ~ -m /nonexistent.gguf -f $DATA/text.txt
 
-# --log-jsonl (v0.4.1): every log line one JSON object on stdout, and the
+# --log-jsonl: every log line one JSON object on stdout, and the
 # memory breakdown one `fit_memory_breakdown` record, whatever the
 # verbosity; common_init's timestamps, free memory and the timings move
 # between runs

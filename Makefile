@@ -74,7 +74,7 @@ cmake:
 	"$(CMAKE)" --version
 
 # Clone the pinned llama.cpp reference checkout.
-# The release the port is synced to, from build/upstream.zig (UPSTREAM.md).
+# The release the port is synced to, from build/upstream.zig.
 UPSTREAM_TAG := $(shell sed -n 's/^pub const tag = "\(.*\)";$$/\1/p' build/upstream.zig)
 
 clone:
@@ -96,11 +96,11 @@ distclean: clean
 
 # Build the port as llama.xcframework, a drop-in for the one upstream's
 # build-xcframework.sh produces: macOS, iOS, tvOS and visionOS, devices and
-# simulators. Everything lives in xcframework/; see xcframework/README.md.
+# simulators. Everything lives in xcframework/.
 xcframework:
 	$(MAKE) -C xcframework
 
-# Performance of the stock C against the port; see metrics/README.md.
+# Performance of the stock C against the port (metrics/).
 perf:
 	$(MAKE) -C metrics
 
@@ -272,7 +272,7 @@ metal-diff:
 	./scripts/metal-diff
 
 # Diff the Metal encoders' output on bits against llama.cpp.zmake's: the new
-# v0.8.0 ops, which backend-ops holds only to a tolerance and no decode
+# newer ops, which backend-ops holds only to a tolerance and no decode
 # reaches. See the header of harness/metal_ops_dump.c.
 metal-ops-diff:
 	cd llama.cpp.zmake && zig build lib --release=fast
@@ -324,10 +324,10 @@ sampler-diff:
 	zig build reference --release=fast
 	./scripts/sampler-diff $(MODEL)
 
-# Stage 7's first measurement: is the reference Vulkan backend reproducible
+# The first Vulkan measurement: is the reference Vulkan backend reproducible
 # run to run, per node and fused? Builds llama.cpp.zmake with its Vulkan
-# backend with the pinned toolchain in .tools/vulkan (`make vk-toolchain`;
-# PLAN.md, Decision 55), so it runs on the GB10 and not on this Mac's
+# backend with the pinned toolchain in .tools/vulkan (`make vk-toolchain`),
+# so it runs on the GB10 and not on this Mac's
 # Metal. See the header of scripts/vk-repro.
 VK_TOOLS = $(CURDIR)/.tools/vulkan
 VK_FLAGS = -Dvulkan "-Dglslc=$(VK_TOOLS)/bin/glslc" "-Dvulkan-include=$(VK_TOOLS)/include"
@@ -339,7 +339,7 @@ vk-repro:
 	cd llama.cpp.zmake && zig build lib --release=fast $(VK_FLAGS)
 	./scripts/vk-repro $(MODEL)
 
-# The Vulkan gates (PLAN.md, "Stage 7 — Vulkan"): this repository's libggml
+# The Vulkan gates: this repository's libggml
 # with upstream's ggml-vulkan.cpp (vk-upstream) and with the Zig host layer
 # (vk-port), CUDA off so the only GPU device is Vulkan's, and upstream's
 # backend with its exports renamed for the in-process gates. vk-backend-diff
@@ -372,7 +372,7 @@ vk-ops-diff: vk-builds
 vk-push-layout:
 	zig build vk-push-layout $(VK_GATE_FLAGS)
 
-# The BLAS backend (PLAN.md, Decision 60): Apple only, over Accelerate.
+# The BLAS backend: Apple only, over Accelerate.
 # blas-diff runs upstream's ggml-blas.cpp, its exports renamed, beside the
 # port in one process -- the vtables, supports_op swept, every type's
 # computation on bits; blas-node-diff diffs a decode node by node with BLAS
@@ -388,7 +388,7 @@ blas-diff: blas-builds
 blas-node-diff: blas-builds
 	./scripts/blas-node-diff
 
-# The x86 gates, run on the Windows laptop (Decision 57) through
+# The x86 gates, run on the Windows laptop through
 # ziglink: each cross-builds both sides for
 # x86_64-windows-gnu at X86_CPU (x86_64_v3), pushes the programs and reads
 # back the verdict. The agent's window must be open there. AVX-512 --
@@ -411,7 +411,7 @@ x86-node-diff:
 
 x86-gates: x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff
 
-# The Windows pickup's host gates (PLAN.md, "Windows pickup"), on the laptop:
+# The Windows pickup's host gates, on the laptop:
 # host-arms-diff (priority, power throttling, affinity, the clock seed),
 # libcxx-diff, regex-diff and unicode-diff, each cross-built by its own
 # script under WIN_X86=1 (scripts/win-target). host-arms-diff goes first: it
@@ -611,7 +611,7 @@ arch-model-diff:
 	./scripts/arch-model-diff zig-out/arch-fixtures $(ARGS)
 
 # The MTP (NextN) draft heads, which arch-model-diff's target-only harness
-# cannot build: the fixtures under zig-out/arch-fixtures/mtp/, since v0.7.0.
+# cannot build: the fixtures under zig-out/arch-fixtures/mtp/.
 # ARGS=<substring...> narrows it. See scripts/mtp-diff.
 mtp-diff:
 	zig build reference --release=fast
@@ -643,14 +643,14 @@ fit-diff:
 	zig build reference --release=fast
 	./scripts/fit-diff $(ARGS)
 
-# Upstream's other tools (PLAN.md, Decisions 61 and 62): each of our twelve ports run
+# Upstream's other tools: each of our twelve ports run
 # beside upstream's own binary on harness/tools/<tool>.cases, stdout,
 # stderr, exit code and every file written compared. TOOL=<name> runs one.
 TOOLS ?= gguf-split quantize tokenize fit-params export-lora batched-bench cvector-generator imatrix perplexity bench tts mtmd-cli server
 tools-diff:
 	@set -e; for t in $(if $(TOOL),$(TOOL),$(TOOLS)); do ./scripts/tools-diff $$t; done
 
-# libmtmd (Stage 8, PLAN.md Decision 62). mmproj-fixtures writes one small
+# libmtmd. mmproj-fixtures writes one small
 # random mmproj per projector type and checks each through upstream's
 # libmtmd; the gates compare the port against it.
 .PHONY: mmproj-fixtures mtmd-diff mtmd-exports mtmd-image-diff mtmd-audio-diff mtmd-decode-diff mtmd-gates
@@ -707,15 +707,15 @@ parity-port-cpu:
 	zig build reference --release=fast -Dcpu=$(GATE_CPU)
 	./scripts/parity-port --cpu $(MODEL)
 
-# The CUDA gates (PLAN.md, "Stage 6 -- CUDA"). Linux with nvcc and an NVIDIA
+# The CUDA gates. Linux with nvcc and an NVIDIA
 # GPU only: the Mac has neither, and Metal's gates cannot run on the CUDA
-# machine (Decision 43). Each builds what its script's `Requires:` line names
+# machine. Each builds what its script's `Requires:` line names
 # into its own prefix, so the port and upstream's host layer never share an
 # archive; the prefixes are the ones the scripts read. See the header of
 # each script.
 
 cuda-require-linux:
-	@[ "$$(uname -s)" = Linux ] || { echo "the CUDA gates run on the Linux CUDA machine only (PLAN.md, Decision 43)" >&2; exit 2; }
+	@[ "$$(uname -s)" = Linux ] || { echo "the CUDA gates run on the Linux CUDA machine only" >&2; exit 2; }
 
 # test-backend-ops on bits, the ported CUDA backend against upstream's.
 cuda-ops-diff: cuda-require-linux

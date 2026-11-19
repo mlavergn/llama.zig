@@ -1,4 +1,4 @@
-//! Barrel for `tools/server/`: `llama-server`'s port (Stage 10, Decision 65).
+//! Barrel for `tools/server/`: `llama-server`'s port.
 //!
 //! # Provenance
 //!

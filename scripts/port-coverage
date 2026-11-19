@@ -60,7 +60,7 @@ else
     [ "$(uname -s)" = Darwin ] && MACHO=1 || MACHO=0
 fi
 
-# Since v0.4.0 the version strings come from `ggml-version.h` and
+# The version strings come from `ggml-version.h` and
 # `llama-version.h`, which CMake configures from their `.in` templates; both
 # are configured here from build/upstream.zig, as the build does.
 VERSION_DIR="$(mktemp -d)"
@@ -125,7 +125,7 @@ todo_total=0
 # `libggml.a` and `libllama.a`: across all 24 C++ units in ggml, the only
 # mangled symbols reached from outside their own file belong to four of them
 # (`ggml-backend-dl`, `traits`, `ggml-cpu`, `ggml-metal-tuning`). Those four
-# carry a note in PLAN.md and must be ported together with the units that need
+# must be ported together with the units that need
 # their vtables; for every other file the real contract is its C ABI.
 #
 # Args: <label> <source> <swapped: yes|no> <zig file>...
@@ -255,7 +255,7 @@ report_unit "ggml-cpu/quants.c" llama.cpp/ggml/src/ggml-cpu/quants.c yes "$PORTE
 
 report_unit "arch/arm/quants.c" llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c yes "$PORTED_DIR/ported.zig"
 
-# Stage 4: the C++ translation units. The contract is the unmangled exports --
+# The C++ translation units. The contract is the unmangled exports --
 # see the note on `LANG_` above.
 LANG_=cxx report_unit "ggml-threading.cpp" llama.cpp/ggml/src/ggml-threading.cpp yes "$PORTED_DIR/ported.zig"
 
@@ -279,8 +279,8 @@ LANG_=cxx report_unit "ggml-backend.cpp" llama.cpp/ggml/src/ggml-backend.cpp yes
     "$PORTED_DIR/backend.zig" "$PORTED_DIR/backend_sched.zig"
 
 # The ggml-cpu/ C++, taken in order of size. These are on the hot path and
-# covered by backend-ops, parity-cli and graph-diff -- unlike the two files
-# Decision 40 deferred.
+# covered by backend-ops, parity-cli and graph-diff -- unlike `ggml-backend-meta.cpp`
+# and `ggml-opt.cpp`, which were deferred.
 # Rooted at `ported.zig`, not the file itself: anything under `cpu/` imports
 # `../impl.zig`, which a per-file module root cannot see.
 LANG_=cxx report_unit "binary-ops.cpp" llama.cpp/ggml/src/ggml-cpu/binary-ops.cpp yes \
@@ -293,7 +293,7 @@ LANG_=cxx report_unit "vec.cpp" llama.cpp/ggml/src/ggml-cpu/vec.cpp yes \
 # `make ops-diff`, which backend-ops and parity cannot stand in for.
 LANG_=cxx report_unit "ops.cpp" llama.cpp/ggml/src/ggml-cpu/ops.cpp yes \
     "$PORTED_DIR/ported.zig"
-# The tiled K-quant GEMM (v0.6.0, replacing v0.4.0's iqp.cpp): live only
+# The tiled K-quant GEMM: live only
 # where `__AVX2__`, so on ARM its three exports are compiled and decline at
 # once; x86-ops-diff gates them. `tiled/tiled-kernel.cpp` has no unmangled
 # export -- its microkernels and repacks are C++-linkage, called only from
@@ -316,7 +316,7 @@ LANG_=cxx report_unit "repack.cpp" llama.cpp/ggml/src/ggml-cpu/repack.cpp yes \
     "$PORTED_DIR/ported.zig"
 LANG_=cxx report_unit "arch/arm/repack.cpp" llama.cpp/ggml/src/ggml-cpu/arch/arm/repack.cpp yes \
     "$PORTED_DIR/ported.zig"
-# The Metal host layer. The two .m files are never ported (Decision 13);
+# The Metal host layer. The two .m files are never ported;
 # the boundary with them is a pure C ABI, measured. Not compiled off Apple.
 if [ "$MACHO" = 1 ]; then
 LANG_=cxx report_unit "ggml-metal-common.cpp" llama.cpp/ggml/src/ggml-metal/ggml-metal-common.cpp yes \
@@ -340,14 +340,14 @@ LANG_=cxx report_unit "ggml-metal-device.cpp" llama.cpp/ggml/src/ggml-metal/ggml
     "$PORTED_DIR/ported.zig"
 LANG_=cxx report_unit "ggml-metal-ops.cpp" llama.cpp/ggml/src/ggml-metal/ggml-metal-ops.cpp yes \
     "$PORTED_DIR/ported.zig"
-# ggml-metal-fusion.cpp (v0.4.1): 17 C-ABI symbols, two of whose callers
+# ggml-metal-fusion.cpp: 17 C-ABI symbols, two of whose callers
 # are the .m files. src/ggml/metal/fusion.zig, gated by scripts/metal-diff.
 LANG_=cxx report_unit "ggml-metal-fusion.cpp" llama.cpp/ggml/src/ggml-metal/ggml-metal-fusion.cpp yes \
     "$PORTED_DIR/ported.zig"
 else
     printf '  %-22snot part of this target\n' "ggml-metal/*.cpp"
 fi
-# ggml-opt.cpp: 37 C-ABI symbols, not the 9 PLAN.md's survey recorded.
+# ggml-opt.cpp: 37 C-ABI symbols, not the 9 first estimated.
 # src/ggml/opt.zig, gated by scripts/opt-diff.
 LANG_=cxx report_unit "ggml-opt.cpp" llama.cpp/ggml/src/ggml-opt.cpp yes \
     "$PORTED_DIR/ported.zig"
@@ -356,7 +356,7 @@ LANG_=cxx report_unit "ggml-opt.cpp" llama.cpp/ggml/src/ggml-opt.cpp yes \
 LANG_=cxx report_unit "ggml-backend-meta.cpp" llama.cpp/ggml/src/ggml-backend-meta.cpp yes \
     "$PORTED_DIR/ported.zig"
 
-# libllama. It swaps once, at llama.h (PLAN.md, Decision 42), except for the
+# libllama. It swaps once, at llama.h, except for the
 # sampler and grammar, which swap ahead of the rest.
 INCLUDES=(-I llama.cpp/include -I llama.cpp/src -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I "$VERSION_DIR")
 EXTRA_MANGLED_="_Z27llama_sampler_backend_beginP13llama_sampler

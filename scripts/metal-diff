@@ -51,13 +51,13 @@ n=$(nm -gUj "$tmp/ref_metal.o" | sed 's/^_//' | grep -c '^ref_ggml_backend')
 echo "reference: $n exports renamed to ref_*"
 [ "$n" -eq 6 ] || { echo "FAIL: expected 6 renamed exports, got $n" >&2; exit 1; }
 
-# The reordering pass (v0.5.0) and the mat-mul dispatch predicates:
-# `ggml-metal-common.cpp` with its fourteen exports renamed (v0.6.0 added
+# The reordering pass and the mat-mul dispatch predicates:
+# `ggml-metal-common.cpp` with its fourteen exports renamed (including
 # the five few-row MMA ones), so `graph_optimize`'s order can be compared on
 # the fusion probes and each predicate asked directly. Its
 # `ggml_metal_fusion_max` stays ours, compared on its own below.
 #
-# The renames go to the reference fusion table too: since v0.6.0 its
+# The renames go to the reference fusion table too: its
 # MUL_MAT + ADD check asks `ggml_metal_op_mul_mat_use_mma` and
 # `_may_use_mma`, and without them it would ask ours, and a fault in those
 # would move both sides of the fusion comparison together.
@@ -70,9 +70,9 @@ for f in ggml_metal_op_mul_mat_use_fwht ggml_metal_op_mul_mat_use_mm ggml_metal_
     CRENAME+=(-D$f=ref_$f)
 done
 
-# The fusion table (v0.4.1): the reference `ggml-metal-fusion.cpp` with all
-# 18 of its exports renamed, beside ours (v0.5.0 dropped `_all` and added
-# `_get_id` and `_add_alloc_deps`). Its helpers -- ggml.c's
+# The fusion table: the reference `ggml-metal-fusion.cpp` with all
+# 18 of its exports renamed, beside ours.
+# Its helpers -- ggml.c's
 # `ggml_can_fuse_subgraph_ext`, the `.m`'s `ggml_metal_buffer_get_id` --
 # are shared, so the comparison is of the table and the matching alone.
 FRENAME=()
@@ -103,7 +103,7 @@ for f in ggml_metal_op_mul_mat_use_mma ggml_metal_op_mul_mat_may_use_mma; do
         || { echo "FAIL: the reference fusion table does not call ref_$f" >&2; exit 1; }
 done
 
-# The op encoders (v0.5.0): `ggml-metal-ops.cpp` with **all** of its exports
+# The op encoders : `ggml-metal-ops.cpp` with **all** of its exports
 # renamed -- read off a first compile, so the list cannot drift -- for the
 # scratch-size queries `get_alloc_size` adds up. The reference
 # `ggml-metal.cpp` above calls ours for those, so only this can compare them.
@@ -132,7 +132,7 @@ zig cc -mcpu=baseline harness/metal_diff.c -o "$tmp/metal_diff" -std=c11 -O2 \
 
 "$tmp/metal_diff" || exit 1
 
-# The batched buffer slots again (v0.9.0), through the private buffer iface:
+# The batched buffer slots again, through the private buffer iface:
 # the device decides shared or private once per process, from this variable.
 echo
 echo "=== batched buffer slots, private buffers ==="

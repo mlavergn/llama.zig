@@ -23,8 +23,8 @@ pub const std_options: std.Options = .{
 /// - `init`: process capabilities supplied by the runtime (allocator, IO, args).
 ///
 /// Return: nothing on success. Exits non-zero on a bad command line or a
-/// failure to generate, having written the reason to stderr -- Decision 22
-/// requires a non-zero exit, so failures are not merely reported.
+/// failure to generate, having written the reason to stderr -- a refused
+/// flag must exit non-zero, so failures are not merely reported.
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);

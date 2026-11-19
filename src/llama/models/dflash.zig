@@ -361,7 +361,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     // full-vocabulary drafts can share the target's through ctx_other. A
     // draft with its own embeddings and head references no target tensors,
     // so it can run on devices the target does not use (e.g. -devd with a
-    // tensor-split target). Since v0.7.0 a draft with no head of its own
+    // tensor-split target). A draft with no head of its own
     // never falls back to its token embeddings.
     self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, n_vocab_draft }, nr, exc);
 

@@ -6,7 +6,7 @@
 //! every record must be byte-identical. A program is a list of cases; a
 //! case is a parser -- a description of builder calls -- and the inputs to
 //! run it over. Per case: the build's outcome, the arena's `dump`, its JSON
-//! form (`harness/peg_serialize.zig`; upstream's `save` until v0.7.0), its
+//! form (`harness/peg_serialize.zig`), its
 //! GBNF eager and lazy; per input, the parse complete and
 //! lenient and of every prefix (the partial state a stream sees), each
 //! with its AST, the three chat mappers' messages and the exceptions on
@@ -19,9 +19,7 @@
 //! (`harness/peg_rec.h`, `ref_peg_upstream`) together with the inputs they
 //! parse; random descriptions over every builder call; chat grammars in the
 //! shapes upstream's templates take, over random tools; and Gemma 4- and
-//! MiniMax-M3-shaped grammars for their mappers. Upstream removed
-//! `load`/`from_json` at v0.7.0, and with them the mutated saved arenas
-//! this gate fed them. The inputs: the recorded ones, strings derived from
+//! MiniMax-M3-shaped grammars for their mappers. The inputs: the recorded ones, strings derived from
 //! the grammar itself, and both mutated.
 //!
 //! The reference runs in forked children, a batch at a time: a
@@ -30,8 +28,8 @@
 //! batch whose child dies is rerun one case per child; a case that kills
 //! the reference is skipped on both sides and counted.
 //!
-//! A tool-related node after a `tool-close` -- undefined in the C++ until
-//! v0.6.0 cleared `current_tool` there (see `chat_peg.zig`) -- is compared
+//! A tool-related node after a `tool-close` -- the C++ clears
+//! `current_tool` there (see `chat_peg.zig`) -- is compared
 //! like any other, and some mapping must reach one.
 //!
 //! Usage: peg_diff [case substring]
@@ -711,7 +709,7 @@ fn resultText(r: peg.ParseResult) []u8 {
 }
 
 /// `ast_invalid_text` in peg_ref.cpp: every node's invalid UTF-8 runs and
-/// sanitized text (v0.5.0).
+/// sanitized text.
 fn astInvalidText(ast: *const peg.AstArena) anyerror![]u8 {
     var s: std.ArrayList(u8) = .empty;
     for (ast.nodes.items, 0..) |*n, i| {
@@ -1330,8 +1328,7 @@ fn genRandom() []const u8 {
     for (0..n) |_| last = genExpr(&d, 0, &avail);
     if (chance(40)) last = d.seq(&.{ last, d.leaf(.end) });
     // now and then no root at all: a parse throws, `dump` of the root reads
-    // past the parsers -- the arms the loaded arenas reached until v0.7.0
-    // removed `load`
+    // past the parsers -- the arms loaded arenas once reached
     if (!chance(2)) d.setRoot(last);
     return d.buf.items;
 }
@@ -1718,8 +1715,8 @@ pub fn main(init: std.process.Init) !void {
         addCase("minimax", 0, mm, inputsFor(mm, &.{}, 40, 40));
     }
     // the base mapper's state machine, node orders a grammar rarely
-    // produces: a close before any name (and a tool node after it,
-    // undefined in the C++ until v0.6.0), arguments before the name, a string value left open
+    // produces: a close before any name (and a tool node after it),
+    // arguments before the name, a string value left open
     {
         const orders = [_][]const Op{
             &.{ .tool_open, .tool_close, .tool_name, .tool_arg_name, .tool_arg_string_value },
@@ -1729,7 +1726,7 @@ pub fn main(init: std.process.Init) !void {
             &.{ .tool_open, .tool_id, .tool_open, .tool_name, .tool_arg_string_value, .tool_arg_string_value, .tool_arg_close },
             &.{ .tool_name, .tool_open, .tool_arg_value, .tool_close, .tool_close },
             // a named call kept, then a nameless one closed and a tool node
-            // after it: v0.6.0 clears current_tool, so nothing reaches the first
+            // after it: current_tool is cleared, so nothing reaches the first
             &.{ .tool_open, .tool_name, .tool_close, .tool_open, .tool_close, .tool_name, .tool_arg_name, .tool_arg_string_value },
             &.{ .tool_open, .tool_name, .tool_args, .tool_close, .tool_open, .tool_close, .tool_args, .tool_id },
         };

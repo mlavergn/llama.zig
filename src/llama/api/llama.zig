@@ -49,7 +49,7 @@ pub fn llama_load_mode_name(load_mode: c.enum_llama_load_mode) callconv(.c) [*c]
 }
 
 /// Ports `llama_load_mode_from_str` (src/llama.cpp:68 @b1b770d90). An unknown
-/// name aborts, `GGML_ABORT`, since v0.6.0.
+/// name aborts, `GGML_ABORT`.
 pub fn llama_load_mode_from_str(str: [*c]const u8) callconv(.c) c.enum_llama_load_mode {
     if (strcmp(str, "auto") == 0) return c.LLAMA_LOAD_MODE_AUTO;
     if (strcmp(str, "none") == 0) return c.LLAMA_LOAD_MODE_NONE;

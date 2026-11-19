@@ -1,4 +1,4 @@
-//! The `json` module the server's Stage 9 imports name: `cli/json/`, reached
+//! The `json` module the server's chat imports name: `cli/json/`, reached
 //! through `cli_fit`.
 //!
 //! # Provenance

@@ -100,7 +100,7 @@ size_t ref_next_prime(size_t n) {
 // An unordered_map<string, int> built as llama-vocab.cpp builds token_to_id,
 // `m[key] = i` in order, then walked: `out` gets the values in iteration
 // order. `n` strings, the i-th at blob[offs[i], offs[i + 1]). `reserve` is
-// passed to `reserve` first, as llama-vocab.cpp does since v0.8.0, unless it is
+// passed to `reserve` first, as llama-vocab.cpp does, unless it is
 // SIZE_MAX.
 // Return: the map's size; `*bc` gets its bucket count.
 size_t ref_umap(const char * blob, const size_t * offs, size_t n, size_t reserve, int * out, size_t * bc) {

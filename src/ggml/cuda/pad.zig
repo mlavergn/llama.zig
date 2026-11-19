@@ -20,7 +20,7 @@ const Tensor = c.ggml_tensor;
 const block_size = 256;
 
 /// Ports `pad_f32_cuda` (pad.cu:67 @b1b770d90), which launches with
-/// `<<<>>>`. Since v0.7.0 the grid's y and z are capped at 65535 and the
+/// `<<<>>>`. The grid's y and z are capped at 65535 and the
 /// kernel strides over larger `ne1` and `ne2 * ne3`.
 fn padF32Cuda(
     src: ?*const anyopaque,

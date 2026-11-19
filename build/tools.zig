@@ -1,4 +1,4 @@
-//! Upstream's tools beyond `llama-cli` (PLAN.md, Decision 61): our Zig ports
+//! Upstream's tools beyond `llama-cli`: our Zig ports
 //! under `tools/`, and upstream's own, compiled unmodified, as the references
 //! their gates diff against.
 //!
@@ -32,7 +32,7 @@ const Tool = struct {
     ref: []const []const u8,
 };
 
-/// The tools ported so far, in the order Decision 61 takes them.
+/// The tools ported so far, in the order they were ported.
 const tools = [_]Tool{
     .{ .name = "gguf-split", .port = "tools/gguf_split.zig", .ref = &.{"tools/gguf-split/gguf-split.cpp"} },
     .{ .name = "quantize", .port = "tools/quantize.zig", .ref = &.{ "tools/quantize/quantize.cpp", "tools/quantize/main.cpp" } },
@@ -46,7 +46,7 @@ const tools = [_]Tool{
     .{ .name = "bench", .port = "tools/llama_bench.zig", .ref = &.{ "tools/llama-bench/llama-bench.cpp", "tools/llama-bench/main.cpp" } },
 };
 
-/// The tools over mtmd (Stage 8): ported, and linking the port of libmtmd
+/// The tools over mtmd: ported, and linking the port of libmtmd
 /// (`build/mtmd.zig`'s module) as their references link upstream's.
 const mtmd_tools = [_]Tool{
     .{ .name = "tts", .port = "tools/tts.zig", .ref = &.{"tools/tts/tts.cpp"} },
@@ -157,7 +157,7 @@ fn buildTarget(b: *std.Build, target: std.Build.ResolvedTarget) []const u8 {
 /// Adds `tools` (our ports, into `zig-out/bin`) and `tools-ref` (upstream's,
 /// into `zig-out/tools-ref/bin`).
 pub fn add(b: *std.Build, opts: Options) !void {
-    // Every upstream executable embeds this manifest on Windows since v0.9.0
+    // Every upstream executable embeds this manifest on Windows
     // (`cmake/win-app.cmake`): a UTF-8 active code page, which replaced
     // `common_params_parse`'s wide-argv repair, and long paths. Zig ignores
     // it on other targets.
@@ -209,7 +209,7 @@ pub fn add(b: *std.Build, opts: Options) !void {
         .sdk = opts.sdk,
         .reference = opts.reference,
     });
-    // Stage 9's modules, for the server's data layer (`tools/server/module.zig`)
+    // The chat modules, for the server's data layer (`tools/server/module.zig`)
     // and `llama-mtmd-cli`'s chat templates (`common_chat_templates_init`):
     // `json` is `cli_fit`'s `cli/json/` under the name `cli/common_chat/`
     // imports (`tools/server/json_module.zig` says why).
@@ -250,9 +250,9 @@ pub fn add(b: *std.Build, opts: Options) !void {
         const exe = b.addExecutable(.{ .name = b.fmt("llama-{s}", .{t.name}), .root_module = mod, .win32_manifest = win_app_manifest });
         tools_step.dependOn(&b.addInstallArtifact(exe, .{}).step);
     }
-    // Our `llama-server` (Stage 10, Decision 65), over the same modules as
+    // Our `llama-server`, over the same modules as
     // the mtmd tools: it takes images and audio once step 8 lands. Not built
-    // for Windows: its port there is out of scope (Marc, 2026-11-04).
+    // for Windows: its port there is out of scope.
     if (opts.target.result.os.tag != .windows) {
         const mod = b.createModule(.{
             .root_source_file = b.path("tools/server/main.zig"),
@@ -311,7 +311,7 @@ pub fn add(b: *std.Build, opts: Options) !void {
         ref_step.dependOn(&install.step);
         mtmd_ref_step.dependOn(&install.step);
     }
-    // Upstream's `llama-server` (Stage 10, Decision 65), as `llama.cpp.zmake`
+    // Upstream's `llama-server`, as `llama.cpp.zmake`
     // builds it: `server-context` and `llama-server-impl` over common, mtmd
     // and cpp-httplib, with the web UI embedded under -Dui (zmake's stub,
     // and no assets, without it).

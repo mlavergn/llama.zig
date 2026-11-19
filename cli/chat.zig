@@ -17,7 +17,7 @@
 //! and `raise_exception`. libllama's own `llama_chat_apply_template` only
 //! recognises a fixed set of template *families* and cannot run an arbitrary
 //! one, so anything short of a Jinja engine gets the prompt subtly wrong for
-//! models it has never heard of. See PLAN.md Decisions 10 and 25.
+//! models it has never heard of.
 //!
 //! # The special-token trap, and how this file closes it
 //!
@@ -121,8 +121,8 @@ pub const Segment = struct {
     /// False for everything that came from a message.
     trusted: bool,
     /// Whether this run is an input run re-trusted as a token (a provenance
-    /// record's `markToken`). `applySegments` binds none since v0.7.0, where
-    /// upstream stopped marking `bos_token` and `eos_token`; a caller that
+    /// record's `markToken`). `applySegments` binds none, as
+    /// upstream does not mark `bos_token` and `eos_token`; a caller that
     /// marks its own tokens (`conversation.zig`) still sets it.
     token: bool = false,
 };

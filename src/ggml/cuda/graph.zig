@@ -9,8 +9,8 @@
 //! and `ggml_backend_cuda_graph_optimize`.
 //!
 //! The op switch is the C's, case for case. While the port was in progress
-//! an `isPorted` predicate mirrored it and was AND-ed into `supports_op`
-//! (PLAN.md, Decision 48); it went at the swap, once `cuda-ops-diff` showed
+//! an `isPorted` predicate mirrored it and was AND-ed into `supports_op`;
+//! it went at the swap, once `cuda-ops-diff` showed
 //! `supports_op` equal to the reference's on every case.
 //!
 //! Fusion, `ggml_cuda_try_fuse`, is in `fusion.zig`.
@@ -93,8 +93,8 @@ const cudaCheck = common.cudaCheck;
 // -----------------------------------------------------------------------------
 // Dispatch
 
-/// Ports `ggml_cuda_compute_forward` (ggml-cuda.cu:2708 @b1b770d90). v1.0.0
-/// removed `GGML_OP_ADD1` and `GGML_OP_DIAG_MASK_INF` from ggml.
+/// Ports `ggml_cuda_compute_forward` (ggml-cuda.cu:2708 @b1b770d90). ggml has no
+/// `GGML_OP_ADD1` or `GGML_OP_DIAG_MASK_INF`.
 fn computeForward(ctx: *Context, dst: *Tensor) bool {
     switch (dst.op) {
         c.GGML_OP_REPEAT => binbcast.opRepeat(ctx, dst),
@@ -249,8 +249,7 @@ fn nodes(cgraph: *impl.CGraph) []*Tensor {
 }
 
 /// Ports `ggml_cuda_graph_check_compability` (ggml-cuda.cu:3206 @b1b770d90).
-/// Its debug line was `#ifndef NDEBUG` through v0.6.0, compiled out of the
-/// release reference; v0.7.0 gates it on `GGML_CUDA_GRAPH_DEBUG` instead.
+/// Its debug line is gated on `GGML_CUDA_GRAPH_DEBUG`.
 fn graphCheckCompatibility(cgraph: *impl.CGraph) bool {
     var use_cuda_graph = true;
     for (nodes(cgraph)) |node| {
@@ -339,8 +338,8 @@ const ClusterRuntime = struct {
     const once = common.Once(init);
 };
 
-/// Ports `ggml_cuda_graph_get_clusters` (ggml-cuda.cu:3288 @b1b770d90), new at
-/// v1.0.0 (#31284), under `USE_CUDA_GRAPH_CLUSTER_CHECK`: the cluster dims
+/// Ports `ggml_cuda_graph_get_clusters` (ggml-cuda.cu:3288 @b1b770d90)
+/// (#31284), under `USE_CUDA_GRAPH_CLUSTER_CHECK`: the cluster dims
 /// of every clustered kernel node, on Hopper and later.
 fn graphGetClusters(cuda_graph: cu.cudaGraph_t, device: c_int) std.ArrayList(common.GraphCluster) {
     var clusters: std.ArrayList(common.GraphCluster) = .empty;
@@ -371,9 +370,8 @@ fn graphGetClusters(cuda_graph: cu.cudaGraph_t, device: c_int) std.ArrayList(com
 }
 
 /// Ports `ggml_cuda_graph_update_executable` (ggml-cuda.cu:3319 @b1b770d90),
-/// the CUDA 12 arm. Since v0.8.0 it takes one chunk's executable and
-/// captured graph. Its debug line, `#ifndef NDEBUG` through v0.6.0, is
-/// `GGML_CUDA_GRAPH_DEBUG`'s since v0.7.0. Since v1.0.0 a chunk whose
+/// the CUDA 12 arm. It takes one chunk's executable and
+/// captured graph. Its debug line is `GGML_CUDA_GRAPH_DEBUG`'s. A chunk whose
 /// kernel cluster dims changed is re-instantiated rather than updated.
 fn graphUpdateExecutable(instance: *common.GraphInstance, cuda_graph: cu.cudaGraph_t, device: c_int) void {
     {
@@ -428,7 +426,7 @@ fn graphChunkSize() c_int {
 
 /// Ports `ggml_cuda_graph_launch_chunk` (ggml-cuda.cu:3370 @b1b770d90): end
 /// the capture of chunk `idx`, update or create its executable and launch it.
-/// Since v1.0.0 a new executable records its cluster dims.
+/// A new executable records its cluster dims.
 fn graphLaunchChunk(cuda_ctx: *Context, graph: *common.Graph, idx: usize) void {
     var cuda_graph: cu.cudaGraph_t = null;
     cudaCheck(cu.cudaStreamEndCapture(cuda_ctx.stream(), &cuda_graph), "cudaStreamEndCapture(cuda_ctx->stream(), &cuda_graph)", @src());
@@ -492,7 +490,7 @@ const Concurrency = struct {
 };
 
 /// Ports `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:5172 @b1b770d90).
-/// Since v0.8.0 the capture ends and restarts every `graphChunkSize` nodes,
+/// The capture ends and restarts every `graphChunkSize` nodes,
 /// each chunk launched as it ends, so the GPU runs one while the next is
 /// enqueued.
 fn graphEvaluateAndCapture(cuda_ctx: *Context, cgraph: *impl.CGraph, use_cuda_graph: bool, cuda_graph_update_required: bool, graph_key: ?*const anyopaque) void {
@@ -657,7 +655,7 @@ fn restoreOriginalOrder(cuda_ctx: *Context, cgraph: *impl.CGraph) void {
 }
 
 /// Ports `ggml_backend_cuda_graph_compute` (ggml-cuda.cu:5418 @b1b770d90).
-/// Since v1.0.0 a graph reused under the same `uid` skips the compatibility
+/// A graph reused under the same `uid` skips the compatibility
 /// check: `graph->uid` is set only for a compatible graph.
 pub fn graphCompute(backend_c: c.ggml_backend_t, cgraph_c: ?*c.struct_ggml_cgraph) callconv(.c) c.enum_ggml_status {
     const cuda_ctx = backend.backendCtx(backend_c);
@@ -783,13 +781,13 @@ const GraphOpt = struct {
 /// Ports `ggml_backend_cuda_graph_optimize` (ggml-cuda.cu:5508 @b1b770d90),
 /// with its `add_alloc_deps` lambda.
 ///
-/// Its first pass (v0.6.0) moves a shared expert's gate/up/GLU, wherever
+/// Its first pass moves a shared expert's gate/up/GLU, wherever
 /// it follows a routed expert's `MUL_MAT_ID`/`MUL_MAT_ID`/`GLU` before the
 /// next routed pair, to right after it -- `std::rotate` of the nodes in
 /// between -- so `tryFuse` sees the six nodes together, and keeps the
 /// routed input and ids alive until the shared GLU.
 ///
-/// Its second pass runs whether or not CUDA graphs are on. Since v0.8.0 the
+/// Its second pass runs whether or not CUDA graphs are on. The
 /// inputs of every gate/up/GLU `fusion.zig` could send to the fused MMQ
 /// kernel are kept alive until the GLU, so they cannot alias its output
 /// (under op offload the weights are buffer copies). Every

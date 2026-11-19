@@ -7,8 +7,7 @@
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-buffers.cpp`, and
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v1.0.0
-//! (`b1b770d90`). Upstream split `ggml-vulkan.cpp` into those files at
-//! v0.5.0. A `vk_context` is a `std::shared_ptr` in the C++, kept alive
+//! (`b1b770d90`). A `vk_context` is a `std::shared_ptr` in the C++, kept alive
 //! either by the backend context's garbage list or by the one caller that
 //! made it ("temporary"); here the owner frees it explicitly.
 
@@ -536,7 +535,7 @@ pub fn copyBuffer(cmdbuf: vk.VkCommandBuffer, src: vk.VkBuffer, dst: vk.VkBuffer
 }
 
 /// The C++'s direct `vkCmdCopyBuffer` -- the loader's exported symbol, not
-/// the dispatcher's pointer (`NOTES.md`, "Stage 7: the measurement").
+/// the dispatcher's pointer (measured with `nm` on the reference).
 pub extern fn vkCmdCopyBuffer(commandBuffer: vk.VkCommandBuffer, srcBuffer: vk.VkBuffer, dstBuffer: vk.VkBuffer, regionCount: u32, pRegions: [*]const vk.VkBufferCopy) void;
 
 // -----------------------------------------------------------------------------

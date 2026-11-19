@@ -13,24 +13,22 @@
 //! The graph optimizer (`common.zig`'s `ggml_graph_optimize`, through
 //! `ggml_metal_fusion_max`) packs fusable runs before it reorders, and the
 //! op encoders (`ops.zig`, through `ggml_metal_fusion_next`) fuse them when
-//! they encode. Before v0.4.1 each phase had its own idea of what fused;
-//! now both consult `fusions`, so they cannot disagree.
+//! they encode. Both consult `fusions`, so they cannot disagree.
 //!
 //! # Its contract is C, and two callers stay Objective-C
 //!
 //! All 18 of the C++'s exports are `extern "C"`. `ggml-metal-device.m`
 //! owns a `ggml_metal_fusion_info` per device and `ggml-metal-context.m`
-//! reads its flags, labels and counts; both stay Objective-C (Decision
-//! 13) and call the `ggml_metal_fusion_info_*` functions below by name.
+//! reads its flags, labels and counts; both stay Objective-C and call the `ggml_metal_fusion_info_*` functions below by name.
 //! The struct itself is opaque to them, so `Info` is free to be a Zig
-//! struct. Since v0.5.0 so is `Fusion`: the header declares it opaque,
+//! struct. So is `Fusion`: the header declares it opaque,
 //! drops `ggml_metal_fusion_all`, and hands out the id through
 //! `ggml_metal_fusion_get_id`. Its address still identifies an entry:
 //! `count_fusion` counts by offset into the table.
 //!
 //! # Raw and non-empty op sequences
 //!
-//! v0.5.0's MoE patterns span RESHAPE and VIEW nodes the encoders never
+//! The MoE patterns span RESHAPE and VIEW nodes the encoders never
 //! see. Each entry keeps both sequences: `ops_all`, the raw graph's, which
 //! `add_alloc_deps` and the MoE checks walk, and `ops`, its non-empty
 //! subsequence, which `ggml_metal_fusion_next` matches and the labels
@@ -107,7 +105,7 @@ pub const CheckFn = *const fn (
 
 /// Ports `struct ggml_metal_fusion` (ggml-metal-fusion.cpp:28 @b1b770d90).
 ///
-/// Since v0.5.0 the header declares it opaque, so the layout is ours. Its
+/// The header declares it opaque, so the layout is ours. Its
 /// address is still what identifies an entry: `count_fusion` takes the
 /// offset from the start of `fusions`.
 pub const Fusion = struct {
@@ -158,7 +156,7 @@ pub export fn ggml_metal_fusion_get_id(fusion: *const Fusion) callconv(.c) Id {
 // Helpers
 
 /// `src[i]`, narrowed: a `[*c]` must go through `impl.one` before an array
-/// field is indexed through it (`CLAUDE.md`).
+/// field is indexed through it (Zig miscompiles `p.*.arr[i]`).
 inline fn src(t: *const Tensor, i: usize) *const Tensor {
     return impl.one(Tensor, t.src[i]);
 }
@@ -442,7 +440,7 @@ const topk_moe_max_experts = 1024;
 // 362, 366 @b1b770d90): SOFT_MAX + ARGSORT + GET_ROWS (plus optional
 // norm/scale) for MoE routing. A multi-output elision chain: the fused
 // kernel writes both the selected expert ids and the gathered/normalized
-// routing weights. The `_bias` norms (v1.0.0) adjust the sum with a
+// routing weights. The `_bias` norms adjust the sum with a
 // `SCALE`'s bias where the others clamp it.
 const ops_topk_moe = [_]c.enum_ggml_op{
     c.GGML_OP_SOFT_MAX, c.GGML_OP_RESHAPE, c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS,
@@ -466,7 +464,7 @@ const ops_topk_moe_norm_scale_bias = [_]c.enum_ggml_op{ c.GGML_OP_SOFT_MAX, c.GG
 // Ports `ops_topk_moe_sp`, `ops_topk_moe_sp_scale`, `ops_topk_moe_sp_norm`,
 // `ops_topk_moe_sp_norm_scale`, `ops_topk_moe_sp_norm_bias` and
 // `ops_topk_moe_sp_norm_scale_bias` (ggml-metal-fusion.cpp:371, 374, 377,
-// 381, 385, 389 @b1b770d90), new at v1.0.0 (#31615): DeepSeek-V4's
+// 381, 385, 389 @b1b770d90) (#31615): DeepSeek-V4's
 // `sqrt(softplus)` gating, ranked with an added selection bias.
 const ops_topk_moe_sp = [_]c.enum_ggml_op{ c.GGML_OP_UNARY, c.GGML_OP_SQRT, c.GGML_OP_RESHAPE, c.GGML_OP_ADD, c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS };
 const ops_topk_moe_sp_scale = [_]c.enum_ggml_op{ c.GGML_OP_UNARY, c.GGML_OP_SQRT, c.GGML_OP_RESHAPE, c.GGML_OP_ADD, c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS, c.GGML_OP_SCALE };
@@ -478,7 +476,7 @@ const ops_topk_moe_sp_norm_scale_bias = [_]c.enum_ggml_op{ c.GGML_OP_UNARY, c.GG
 // Ports `ops_topk_moe_sig`, `ops_topk_moe_sig_scale`, `ops_topk_moe_sig_norm`,
 // `ops_topk_moe_sig_norm_scale`, `ops_topk_moe_sig_norm_bias` and
 // `ops_topk_moe_sig_norm_scale_bias` (ggml-metal-fusion.cpp:394, 397, 400,
-// 404, 408, 412 @b1b770d90), new at v1.0.0: GLM's sigmoid gating, ranked
+// 404, 408, 412 @b1b770d90): GLM's sigmoid gating, ranked
 // with an added selection bias.
 const ops_topk_moe_sig = [_]c.enum_ggml_op{ c.GGML_OP_UNARY, c.GGML_OP_RESHAPE, c.GGML_OP_ADD, c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS };
 const ops_topk_moe_sig_scale = [_]c.enum_ggml_op{ c.GGML_OP_UNARY, c.GGML_OP_RESHAPE, c.GGML_OP_ADD, c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS, c.GGML_OP_SCALE };
@@ -492,11 +490,11 @@ const ops_topk_moe_sig_norm_scale_bias = [_]c.enum_ggml_op{ c.GGML_OP_UNARY, c.G
 ///
 /// The table matches on the non-empty node sequence; this check walks the
 /// raw graph, RESHAPE and VIEW nodes included, and holds it to `ops_all`.
-/// Since v1.0.0 a chain may start at a `SOFTPLUS` (then a `SQRT`) or a
+/// A chain may start at a `SOFTPLUS` (then a `SQRT`) or a
 /// `SIGMOID` unary, rank its scores after an `ADD` of a per-expert bias
 /// while gathering the unbiased ones, and adjust the norm's sum with a
 /// `SCALE` of factor 1 (an additive bias) instead of a clamp. The variant is
-/// read off the ops, no longer off the chain's length.
+/// read off the ops, not the chain's length.
 fn checkTopkMoe(fusion: *const Fusion, nodes: [*]const *const Tensor, gf: *const CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
     impl.assert(fusion.ops.len >= 3, "fusion->ops.size() >= 3");
     _ = nodes;
@@ -1556,7 +1554,7 @@ pub export fn ggml_metal_fusion_next(
 /// the same view-transparent sequence the encoders see, so the answer is
 /// the raw span to the last matched node, views packed along.
 ///
-/// Since v0.6.0 a zero-element node is no longer skipped here (the
+/// A zero-element node is not skipped here (the
 /// encoders still skip it): an empty graph packs like its non-empty
 /// counterpart, so a no-output ubatch gets the same node order.
 ///

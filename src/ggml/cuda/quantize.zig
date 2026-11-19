@@ -5,9 +5,9 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/quantize.cu` and
 //! `llama.cpp/ggml/src/ggml-cuda/quantize.cuh` at v1.0.0 (`b1b770d90`). The
-//! `quantize_*` kernels stay CUDA. v1.0.0 removed the unused
-//! `quantize_cuda_t` typedef (and with it `quantize_row_q8_1_cuda`'s unused
-//! `ids` and `type_src0`), and added few-row MMQ's `src1` layout.
+//! `quantize_*` kernels stay CUDA. There is no `quantize_cuda_t` typedef, and
+//! `quantize_row_q8_1_cuda` takes no `ids` or `type_src0`; few-row MMQ has
+//! its own `src1` layout.
 
 const std = @import("std");
 const impl = @import("../impl.zig");
@@ -80,8 +80,8 @@ fn mmqFewQ8_1Kernel(comptime layout: mmq.Q8_1DsLayout) kernels.Kernel {
     return kernels.get("quantize", kernels.tmpl("quantize_mmq_few_q8_1", &.{std.fmt.comptimePrint("(mmq_q8_1_ds_layout){d}", .{@backingInt(layout)})}));
 }
 
-/// Ports `quantize_mmq_few_q8_1_cuda` (quantize.cu:655 @b1b770d90), new at
-/// v1.0.0: `src1` of few-row MMQ in the layout of the MMA fragments, one
+/// Ports `quantize_mmq_few_q8_1_cuda` (quantize.cu:655 @b1b770d90):
+/// `src1` of few-row MMQ in the layout of the MMA fragments, one
 /// thread per 4 values of a column, the columns padded to whole groups.
 pub fn quantizeMmqFewQ8_1(x: ?*const f32, vy: ?*anyopaque, ds_layout: mmq.Q8_1DsLayout, ne00: i64, s01: i64, s02: i64, s03: i64, ne1: i64, ne2: i64, ne3: i64, stream: cu.cudaStream_t) void {
     impl.assert(@rem(ne00, c.QK_K) == 0, "ne00 % QK_K == 0");

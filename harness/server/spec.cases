@@ -1,4 +1,4 @@
-# Speculative decoding through the server (Stage 10 step 3c): scripts/server-diff
+# Speculative decoding through the server: scripts/server-diff
 # spec. The drafters are tools/common's (spec-diff holds them to upstream's);
 # here the slots drive them: drafting, verifying, accepting, and on a
 # hybrid model restoring the speculative checkpoint.
@@ -13,7 +13,7 @@ GET /props
 !fulllog
 POST /completion {"prompt": "The capital of France is", "n_predict": 16, "temperature": 0}
 POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 16, "temperature": 0, "n_probs": 2}
-# v0.8.0: probabilities of accepted draft tokens, from each one's own batch row;
+# probabilities of accepted draft tokens, from each one's own batch row;
 # post_sampling_probs stays empty with speculative decoding
 POST /completion {"prompt": "1 2 3 4 5 1 2 3 4 5 1 2 3", "n_predict": 12, "temperature": 0, "n_probs": 3}
 POST /completion {"prompt": "1 2 3 4 5 1 2 3 4 5 1 2 3", "n_predict": 8, "temperature": 0, "n_probs": 2, "post_sampling_probs": true}
@@ -21,7 +21,7 @@ POST /v1/chat/completions {"messages": [{"role": "user", "content": "Count to fi
 POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 16, "temperature": 0, "stop": [" 9"]}
 POST /completion {"prompt": "Once upon a time", "n_predict": 24, "temperature": 1.0, "seed": 11}
 
-# v0.6.0: a probabilistic draft (--spec-draft-sampling) fills its candidate
+# a probabilistic draft (--spec-draft-sampling) fills its candidate
 # distributions, and above temperature 0 the target verifies by rejection;
 # at 0 it still samples and matches
 !server -m $QWEN3 -md $QWEN3 -c 2048 -np 1 --no-jinja --spec-type draft-simple --spec-draft-n-max 4 --spec-draft-sampling probabilistic -lv 4
@@ -48,7 +48,7 @@ POST /completion {"prompt": "one two three one two three one two three one", "n_
 POST /completion {"prompt": "1 2 3 4 1 2 3 5 1 2 3 4 1 2 3 5 1 2 3 4 1 2 3", "n_predict": 24, "temperature": 0}
 POST /completion {"prompt": "Once upon a time there was a cat. Once upon a time there was a dog. Once upon a time there was", "n_predict": 24, "temperature": 1.0, "seed": 5}
 
-# v0.7.0 (#30574): a slot file carries the draft context's state and the
+# (#30574) a slot file carries the draft context's state and the
 # drafter's ("SDFT") after the checkpoints; restored into a server whose
 # draft does not match, the draft starts empty. --spec-draft-n-ubatch
 # (#30459) sizes the draft context's ubatch on its own
@@ -69,7 +69,7 @@ POST /slots/0?action=save {"filename": "nodft.bin"}
 POST /slots/0?action=restore {"filename": "nodft.bin"}
 POST /completion {"prompt": "Count: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12", "n_predict": 12, "temperature": 0, "id_slot": 0}
 
-# v0.9.0: on a recurrent or hybrid target the speculative checkpoint is
+# on a recurrent or hybrid target the speculative checkpoint is
 # restored when the *draft* is longer than n_rs_seq, no longer only when the
 # rollback is (server-context.cpp:4962). n_rs_seq is the MTP drafter's n_max,
 # 2; ngram-simple proposes 6. The prompt (the fixture's own 7-token loop,

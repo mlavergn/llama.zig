@@ -1,4 +1,4 @@
-# The server's MCP client (Stage 10 step 6): scripts/server-diff mcp.
+# The server's MCP client: scripts/server-diff mcp.
 # Upstream's fixtures (llama.cpp/tools/server/tests/fixtures/mcp_*.py) and
 # harness/server/mcp_probe_server.py, configured by mcp.setup. Their
 # tools are called through POST /tools, as tests/unit/test_mcp_servers.py

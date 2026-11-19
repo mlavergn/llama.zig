@@ -1,4 +1,4 @@
-//! Stage 10 step 3a (PLAN.md, Decision 65): the server's data layer --
+//! The server's data layer --
 //! `tools/server/`'s ports of `server-common`, `server-task` and
 //! `server-schema` -- its unit tests (`zig build test-server-data`) and the
 //! port's half of the `server-task-diff` gate (`zig build
@@ -27,7 +27,7 @@ pub const Options = struct {
     reference: llamacpp.Artifacts,
     cuda: ?llamacpp.Cuda = null,
     /// `zigjinja`, for `cli/common_chat/`'s templates, which the data
-    /// layer's chat conversion renders through (Stage 10 step 4).
+    /// layer's chat conversion renders through.
     jinja: ?*std.Build.Module = null,
 };
 
@@ -80,7 +80,7 @@ pub fn modules(b: *std.Build, opts: Options, optimize: std.builtin.OptimizeMode)
     const json_module = b.createModule(.{ .root_source_file = b.path("tools/server/json_module.zig"), .target = opts.target, .optimize = optimize, .link_libc = true });
     json_module.addImport("cli_fit", fit_module);
 
-    // Stage 9 step 3's PEG engine, which `cli/common_chat/chat_peg.zig` imports.
+    // The PEG engine, which `cli/common_chat/chat_peg.zig` imports.
     const peg_module = b.createModule(.{ .root_source_file = b.path("cli/peg/module.zig"), .target = opts.target, .optimize = optimize, .link_libc = true });
     peg_module.addImport("json", json_module);
     peg_module.addImport("llama", opts.reference.llama.root_module);
@@ -132,7 +132,7 @@ pub fn add(b: *std.Build, opts: Options) void {
     const test_step = b.step("test-server-data", "Run the server data layer's unit tests (tools/server/common, tokens, oaicompat, task, result, schema)");
     test_step.dependOn(&b.addRunArtifact(tests).step);
 
-    const step = b.step("server-task-diff-bins", "Build the port's server-task-diff harness (Stage 10 step 3a) into zig-out/server-task-diff");
+    const step = b.step("server-task-diff-bins", "Build the port's server-task-diff harness into zig-out/server-task-diff");
     const port_mod = b.createModule(.{ .root_source_file = b.path("harness/server_task_diff.zig"), .target = opts.target, .optimize = safe, .link_libc = true, .link_libcpp = true });
     port_mod.addImport("server_data", m.data);
     port_mod.addImport("tools_common", m.tools_common);

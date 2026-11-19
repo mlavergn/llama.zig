@@ -25,7 +25,7 @@
 #include <vector>
 
 // `common.cpp` defines these, and `log.cpp` asks them when the logger
-// starts and whenever colours are set (`tty_enable_ansi`, v0.6.0); compiling `common.cpp` for one predicate would bring most of
+// starts and whenever colours are set (`tty_enable_ansi`); compiling `common.cpp` for one predicate would bring most of
 // `common/` with it. The harness turns colours off regardless.
 bool tty_can_use_colors() {
     return false;

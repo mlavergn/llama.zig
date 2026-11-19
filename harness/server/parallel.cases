@@ -1,4 +1,4 @@
-# Several slots at once (Stage 10 step 3c): scripts/server-diff parallel.
+# Several slots at once: scripts/server-diff parallel.
 # Requests in a !parallel block arrive together and are batched together;
 # each names its slot, so which slot serves it does not depend on arrival
 # order. Greedy, so the bodies are exact. The task ids are not: concurrent
@@ -50,7 +50,7 @@ POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 8, "temperature": 0,
 POST /completion {"prompt": "Once upon a time", "n_predict": 8, "temperature": 0, "id_slot": 2}
 !end
 
-# v0.7.0 (#30295): a request pinned to a busy slot leaves it untouched and
+# (#30295) a request pinned to a busy slot leaves it untouched and
 # waits; it no longer saves the running state to the prompt cache and loads
 # a cached one over it mid-generation (upstream's
 # test_pinned_request_on_busy_slot)

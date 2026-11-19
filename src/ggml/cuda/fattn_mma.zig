@@ -5,9 +5,8 @@
 //!
 //! Ported from the host half of
 //! `llama.cpp/ggml/src/ggml-cuda/fattn-mma-f16.cuh` at v1.0.0 (`b1b770d90`).
-//! v0.4.1's `fattn-swizzle.cuh` is gone since v0.5.0; its host half, the
-//! K/V tile stride, is `ggml_cuda_fattn_mma_get_swizzled` and, since
-//! v0.6.0, one inline line in `ggml_cuda_flash_attn_ext_mma_f16_case`.
+//! The K/V tile stride is `ggml_cuda_fattn_mma_get_swizzled` and one
+//! inline line in `ggml_cuda_flash_attn_ext_mma_f16_case`.
 //! The configuration tables are generated into `fattn_config_table.zig` by
 //! `scripts/gen-fattn-config`. The kernel stays CUDA, one instantiation set
 //! per `(ncols1, ncols2)` in
@@ -141,9 +140,9 @@ fn library(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols
 /// `half2` when there is ldmatrix (Turing and later) and both the K and the
 /// V batch are a multiple of 32 `half2`. The kernels compute the same at
 /// compile time; the host needs it to size the dynamic shared memory.
-/// v0.6.0 dropped v0.5.0's `ggml_cuda_fattn_mma_bank_aligned` (which also
-/// asked for at least 32) and `ggml_cuda_fattn_mma_get_stride_tile`, whose
-/// one line `mmaF16Case` now writes inline as the C does.
+/// There is no `ggml_cuda_fattn_mma_bank_aligned` and no
+/// `ggml_cuda_fattn_mma_get_stride_tile`: `mmaF16Case` writes the one line
+/// inline as the C does.
 fn getSwizzled(DKQ: c_int, DV: c_int, ncols: c_int, cc: c_int) bool {
     const cfg = getConfig(DKQ, DV, ncols, cc);
     return common.turingMmaAvailable(cc) and
@@ -175,15 +174,15 @@ fn kernel(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols1
 }
 
 /// Ports `ggml_cuda_flash_attn_ext_mma_f16_case` (fattn-mma-f16.cuh:2124 @b1b770d90).
-/// Since v1.0.0 the shared Q tile is sized by `DKQ` padded to 16, for the
-/// new head sizes 40 and 72.
+/// The shared Q tile is sized by `DKQ` padded to 16, for the
+/// head sizes 40 and 72.
 ///
 /// The C raises each kernel's dynamic shared-memory limit once per device
 /// behind a function-local `static bool[GGML_CUDA_MAX_DEVICES]`, one per
 /// instantiation, softcap and sparse branch; `kernels.setSharedMemoryLimit`
 /// keeps the same once-per-(device, kernel) flag. The C's sparse arm
 /// raises the limit under `!GGML_USE_MUSA` implicitly, being inside the
-/// `!GGML_USE_MUSA` block (since v0.9.0 HIP compiles it too); MUSA is not
+/// `!GGML_USE_MUSA` block (HIP compiles it too); MUSA is not
 /// defined here.
 pub fn mmaF16Case(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols1: comptime_int, comptime ncols2: comptime_int, ctx: *common.Context, dst: *Tensor) void {
     const KQV = dst;

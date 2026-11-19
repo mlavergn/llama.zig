@@ -2,7 +2,7 @@
  * the port, side by side in one process, asked the same questions.
  *
  * `scripts/meta-diff` compiles `llama.cpp/ggml/src/ggml-backend-meta.cpp`
- * with its unmangled exports (seven since v0.6.0) renamed to `ref_*` on the command line --
+ * with its unmangled exports (seven) renamed to `ref_*` on the command line --
  * which renames the C++'s own internal calls to them too, so the renamed
  * object is self-consistent -- and links it beside `src/ggml/backend_meta.zig`
  * and a `libggml.a` with the stock meta object deleted. Everything else in
@@ -20,8 +20,7 @@
  *   - graphs built to steer `graph_compute` down its delayed-reduction
  *     branches: `ADD_ID` with a partial bias followed by a `MUL` chain, two
  *     partial branches summed by one `ADD`, and zero-slice devices that need
- *     the zeroing step before the butterfly (a `FILL` with 0 since v0.6.0,
- *     a `SCALE` by 0 before);
+ *     the zeroing step before the butterfly (a `FILL` with 0);
  *   - one, two, three and four devices, Metal and CPU mixed, so the
  *     butterfly runs with no reduction, one step, a non-power-of-two fold,
  *     and two steps.
@@ -37,7 +36,7 @@
  * `ggml_backend_buffer_is_meta` -- it reaches the port's, which says "no" to
  * a reference object; the end-to-end half, which links one implementation
  * per binary, is what covers that call site faithfully. Allocation needs no
- * such care since v0.6.0: `ggml_backend_alloc_ctx_tensors_from_buft` reaches
+ * such care: `ggml_backend_alloc_ctx_tensors_from_buft` reaches
  * the meta buffer type's own `alloc_buffer_n` through its vtable, so the
  * shared allocator runs each side's, and `_size` the shared default
  * `get_alloc_size_n` over each side's `get_alloc_size`.
@@ -596,7 +595,7 @@ static void graph_misc(graph_t * g, weights_t * w) {
     output(g, ggml_mul(g->ctx, W(w, "ax2_t"), ggml_reshape_3d(g->ctx, bc, 8, 4, 1)), "ax2_bcast");
     output(g, ggml_sum_rows(g->ctx, ggml_scale(g->ctx, W(w, "ax2_t"), 2.0f)), "ax2_sum");
     output(g, ggml_mean(g->ctx, x), "mean");
-    /* v0.8.0: mirrored in, mirrored out, by `handle_generic` with
+    /* Mirrored in, mirrored out, by `handle_generic` with
      * `scalar_only` */
     output(g, ggml_top_k_mask(g->ctx, input(g, GGML_TYPE_F32, 2, 16, 4, "tk_mask"), input(g, GGML_TYPE_I32, 2, 3, 4, "tk"),
                               NULL, NULL, NULL), "top_k_mask");
@@ -726,18 +725,17 @@ static void graph_props(graph_t * g, weights_t * w) {
     P("sum_rows_ax1", ggml_sum_rows(c, e2));
     P("norm_ax1", ggml_norm(c, e2, 1e-5f));
     P("argsort_ax1", ggml_argsort(c, e2, GGML_SORT_ORDER_ASC));
-    /* v0.7.0 (#30217): a full-tensor view (ggml_view_tensor, op NONE) takes
+    /* (#30217): a full-tensor view (ggml_view_tensor, op NONE) takes
      * its source's split state rather than mirrored. Only a mirrored source
      * can be viewed and consumed here: over a dimension-split source the
      * reference aborts (GGML_ASSERT(!first_src_split_by_axis),
      * ggml-backend-meta.cpp:1113 -- the view has no sources to take the
      * ratio from), and a consumer of a view of a PARTIAL sum aborts in
-     * ggml_backend_meta_buffer_n_bufs. So this reaches the new arm, and no
-     * case can tell it from the old one. */
+     * ggml_backend_meta_buffer_n_bufs. So this reaches that arm. */
     P("view_tensor_mir", ggml_scale(c, ggml_view_tensor(c, a), 2.0f));
-    /* v0.9.0: ARANGE has no sources and is MIRRORED outright. */
+    /* ARANGE has no sources and is MIRRORED outright. */
     P("arange", ggml_scale(c, ggml_arange(c, 0.0f, 8.0f, 1.0f), 2.0f));
-    /* v0.9.0, handle_view: a permuted view of an unpermuted split tensor
+    /* handle_view: a permuted view of an unpermuted split tensor
      * splits the view dim that spans the source's split axis (ax2_t is
      * [8, 4, 6] split on axis 2; the view puts that axis at dim 1)... */
     {
@@ -919,9 +917,8 @@ static void run_impl(const impl_t * im, const char * combo, FILE * f) {
     transfers(&w);
 
     /* CPU-only combos, where the buffer type is host and the simple buffers
-     * are plain memory, run the graphs too since v0.7.0: through v0.6.0 the
-     * reference's graph_compute crashed here (its `s_copy_main` FIXME skipped
-     * views of host-resident leaves), and #30217 replaced the FIXME. */
+     * are plain memory, run the graphs too (#30217 replaced the
+     * `s_copy_main` FIXME that skipped views of host-resident leaves). */
 
     ggml_backend_t backend = ggml_backend_dev_init(dev, NULL);
     fprintf(out, "backend name=%s is_meta=%d n=%zu guid=%016llx\n", ggml_backend_name(backend), im->is_meta(backend),
@@ -932,17 +929,14 @@ static void run_impl(const impl_t * im, const char * combo, FILE * f) {
     fprintf(out, "default buft same=%d alignment=%zu\n", ggml_backend_get_default_buffer_type(backend) == buft,
             ggml_backend_get_alignment(backend));
 
-    /* Two backends, because of an upstream use-after-free the sequence had
-     * to stay clear of through v0.6.0: when a graph raised max_nnodes,
-     * graph_compute freed its graph context and re-created only the first
+    /* Two backends, because of an upstream use-after-free the sequence
+     * stays clear of (#30453): when a graph raised max_nnodes,
+     * graph_compute would free its graph context and re-create only the first
      * n_subgraphs subgraphs, so a later graph with more subgraphs ran on a
-     * cgraph in freed memory. Run as mlp, ..., attn, misc, mlp-again on one
-     * backend, the port crashed and the reference did not -- heap luck, not
-     * a difference. Backend A only ever sees graphs no larger than its
+     * cgraph in freed memory. Backend A only ever sees graphs no larger than its
      * first, with at most as many subgraphs; backend B's graph that raises
      * the count (misc) has one subgraph and nothing after it has more.
-     * v0.7.0 (#30453) re-creates all max_subgraphs at max_nnodes; backend C
-     * below runs exactly the sequence that used to crash. */
+     * Backend C below runs mlp, ..., attn, misc, mlp-again on one backend. */
     ggml_gallocr_t galloc = ggml_gallocr_new(buft);
     enum { NG = 7, NA = 5 };
     graph_t gs[NG];
@@ -984,9 +978,9 @@ static void run_impl(const impl_t * im, const char * combo, FILE * f) {
     /* the cache after the attention graph wrote it */
     check_roundtrip("after-compute", W(&w, "ax0h_kcache"), NULL);
 
-    /* v0.7.0 (#30453), on a fresh backend: mlp sets max_subgraphs above
-     * one, misc raises max_nnodes with a single subgraph -- through v0.6.0
-     * that re-created only that one and freed the rest -- and mlp again,
+    /* (#30453), on a fresh backend: mlp sets max_subgraphs above
+     * one, misc raises max_nnodes with a single subgraph -- which re-creates
+     * every subgraph -- and mlp again,
      * with no new maximum, runs on every subgraph */
     ggml_backend_t backend_c = ggml_backend_dev_init(dev, NULL);
     ggml_gallocr_t galloc_c = ggml_gallocr_new(buft);

@@ -10,7 +10,7 @@
 //! both at v1.0.0 (`b1b770d90`). `tuning_table.zig` holds the 1,033
 //! generated rows.
 //!
-//! # This file had to go first, and `PLAN.md` said otherwise
+//! # This file had to go first, though the plan said otherwise
 //!
 //! Its seven entry points are the only **C++-linkage** symbols left in
 //! ggml, and the plan recorded them as "called only by
@@ -21,8 +21,8 @@
 //!
 //! # Zig supplies the mangled names
 //!
-//! `CLAUDE.md` records `ggml-backend-dl.cpp`'s three functions as having
-//! "C++ linkage Zig cannot provide" — true of *those*, whose signatures
+//! `ggml-backend-dl.cpp`'s three functions have C++ linkage Zig cannot
+//! provide — true of *those*, whose signatures
 //! name `std::filesystem::path`. These seven are POD: ints, `int64_t`, an
 //! enum, and a two-`int8_t` struct. So `@export` with the mangled name
 //! works, and the three C++ callers keep linking against it unchanged
@@ -30,7 +30,7 @@
 //!
 //! **One of the seven needs a workaround.** `fa_vec_set_override` takes
 //! `fa_vec_cfg_t` **by value**, and Zig 0.16 hands a callee zeros for an
-//! `extern struct` that size — see `CLAUDE.md`, and
+//! `extern struct` that size — see
 //! `harness/abi_structs.c` for the measured table of shapes. The exported
 //! thunk takes a `u16` and `@bitCast`s, which is the same two bytes in the
 //! same register and was measured correct.
@@ -89,10 +89,10 @@ pub fn ne01Bucket(ne01: i64) c_int {
 
 /// Ports `fa_vec_baseline_ne` (ggml-metal-tuning.cpp:27 @b1b770d90): the
 /// `NE` baked into each `(dk, dv)` baseline instantiation in
-/// `kernels/fa_vec_*.metal` (`fa.metal` until v0.6.0 split it).
+/// `kernels/fa_vec_*.metal`.
 ///
 /// The C writes twelve `if`s and a default; this is the same table as a
-/// `switch` on the pair. v0.7.0's `(128, 96)` returns 4, the default's
+/// `switch` on the pair. The `(128, 96)` arm returns 4, the default's
 /// value, so its arm changes no answer; it is written out to match. Hand-maintained there and here — it mirrors the
 /// Metal source, which is never ported.
 ///
@@ -158,7 +158,7 @@ fn findCfg(k: Key) ?Cfg {
 
 /// Ports `fa_vec_pick` (ggml-metal-tuning.cpp:1140 @b1b770d90).
 ///
-/// Since v0.5.0 the table is keyed by GPU family: the exact bucket, then
+/// The table is keyed by GPU family: the exact bucket, then
 /// the `ne01` domain default with `ne11` collapsed, then the baseline. An
 /// untuned family matches no row. The C narrows each argument into the
 /// key with a cast, which truncates; so does this, rather than asserting a
@@ -309,7 +309,7 @@ test "the override wins over everything, and clearing restores the table" {
 
 test "an untuned family gets the baseline" {
     // Family 0 means unknown; family 6 predates the table. Neither has a
-    // row, and since v0.5.0 there is no fallback to a representative.
+    // row, and there is no fallback to a representative.
     try std.testing.expectEqual(baselineCfg(128, 128), pick(0, c.GGML_TYPE_F16, 128, 128, 8192, 1));
     try std.testing.expectEqual(baselineCfg(128, 128), pick(6, c.GGML_TYPE_F16, 128, 128, 8192, 1));
 }

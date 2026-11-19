@@ -3,7 +3,7 @@
 # llama-model-loader.cpp and llama-model.cpp, in one process.
 #
 # The loader, the hyperparameters and the model's metadata are ported ahead
-# of libllama's single swap (PLAN.md, Decision 42), so nothing downstream can
+# of libllama's single swap, so nothing downstream can
 # see them yet. This runs the metadata half of llama_model_load through the
 # C++ in libllama-ref.a (harness/loader_ref.cpp) and through the port, on every
 # vocabulary file upstream ships, the local Qwen3.5 model, and synthesized
@@ -27,7 +27,7 @@ for lib in zig-out/lib/libllama-ref.a zig-out/lib/libggml.a; do
 done
 
 # The lazy-read and aliased-layer cases below need scripts/gen-arch-fixtures'
-# output. A missing fixture is a failure, not a smaller run: at v0.5.0 a
+# output. A missing fixture is a failure, not a smaller run: once a
 # combined gate run reached this script before the fixtures were written,
 # printed one "no fixture given" line and passed on the rest.
 FIXTURES="${ARCH_FIXTURES:-zig-out/arch-fixtures}"

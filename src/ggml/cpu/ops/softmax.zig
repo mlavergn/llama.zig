@@ -180,8 +180,8 @@ pub export fn ggml_compute_forward_soft_max(params: *const ComputeParams, dst: *
 /// Ports `ggml_compute_forward_soft_max_ext_back_f32` (ops.cpp:5842 @b1b770d90).
 ///
 /// `dx = scale * (dy - dot(y, dy)) * y`, one element at a time, in the C's
-/// order: since v0.6.0 one loop, where v0.5.0 copied, subtracted, multiplied
-/// and scaled in four passes and so rounded `(dy - dot)*y` before scaling.
+/// order: one loop, not four passes, so `(dy - dot)*y` is not rounded
+/// before scaling.
 /// No product in it is added to anything, so there is nothing to contract.
 fn softMaxExtBackF32(params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
@@ -246,9 +246,9 @@ pub export fn ggml_compute_forward_soft_max_ext_back(params: *const ComputeParam
 ///
 /// The two differ only in the element type, so they are one function over a
 /// comptime type. `MAX(MIN(v, max), min)` is the C's macro pair, NaN
-/// behaviour included: a NaN `v` makes `MIN` return `max`. Since v0.7.0 each
+/// behaviour included: a NaN `v` makes `MIN` return `max`. Each
 /// row is addressed through all three outer strides, so a non-contiguous view
-/// clamps the right rows; before, row `j` was `j * nb1` from the start.
+/// clamps the right rows.
 fn clamp(comptime T: type, params: *const ComputeParams, dst: *Tensor) void {
     const src0 = impl.one(Tensor, dst.src[0]);
 

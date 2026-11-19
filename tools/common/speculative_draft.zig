@@ -259,7 +259,7 @@ pub const DraftSimple = struct {
         return self;
     }
 
-    /// The members' destructors: upstream's is the default since v0.6.0.
+    /// The members' destructors: upstream's is the default.
     pub fn deinit(self: *DraftSimple) void {
         self.batch.deinit();
         gpa.free(self.zeros);

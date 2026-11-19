@@ -6,7 +6,7 @@
 //!
 //! - **Every code point**, 0 to 0x10FFFF and a few beyond: the flags,
 //!   `tolower`, `is_han`, NFD, NFC, and the UTF-8 encoding or its refusal.
-//! - **NFC over sequences** (v0.7.0): the whole range as one vector, every
+//! - **NFC over sequences**: the whole range as one vector, every
 //!   canonical decomposition re-fed with marks around it, Hangul jamo runs,
 //!   and random runs of starters and combining marks -- composition,
 //!   reordering and blocking.
@@ -14,7 +14,7 @@
 //!   four-byte strings over the lead bytes and a set of trailing bytes
 //!   chosen to sit on each boundary, and random byte strings -- through the
 //!   single-sequence decoder, the whole-string one and the flags-of-string
-//!   one. Since v0.7.0 that sweep is what holds the overlong and
+//!   one. That sweep is what holds the overlong and
 //!   above-U+10FFFF rejections: every two-byte string, and the boundary
 //!   trails, reach each of them.
 //! - **The byte map**, both directions, over every byte and every one- and
@@ -441,7 +441,7 @@ pub fn main() !void {
     const sets = parseSets(inputs.sets);
     var corpus: std.ArrayList([]const u8) = .empty;
     var seen: std.StringHashMapUnmanaged(void) = .empty;
-    // The empty text, which since v0.7.0 returns before any pattern is
+    // The empty text, which returns before any pattern is
     // compiled -- the malformed synthetic ones included.
     try corpus.append(gpa, "");
     try seen.put(gpa, "", {});

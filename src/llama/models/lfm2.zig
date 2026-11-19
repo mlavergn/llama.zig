@@ -3,7 +3,7 @@
 //! past the leading dense blocks, a mixture of experts; the attention
 //! layers may use a sliding window.
 //!
-//! A decision model (LiquidAI's d1, since v0.7.0) puts `n_layer_decision`
+//! A decision model (LiquidAI's d1) puts `n_layer_decision`
 //! plain pre-norm blocks with biases after a non-causal trunk without a
 //! memory, and scores every output token once per question type instead
 //! of computing logits. Media entries (an image or audio prefix, given as
@@ -18,7 +18,7 @@
 //! the decision model's `N_DECISION_TYPES`, `lfm2_is_media`, the graph
 //! inputs `llm_graph_input_attn_media` and `llm_graph_input_conv_mask`, and
 //! `graph_decision` with `build_decision_head`; and from
-//! `llama.cpp/src/models/models.h` at v0.8.0, `llama_model_lfm2`'s
+//! `llama.cpp/src/models/models.h`, `llama_model_lfm2`'s
 //! `graph_decision`. The short convolution and the feed-forwards are
 //! `lfm_base.zig`'s. LFM2-MoE (`lfm2moe.zig`) builds the same graph.
 

@@ -117,7 +117,7 @@ pub fn replaceAll(a: Allocator, s: []const u8, search: []const u8, replace: []co
 
 /// `GGML_ASSERT(cond)`: kept in every build mode, as upstream's is; a
 /// failure writes the condition to stderr and aborts, never `@panic` --
-/// CLAUDE.md: a panic handler pulls Zig's `compiler_rt` libm in.
+/// A panic handler pulls Zig's `compiler_rt` libm in.
 pub fn ggmlAssert(ok: bool, comptime cond: []const u8) void {
     if (ok) return;
     const text = "GGML_ASSERT(" ++ cond ++ ") failed\n";

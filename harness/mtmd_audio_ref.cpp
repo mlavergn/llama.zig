@@ -11,7 +11,7 @@
 // `build/mtmd_audio_diff.zig`, so the rest of libmtmd stays out of the link.
 // The hparams handle the harness fills is a `new mtmd_model()`.
 //
-// Since v1.0.0 a preprocessor's public face is `preprocess` -- the entries'
+// A preprocessor's public face is `preprocess` -- the entries'
 // shapes, placeholders when it defers to the log-mel graph -- and `compute`,
 // which runs the graph on `mel_config.sched`. The harness runs both and
 // reports each stage, on a CPU scheduler of its own.
@@ -66,8 +66,8 @@ void ref_audio_set_log(ggml_log_callback cb, void * ud) {
     g_logger_state.log_callback_user_data = ud;
 }
 
-// the fourteen preprocessors, in mtmd-audio.h's order -- d1omni (v0.7.0) and
-// the two of v0.8.0 last, as the Zig `audio.Kind` keeps it
+// the fourteen preprocessors, in mtmd-audio.h's order -- d1omni and
+// two more last, as the Zig `audio.Kind` keeps it
 static mtmd_audio_preprocessor * make(int kind, const mtmd_model * ctx) {
     switch (kind) {
         case 0:  return new mtmd_audio_preprocessor_whisper(ctx);
@@ -122,7 +122,7 @@ void * ref_audio_proc_new(int kind, void * m, int n_threads) {
 
 void ref_audio_proc_free(void * r) { delete (ref_proc *) r; }
 
-// v0.9.0's chatterbox front-end, `audio.Kind.chatterbox_ref` (15), takes a
+// The chatterbox front-end, `audio.Kind.chatterbox_ref` (15), takes a
 // variant flag (`is_mtl`) the other preprocessors do not
 void * ref_audio_proc_new_flag(int kind, void * m, int flag, int n_threads) {
     if (kind != 15) {

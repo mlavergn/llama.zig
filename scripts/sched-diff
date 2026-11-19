@@ -15,7 +15,7 @@
 # `harness/sched_dump.c` stands up two stub devices that differ only in which
 # ops they claim, so where each node lands is a direct readout of the passes.
 #
-# Since v0.7.0 it also holds the copy and realloc callbacks
+# It also holds the copy and realloc callbacks
 # (`ggml_backend_sched_set_copy_callback`, `_set_realloc_callback`), which
 # libllama's MoE cache drives: a third stub, ACC, takes offloaded ADDs over
 # weights in a CPU buffer, and the harness prints every callback, its
@@ -47,7 +47,7 @@ FW=(-framework Foundation -framework Metal -framework MetalKit -framework Accele
 INC=(-I llama.cpp/ggml/include -I llama.cpp/ggml/src)
 
 # The reference side is Apple-clang objects; since Xcode 27 Zig's linker cannot
-# consume them, so Apple's driver links it. See NOTES.md.
+# consume them, so Apple's driver links it.
 clang harness/sched_dump.c -o "$tmp/ref" -std=c11 -w "${INC[@]}" \
     "${REF_LIBS[@]}" -lc++ "${FW[@]}" 2>"$tmp/ref.log" \
     || { echo "FAIL: could not link against the reference libraries" >&2; tail -5 "$tmp/ref.log" >&2; exit 1; }

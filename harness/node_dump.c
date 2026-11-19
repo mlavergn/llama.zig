@@ -162,8 +162,8 @@ int main(int argc, char ** argv) {
         cp.op_offload = false;
     }
     /* NODE_DUMP_KV names the KV cache type (`bf16`, `q8_0`, ...; default
-     * f16): the Metal flash-attention kernel is chosen by it -- since
-     * v0.7.0 a BF16 cache takes the tensor-API kernel, which only an exact
+     * f16): the Metal flash-attention kernel is chosen by it -- a BF16
+     * cache takes the tensor-API kernel, which only an exact
      * comparison can tell from the kernel it falls back to. */
     const char * kv_env = getenv("NODE_DUMP_KV");
     if (kv_env) {

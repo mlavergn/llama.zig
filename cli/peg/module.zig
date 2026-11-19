@@ -1,7 +1,7 @@
 //! Barrel for `cli/peg/`: upstream's PEG parser -- the combinators, the
 //! arena they build, partial parsing over a stream, the AST and GBNF
-//! export. Upstream dropped the arena's JSON form (`save` and `load`) at
-//! v0.7.0; the gates keep a serializer of their own,
+//! export. Upstream has no JSON form of the arena (`save` and `load`); the gates
+//! keep a serializer of their own,
 //! `harness/peg_serialize.zig`.
 //!
 //! # Provenance

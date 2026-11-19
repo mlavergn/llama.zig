@@ -95,7 +95,7 @@ const model_unsaved = [_][]const u8{
     "dspark_markov_w1",            "dspark_markov_w2",             "dspark_markov_w2_s",       "dspark_conf_proj",
     "dspark_conf_proj_b",          "dflash_selector_prev",         "dflash_selector_next",     "dflash_selector_hidden",
     "dense_2_out_layers",          "dense_2_out_layers_b",         "dense_3_out_layers",       "cls_norm_b",
-    // v0.7.0: DFlash's LiliCorr heads (models/dflash.cpp), not written either.
+    // DFlash's LiliCorr heads (models/dflash.cpp), not written either.
     "lilicorr_token_proj",         "lilicorr_token_proj_b",        "lilicorr_token_proj_s",    "lilicorr_pass_hidden_proj",
     "lilicorr_pass_hidden_proj_b", "lilicorr_pass_hidden_proj_s",  "lilicorr_feature_norm",    "lilicorr_feature_norm_b",
     "lilicorr_feature_mlp_1",      "lilicorr_feature_mlp_1_b",     "lilicorr_feature_mlp_3",   "lilicorr_feature_mlp_3_b",
@@ -103,7 +103,7 @@ const model_unsaved = [_][]const u8{
     "lilicorr_context_proj_b",     "lilicorr_context_proj_s",      "lilicorr_output_norm",     "lilicorr_anchor_norm",
     "lilicorr_factor_input_proj",  "lilicorr_factor_input_proj_b", "lilicorr_out_head",        "lilicorr_out_head_b",
     "lilicorr_in_head",            "lilicorr_in_head_b",           "lilicorr_anchor_out_head", "lilicorr_anchor_out_head_b",
-    // v0.9.0: DSpark's joint projection and slot masks (models/dflash.cpp), not written either.
+    // DSpark's joint projection and slot masks (models/dflash.cpp), not written either.
     "dspark_joint_proj",           "dspark_joint_proj_b",          "dspark_mask_embd",
 };
 

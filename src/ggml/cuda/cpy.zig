@@ -230,8 +230,8 @@ fn cpyAsMemcpy2d(src0: *const Tensor, src1: *const Tensor, m: *Memcpy2d) bool {
     return m.spitch >= m.width and m.dpitch >= m.width;
 }
 
-/// Ports `ggml_cuda_cpy` (cpy.cu:429 @b1b770d90). The `F8_E4M3` arms are new
-/// at v1.0.0.
+/// Ports `ggml_cuda_cpy` (cpy.cu:429 @b1b770d90). The `F8_E4M3` arms are
+/// ported.
 ///
 /// Parameters:
 /// - `ctx`: the backend context whose stream is used.

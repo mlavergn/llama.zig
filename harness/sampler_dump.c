@@ -544,15 +544,15 @@ static const struct grammar_case grammars[] = {
     { "noroot",  "start ::= \"x\"", "root" },
     { "badesc",  "root ::= \"\\q\"", "root" },
     { "toomany", "root ::= \"a\"{3000}", "root" },
-    // Exactly at MAX_REPETITION_THRESHOLD: accepted since v0.4.1, whose
-    // check is `>` where v0.4.0's was `>=`.
+    // Exactly at MAX_REPETITION_THRESHOLD: accepted, as the
+    // check is `>`.
     { "edge2000", "root ::= \"a\"{2000}", "root" },
     // Ranges just above the 2- and 3-byte UTF-8 floors, which a token ending
     // in a bare 0xE0 or 0xF0 lead byte is checked against as a partial
     // sequence.
     { "partial3", "root ::= [\\u0800-\\u0840]+ \"!\"", "root" },
     { "partial4", "root ::= [\\U00010000-\\U00010040]+ \"!\"", "root" },
-    // v0.8.0 walks a candidate's code points in a loop, one level each:
+    // The grammar walks a candidate's code points in a loop, one level each:
     // several stacks at a level, each narrowing the last's rejects, and whole
     // runs a long token spends in one rule.
     { "stacks",  "root ::= \"a\" (\"bc\" | \"bd\" | \"b\" [e-z]) [a-z]* | \"abd\" \"x\" | [a-z]+ \" \" [a-z]+ | [a-c]{2,3} \"!\"", "root" },
@@ -721,7 +721,7 @@ static const char * dry_filler(int i) {
     return pool[i];
 }
 
-/* v0.8.0's cap on distinct breakers, and the dedup under it. A breaker that
+/* The cap on distinct breakers, and the dedup under it. A breaker that
  * matters -- ":" stops a repeat at every ":" of the history -- sits on either
  * side of the cap. */
 static void run_dry_breakers(const struct llama_vocab * vocab) {
@@ -821,7 +821,7 @@ static void run_vocab(const struct llama_vocab * vocab) {
         run_grammar(vocab, grammars[g].name, text, grammars[g].root);
     }
 
-    // v0.8.0's depth limits, on both sides of each. A group nests up to
+    // The depth limits, on both sides of each. A group nests up to
     // GRAMMAR_RECURSIVE_LIMIT deep; rules chain, leftmost, one further, since
     // the check there is `>` and the root is depth 0. A chain whose references
     // are not leftmost is never walked and has no limit.
@@ -870,8 +870,8 @@ static void run_vocab(const struct llama_vocab * vocab) {
         }
     }
     {
-        // The pattern the trigger-word form built from these words before
-        // v1.0.0 removed it (llama_sampler_init_grammar_lazy): escaped and
+        // The pattern the trigger-word form built from these words (the removed
+        // llama_sampler_init_grammar_lazy): escaped and
         // captured, so the records keep exercising the same grammar.
         const char * words[] = { "[\\s\\S]*?(<tool_call>|a\\.b\\*\\(c\\))[\\s\\S]*" };
         struct llama_sampler * s = llama_sampler_init_grammar_lazy_patterns(vocab, tool_gbnf, "root", words, 1, NULL, 0);
@@ -1053,7 +1053,7 @@ static struct llama_sampler * make_backend(int i, const char ** label, int32_t n
             return c;
         case 8:
             *label = "temp0-greedy";
-            // v0.7.0 (#29797): common's chain at temperature zero ends in
+            // #29797: common's chain at temperature zero ends in
             // greedy, not dist, and the filters before it leave candidates,
             // so greedy's argmax is a position the candidates map back.
             llama_sampler_chain_add(c, llama_sampler_init_top_k(40));

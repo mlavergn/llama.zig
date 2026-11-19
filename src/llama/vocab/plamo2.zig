@@ -1,6 +1,6 @@
 //! The PLaMo-2 and PLaMo-3 tokenizer: a suffix table over the vocabulary,
 //! then a dynamic program for the cheapest segmentation, with byte fallback.
-//! PLaMo-3 (v0.7.0) first cuts the text into segments -- `<|plamo:...|>`
+//! PLaMo-3 first cuts the text into segments -- `<|plamo:...|>`
 //! markers, runs of a repeated character or of spaces, and U+EE00 -- and
 //! runs the program on each.
 //!

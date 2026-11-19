@@ -4,8 +4,7 @@
 //! # Provenance
 //!
 //! Ports `llama.cpp/tools/mtmd/mtmd-graph.h` and the `mtmd_graph` methods of
-//! `llama.cpp/tools/mtmd/mtmd-graph.cpp` at v1.0.0 (`b1b770d90`) -- until
-//! v0.9.0 `clip-graph.h` and `clip.cpp`'s `clip_graph`. Each declaration
+//! `llama.cpp/tools/mtmd/mtmd-graph.cpp` at v1.0.0 (`b1b770d90`). Each declaration
 //! names what it ports and the line it began at.
 //!
 //! # A class hierarchy, flattened

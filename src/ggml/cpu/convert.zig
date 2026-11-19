@@ -16,7 +16,7 @@
 //! a NaN's payload where the software narrowing does not, and `vcvtph2ps`
 //! quiets a signalling NaN where the table does not. So the blocks call the
 //! instructions -- LLVM's `vcvtps2ph` intrinsic, and the vector `fpext` that
-//! lowers to `vcvtph2ps`. Since v0.7.0 the narrowing tail takes F16C too
+//! lowers to `vcvtph2ps`. The narrowing tail takes F16C too
 //! (`GGML_CPU_FP32_TO_FP16` under `__F16C__`); the widening tail stays on the
 //! table. See the notes on `cpuFp16ToFp32` and `cpuFp32ToFp16` below.
 
@@ -84,14 +84,12 @@ pub inline fn cpuFp16ToFp32(h: c.ggml_fp16_t) f32 {
 /// `GGML_CPU_FP32_TO_FP16` (simd-mappings.h:47, 155, 177 @b1b770d90): the NEON
 /// arm, the F16C arm on x86-64-v3 and up, and the fallback everywhere else.
 ///
-/// Since v0.8.0 the NEON block selects its own `neon_compute_fp32_to_fp16`, a
-/// cast through `__fp16`, so on ARM this is the hardware `fcvt`. Through
-/// v0.7.0 it defined that macro and never promoted it, and the fallback won:
-/// the software `ggml_compute_fp32_to_fp16` in `src/ggml/impl.zig`. The two
-/// differ on a NaN, whose payload `fcvt` keeps where the software writes
-/// `0x7E00`.
+/// The NEON block selects its own `neon_compute_fp32_to_fp16`, a cast through
+/// `__fp16`, so on ARM this is the hardware `fcvt`, not the software
+/// `ggml_compute_fp32_to_fp16` in `src/ggml/impl.zig`. The two differ on a
+/// NaN, whose payload `fcvt` keeps where the software writes `0x7E00`.
 ///
-/// On x86 with F16C, since v0.7.0 (#30270, #30342), it is the hardware too:
+/// On x86 with F16C (#30270, #30342), it is the hardware too:
 /// `_cvtss_sh(x, 0)`, one lane of `vcvtps2ph` at round-to-nearest. Every
 /// ported site of the C's `GGML_CPU_FP32_TO_FP16` calls this; the one
 /// `GGML_FP32_TO_FP16` in `ops.cpp` (the f16 `swiglu`) calls
@@ -140,8 +138,8 @@ const round_nearest: i32 = 0;
 
 /// Ports `ggml_cpu_fp32_to_fp16` (ggml-cpu.c:3489 @b1b770d90): with F16C,
 /// blocks of sixteen under `__AVX512F__`, then eight and four, through
-/// `vcvtps2ph`, then the tail through `GGML_CPU_FP32_TO_FP16` -- F16C again
-/// since v0.7.0. The s390x `__VXE__` block v0.7.0 adds is not a target here.
+/// `vcvtps2ph`, then the tail through `GGML_CPU_FP32_TO_FP16` -- F16C again.
+/// The s390x `__VXE__` block is not a target here.
 pub export fn ggml_cpu_fp32_to_fp16(x: [*c]const f32, y: [*c]c.ggml_fp16_t, n: i64) void {
     const nn: usize = @intCast(n);
     var i: usize = 0;

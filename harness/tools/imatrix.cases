@@ -58,7 +58,7 @@
 !fail -m $PLAIN -f $DATA/text.txt -c 64 --chunk 1000
 !fail -m $PLAIN -f $DATA/text.txt -c 0
 !fail --in-file moe.gguf -m $PLAIN -f $DATA/text.txt -c 64 --chunks 1 -o bad.gguf
-# v0.6.0: activation sums (`in_sum`) and per-tensor statistics (`.stats`)
+# activation sums (`in_sum`) and per-tensor statistics (`.stats`)
 # ride in every GGUF written above, and the hashes of those files compare
 # them. Below: NextN (MTP) collection through --nextn and -md over a
 # Qwen3.5 fixture given an MTP block (harness/tools/imatrix_mtp.c), its
@@ -68,9 +68,9 @@
 # legacy and activation tensors, a bad in_sum -- shown and saved again.
 -m $DATA/tied.gguf -f $DATA/ascii.txt -c 32 --chunks 2 --process-output -o tied.gguf
 -m $PLAIN --in-file $DATA/gen-nextn.gguf -o rounded.gguf
-# v0.7.0 to v0.8.0: upstream's imatrix aborted on every NextN and draft
+# Upstream's imatrix once aborted on every NextN and draft
 # collection, the MTP graph requiring a state embedding imatrix.cpp did not
-# set. v0.9.0 sets it (set_embd_state, imatrix.cpp:1392), and they collect.
+# set. It sets it (`set_embd_state`), and they collect.
 -m $DATA/qwen35-mtp.gguf -f $DATA/ascii.txt -c 32 -b 32 --chunks 2 --nextn -o mtp.gguf
 -m $DATA/qwen35-mtp.gguf -f $DATA/ascii.txt -c 32 -b 32 --chunks 2 --nextn --process-output -o mtpo.gguf
 -m $DATA/qwen35-mtp.gguf -f $DATA/ascii.txt -c 64 -b 32 --chunks 2 --nextn -o mtp2.gguf

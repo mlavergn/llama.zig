@@ -1,4 +1,4 @@
-//! Stage 8 workstream build file: `mtmd_fixtures`. Owned by that workstream; wired
+//! Build file for `mtmd_fixtures`, wired
 //! into `build.zig` through `build/mtmd.zig`'s `Gates`.
 //!
 //! Adds `mmproj-fixtures`: `harness/mmproj_fixtures.cpp`, which writes a small

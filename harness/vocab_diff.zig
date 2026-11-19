@@ -172,19 +172,19 @@ const pool = [_][]const u8{
     "▁",
     "<0x41>",              "\xff",           "\xc3",                                                                            "\x00",             "ACGT",                     "<dna>",
     "</dna>",              "acgtn",
-    // v0.7.0: PLaMo-3's pre-segmentation -- `<|plamo:...|>` markers (empty,
+    // PLaMo-3's pre-segmentation -- `<|plamo:...|>` markers (empty,
     // with whitespace, U+001C, too long), runs of repeats and spaces, the
     // U+EE00 boundary, newline runs it leaves alone.
              "<|plamo:x|>",                                                                     "<|plamo:|>",       "<|plamo:a b|>",            "<|plamo:\x1c|>",
     "<|plamo:",            "|>",             "<|plamo:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|>", "aaaa",             "aaaaaaa",                  "    ",
     "\n\n\n\n\n",          "\u{EE00}",       "\u{FEFF}",
-    // v0.7.0: NFC -- decomposed and reordered marks, Hangul jamo, singletons.
+    // NFC -- decomposed and reordered marks, Hangul jamo, singletons.
                                                                            "e\u{0301}",        "A\u{030A}",                "a\u{0323}\u{0302}",
     "a\u{0302}\u{0323}",   "\u{212B}",       "\u{0344}",                                                                        "\u{1100}\u{1161}", "\u{1100}\u{1161}\u{11A8}", "\u{AC00}\u{11A8}",
     "\u{0F73}",
-    // v0.7.0: K2 Horizon's letter runs and long s.
+    // K2 Horizon's letter runs and long s.
                "\u{200C}",       "\u{200D}",                                                                        "\u{017F}",         "'\u{017F}",
-    // v0.8.0: Nemotron 3.5 Embed's zero-width non-joiner after `[` and `<`,
+    // Nemotron 3.5 Embed's zero-width non-joiner after `[` and `<`,
     // Soprano's full lowercase of U+0130 and its whitespace runs, and the
     // spaces clean_spaces eats.
                    "[\u{200C}",
@@ -193,7 +193,7 @@ const pool = [_][]const u8{
     " 'm",                 " 're",           " 've",                                                                            " ' ",              " 't",
 };
 
-/// v0.8.0's hybriddna: spaced displays either side of each threshold, runs
+/// The hybriddna corpus: spaced displays either side of each threshold, runs
 /// either side of the auto-tagging's, unmatched and empty tags, whitespace
 /// and non-ASCII inside a span.
 const dna_corpus = [_][]const u8{
@@ -651,7 +651,7 @@ const edits = struct {
         setF32s(ctx, "tokenizer.ggml.scores", scores.items);
     }
 
-    /// The v0.7.0 PLaMo-3 tokenizer: PLaMo-2's vocabulary with pieces that
+    /// The PLaMo-3 tokenizer: PLaMo-2's vocabulary with pieces that
     /// span what the pre-segmentation cuts -- so cutting or not changes the
     /// tokens -- and the PLaMo FIM and file-separator tokens.
     fn plamo3(ctx: *c.gguf_context) void {
@@ -664,7 +664,7 @@ const edits = struct {
         }, c.LLAMA_TOKEN_TYPE_NORMAL, -1.5);
     }
 
-    /// The v0.7.0 Unigram NFC option on a vocabulary with no charsmap, so
+    /// The Unigram NFC option on a vocabulary with no charsmap, so
     /// nothing but NFC composes: precomposed pieces beside their parts.
     fn ugmNfc(ctx: *c.gguf_context) void {
         ugmScores(ctx);
@@ -677,7 +677,7 @@ const edits = struct {
         c.gguf_set_val_bool(ctx, "tokenizer.ggml.normalizer.nfc", true);
     }
 
-    /// The v0.7.0 K2 Horizon pre-tokenizer on the GPT-2 vocabulary, with its
+    /// The K2 Horizon pre-tokenizer on the GPT-2 vocabulary, with its
     /// end-of-turn token.
     fn preK2Horizon(ctx: *c.gguf_context) void {
         c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "k2-horizon");
@@ -783,7 +783,7 @@ const edits = struct {
         }.f;
     }
 
-    /// v0.8.0: Flint's turn tokens end generation, and only under its own
+    /// Flint's turn tokens end generation, and only under its own
     /// pre-tokenizer.
     fn preFlintTurns(ctx: *c.gguf_context) void {
         c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "flint");
@@ -794,14 +794,14 @@ const edits = struct {
         appendNormal(ctx, &.{ "<|user|>", "<|observation|>" });
     }
 
-    /// v0.8.0: Domyn Small is Sarvam's SPM-style BPE, on a vocabulary whose
+    /// Domyn Small is Sarvam's SPM-style BPE, on a vocabulary whose
     /// tokens carry U+2581.
     fn preDomyn(ctx: *c.gguf_context) void {
         c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "gpt2");
         c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "domyn-small");
     }
 
-    /// v0.8.0: Soprano lowercases and folds whitespace, keeps raw UTF-8,
+    /// Soprano lowercases and folds whitespace, keeps raw UTF-8,
     /// emits UNK for what is not a token, and its EOS always ends generation.
     /// A real UNK, because a text with no vocabulary token puts its id in the
     /// output.
@@ -818,7 +818,7 @@ const edits = struct {
         c.gguf_set_val_u32(ctx, "tokenizer.ggml.unknown_token_id", 0);
     }
 
-    /// v0.8.0's end-of-turn tokens: muse-spark's ...
+    /// The end-of-turn tokens: muse-spark's ...
     fn eotMuse(ctx: *c.gguf_context) void {
         appendNormal(ctx, &.{"<|eot|>"});
     }
@@ -833,7 +833,7 @@ const edits = struct {
         appendNormal(ctx, &.{"</s>"});
     }
 
-    /// v0.8.0's `tokenizer.ggml.clean_spaces`, which overrides whatever the
+    /// `tokenizer.ggml.clean_spaces`, which overrides whatever the
     /// pre-tokenizer set.
     fn cleanOn(ctx: *c.gguf_context) void {
         c.gguf_set_val_bool(ctx, "tokenizer.ggml.clean_spaces", true);
@@ -852,7 +852,7 @@ const edits = struct {
         c.gguf_set_val_u32(ctx, "tokenizer.ggml.clean_spaces", 1);
     }
 
-    /// v0.8.0's Metaspace prepend scheme.
+    /// The Metaspace prepend scheme.
     fn scheme(comptime name: [:0]const u8) fn (*c.gguf_context) void {
         return struct {
             fn f(ctx: *c.gguf_context) void {
@@ -880,7 +880,7 @@ const edits = struct {
 
     /// Every text `eot` auto-detection takes, among tokens enough to fill
     /// `n`. Which one becomes EOT is the first in `token_to_id`'s order, and
-    /// v0.8.0's `reserve` set that order: a power of two stays one, where
+    /// `reserve` sets that order: a power of two stays one, where
     /// growing only ever reached primes.
     fn eotOrder(comptime n: usize) fn (*c.gguf_context) void {
         return struct {
@@ -1026,7 +1026,7 @@ const edits = struct {
         c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "no-such-tokenizer");
     }
 
-    /// The v0.4.1 pre-tokenizers on the GPT-2 vocabulary: their names,
+    /// The pre-tokenizers on the GPT-2 vocabulary: their names,
     /// `clean_spaces` and their split patterns.
     fn preHyV4(ctx: *c.gguf_context) void {
         c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "hy_v4");
@@ -1036,19 +1036,19 @@ const edits = struct {
         c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "spark2_5");
     }
 
-    /// The v0.5.0 pre-tokenizer: Qwen2's pattern without the English
+    /// The pre-tokenizer: Qwen2's pattern without the English
     /// contraction group.
     fn preUfakzeka(ctx: *c.gguf_context) void {
         c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "ufakzeka");
     }
 
-    /// The v0.5.0 `LLAMA_VOCAB_TYPE_TEST`: a rolling hash of five-byte
+    /// The `LLAMA_VOCAB_TYPE_TEST`: a rolling hash of five-byte
     /// chunks into the vocabulary, and each token's id in hex back out.
     fn testType(ctx: *c.gguf_context) void {
         c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "test");
     }
 
-    /// The v0.6.0 pre-tokenizers on the GPT-2 vocabulary: mmBERT's
+    /// The pre-tokenizers on the GPT-2 vocabulary: mmBERT's
     /// Metaspace split (escaped spaces, a word per escaped space) and its
     /// `<mask>` attribute, and GLM-5's ChatGLM-4 pattern with
     /// `ignore_merges`.
@@ -1082,7 +1082,7 @@ const edits = struct {
         }
     }
 
-    /// The v0.6.0 PLaMo-2 tokenize: BOS and EOS added as asked, and a
+    /// The PLaMo-2 tokenize: BOS and EOS added as asked, and a
     /// `</s>` that is a normal token beside `<|plamo:eos|>`.
     fn plamo2Special(ctx: *c.gguf_context) void {
         plamo2(ctx);
@@ -1179,9 +1179,9 @@ pub fn main(init: std.process.Init) !void {
     const spm = by_name.get("ggml-vocab-llama-spm.gguf") orelse return error.MissingSpmVocab;
     const ugm = by_name.get("ggml-vocab-nomic-bert-moe.gguf") orelse return error.MissingUgmVocab;
     const gemma4 = by_name.get("ggml-vocab-gemma-4.gguf") orelse return error.MissingGemma4Vocab;
-    // words only `ignore_merges` (GLM-4/5 since v0.6.0) keeps whole
+    // words only `ignore_merges` (GLM-4/5) keeps whole
     for ([_][]const u8{ "zqzq zqzq\nzqzq", "a zqzq, zqzqzq" }) |t| try corpus.append(gpa, t);
-    // a leading BOM, which PLaMo-2 drops and PLaMo-3 (v0.7.0) keeps
+    // a leading BOM, which PLaMo-2 drops and PLaMo-3 keeps
     for ([_][]const u8{ "\u{FEFF}hello", "\u{FEFF}", "\u{FEFF}\u{FEFF}aaaa" }) |t| try corpus.append(gpa, t);
     // PLaMo-3's marker body at its 64-code-point limit and one past it, and
     // newline runs, each between pieces that span the cut

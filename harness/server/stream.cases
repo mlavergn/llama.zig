@@ -1,4 +1,4 @@
-# Resumable streams (Stage 10 step 3c): scripts/server-diff stream. A
+# Resumable streams: scripts/server-diff stream. A
 # request carrying X-Conversation-Id tees its stream into a session that
 # /v1/stream replays from any offset; the lookup and delete routes find and
 # end it.

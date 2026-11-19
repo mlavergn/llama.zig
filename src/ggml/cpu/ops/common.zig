@@ -159,7 +159,7 @@ pub inline fn min64(a: i64, b: i64) i64 {
 /// per-thread scratch slots in `params.wdata`.
 ///
 /// `CACHE_LINE_SIZE` is 64 on this target -- the `#else` arm of ops.h:12-18,
-/// POWER9 using 128 and s390x 256. Since v0.4.1 that is so in C and C++
+/// POWER9 using 128 and s390x 256. That is so in C and C++
 /// translation units alike: the `std::hardware_destructive_interference_size`
 /// arm, which a C++ unit took depending on include order, is gone.
 pub const cache_line_size_f32: usize = 64 / @sizeOf(f32);

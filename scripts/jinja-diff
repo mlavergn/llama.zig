@@ -1,8 +1,8 @@
 #!/bin/bash
 # Compare cli/chat.zig's chat-template rendering with upstream's Jinja engine.
 #
-# Our llama-cli renders a model's chat template through `zigjinja`
-# (PLAN.md, Decisions 25 and 27); upstream's renders it through
+# Our llama-cli renders a model's chat template through `zigjinja`;
+# upstream's renders it through
 # `llama.cpp/common/jinja`. Nothing else checks that the two engines agree on
 # the templates models actually ship, so this compiles upstream's engine
 # unmodified beside `chat.zig` and renders every template in

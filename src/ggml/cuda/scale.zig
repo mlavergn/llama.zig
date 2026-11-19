@@ -1,12 +1,12 @@
-//! `GGML_OP_SCALE`: `dst = scale * x + bias`, in F32 or (since v0.6.0) BF16.
+//! `GGML_OP_SCALE`: `dst = scale * x + bias`, in F32 or BF16.
 //!
 //! # Provenance
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/scale.cu` and
 //! `llama.cpp/ggml/src/ggml-cuda/scale.cuh` at v1.0.0 (`b1b770d90`). The
-//! kernel, `scale_f32`, stays CUDA and is launched from here; since v0.6.0
+//! kernel, `scale_f32`, stays CUDA and is launched from here;
 //! it is a template over the element type, and computes in F32 either way.
-//! Since v0.8.0 `src` and `dst` may be views: rows are contiguous, dimensions
+//! `src` and `dst` may be views: rows are contiguous, dimensions
 //! 1 to 3 follow the strides.
 
 const std = @import("std");

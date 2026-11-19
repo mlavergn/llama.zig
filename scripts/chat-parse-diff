@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compare cli/common_chat/'s templates and output parsing with upstream's.
 
-The gate for Stage 9 step 4 (PLAN.md): `common_chat_templates_apply` and
+The gate for `common_chat_templates_apply` and
 `common_chat_parse`, with everything under them -- the template
 capabilities, the differential analysis, the auto-parser and the per-model
 parsers. `harness/chat_parse_ref.cpp` links upstream's `llama-common`
@@ -27,7 +27,7 @@ The records:
   were given. The plain builds must pass on the reference; the recording
   builds must pass too, and what they wrote -- templates, applies, every
   prefix `test_peg_parser` feeds its chat session, the helpers' inputs -- is
-  replayed. Since v0.7.0 a parser cannot be saved and loaded, so a parse is
+  replayed. A parser cannot be saved and loaded, so a parse is
   replayed through the apply that made its parser.
 - **Every template in `llama.cpp/models/templates/`**, applied over sampled
   conversations (system and developer roles, typed content parts, tool calls
@@ -118,10 +118,10 @@ COVERAGE = [
     "caps supports_preserve_reasoning=1", "caps supports_reasoning_effort=1", "caps supports_parallel_tool_calls=0",
     "enable_thinking 1", "verify 0", "init_failed", "asr.system Perform ASR.",
     "MARKER ", "output_A ",
-    # v0.7.0's two dedicated parsers
+    # the two dedicated parsers
     "L W TranslateGemma: source_lang_code not set in chat_template_kwargs, defaulting to en-GB",
     "think_start <ifm|think_faster>", "think_start <ifm|think_fast>", "trigger 1 -1 <ifm|tool_calls>",
-    # v0.8.0: the effort levels, LFM3's ASR prompt, the tts template, the two
+    # the effort levels, LFM3's ASR prompt, the tts template, the two
     # new parsers' triggers
     '"reasoning_effort_levels":["', "asr.system Perform ASR in French.", "asr.system Perform ASR in xx.",
     "asr.system Perform ASR in French.", "asr.has_language 1",
@@ -280,7 +280,7 @@ SCHEMAS = [
 
 WORDS = ["Hello!", "What's the weather in Paris?", "  spaced  \n", "héllo 世界 🙂", "Compute 2+2",
          "<think>not really</think>", "line one\nline two", "",
-         # v0.7.0: a BOS and an EOS spelled in user input, which the add-BOS
+         # a BOS and an EOS spelled in user input, which the add-BOS
          # and add-EOS trims of a template part must leave alone
          "<s>Hi", "Bye</s>"]
 
@@ -304,7 +304,7 @@ def conversation(rng, trailing_assistant):
     r = rng.random()
     if r < 0.35:
         msgs.append(raw_msg("system", rng.choice(["You are a helpful assistant.", "  Be brief.  ", "Reasoning: high"]),
-                            # v0.8.0: DeepSeek V4.1 reads a system message's own tools
+                            # DeepSeek V4.1 reads a system message's own tools
                             extra_json=rng.choice(["", "", SYSTEM_TOOLS, "{\"timestamp\":\"now\"}"])))
     elif r < 0.45:
         msgs.append(raw_msg("developer", "Follow the rules."))
@@ -340,7 +340,7 @@ def conversation(rng, trailing_assistant):
                 msgs[-1]["extra_json"] = json.dumps({"__tool_call_extras": [{"namespace": "ns", "function": {"strict": True}}]})
             for c in calls:
                 if rng.random() < 0.15:
-                    # v0.8.0: a tool result naming a deferred tool
+                    # a tool result naming a deferred tool
                     msgs.append(raw_msg("tool", "", parts=[("tool_reference", "", rng.choice(TOOLS)[0])],
                                         tool_name=c[0], tool_call_id=c[2]))
                     continue
@@ -359,7 +359,7 @@ def gen_inputs(rng):
     cont = rng.choice([0, 0, 0, 1, 2, 3])
     tools = rng.sample(TOOLS, rng.randint(1, len(TOOLS))) if rng.random() < 0.55 else []
     if tools and rng.random() < 0.3:
-        # v0.8.0: withheld from the system prompt
+        # withheld from the system prompt
         tools = [t + [rng.random() < 0.5] for t in tools]
     if tools and rng.random() < 0.03:
         tools.append(BAD_TOOL)
@@ -367,12 +367,12 @@ def gen_inputs(rng):
     if rng.random() < 0.25:
         kv = rng.choice([("reasoning_effort", "\"low\""), ("reasoning_effort", "\"high\""), ("preserve_reasoning", "true"),
                          ("enable_thinking", "false"), ("custom", "{\"x\": 1}"), ("bad", "{oops"),
-                         # v0.7.0: K2 Horizon's call formats and effort tiers,
+                         # K2 Horizon's call formats and effort tiers,
                          # TranslateGemma's language codes
                          ("tool_call_format", "\"json\""), ("tool_call_format", "\"xml_typed\""),
                          ("reasoning_effort", "\"medium\""), ("source_lang_code", "\"fr\""),
                          ("target_lang_code", "\"de-DE\""),
-                         # v0.8.0: DeepSeek V4.1's mapped levels
+                         # DeepSeek V4.1's mapped levels
                          ("reasoning_effort", "\"minimal\""), ("reasoning_effort", "\"xhigh\""),
                          ("reasoning_effort", "\"max\"")])
         kwargs.append(list(kv))
@@ -398,7 +398,7 @@ def gen_inputs(rng):
     }
 
 
-# v0.7.0: K2 Horizon's call formats and effort tiers, TranslateGemma's
+# K2 Horizon's call formats and effort tiers, TranslateGemma's
 # language codes
 EXTRA_KWARGS = [("tool_call_format", "\"json\""), ("tool_call_format", "\"xml_typed\""),
                 ("reasoning_effort", "\"low\""), ("reasoning_effort", "\"medium\""),
@@ -406,17 +406,17 @@ EXTRA_KWARGS = [("tool_call_format", "\"json\""), ("tool_call_format", "\"xml_ty
                 ("source_lang_code", "\"fr\""), ("target_lang_code", "\"de-DE\""),
                 # an empty input string, which upstream keeps as a part
                 ("empty_kw", "\"\""),
-                # v0.8.0: from_json's limit, on either side of it
+                # from_json's limit, on either side of it
                 ("deep", "[" * 128 + "]" * 128), ("deep", "[" * 129 + "]" * 129)]
 
 
-# v0.8.0: the tools of a system message, which DeepSeek V4.1 declares there
+# the tools of a system message, which DeepSeek V4.1 declares there
 SYSTEM_TOOLS = json.dumps({"tools": [{"type": "function", "function": {
     "name": "get_time", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}]})
 
 
 SYNTHETIC = [
-    # v0.8.0: templates the two new parsers and V4.1 detect
+    # templates the two new parsers and V4.1 detect
     ("synthetic-harmony-xml",
      "{%- for m in messages %}<|start|>{{ m.role }}<|channel|>final<|message|>{{ m.content }}<|end|>{% endfor -%}"
      "{#- <|constrain|>xml rfl:parameter -#}{% if add_generation_prompt %}<|start|>assistant{% endif %}"),
@@ -452,7 +452,7 @@ SYNTHETIC = [
      "{%- if enable_thinking %}SYS ON{% else %}SYS OFF{% endif -%}"
      "{%- for m in messages %}<|{{ m.role }}|>{{ m.content }}{% endfor -%}"
      "{%- if add_generation_prompt %}<|assistant|>" + " " * 70 + "{% if enable_thinking %}<think></think><|tail|>{% endif %}{% endif -%}"),
-    # v0.5.0: Qwen3-Coder's markers with no newline between the tags, which
+    # Qwen3-Coder's markers with no newline between the tags, which
     # the specialized Qwen3-Coder parser refuses (common_chat_try_specialized_template)
     ("synthetic-qwen3-coder-tight",
      "{%- for m in messages %}<|im_start|>{{ m.role }}\n{{ m.content }}"
@@ -467,7 +467,7 @@ SYNTHETIC = [
 
 GENERIC_REPLIES = [
     "Hello, world!",
-    # v0.8.0: the new parsers' shapes
+    # the new parsers' shapes
     " to=get_weather<|channel|>analysis <|constrain|>xml<|message|><rfl:parameter name=\"city\">\nParis\n</rfl:parameter><|call|>",
     "<|channel|>analysis<|message|>hmm<|end|><|start|>assistant<|channel|>final<|message|>Sure<|return|>",
     " to=self<|message|>hmm<|eom|><|start|>assistant to=commentary<|message|>one moment<|eom|><|start|>assistant to=user<|message|>Done<|eot|>",
@@ -560,7 +560,7 @@ def make_records(rec_path, out):
         return tmpl_ids[key]
 
     def parse(idx, data, partial):
-        # a parser cannot be loaded since v0.7.0: every parse names the
+        # a parser cannot be loaded: every parse names the
         # apply whose parser and parser params it uses
         key = ("parse", idx, data, partial)
         if key in seen:
@@ -643,7 +643,7 @@ def make_records(rec_path, out):
     with_model = {"synthetic-bos-eos", "synthetic-input-ends", "meta-llama-Llama-3.1-8B-Instruct.jinja", "Qwen3.5-4B.jinja"}
     sources.append(("synthetic-bos-eos", "{{ bos_token }}{% for m in messages %}[{{ m.role }}]{{ m.content }}{% endfor %}"
                     "{% if add_generation_prompt %}[assistant]{% endif %}{{ eos_token }}"))
-    # v0.7.0: the prompt opens and closes with message text, an input part:
+    # the prompt opens and closes with message text, an input part:
     # the add-BOS and add-EOS trims look only at a template part
     sources.append(("synthetic-input-ends", "{% for m in messages %}{{ m.content }}{% endfor %}"))
     # an empty input string first and last (the `empty_kw` kwarg): upstream
@@ -656,7 +656,7 @@ def make_records(rec_path, out):
     vocab_eos = os.path.join(ROOT, "llama.cpp/models/ggml-vocab-nomic-bert-moe.gguf")
     with_model_eos = {"synthetic-empty-input-edges", "synthetic-input-ends"}
     with_model.add("synthetic-empty-input-edges")
-    # v0.8.0: a model's "tts" template, with its language and voice, and one
+    # a model's "tts" template, with its language and voice, and one
     # that does not parse, which is logged and ignored
     vocab_tts = tts_vocab(out, "vocab-tts.gguf",
                           "{{ bos_token }}{% if voice %}[voice {{ voice }}]{% endif %}{% if language %}[lang {{ language }}]{% endif %}"
@@ -713,7 +713,7 @@ def make_records(rec_path, out):
                 data = reply if isinstance(reply, bytes) else reply.encode()
                 add({"op": "parse", "a": idx, "input_hex": hexs(data), "partial": False})
                 stats["parse"] += 1
-        # v0.8.0: V4.1's tools on a system message, none at the top level:
+        # V4.1's tools on a system message, none at the top level:
         # calls to them parse all the same
         if "｜DSML｜ calls>" in src:
             inputs = gen_inputs(trng)

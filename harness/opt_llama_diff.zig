@@ -265,11 +265,10 @@ const Filter = enum {
     /// Measured, one weight at a time: every other weight reaches the
     /// attention output gate's `ggml_sigmoid`, a unary op with no backward
     /// pass, and aborts with "fatal error" after "unsupported unary op for
-    /// backward pass" (ggml.c:7215 @620d2225c). Through v0.3.0 the KV
-    /// cache's `ggml_set_rows` stopped several of them first, at
-    /// `ggml_build_backward_expand`'s "inplace operations are currently not
-    /// supported"; v0.4.0 admits `GGML_OP_SET_ROWS` there
-    /// (ggml.c:7440 @620d2225c), so all three now end at the sigmoid.
+    /// backward pass" (ggml.c:7215 @620d2225c). The KV
+    /// cache's `ggml_set_rows` is admitted by
+    /// `ggml_build_backward_expand` (ggml.c:7440 @620d2225c), so all three
+    /// end at the sigmoid.
     head,
     /// One weight per abort, below.
     attn_q,
@@ -354,7 +353,7 @@ const Case = struct {
     n_ubatch: u32 = 64,
     n_ctx_train: u32 = 0,
     /// The context; with `n_ubatch` equal to it, `opt_init` trains through
-    /// the ubatch's own K and V instead of the cache (since v0.6.0).
+    /// the ubatch's own K and V instead of the cache.
     n_ctx: u32 = 256,
     epochs: usize = 2,
     /// Datapoints trained on before evaluation starts.
@@ -367,7 +366,7 @@ const cases = [_]Case{
     .{ .name = "gpu adamw head, one ubatch per batch", .filter = .head, .optimizer = c.GGML_OPT_OPTIMIZER_TYPE_ADAMW, .n_gpu_layers = -1, .n_batch = 64, .n_ubatch = 64 },
     .{ .name = "cpu adamw head", .filter = .head, .optimizer = c.GGML_OPT_OPTIMIZER_TYPE_ADAMW, .n_gpu_layers = 0 },
     .{ .name = "cpu sgd output, n_ctx_train 128", .filter = .output, .optimizer = c.GGML_OPT_OPTIMIZER_TYPE_SGD, .n_gpu_layers = 0, .n_ctx_train = 128, .idata_split = 3 },
-    // No case has n_ubatch == n_ctx, v0.6.0's training graph that reads the
+    // No case has n_ubatch == n_ctx, the training graph that reads the
     // ubatch's own K and V: on this hybrid model upstream then aborts in
     // `llm_graph_input_mem_hybrid::set_input`, which still writes the
     // K and V indices the training graph left unallocated
@@ -518,7 +517,7 @@ fn firstDiff(name: []const u8, a_raw: []const u8, b_raw: []const u8) usize {
         const la = ia.next();
         const lb = ib.next();
         if (la == null and lb == null) return line - 1;
-        // a reserve's time, which since v0.6.0 `opt_init` always logs: it
+        // a reserve's time, which `opt_init` always logs: it
         // reserves the training graph whether or not flash attention was on
         if (la != null and lb != null) {
             if (std.mem.find(u8, la.?, "reserve took ")) |at| {

@@ -2,7 +2,7 @@
 //
 // **Not a port.** Drives the real `llama_batch_allocr` in `libllama.a`
 // through a C interface the Zig harness can call: construct, `init`, the
-// accessors, every split mode and `ubatch_reserve`; and since v0.6.0 the
+// accessors, every split mode and `ubatch_reserve`; and the
 // `llama_batch_ext` `init` takes -- built with its test constructor, filled
 // by `llama_batch_compat::init` or the `llama_batch_ext_*` C API, and read
 // back entry by entry, sequence ids in the `unordered_set`'s order. The memory module it is
@@ -155,14 +155,14 @@ int ref_ext_set_decision_order(llama_batch_ext * b, int32_t idx, int32_t order) 
     return llama_batch_ext_set_decision_order(b, idx, (llama_decision_order) order) ? 1 : 0;
 }
 
-// v0.9.0: llama-ext.h declares it with C++ linkage.
+// llama-ext.h declares it with C++ linkage.
 int32_t ref_ext_add_embd_row(llama_batch_ext * b, llama_seq_id seq_id, int32_t row) {
     return llama_batch_ext_add_embd_row(b, seq_id, row);
 }
 
 size_t ref_ext_n_tokens(const llama_batch_ext * b) { return b->tokens.size(); }
 
-// v0.7.0's state width: the test constructor sets none, the context
+// The state width: the test constructor sets none, the context
 // constructor one per context type (llama_batch_ext_select_n_embd_state), so
 // the harness sets it as a context would.
 void ref_ext_set_n_embd_state(llama_batch_ext * b, size_t n) { const_cast<size_t &>(b->n_embd_state) = n; }
@@ -254,7 +254,7 @@ int ref_ubatch_owned(const ref_ubatch * u) {
     return ((llama_ubatch *) u->holder)->data != nullptr;
 }
 
-// The state rows of each token, `data->embd_state_row` (v1.0.0), empty if none.
+// The state rows of each token, `data->embd_state_row`, empty if none.
 size_t ref_ubatch_state_rows(const ref_ubatch * u, const int32_t ** rows) {
     const auto & d = ((llama_ubatch *) u->holder)->data;
     *rows = d ? d->embd_state_row.data() : nullptr;

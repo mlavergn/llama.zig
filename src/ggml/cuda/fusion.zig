@@ -164,7 +164,7 @@ fn tryGdnCacheFusion(cgraph: *const CGraph, node_idx: c_int, fused_state_cpy: *g
 }
 
 /// Ports `ggml_cuda_try_ssm_scan_cache_fusion` (ggml-cuda.cu:3542
-/// @b1b770d90), new at v0.7.0: match ssm_scan + the strided cpy that
+/// @b1b770d90): match ssm_scan + the strided cpy that
 /// scatters its state snapshots into the cache, so the kernel writes them
 /// and skips the cpy. Only the Mamba-2 kernels (the group scan and SSD)
 /// write to the cache, and only for one sequence.
@@ -246,8 +246,8 @@ const topk_moe_group_pattern = [_]GroupStep{
     .{ .op = c.GGML_OP_RESHAPE, .src0 = 12, .src1 = -2 }, // 13: [n_expert, n_tokens]
 };
 
-/// Ports `ggml_cuda_topk_moe_group_fusion` (ggml-cuda.cu:3637 @b1b770d90),
-/// new at v0.8.0: whether `topk_moe_group_pattern` starts at `node_idx` over
+/// Ports `ggml_cuda_topk_moe_group_fusion` (ggml-cuda.cu:3637 @b1b770d90):
+/// whether `topk_moe_group_pattern` starts at `node_idx` over
 /// `selection`. The `HIP_VERSION < 60300000` arm never compiles here.
 fn topkMoeGroupFusion(cgraph: *const CGraph, node_idx: c_int, selection: *const Tensor, args: *topk_moe.Args) bool {
     const n_ops: c_int = topk_moe_group_pattern.len;
@@ -843,8 +843,8 @@ fn canFuse(cgraph: *const CGraph, node_idx: c_int, ops: []const Op, unary_ops: [
     return false;
 }
 
-/// Ports `ggml_cuda_match_shared_expert` (ggml-cuda.cu:2281 @b1b770d90),
-/// new at v0.6.0: whether the routed experts' gate/up/GLU at `routed_idx`
+/// Ports `ggml_cuda_match_shared_expert` (ggml-cuda.cu:2281 @b1b770d90):
+/// whether the routed experts' gate/up/GLU at `routed_idx`
 /// and a shared expert's at `shared_idx` can run as one MMVQ launch --
 /// both pairs fusable, the same quantized weight shape, the shared input
 /// the routed one before its reshape, the same GLU and limit. Only checks
@@ -923,9 +923,9 @@ fn srcOpt(t: *const Tensor, i: usize) ?*const Tensor {
 }
 
 /// Ports `ggml_cuda_try_fuse` (ggml-cuda.cu:4338 @b1b770d90): try and fuse
-/// nodes, and return the number of nodes to skip. v0.7.0 added the
-/// `SSM_SCAN -> CPY` cache fusion, beside the gated-delta-net one. v1.0.0
-/// (#31296, #26048) moved the scale lambdas to `mulmat.zig`, where
+/// nodes, and return the number of nodes to skip. It includes the
+/// `SSM_SCAN -> CPY` cache fusion, beside the gated-delta-net one. The
+/// scale lambdas (#31296, #26048) are in `mulmat.zig`, where
 /// `graph_optimize` shares them, and lets MMVF (FP8 weights) and MMQ (NVFP4)
 /// take the scaled gate/up/GLU and the scaled matmul, cuBLASLt's FP8 GEMM
 /// the scaled FP8 `MUL_MAT`.

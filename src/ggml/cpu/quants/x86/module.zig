@@ -5,10 +5,9 @@
 //! **Not a port by itself.** It gathers the port of
 //! `llama.cpp/ggml/src/ggml-cpu/arch/x86/quants.c` at v1.0.0 (`b1b770d90`),
 //! the x86 counterpart of `quants/arm/`: that file's 28 exports, at the
-//! `__AVX2__` arms x86-64-v3 compiles. Until v0.7.0 the 28th,
-//! `ggml_vec_dot_q2_0_q8_0`, was `quants.c`'s generic body renamed by
-//! `arch-fallback.h`, ported again as x86 compiled it, fused; since #30447 it
-//! is an AVX2 kernel of its own and the generic is dead here as on ARM.
+//! `__AVX2__` arms x86-64-v3 compiles. The 28th,
+//! `ggml_vec_dot_q2_0_q8_0`, is an AVX2 kernel of its own (#30447) and the
+//! generic is dead here as on ARM.
 //!
 //! - `avx2.zig`   — the SSE/AVX/AVX2 intrinsics, as Zig
 //! - `common.zig` — the file's static helpers

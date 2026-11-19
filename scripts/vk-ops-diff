@@ -1,8 +1,7 @@
 #!/bin/bash
 # The Vulkan op oracle: every op configuration of upstream's test-backend-ops,
 # run on the ported Vulkan backend and on the reference Vulkan backend in one
-# process, compared on bits -- `cuda-ops-diff` for Vulkan (PLAN.md,
-# "Stage 7 — Vulkan").
+# process, compared on bits -- `cuda-ops-diff` for Vulkan.
 #
 # What it compares
 # ----------------
@@ -22,17 +21,17 @@
 # a real decode through it. Shapes upstream's list lacks need extra cases
 # (`harness/vk_ops_diff.c`, `extra_cases`): the misaligned set_rows leaf,
 # split-k and large-tile matmuls, a second fused bias in `src[0]`, sparse
-# flash attention with no GQA (the scalar path's N == 1 arm); since v0.6.0
+# flash attention with no GQA (the scalar path's N == 1 arm);
 # sparse flash attention over q8_0 below the 16x break-even, HC_POST_GATE
 # refused for a biased scale, conv_2d/conv_3d with a misaligned input and
 # output, and a matmul whose staged src1 a soft_max or sparse flash
-# attention overwrote in between; since v0.7.0 a BF16 src1 on the matrix
+# attention overwrote in between; a BF16 src1 on the matrix
 # path over f32, f16, q4_0 and q4_K (upstream's bf16-activation cases are
 # all vector-path shapes), and MUL_MAT_ID with
 # experts repeated in a row and with experts spanning several tiles
 # (upstream's duplicate-id cases are disabled), and POOL_2D windows 4, 8
-# and 16 wide, the subgroup shader's threshold on smaller subgroups; since
-# v0.8.0 a src1 precision that forbids q8_1 on every path and a swapped
+# and 16 wide, the subgroup shader's threshold on smaller subgroups;
+# a src1 precision that forbids q8_1 on every path and a swapped
 # multiply it says nothing about, a bf16 accumulator request in the matmul
 # and flash attention, a non-contiguous f16 src0 broadcast over dim 3,
 # RMS_NORM and its fusions at the block sizes' thresholds, RMS_NORM + VIEW +
@@ -40,16 +39,15 @@
 # 256x128 tile needs a driver the GB10 lacks), and `supports_op` asked
 # directly (`supports_extra`) what no case can ask: the refused src1
 # precision, SUM over a strided view, TOP_K_MASK. The extras follow `-o`
-# as test-backend-ops does -- a comma list, a regex (`harness/op_filter.h`);
-# before v0.8.0's pickup a list or regex ran none of them.
-# Since v1.0.0: FWHT above 512 wide and over f16 (upstream's cases stop at
+# as test-backend-ops does -- a comma list, a regex (`harness/op_filter.h`).
+# FWHT above 512 wide and over f16 (upstream's cases stop at
 # 512 and jump to a refused 16384), coopmat2 flash attention over a dense
 # q8_0 cache with and without the new dequantized-KV threshold, and the
 # tiled-transpose concat at sizes off its 32x32 tile. With
 # `GGML_VK_FORCE_XE_FA=1` (and coopmat2 off) flash attention takes the
 # Intel Xe prefill and two-phase decode kernels, which the GB10 can run.
 # `test-backend-ops` does not see
-# descriptor-set reuse (v0.6.0): an injection that reused every set whose
+# descriptor-set reuse: an injection that reused every set whose
 # binding count matched passed ADD and GET_ROWS on llvmpipe -- a case
 # computes on fresh buffers, and freeing the last case's drops the cached
 # bindings. `vk-node-diff`'s decodes and `vk-parity-cli` reach it.
@@ -212,8 +210,7 @@ else
     # process with the rest, the KHR-coopmat and no-coopmat arms stall at
     # `hsk=256, kv=16384, q8_0` with the GPU idle and a fence that never
     # signals -- and the reference stalls there against itself -- while each
-    # case alone finishes in a second (NOTES.md, "The Vulkan arms,
-    # completed"). A head size can still stall on its own (KHR, hsk=576), so
+    # case alone finishes in a second. A head size can still stall on its own (KHR, hsk=576), so
     # a part that outlives VK_OPS_DIFF_FA_TIMEOUT (600 s) finishes one case
     # per process. The head sizes are test-backend-ops' own list; every
     # FLASH_ATTN_EXT case it makes uses one of them.
@@ -221,7 +218,7 @@ else
     # alone begin `hsk=N,hsv=`. Not `-o` over a list of names: a fused case
     # is named for its fusion (ROPE_SET_ROWS, RMS_NORM_MUL_ADD, GELU_MUL),
     # which `--list-ops` does not print and `support` mode drops, so that ran
-    # none of them (NOTES.md, "The v0.4.1 pickup").
+    # none of them.
     run_part ops "${VK_OPS_DIFF_TIMEOUT:-5400}" plain -p '^(?!hsk=[0-9]+,hsv=)'
     for hsk in 40 64 72 80 96 128 192 256 320 512 576; do
         run_part "fa-hsk$hsk" "${VK_OPS_DIFF_FA_TIMEOUT:-600}" fallback -o FLASH_ATTN_EXT -p "hsk=$hsk,"

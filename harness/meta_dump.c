@@ -71,7 +71,7 @@ static int volatile_line(const char * s) {
     if (strstr(s, "SPLIT_STATE")) return 0;
     /* Addresses, timings and free-memory figures: different every run. */
     if (has_address(s)) return 1;
-    /* New at v0.5.0: libllama lists each graph input's users from
+    /* libllama lists each graph input's users from
      * `llama_graph_n_input_tensors` (llama-context.cpp:583 @7fe450e19),
      * walking a std::unordered_map keyed by tensor pointer, so their order
      * follows the addresses malloc returned and differs run to run -- the

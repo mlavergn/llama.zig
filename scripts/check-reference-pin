@@ -84,7 +84,7 @@ done
 grep -q "^const build_version: \[\*:0\]const u8 = \"$(_field $_up ggml_version)\";" src/ggml/runtime.zig || _bad="$_bad src/ggml/runtime.zig:build_version"
 grep -q "^const build_commit: \[\*:0\]const u8 = \"$_short\";" src/ggml/runtime.zig || _bad="$_bad src/ggml/runtime.zig:build_commit"
 grep -q "^pub const version = \"$(_field $_up version)\";" src/llama/api/llama.zig || _bad="$_bad src/llama/api/llama.zig:version"
-# Since its v0.9.0+1 the zmake reference compiles the release *tarball* its
+# The zmake reference compiles the release *tarball* its
 # build.zig.zon names (unpacked into zig-pkg/), not the nested checkout read
 # above -- which only types-golden and this script still use. So the tag in
 # that URL is the commit the bit-exact gates actually compile against.

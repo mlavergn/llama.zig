@@ -2,7 +2,7 @@
 # Compare src/llama/context.zig, and everything a decode reaches, with
 # llama.cpp's llama-context.cpp and its callees, in one process.
 #
-# libllama swaps once, at llama.h (PLAN.md, Decision 42), so until then
+# libllama swaps once, at llama.h, so until then
 # nothing downstream can see the ported context, batch splitter, memory
 # modules or graph. This loads one Qwen3.5 model through the C++ in
 # libllama-ref.a and through the port, runs the same decode script through
@@ -43,7 +43,6 @@ trap 'rm -rf "$tmp"' EXIT
 
 # The system libraries the harness links beside libggml.a: the Metal
 # frameworks on macOS, the CUDA libraries on Linux (scripts/platform-libs).
-# Until v0.5.0 this named the Metal frameworks itself and ran on macOS only.
 . scripts/platform-libs
 platform_libs exe
 
@@ -66,7 +65,7 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/context_diff" -Ofast -lc \
     "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
 
-# Without a model named, the default run also covers v0.7.0's features on
+# Without a model named, the default run also covers these features on
 # fixtures from scripts/gen-arch-fixtures, each required: the MoE cache and
 # host-resident experts on deepseek2's 64 experts, prism.hadamard (latent and
 # tied) on a hybrid MoE and a dense model, the GDN grouped-head permutation
@@ -101,7 +100,7 @@ if [ $extra = 1 ]; then
     run "$FIXTURES/llama-dense.gguf" --hadamard-tied --model gpu
     run "$model" --section-order zyxt --model gpu --case-exact default
     run "$FIXTURES/dflash-gemma.gguf" --target "$FIXTURES/qwen3-dense.gguf" --model gpu --case-exact default
-    # v0.8.0: `no_alloc` is a parameter of every memory, not a hparam, so each
+    # `no_alloc` is a parameter of every memory, not a hparam, so each
     # kind of memory builds with dummy buffers and reports the same breakdown.
     for f in qwen3-dense gemma3-dense mamba-dense qwen35moe-moe jamba-dense glm-dsa-moe deepseek32-moe deepseek4-moe minimax-m3-moe glm5-next-moe; do
         run "$FIXTURES/$f.gguf" --model no-alloc --case-exact default

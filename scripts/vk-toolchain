@@ -1,11 +1,11 @@
 #!/bin/bash
 # Fetches and builds the Vulkan toolchain every Vulkan gate is built with,
-# into .tools/vulkan/ -- PLAN.md, Decision 55: the toolchain is part of the
+# into .tools/vulkan/. The toolchain is part of the
 # reference, so it is pinned like the upstream source and never taken from
 # whatever the machine happens to have.
 #
-# One SDK tag, 1.4.363.0, for all of it -- the tag Stage 7's measurement was
-# taken at (NOTES.md, "Stage 7: the measurement"):
+# One SDK tag, 1.4.363.0, for all of it -- the tag the Vulkan reference was
+# first measured at:
 #
 #   include/vulkan, include/vk_video   Khronos Vulkan-Headers   vulkan-sdk-1.4.363.0
 #   include/spirv                      Khronos SPIRV-Headers    vulkan-sdk-1.4.363.0

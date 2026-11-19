@@ -11,7 +11,7 @@
 //! types, `common_chat_tool`, the tool-choice, format, continuation and
 //! reasoning-format enums with their names, and the `*_oaicompat`
 //! conversions. Rendering a template and parsing a model's output -- the
-//! rest of `chat.cpp`, over Jinja and the PEG parser -- are Stage 9 step 4.
+//! rest of `chat.cpp`, over Jinja and the PEG parser -- live beside it.
 //! Each declaration names what it ports and the line it began at.
 //!
 //! # Ownership

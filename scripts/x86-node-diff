@@ -1,6 +1,5 @@
 #!/bin/bash
-# `node-diff` for x86_64, on the Windows laptop (PLAN.md, Stage 5 step 6;
-# Decision 57): every node of a real model's CPU decode hashed, ported
+# `node-diff` for x86_64, on the Windows laptop: every node of a real model's CPU decode hashed, ported
 # against llama.cpp.zmake, at 1 and 4 threads, plus the fused pass --
 # scripts/node-diff's comparison, run where the AVX2 kernels are.
 #

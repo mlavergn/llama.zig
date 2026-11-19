@@ -1,4 +1,4 @@
-//! `llama-server`: the HTTP server over libllama (Stage 10, Decision 65).
+//! `llama-server`: the HTTP server over libllama.
 //!
 //! # Provenance
 //!
@@ -96,7 +96,7 @@ fn shutdownSingleModel(_: c_int) void {
     if (shutdown_ctx_server) |s| s.terminate();
 }
 
-/// What the router's `shutdown_handler` acts on (Stage 10 step 7).
+/// What the router's `shutdown_handler` acts on.
 var shutdown_models_routes: ?*models_mod.ModelsRoutes = null;
 var shutdown_ctx_http: ?*http.Context = null;
 

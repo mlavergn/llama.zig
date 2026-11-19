@@ -2,7 +2,7 @@
 // `llama.cpp/tools/mtmd/mtmd-image.cpp`, compiled unmodified beside this
 // file, driven through one C entry point.
 //
-// **Not a port.** A harness. Since v1.0.0 upstream's preprocessors are
+// **Not a port.** A harness. Upstream's preprocessors are
 // constructed from an `mtmd_model` -- they read `model->hparams`, and
 // deepseekocr `model->proj_type` -- which `mtmd-model.h` defines inline, so
 // this file fills one by hand and the preprocessors run without loading a
@@ -52,10 +52,10 @@ struct ref_hparams {
     float   image_std[3];
     int32_t dsv4_max_n_token;
     int32_t dsv4_max_wh_ratio;
-    int32_t max_slice_nums; // v0.7.0
-    float   preproc_max_pixels_tolerance; // v0.8.0
-    int32_t image_round_half_even;        // v0.8.0
-    int32_t image_floor_before_align;     // v0.8.0
+    int32_t max_slice_nums;
+    float   preproc_max_pixels_tolerance;
+    int32_t image_round_half_even;
+    int32_t image_floor_before_align;
 };
 
 typedef void (*ref_log_fn)(int level, const char * text, void * user_data);
@@ -148,7 +148,7 @@ static std::unique_ptr<mtmd_image_preprocessor> make_preprocessor(int kind, cons
         case 17: return std::make_unique<mtmd_image_preprocessor_deepseek41v>(ctx);
         case 18: return std::make_unique<mtmd_image_preprocessor_minicpm_ocr_1_0>(ctx);
         case 19: return std::make_unique<mtmd_image_preprocessor_qwen3vl>(ctx);
-        case 20: return std::make_unique<mtmd_image_preprocessor_kimik25>(ctx); // v1.0.0
+        case 20: return std::make_unique<mtmd_image_preprocessor_kimik25>(ctx);
         default: return nullptr;
     }
 }

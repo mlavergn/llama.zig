@@ -24,8 +24,61 @@
 //! One deliberate difference: upstream's server tokenizes the rendered
 //! prompt whole with `parse_special`, so a message spelling a control token
 //! becomes one. This tokenizes every input part of the session's prompt
-//! (`common_chat_prompt`, whose parts carry the marks since v0.7.0) with
-//! `parse_special` off (SPEC.md 5.2).
+//! (`common_chat_prompt`, whose parts carry the marks) with
+//! `parse_special` off.
+//!
+//! # Behaviour
+//!
+//! This is the contract `harness/conversation_ref.cpp` reimplements and
+//! `make cnv-diff` holds the two to.
+//!
+//! Templates:
+//!
+//! - Source: `--chat-template`, else `--chat-template-file`, else the
+//!   model's `tokenizer.chat_template`, else ChatML. One that does not
+//!   parse is an error before the first turn.
+//! - Bindings: those of upstream's `common_chat_template_direct_apply_impl`
+//!   -- `messages`, `bos_token`, `eos_token`, `enable_thinking`, `datetime`,
+//!   `date_string`, every kwarg, `add_generation_prompt` true, the
+//!   `preserve_thinking` family from `preserve_reasoning`.
+//! - `enable_thinking` is on when the template supports thinking, unless
+//!   `--reasoning off`; an `enable_thinking` kwarg overrides it.
+//! - Tokenized with `add_special` false (the template writes the opening).
+//!   Input parts with `parse_special` off, template parts with it on: a
+//!   message spelling `<|im_start|>` reaches the model as its characters.
+//!
+//! Turns (`-cnv`, stdin until EOF):
+//!
+//! - A turn is one trimmed line; blank lines are skipped. `-p` seeds the
+//!   first turn.
+//! - Every turn re-renders the whole history; the common token prefix with
+//!   the cache is kept. Where `llama_memory_seq_rm` refuses (recurrent and
+//!   hybrid models), the cache is cleared and re-decoded.
+//! - `> ` on stderr marks a turn. `/exit` ends, `/clear` drops the history
+//!   (keeping the system prompt), `/regen` answers the last turn again; any
+//!   other `/word` is text.
+//! - `LLAMAZIG_CNV_TRACE` writes `[turn: kept K, decoding S]` to stderr.
+//!
+//! Replies, as upstream's `ui::assistant_turn` shows its server's stream:
+//!
+//! - A control token prints its spelling only when the parser preserved it.
+//!   Text ending inside a UTF-8 character is held until whole.
+//! - The parser's `additional_stops` end the reply and are not shown; text
+//!   that could start one is held, and dropped if the reply ends.
+//! - After each piece the reply so far is parsed partially
+//!   (`common_chat_parse`) and the new reasoning and answer shown; at the end
+//!   it is parsed whole. `--skip-chat-parsing` reads everything as answer;
+//!   `--reasoning-format none` leaves thinking in the answer. Tool calls are
+//!   parsed, not shown.
+//! - Reasoning opens with `\n[Start thinking]\n\n`; the answer begins after a
+//!   newline if needed and `[End thinking]\n\n`. A final newline if the last
+//!   text lacked one. `--color` greys the reasoning (`\e[90m` ... `\e[0m`).
+//! - A reply that does not parse prints `Error: <message>` (red under
+//!   `--color`), stops, and what was shown joins the history.
+//! - History keeps the answer and, apart, `reasoning_content`.
+//! - `--reasoning-budget N >= 0` with a parser that names an end tag runs
+//!   upstream's budget sampler before the chain: N tokens after the start
+//!   tag, then `--reasoning-budget-message` and the end tag are forced.
 
 const std = @import("std");
 const common_chat = @import("common_chat");

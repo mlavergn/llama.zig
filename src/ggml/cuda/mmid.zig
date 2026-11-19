@@ -5,9 +5,8 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/mmid.cu` and
 //! `llama.cpp/ggml/src/ggml-cuda/mmid.cuh` at v1.0.0 (`b1b770d90`). The
-//! kernel, `mm_ids_helper`, stays CUDA. Since v1.0.0 (#31047, the
-//! linearized MoE layout) it writes one `ggml_cuda_mm_id_tile_spec` per
-//! column tile of `tile_width` instead of each expert's bounds.
+//! kernel, `mm_ids_helper`, stays CUDA. It writes one
+//! `ggml_cuda_mm_id_tile_spec` per column tile of `tile_width` instead of each expert's bounds.
 
 const std = @import("std");
 const impl = @import("../impl.zig");

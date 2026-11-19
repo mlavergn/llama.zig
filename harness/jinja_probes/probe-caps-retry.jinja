@@ -1,4 +1,4 @@
-{#- v0.7.0: a template that requires a thinking field on every assistant turn, as K2 Horizon's does: caps_get retries its probe once with an empty reasoning_content added. -#}
+{#- a template that requires a thinking field on every assistant turn, as K2 Horizon's does: caps_get retries its probe once with an empty reasoning_content added. -#}
 {%- for m in messages -%}
 {%- if m.role == 'assistant' and m.reasoning_content is not defined -%}{{ raise_exception('assistant turn without reasoning_content') }}{%- endif -%}
 <{{ m.role }}>

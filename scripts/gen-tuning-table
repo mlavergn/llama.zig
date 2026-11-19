@@ -2,8 +2,8 @@
 """Regenerate the generated parts of `src/ggml/metal/tuning_table.zig`.
 
 **Not a port.** The table is upstream's `fa_vec_tuned_table`, which its own
-comment calls generated ("do not hand-edit"); v0.4.0 added 2,630 rows to
-the 936 v0.3.0 had, which is past the point where copying by hand is
+comment calls generated ("do not hand-edit"); it is far past
+the point where copying by hand is
 honest work. This splices these into the existing files and leaves their
 prose alone:
 
@@ -14,9 +14,7 @@ prose alone:
 - `DeviceId` in `device_c.zig`, from `enum ggml_metal_device_id` in
   `ggml-metal-device.h`, in the enum's order.
 
-**The key's first field changed meaning at v0.5.0.** Until v0.4.1 it was a
-`GGML_METAL_DEVICE_*` enumerator and the table indexed the SKU enum by
-ordinal; since v0.5.0 it is the Apple GPU family as a bare integer (7 to
+**The key's first field is the Apple GPU family**, a bare integer (7 to
 10), and the rows carry `// AppleN - <SKUs>` comment lines between
 families. A row in the old form now stops the script rather than being
 read as something else, and so does any family outside `FAMILIES`: a new

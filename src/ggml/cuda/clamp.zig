@@ -33,7 +33,7 @@ fn u32Of(x: usize) u32 {
 }
 
 /// Ports `clamp_cuda` (clamp.cu:30 @b1b770d90), which launches with `<<<>>>`.
-/// Since v0.7.0 `src0` and `dst` may be views: rows are contiguous, dims
+/// `src0` and `dst` may be views: rows are contiguous, dims
 /// 1..3 follow the strides, in elements, and the kernel divides the flat
 /// index with `fast_div_modulo`.
 fn clampCuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, min: T, max: T, src0: *const Tensor, t: *const Tensor, stream: cu.cudaStream_t) void {

@@ -13,7 +13,7 @@
 //! too long for the bitonic kernel go to CUB's device-wide sorts. Their
 //! host-side dispatch is CUB's header templates, which Zig cannot
 //! instantiate; `cub_shim.cu` wraps exactly upstream's six calls behind a C
-//! ABI (PLAN.md, Decision 47) and this file keeps everything around them.
+//! ABI and this file keeps everything around them.
 //!
 //! The toolkit here ships CCCL 3.0, so `STRIDED_ITERATOR_AVAILABLE` (CCCL
 //! >= 3.1) is not defined: the segment offsets are an `int` array filled by
@@ -57,8 +57,7 @@ comptime {
 
 /// Ports `ggml_cuda_chunk_nrows` (argsort.cu:32 @b1b770d90): the suggested
 /// maximum number of rows to process at once, given the temporary buffer
-/// bytes per row. v0.7.0 renamed it from `argsort_f32_i32_cuda_cub_chunk_nrows`
-/// and took it out of `GGML_CUDA_USE_CUB`, for `top_k.zig`'s chunking too.
+/// bytes per row. It is outside `GGML_CUDA_USE_CUB`, for `top_k.zig`'s chunking too.
 pub fn chunkNrows(row_bytes: usize, nrows: i64) c_int {
     // process rows in chunks up to approximately this size (currently 64MB)
     // to avoid excessive temporary buffers memory usage

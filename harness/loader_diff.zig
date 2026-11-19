@@ -23,8 +23,8 @@
 //! Inputs are upstream's vocabulary files, any Qwen3.5 model present, and
 //! files synthesized into the directory given: Qwen3.5's metadata without
 //! its tensors and edited one key at a time, small files with real tensors
-//! for the type guess and the bounds check, and split sets -- since v1.0.0
-//! also given as `llama_model_load_from_splits`' paths, with extra shards
+//! for the type guess and the bounds check, and split sets -- also
+//! given as `llama_model_load_from_splits`' paths, with extra shards
 //! and external per-layer embedding tables appended (5f490d7bf).
 //!
 //! Usage: loader_diff <tmpdir> <file.gguf>...
@@ -689,17 +689,17 @@ const Fixture = struct {
     fn nemotronNoEps(ctx: *c.gguf_context) void {
         _ = c.gguf_remove_key(ctx, "nemotron_h.attention.layer_norm_epsilon");
     }
-    /// v0.7.0: a section order needs M-RoPE, which nemotron_h has not.
+    /// A section order needs M-RoPE, which nemotron_h has not.
     fn nemotronSectionOrder(ctx: *c.gguf_context) void {
         c.gguf_set_val_str(ctx, "nemotron_h.rope.section_order", "zyxt");
     }
-    /// v0.7.0: prism.hadamard on an architecture not verified to apply it.
+    /// prism.hadamard on an architecture not verified to apply it.
     fn nemotronHadamard(ctx: *c.gguf_context) void {
         Hadamard.base(ctx, 1, false);
     }
 };
 
-/// v0.7.0's `prism.hadamard` metadata (llama-model.cpp:2030 @620d2225c),
+/// The `prism.hadamard` metadata (llama-model.cpp:2030 @620d2225c),
 /// on Qwen3.5: a valid base, then one fault at a time, each a throw of
 /// `load_hparams_hadamard`'s.
 const Hadamard = struct {
@@ -971,12 +971,12 @@ const Qwen = struct {
         setStrs(ctx, "qwen35.classifier.output_labels", &.{ "negative", "neutral", "positive \"quoted\"" });
     }
 
-    /// v0.8.0's `<arch>.decision.labels`.
+    /// The `<arch>.decision.labels`.
     fn decisionLabels(ctx: *c.gguf_context) void {
         setStrs(ctx, "qwen35.decision.labels", &.{ "yes", "no", "maybe \"so\"" });
     }
 
-    /// v0.8.0: `gguf_kv_to_str` stops rendering an array once the text is
+    /// `gguf_kv_to_str` stops rendering an array once the text is
     /// past 40 bytes, so the dump must show the same around that edge: one
     /// short of it, at it, one past it, a last element that crosses it, and
     /// an element that ends in an escape exactly there.
@@ -1015,7 +1015,7 @@ const Qwen = struct {
         c.gguf_set_val_u32(ctx, "qwen35.embedding_length_out", 512);
     }
 
-    /// v0.6.0's `pooling_type_cls`, the pooling before a RANK classifier
+    /// The `pooling_type_cls`, the pooling before a RANK classifier
     /// head (ModernBERT's "mean").
     fn classifierPooling(ctx: *c.gguf_context) void {
         c.gguf_set_val_u32(ctx, "qwen35.classifier.pooling_type", 1);
@@ -1050,14 +1050,14 @@ const Qwen = struct {
         c.gguf_set_val_str(ctx, "general.architecture", "gptj");
     }
 
-    /// v0.7.0's `<arch>.classifier.activation`.
+    /// The `<arch>.classifier.activation`.
     fn clsActGelu(ctx: *c.gguf_context) void {
         c.gguf_set_val_str(ctx, "qwen35.classifier.activation", "gelu");
     }
     fn clsActSilu(ctx: *c.gguf_context) void {
         c.gguf_set_val_str(ctx, "qwen35.classifier.activation", "silu");
     }
-    /// v1.0.0's `<arch>.classifier_free_guidance` (b1c902f02), read for
+    /// The `<arch>.classifier_free_guidance` (b1c902f02), read for
     /// every architecture.
     fn cfgOn(ctx: *c.gguf_context) void {
         c.gguf_set_val_bool(ctx, "qwen35.classifier_free_guidance", true);
@@ -1065,7 +1065,7 @@ const Qwen = struct {
     fn cfgAsU32(ctx: *c.gguf_context) void {
         c.gguf_set_val_u32(ctx, "qwen35.classifier_free_guidance", 1);
     }
-    /// v0.7.0's `<arch>.rope.section_order`, which Qwen3.5's M-RoPE takes.
+    /// The `<arch>.rope.section_order`, which Qwen3.5's M-RoPE takes.
     fn sectionOrderZyxt(ctx: *c.gguf_context) void {
         c.gguf_set_val_str(ctx, "qwen35.rope.section_order", "zyxt");
     }
@@ -1078,7 +1078,7 @@ const Qwen = struct {
     fn sectionOrderU32(ctx: *c.gguf_context) void {
         c.gguf_set_val_u32(ctx, "qwen35.rope.section_order", 1);
     }
-    /// v0.7.0's MoVA counts (K2 Horizon), which only that architecture
+    /// The MoVA counts (K2 Horizon), which only that architecture
     /// reads: present here they change nothing but the metadata log.
     fn valueExperts(ctx: *c.gguf_context) void {
         c.gguf_set_val_u32(ctx, "qwen35.attention.value_expert_count", 8);
@@ -1153,13 +1153,13 @@ const Tensors = struct {
     }
 
     /// `tie` with a per-layer embedding table of its own, for an external
-    /// one to replace (v1.0.0, 5f490d7bf).
+    /// one to replace (5f490d7bf).
     fn withPle(g: *c.gguf_context, ctx: *c.ggml_context) void {
         tie(g, ctx);
         addTensor(g, ctx, "per_layer_token_embd.weight", c.GGML_TYPE_F16, 64);
     }
 
-    /// v0.9.0's F8_E4M3: the guessed type and its file-type name.
+    /// F8_E4M3: the guessed type and its file-type name.
     fn f8(g: *c.gguf_context, ctx: *c.ggml_context) void {
         addTensor(g, ctx, "output.weight", c.GGML_TYPE_F32, 64);
         addTensor(g, ctx, "blk.0.a.weight", c.GGML_TYPE_F8_E4M3, 256);
@@ -1221,7 +1221,7 @@ fn splitSecond(dir: []const u8, name: []const u8) [:0]const u8 {
     return gpa.printSentinel("{s}/{s}-00002-of-00002.gguf", .{ dir, name }, 0) catch unreachable;
 }
 
-/// v1.0.0's extra GGUF shards (5f490d7bf): a file of the given tensors and
+/// Extra GGUF shards (5f490d7bf): a file of the given tensors and
 /// no other metadata -- with `numbered`, the split keys too, which the
 /// loader ignores on an extra. One tensor named `per_layer_token_embd.weight`
 /// makes it an external per-layer embedding table.
@@ -1306,7 +1306,7 @@ pub fn main(init: std.process.Init) !void {
         runCase(.{ .name = "split: duplicate tensor", .path = splitSet(dir, base, "s-dup", .duplicate), .vocab_only = true });
         runCase(.{ .name = "split: unrecognized name", .path = splitSet(dir, base, "s-name", .bad_name), .vocab_only = true });
         runCase(.{ .name = "missing file", .path = try gpa.printSentinel("{s}/no-such-file.gguf", .{dir}, 0), .vocab_only = true });
-        // v1.0.0's extra shards and external per-layer embedding tables
+        // Extra shards and external per-layer embedding tables
         // (5f490d7bf), given as llama_model_load_from_splits' paths.
         const ple = shardFile(dir, "ple", &.{"per_layer_token_embd.weight"}, c.GGML_TYPE_Q8_0, false);
         const ple2 = shardFile(dir, "ple2", &.{"per_layer_token_embd.weight"}, c.GGML_TYPE_F16, false);
@@ -1349,7 +1349,7 @@ pub fn main(init: std.process.Init) !void {
         runCase(.{ .name = "split: second given out of order", .path = s_moved, .vocab_only = true, .splits = &.{ splitSecond(sub, "s-moved"), s_moved } });
     }
 
-    // v0.5.0's hyperparameter reads on fixtures, one key edited at a time:
+    // The hyperparameter reads on fixtures, one key edited at a time:
     // hrm_text's four hrm.* keys (models/hrm-text.cpp:6 @620d2225c) and
     // nemotron_h's RMS epsilon, which falls back to the LayerNorm one
     // (models/nemotron-h.cpp:5 @620d2225c).
@@ -1410,7 +1410,7 @@ pub fn main(init: std.process.Init) !void {
             .{ "no arch", Qwen.noArch },
             .{ "gptj", Qwen.gptj },
             .{ "long and odd values", Qwen.longValues },
-            // v0.7.0's keys
+            // the classifier, rope section order and MoVA keys
             .{ "classifier activation gelu", Qwen.clsActGelu },
             .{ "classifier activation silu", Qwen.clsActSilu },
             .{ "rope section order zyxt", Qwen.sectionOrderZyxt },
@@ -1418,7 +1418,7 @@ pub fn main(init: std.process.Init) !void {
             .{ "rope section order unknown", Qwen.sectionOrderBad },
             .{ "rope section order as u32", Qwen.sectionOrderU32 },
             .{ "value expert counts", Qwen.valueExperts },
-            // v1.0.0's keys
+            // the classifier-free guidance and hadamard keys
             .{ "classifier free guidance", Qwen.cfgOn },
             .{ "classifier free guidance as u32", Qwen.cfgAsU32 },
             .{ "hadamard identity", Hadamard.identity },

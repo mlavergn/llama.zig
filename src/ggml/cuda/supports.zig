@@ -5,11 +5,10 @@
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu` at v1.0.0
 //! (`b1b770d90`): `ggml_backend_cuda_device_supports_op`, the CUDA arms
 //! (the `GGML_USE_MUSA` exclusions compile out; `GGML_CUDA_USE_CUB` is
-//! defined, so `ARGSORT` takes its CUB arm -- v0.6.0's shared-memory bound
-//! is the bitonic-only one -- and since v0.7.0 both it and `TOP_K`, which
-//! lost its `#if`, accept any row of at most `INT_MAX` elements).
-//! v0.6.0 also dropped the `GGML_USE_MUSA` exclusion on
-//! `GATED_DELTA_NET`, which was already `true` here.
+//! defined, so `ARGSORT` takes its CUB arm -- the shared-memory bound
+//! is the bitonic-only one -- and both it and `TOP_K`
+//! accept any row of at most `INT_MAX` elements).
+//! `GATED_DELTA_NET` has no `GGML_USE_MUSA` exclusion, and is `true` here.
 //!
 //! `cuda-ops-diff` asks this and the reference the same question for every
 //! case it builds.
@@ -39,11 +38,11 @@ fn src(op: *const Tensor, i: usize) *const Tensor {
 /// `ggml_cuda_lightning_indexer_supported`; see `lightning_indexer.zig`.
 const lightningIndexerSupported = lightning_indexer.supported;
 /// Ports `ggml_backend_cuda_device_supports_op` (ggml-cuda.cu:6195 @b1b770d90).
-/// v1.0.0: the `F8_E4M3` type in `MUL_MAT`, `GET_ROWS`, `SET_ROWS` and
+/// The `F8_E4M3` type in `MUL_MAT`, `GET_ROWS`, `SET_ROWS` and
 /// `CPY`; `MUL_MAT`'s `src1` precision (`ggml_prec_get_src`) gates F32 and
 /// BF16 requests; `SSM_SCAN` takes `d_state == 64`; `ADD1` and
-/// `DIAG_MASK_INF` are gone from ggml.
-/// v0.7.0: `UNARY` takes any strides for F16, F32 and BF16 (the kernels
+/// `DIAG_MASK_INF` are not in ggml.
+/// `UNARY` takes any strides for F16, F32 and BF16 (the kernels
 /// index by stride now), `CLAMP` and `ROLL` take non-contiguous views,
 /// `SWIGLU_OAI` refuses F16, and `TOP_K`/`ARGSORT` are bounded by
 /// `INT_MAX` columns.

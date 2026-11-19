@@ -10,7 +10,7 @@
 //!
 //! # pthreads, as the C's are
 //!
-//! The mutex and condition variable are pthreads', as `CLAUDE.md` asks of
+//! The mutex and condition variable are pthreads', as in all
 //! ported threading code: `std::mutex` and `std::condition_variable` are
 //! those on every POSIX libc++, and Zig's own take an `Io` this layer has
 //! none of. A dynamic worker's idle wait is `pthread_cond_timedwait`

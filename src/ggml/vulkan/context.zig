@@ -9,8 +9,7 @@
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-buffers.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-common.h`, and
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v1.0.0
-//! (`b1b770d90`). Upstream split `ggml-vulkan.cpp` into those files at
-//! v0.5.0. The C++'s `vk_context_ref`s -- weak pointers to contexts the
+//! (`b1b770d90`). The C++'s `vk_context_ref`s -- weak pointers to contexts the
 //! garbage list owns -- are plain pointers here, nulled where the list is
 //! cleared (`graphCleanup`), the only place those contexts die.
 

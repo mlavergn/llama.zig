@@ -3,7 +3,7 @@
 
 The C++ is itself generated (by upstream's scripts/gen-unicode-data.py) and is
 nothing but eight tables: code-point range flags, the whitespace set, the
-lower- and upper-case maps, the NFD ranges, and (since v0.7.0) the canonical
+lower- and upper-case maps, the NFD ranges, and the canonical
 combining classes, decompositions and compositions NFC reads. ~7,000 lines of numbers are
 not something to transcribe by hand, so this reads them out of the C++ and
 writes the same tables as Zig arrays, in the same order.

@@ -87,7 +87,7 @@ fn fwhtSupportedSize(n: i64, max_tg_mem: usize) bool {
 /// encoder and the Objective-C `supports_op` must ask the same question:
 /// an F16 `src[1]` that `supports_op` admits and the dispatch then lets
 /// fall through reaches the generic path, which has no F32-by-F16 kernel.
-/// Since v0.6.0 it takes the device's threadgroup memory, which decides
+/// It takes the device's threadgroup memory, which decides
 /// the widths above 512.
 pub export fn ggml_metal_op_mul_mat_use_fwht(op: *const c.ggml_tensor, max_tg_mem: usize) callconv(.c) bool {
     const src1 = impl.one(c.ggml_tensor, op.src[1]);
@@ -106,7 +106,7 @@ pub export fn ggml_metal_op_mul_mat_use_fwht(op: *const c.ggml_tensor, max_tg_me
 /// matrix-vector one: the break-even the encoder and the Objective-C
 /// `supports_op` must agree on, which is why it lives here and not in the
 /// encoder. The matrix-matrix kernel needs simdgroup matrices (A14/M1 and
-/// later). Since v1.0.0 (#30982) it takes `K` from 32, where it took 64.
+/// later). It takes `K` from 32 (#30982).
 pub export fn ggml_metal_op_mul_mat_use_mm(op: *const c.ggml_tensor, has_simdgroup_mm: bool) callconv(.c) bool {
     const src0 = impl.one(c.ggml_tensor, op.src[0]);
     const src1 = impl.one(c.ggml_tensor, op.src[1]);
@@ -121,7 +121,7 @@ pub export fn ggml_metal_op_mul_mat_use_mm(op: *const c.ggml_tensor, has_simdgro
 /// Ports `ggml_metal_op_mul_mat_id_use_mm` (ggml-metal-common.cpp:44 @b1b770d90).
 ///
 /// `MUL_MAT_ID`'s counterpart: the matrix-matrix kernel once the batch
-/// (`ne21`, rows of the expert ids) reaches 32 -- and, since v0.7.0, only
+/// (`ne21`, rows of the expert ids) reaches 32 -- and only
 /// for at most 1024 experts, the most the id-map kernel's one threadgroup
 /// (a thread per expert) and its function constant take.
 pub export fn ggml_metal_op_mul_mat_id_use_mm(op: *const c.ggml_tensor, has_simdgroup_mm: bool) callconv(.c) bool {
@@ -169,9 +169,9 @@ pub export fn ggml_metal_mul_mv_mma_rt(op: *const c.ggml_tensor) callconv(.c) c_
 }
 
 /// Ports `ggml_metal_mul_mv_mma_type_supported` (ggml-metal-common.cpp:72
-/// @b1b770d90). Since v0.7.0 every `src0` type `mul_mv_mma.metal`
+/// @b1b770d90). Every `src0` type `mul_mv_mma.metal`
 /// instantiates: BF16, the 1- and 2-bit types, MXFP4, the remaining
-/// k-quants, the i-quants and TQ2_0 joined the first ten.
+/// k-quants, the i-quants and TQ2_0 join the first ten.
 fn mulMvMmaTypeSupported(@"type": c.enum_ggml_type) bool {
     return switch (@"type") {
         c.GGML_TYPE_F32,

@@ -220,8 +220,8 @@ fn isComment(line: []const u8) bool {
 /// **This was a silent hole.** `findCitation` parses one line, and an
 /// unclosed `(` simply fell through its `orelse continue`: no citation, no
 /// error, no check. 36 citations across nine files were wrapped that way
-/// and had never been looked at, in the same class as the `Mirrors …` ones
-/// `CLAUDE.md` records. Wrapping at 80 columns is normal here, so the fix
+/// and had never been looked at, in the same class as the unchecked
+/// `Mirrors …` ones. Wrapping at 80 columns is normal here, so the fix
 /// is to join the continuation rather than forbid it.
 fn opensUnclosedCitation(line: []const u8) bool {
     const open = std.mem.findScalarLast(u8, line, '(') orelse return false;

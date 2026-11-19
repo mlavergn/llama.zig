@@ -18,6 +18,6 @@ cd "$ROOT" || exit 2
 # (llama-cli needs it for cuBLAS and the CUB shim). libstdc++'s
 # `__gxx_personality_v0` then wins over Zig's libc++abi and aborts on every
 # exception the reference throws, which the harness means to catch: on the
-# GB10, v0.8.0's torch-resize cases ended in `terminate` (NOTES.md, "Upstream
-# sync v0.7.0 → v0.8.0"). A no-op on macOS, where CUDA is off anyway.
+# GB10, the torch-resize cases ended in `terminate`:
+# libstdc++'s personality aborts every throw. A no-op on macOS, where CUDA is off anyway.
 exec zig build mtmd-image-diff --release="${MTMD_IMAGE_O:-fast}" -Dcuda=false -- "$@"

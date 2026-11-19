@@ -4285,7 +4285,7 @@ fn stubLogCallback(level: c.enum_ggml_log_level, text: [*c]const u8, user_data: 
     // do nothing
 }
 
-/// Ports `mtmd_memory_usage` (mtmd.h:582 @b1b770d90), new at v0.6.0: what
+/// Ports `mtmd_memory_usage` (mtmd.h:582 @b1b770d90): what
 /// `mtmd_get_memory_usage` measured. The caller owns it and calls `deinit`.
 pub const MemoryUsage = struct {
     backend_mem_usage: clip.DevSizeMap = .{},
@@ -4299,7 +4299,7 @@ pub const MemoryUsage = struct {
 };
 
 /// Ports `mtmd_get_memory_usage` (mtmd.cpp:3995 @b1b770d90): weights and
-/// compute per device, measured without allocating, and since v0.6.0 the
+/// compute per device, measured without allocating, and the
 /// image token budget and whether the model decodes images non-causally.
 /// The C++ returns a struct holding a `std::map` and has C++ linkage, so
 /// this is for Zig callers only; the caller owns the result, `{{}, -1,

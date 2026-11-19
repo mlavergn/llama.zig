@@ -30,7 +30,7 @@ const QK_K = c.QK_K;
 ///
 /// The nearest `kvalues_iq4nl` level, counted down from 15 by every midpoint
 /// `x` lies below; `mid[k]` is `(values[k] + values[k+1]) / 2`. For this table
-/// it agrees with the binary search it replaced at v0.9.0, tie rule
+/// it agrees with a binary search, tie rule
 /// `x - values[k] < values[k+1] - x` included, for every float `x`.
 fn bestIndexIq4nl(mid: *const [15]f32, x: f32) usize {
     var l: usize = 15;

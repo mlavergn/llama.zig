@@ -238,7 +238,7 @@ PY
 # declare that upstream's binary exports, exported by ours too -- per slice,
 # per architecture.
 #
-# Since v0.9.0 every slice carries a higher minimum OS than upstream's
+# Every slice carries a higher minimum OS than upstream's
 # (26.0; COMPAT_MINOS). Every binary of ours must carry exactly that minimum
 # (`identity_with_minos`), and the bundle Info.plist must be upstream's with
 # that minimum written in (`plist_with_minos`); the rest is compared as

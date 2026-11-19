@@ -1,6 +1,5 @@
 #!/bin/bash
-# `ops-diff` for x86_64, on the Windows laptop (PLAN.md, Stage 5 step 6;
-# Decision 57).
+# `ops-diff` for x86_64, on the Windows laptop.
 #
 # Cross-builds the reference (`llama.cpp.zmake`) and the port for
 # `x86_64-windows-gnu` at X86_CPU, links `harness/ops_dump.c` against each

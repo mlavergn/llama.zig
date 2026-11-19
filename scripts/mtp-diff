@@ -57,7 +57,7 @@ before_abort() {
 
 # On Linux an abort attaches gdb, whose `[New LWP n]` lines differ every run
 # and land in the transcript before_abort compares: the glm4moe fixture failed
-# there on thread ids alone (v0.7.0's GB10 pickup).
+# there on thread ids alone.
 export GGML_NO_BACKTRACE=1
 
 pass=0; fail=0; aborts=0

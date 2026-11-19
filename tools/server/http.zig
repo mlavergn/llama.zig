@@ -28,7 +28,7 @@
 //! and no asset route is registered. `--path` (`public_path`), which mounts
 //! a directory through cpp-httplib's file handler, is not ported: `init`
 //! refuses it. With the UI off, `/sw.js` answers with a service worker that
-//! removes itself (v0.6.0), so a browser that cached the built-in UI drops
+//! removes itself, so a browser that cached the built-in UI drops
 //! it.
 //!
 //! # Websockets

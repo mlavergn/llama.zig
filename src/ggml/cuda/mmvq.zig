@@ -58,7 +58,7 @@ fn getVdrMmvq(comptime ty: c.enum_ggml_type) comptime_int {
 const TableId = enum(c_int) { generic = 0, turing, gcn, rdna2, rdna3_0, rdna4, gb10 };
 
 /// Ports the host `get_device_table_id` (mmvq.cu:120 @b1b770d90), NVIDIA
-/// arms (v0.9.0's RDNA4_M is AMD). Since v0.6.0 Volta takes the Turing table too.
+/// arms (RDNA4_M is AMD). Volta takes the Turing table too.
 fn getDeviceTableId(x: c_int) TableId {
     const h = common.highestCompiledArch(x);
     if (common.cc.isNvidia(x) and h >= common.cc.volta and h < common.cc.ampere) return .turing;
@@ -109,9 +109,9 @@ fn mmidMaxBatchTuringPlus(ty: c.enum_ggml_type) c_int {
 }
 
 /// Ports `get_mmvq_mmid_max_batch` (mmvq.cu:281 @b1b770d90), NVIDIA arms.
-/// v0.7.0 added the P100 (`cc == GGML_CUDA_CC_PASCAL`) to the always-MMVQ
-/// set; the device side's `get_mmvq_mmid_max_batch_for_device` moved with it.
-/// Since v1.0.0 (#31679) it decides on the highest compiled architecture,
+/// The P100 (`cc == GGML_CUDA_CC_PASCAL`) is in the always-MMVQ
+/// set, as in the device side's `get_mmvq_mmid_max_batch_for_device`.
+/// It decides on the highest compiled architecture,
 /// as the device side does.
 pub fn getMmidMaxBatch(ty: c.enum_ggml_type, x_in: c_int) c_int {
     // NVIDIA: P100, Volta, Ada Lovelace, and Blackwell always use MMVQ for MUL_MAT_ID.
@@ -308,7 +308,7 @@ fn switchFusion(comptime ty: c.enum_ggml_type, comptime ncols_dst: comptime_int,
 
 /// Ports `mul_mat_vec_q_moe_launch` (mmvq.cu:1076 @b1b770d90). The kernel
 /// takes the fusion arguments by value either way; `has_fusion` picks the
-/// instantiation that reads them. A shared expert (v0.6.0) is one more
+/// instantiation that reads them. A shared expert is one more
 /// channel of blocks, the last, which the kernel points at its weights.
 fn moeLaunch(comptime ty: c.enum_ggml_type, a: *const Common, nrows_x: u32, ncols_dst: u32, warp_size: c_int, nchannels_dst: c_int, stream: cu.cudaStream_t) void {
     const rows_per_block = 2; // 2 gives best perf based on tuning
@@ -471,7 +471,7 @@ fn switchNcolsDst(
             // identical kernel, so the C launches the unhalved one.
             const c_promoted = comptime calcNwarps(ty, c_ncols_dst, .gb10, false, true) != calcNwarps(ty, c_ncols_dst, .gb10, false, false);
 
-            // A shared expert (v0.6.0) is one more channel of blocks, the last.
+            // A shared expert is one more channel of blocks, the last.
             const nchannels_launch = nchannels_dst + @intFromBool(fusion.shared_up != null);
             if (use_small_k) {
                 const dims = calcLaunchParams(ty, c_ncols_dst, nrows_x, nchannels_launch, nsamples_dst, warp_size, table_id, true, false);

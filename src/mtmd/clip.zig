@@ -8,12 +8,10 @@
 //! `mtmd_model_load`, `mtmd_model_get_caps`, `mtmd_model`'s methods) and
 //! `llama.cpp/tools/mtmd/mtmd-subcontext.cpp` (`mtmd_backends`,
 //! `mtmd_subcontext`, the encoder and generator states), with the types of
-//! `llama.cpp/tools/mtmd/mtmd-subcontext.h`, at v1.0.0 (`b1b770d90`). Until
-//! v0.9.0 all of this was `clip.cpp`'s `clip_ctx`, `clip_model_loader` and
-//! free functions; upstream split it (7d7f02875) and moved the backends and
-//! the scheduler into one object shared by the subcontexts (a591cbe17). The
-//! file keeps its name, since the per-model graphs under `models/` import
-//! it. The four per-projector switches live beside it:
+//! `llama.cpp/tools/mtmd/mtmd-subcontext.h`, at v1.0.0 (`b1b770d90`). The
+//! backends and the scheduler are one object shared by the subcontexts
+//! (a591cbe17). The per-model graphs under `models/` import this file, so it
+//! keeps the name `clip.zig`. The four per-projector switches live beside it:
 //!
 //! - `arms_hparams.zig` -- `load_hparams`'s model-specific switch
 //! - `arms_tensors.zig` -- `load_tensors`'s model-specific switch and
@@ -244,8 +242,7 @@ pub fn selectDevice(use_gpu: bool, device: c.ggml_backend_dev_t) c.ggml_backend_
 }
 
 /// Ports `mtmd_backends` (mtmd-subcontext.h:36 @b1b770d90): the backends and
-/// the scheduler every subcontext of one `mtmd_context` shares (since v1.0.0,
-/// a591cbe17), so its compute buffers fit the largest graph any of them
+/// the scheduler every subcontext of one `mtmd_context` shares (a591cbe17), so its compute buffers fit the largest graph any of them
 /// reserved. Not thread-safe.
 pub const Backends = struct {
     backend: c.ggml_backend_t = null, // backend_cpu if no accelerator
@@ -341,8 +338,7 @@ pub const Backends = struct {
 // mtmd_subcontext
 
 /// Ports `mtmd_subcontext` (mtmd-subcontext.h:152 @b1b770d90): runs the graphs
-/// of one `mtmd_model` on the shared backends and scheduler. Until v0.9.0 this
-/// was `clip_ctx`, which owned its model, weights, backends and scheduler.
+/// of one `mtmd_model` on the shared backends and scheduler.
 pub const Ctx = struct {
     model: *const model_mod.Model,
     backends: *Backends,
@@ -538,7 +534,7 @@ pub const Ctx = struct {
 
     /// Ports `reserve_compute_meta` (mtmd-subcontext.cpp:243 @b1b770d90), a
     /// member of `mtmd_subcontext`: initialize the backend buffers, without
-    /// allocating them. Since v1.0.0 the scheduler is shared, so the compute
+    /// allocating them. The scheduler is shared, so the compute
     /// buffer sizes are logged once, by `mtmd_context`, not per reservation.
     fn reserveComputeMeta(self: *Ctx, batch: *const impl.ImageF32Batch) Error!SupportInfoGraph {
         const func = "reserve_compute_meta";

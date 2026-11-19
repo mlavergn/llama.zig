@@ -77,7 +77,7 @@ inline fn colScales(comptime fmt: Fmt, bl: anytype) f32x4 {
 
 /// Ports `ggml_gemv_iq4_nl_4x4_q8_0` and `ggml_gemv_mxfp4_4x4_q8_0`
 /// (arch/arm/repack.cpp:449, 519 @b1b770d90).
-/// The `__ARM_FEATURE_SVE` arm v0.9.0 added to the mxfp4 one is not ported:
+/// The `__ARM_FEATURE_SVE` arm of the mxfp4 one is not ported:
 /// no Apple core has SVE.
 fn gemv(comptime fmt: Fmt, comptime BlockX: type, n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void {
     _ = bs;

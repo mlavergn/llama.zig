@@ -776,7 +776,7 @@ pub fn gemmQ5_K_8x8(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *c
 
 /// Ports `ggml_gemm_q6_K_8x8_q8_K` (arch/arm/repack.cpp:4984 @b1b770d90),
 /// the `__ARM_NEON && __ARM_FEATURE_MATMUL_INT8` arm at line 5193. The SVE
-/// arm v0.9.0 added before it is not ported: no Apple core has SVE.
+/// arm before it is not ported: no Apple core has SVE.
 ///
 /// Unlike `q4_K` and `q5_K`, the bias of 32 comes off each weight
 /// (`vsubq_s8`) rather than out of the sum through `bsums`, and there are

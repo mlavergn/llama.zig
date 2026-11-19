@@ -4,8 +4,7 @@
 //!
 //! Mirrors the `vk_*_push_constants` structs of
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-push-constants.h` at v1.0.0
-//! (`b1b770d90`), which upstream split out of
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.5.0.
+//! (`b1b770d90`).
 //!
 //! # Generated, not written
 //!

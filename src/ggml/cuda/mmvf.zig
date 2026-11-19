@@ -1,5 +1,5 @@
-//! MMVF: matrix-vector products for `F32`, `F16`, `BF16` and, since
-//! v1.0.0, `F8_E4M3` weights.
+//! MMVF: matrix-vector products for `F32`, `F16`, `BF16` and
+//! `F8_E4M3` weights.
 //!
 //! # Provenance
 //!
@@ -63,8 +63,7 @@ fn mmvfKernel(comptime T: type, comptime A: type, comptime ncols_dst: comptime_i
     return kernels.get("mmvf", kernels.tmpl("mul_mat_vec_f", &.{ kernels.typeName(T), kernels.typeName(A), kernels.int(ncols_dst), kernels.int(block_size), kernels.boolean(has_fusion), kernels.boolean(is_multi_token_id) }));
 }
 
-/// Ports `mul_mat_vec_f_switch_fusion` (mmvf.cu:443 @b1b770d90). Since
-/// v1.0.0 the FP8 weight scales count as a fusion too.
+/// Ports `mul_mat_vec_f_switch_fusion` (mmvf.cu:443 @b1b770d90). The FP8 weight scales count as a fusion too.
 fn switchFusion(comptime T: type, comptime A: type, comptime ncols_dst: comptime_int, comptime block_size: comptime_int, comptime is_multi_token_id: bool, a: *const Args, block_dims: kernels.Dim3, block_nums: kernels.Dim3, nbytes_shared: c_int, stream: cu.cudaStream_t) void {
     const p: kernels.LaunchParams = .{ .grid = block_nums, .block = block_dims, .shmem = @intCast(nbytes_shared), .stream = stream };
 
@@ -335,7 +334,7 @@ pub fn mulMatVecF(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor
 /// every other vendor's arm ends in `ne11 <= MMVF_MAX_BATCH_SIZE`. It takes
 /// the warp size to ask `mmf.zig` whether MMF can take a small F16 or BF16
 /// matrix: MMF needs whole row tiles, and where it cannot, MMVF still beats
-/// cuBLAS at a small batch. Since v1.0.0 it takes the tensor, and asks
+/// cuBLAS at a small batch. It takes the tensor, and asks
 /// `ggml_cuda_is_aligned` about its data pointer as well as its strides.
 pub fn shouldUseMmvf(src0: *const Tensor, x: c_int, warp_size: c_int, ne11: i64) bool {
     const ty = src0.type;

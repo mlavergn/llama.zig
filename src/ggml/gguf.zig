@@ -13,11 +13,11 @@
 //! mutex and the other a registry of eight entries. This file is 61 exported
 //! functions over `std::vector`, `std::string`, two `std::map` lookup tables,
 //! a template-dispatched reader and a virtual writer hierarchy — the shapes
-//! the rest of Stage 4 is made of.
+//! the rest of ggml's C++ is made of.
 //!
 //! # The contract is 61 symbols, not 44
 //!
-//! `PLAN.md` records 44. Measured against `zig c++ -c` at the pinned commit,
+//! An early survey recorded 44. Measured against `zig c++ -c` at the pinned commit,
 //! the unmangled export count is **61**; the 2,002 mangled names are template
 //! instantiations and inline functions emitted weakly, and none of them is
 //! referenced from another translation unit in this build.
@@ -2050,7 +2050,7 @@ fn Writer(comptime Impl: type) type {
         }
 
         /// Ports `gguf_writer_base`'s pure-virtual `write` (gguf.cpp:1466
-        /// @b1b770d90), the `const void *, size_t` overload v0.9.0 added,
+        /// @b1b770d90), the `const void *, size_t` overload,
         /// dispatched to the concrete writer.
         fn writeData(self: *Self, data: [*]const u8, size: usize) WriteError!void {
             self.written_bytes += size;
@@ -2189,7 +2189,7 @@ const BufWriter = struct {
 
     /// Ports `gguf_writer_buf`'s `write_tensor_data` (gguf.cpp:1588 @b1b770d90).
     ///
-    /// Since v0.9.0 a tensor in a host buffer is appended straight from its
+    /// A tensor in a host buffer is appended straight from its
     /// `data`, without the `ggml_backend_tensor_get` round trip. The `pad` the
     /// C++ does at the end lives in the generic caller, so it is not repeated
     /// here.
@@ -2273,7 +2273,7 @@ const FileWriter = struct {
 
     /// Ports `gguf_writer_file`'s `write_tensor_data` (gguf.cpp:1646 @b1b770d90).
     ///
-    /// Since v0.9.0 a tensor in a host buffer is written straight from its
+    /// A tensor in a host buffer is written straight from its
     /// `data`, without the staging copy.
     fn writeTensorData(
         self: *FileWriter,
@@ -2624,8 +2624,8 @@ test "tensor metadata round-trips with shape, type and offset" {
 }
 
 test "a GGUF that starts mid-file aligns its data section to its own start" {
-    // `gguf_init_from_file_ptr` starts reading wherever the FILE is. Since
-    // v0.5.0 `gguf_init_from_reader` pads the data section relative to that
+    // `gguf_init_from_file_ptr` starts reading wherever the FILE is.
+    // `gguf_init_from_reader` pads the data section relative to that
     // start, not to the file; a prefix whose length is not a multiple of the
     // alignment is what tells the two apart.
     const gctx = c.ggml_init(.{ .mem_size = 1024 * 1024, .mem_buffer = null, .no_alloc = true });
@@ -2900,7 +2900,7 @@ fn expectRejected(raw: *RawGguf, message: []const u8) !void {
     try std.testing.expectEqualStrings(message, captured_log[0..captured_len]);
 }
 
-test "a duplicate key is rejected with v0.6.0's message" {
+test "a duplicate key is rejected with upstream's message" {
     {
         var raw: RawGguf = .{};
         defer raw.deinit();
@@ -2922,7 +2922,7 @@ test "a duplicate key is rejected with v0.6.0's message" {
     }
 }
 
-test "a duplicate tensor name is rejected with v0.6.0's message" {
+test "a duplicate tensor name is rejected with upstream's message" {
     var raw: RawGguf = .{};
     defer raw.deinit();
     try raw.header(3, 0);

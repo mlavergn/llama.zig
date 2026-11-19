@@ -20,7 +20,7 @@
 //! `llama_sampler_chain_init` takes `struct llama_sampler_chain_params` by
 //! value, and that struct is one `bool`: one byte. Zig 0.16 miscompiles a
 //! small `extern struct` received by value -- the callee sees zeros -- unless
-//! its size is a multiple of 4 with no padding (see `CLAUDE.md`). So the
+//! its size is a multiple of 4 with no padding. So the
 //! parameter is declared as the byte it is and bit-cast, and the entry point
 //! is in `harness/abi_structs.c`.
 

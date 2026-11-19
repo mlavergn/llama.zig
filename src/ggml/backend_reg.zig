@@ -78,7 +78,7 @@ const debug_build = builtin.mode == .debug;
 /// the same heap the rest of ggml uses.
 const allocator = std.heap.c_allocator;
 
-/// Decision 39, applied to the filesystem as well as to locks: Zig 0.16 puts
+/// pthreads-not-`std.Io`, applied to the filesystem as well as to locks: Zig 0.16 puts
 /// `getcwd` and directory iteration behind `std.Io`, which takes an `Io` on
 /// every call, and a function entered through a C ABI has none to thread
 /// through. libc's `opendir`/`readdir`/`getcwd` are what `std::filesystem`
@@ -891,7 +891,7 @@ fn loadBest(name: [*:0]const u8, silent: bool, user_search_path: ?[*:0]const u8)
         var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const dir_path = std.mem.printSentinel(&dir_buf, "{s}", .{search_path}, 0) catch continue;
 
-        // `directory_iterator` alone since v0.7.0: a missing directory is
+        // `directory_iterator` alone: a missing directory is
         // one more way to fail to enumerate it, logged after the scan. A
         // failed open scans nothing, so logging here is the same order.
         var dir = DirScan.open(dir_path) orelse {

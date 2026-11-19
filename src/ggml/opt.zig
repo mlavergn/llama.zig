@@ -15,7 +15,7 @@
 //!
 //! # The contract is 37 symbols, not 9
 //!
-//! `PLAN.md`'s survey recorded 9; measured against `zig c++ -c` at the pinned
+//! An early survey recorded 9; measured against `zig c++ -c` at the pinned
 //! commit the unmangled export count is **37**. The mangled remainder is
 //! `std::vector`, `std::map` and `<random>` template noise that no other
 //! object references. The one caller outside ggml is `llama-context.cpp`'s

@@ -8,7 +8,7 @@
 //!
 //! A single long row (`nrows == 1` and more than 65536 columns, or more than
 //! 32768 while CUDA graphs are capturing or replaying) goes to
-//! `cub::DeviceReduce::Sum`, through `cub_shim.cu` (PLAN.md, Decision 47),
+//! `cub::DeviceReduce::Sum`, through `cub_shim.cu`,
 //! and then `divide_by_count`.
 
 const std = @import("std");

@@ -2,8 +2,8 @@
 # Compare src/llama/arch.zig with llama.cpp's llama-arch.cpp, in one process.
 #
 # The architecture, key and tensor tables are generated (scripts/gen-arch),
-# and the functions over them are ported ahead of libllama's single swap
-# (PLAN.md, Decision 42), so nothing downstream can see either yet. This
+# and the functions over them are ported ahead of libllama's single swap,
+# so nothing downstream can see either yet. This
 # links the C++ llama-arch.o, inside libllama-ref.a, through C wrappers
 # (harness/arch_ref.cpp) beside the Zig, and asks both every lookup. See
 # harness/arch_diff.zig for what is compared.

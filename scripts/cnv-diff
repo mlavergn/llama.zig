@@ -3,7 +3,7 @@
 #
 # What this adds over scripts/parity-cli
 # --------------------------------------
-# `parity-cli` runs one-shot prompts. A conversation (SPEC.md, section 5.3)
+# `parity-cli` runs one-shot prompts. A conversation (`cli/conversation.zig`)
 # is a loop none of the other gates reach: the history, the slash commands,
 # the re-render every turn, the diff against what is already decoded, the
 # prefix kept with `llama_memory_seq_rm` -- and the clear when a hybrid
@@ -11,7 +11,7 @@
 # positions, which reads as a template bug in the reply and is not one.
 #
 # The reference is harness/conversation_ref.cpp: the same loop written from
-# SPEC.md over upstream's `llama-common` (`libllama-common-ref.a`, `zig build
+# that file's "Behaviour" over upstream's `llama-common` (`libllama-common-ref.a`, `zig build
 # tools-ref`) -- `common_chat_templates_apply` renders, `common_sampler`
 # samples with the reasoning budget, `common_chat_parse` and `compute_diffs`
 # read each reply back, and upstream's own `ui::assistant_turn` shows it --
@@ -232,7 +232,7 @@ What is the capital of France? Answer in one word.
 And of Italy?
 TURNS
 
-# Reasoning (SPEC.md 5.3, "Replies"). Both models think by default, so
+# Reasoning (`cli/conversation.zig`, "Replies"). Both models think by default, so
 # every scenario above already reads its replies through the template's
 # parser and shows the thinking bracketed; these turn each knob. The replies
 # are long enough to close the thinking, so the answer shows too.

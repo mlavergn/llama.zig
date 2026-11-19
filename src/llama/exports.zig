@@ -4,7 +4,7 @@
 //! function with the C signature and no export, so the in-process harnesses
 //! can call it beside the C++ that defines the same name. Importing this
 //! file exports all of them by name, which is libllama's single swap at
-//! `llama.h` (`PLAN.md`, Decision 42). Only `module.zig`, the library root,
+//! `llama.h`. Only `module.zig`, the library root,
 //! imports it; `harness_root.zig`, the harnesses' root, must not.
 
 const std = @import("std");

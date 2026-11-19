@@ -8,8 +8,8 @@
 //! `const void * add_data[2][2][2] = {{{add_f32_f32_f32_data, ...}}};` and
 //! their `_len` twins. The reference compiles those files as C++; this reads
 //! the same files, so the port's SPIR-V is the reference's byte for byte
-//! (PLAN.md, Decisions 55 and 59 -- two runs of the generator are *not* the
-//! same reference: `glslc -O` is not reproducible on `tri_f16`).
+//! (two runs of the generator are *not* the same reference: `glslc -O`
+//! is not reproducible on `tri_f16`).
 //!
 //! Output: one blob of every variant's bytes, each starting at a multiple of
 //! four, and a Zig file that slices it under the C names: `abs_f16_data` is

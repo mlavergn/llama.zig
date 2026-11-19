@@ -12,7 +12,7 @@
 //!   `comp` and every byte;
 //! - `decode_audio_from_buf` at several rates: the step that failed, the
 //!   length, and every sample's bits;
-//! - `mtmd_helper_resampler` (v1.0.0), streaming over every pair of common
+//! - `mtmd_helper_resampler` streaming over every pair of common
 //!   rates with chunks from empty to larger than one call's estimate: each
 //!   call's count and every sample's bits.
 //!

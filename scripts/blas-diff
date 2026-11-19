@@ -1,10 +1,10 @@
 #!/bin/bash
 # The ported BLAS backend against upstream's `ggml-blas.cpp`, in one process
-# (PLAN.md, Decision 60) -- see the header of harness/blas_diff.c.
+# -- see the header of harness/blas_diff.c.
 #
 # Upstream's translation unit is compiled here, unmodified, with the
 # Accelerate vendor's flags and its four exports renamed `ref_*` -- the
-# `-D` rename `NOTES.md` records as unusable for swapping a file, because it
+# `-D` rename found unusable for swapping a file, because it
 # renames internal callers too, which is what is wanted here. It links beside
 # a `-Dblas` libggml, whose registry holds the port.
 #

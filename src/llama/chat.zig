@@ -32,7 +32,7 @@
 //!
 //! Nothing here exports a C symbol: `llama_chat_apply_template` and
 //! `llama_chat_builtin_templates` are still defined by the C++, and
-//! libllama swaps once, at `llama.h` (`PLAN.md`, Decision 42). A shim there
+//! libllama swaps once, at `llama.h`. A shim there
 //! calls `detectTemplate`, `applyTemplate` and `builtinTemplates`.
 
 const std = @import("std");

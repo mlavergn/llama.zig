@@ -43,7 +43,7 @@
 #include "ggml-opt.h"
 /*
  * Two declarations from ggml-impl.h, which is not importable (see above):
- * since v1.0.0 `ggml_rope_yarn_corr_dims` lives there, with a `truncate`
+ * `ggml_rope_yarn_corr_dims` lives there, with a `truncate`
  * argument, beside `ggml_rope_get_truncate`. The CPU, CUDA and Vulkan RoPE
  * call both. Copied from ggml-impl.h:112, 115 @b1b770d90.
  */

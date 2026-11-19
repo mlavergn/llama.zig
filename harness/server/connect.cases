@@ -1,4 +1,4 @@
-# --connect (v0.8.0, server-connect.cpp): a stand-in llama-connect on PATH
+# --connect (server-connect.cpp): a stand-in llama-connect on PATH
 # (connect.setup), found the way the real one is, its output forwarded at its
 # own levels, stopped through its stdin. The binary itself is a separate
 # project and out of scope. Its port differs per side; the share code is

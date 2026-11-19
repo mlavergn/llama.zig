@@ -10,7 +10,7 @@
 //!
 //! The C++ picks a BLAS by `#if`: Accelerate, MKL, BLIS, NVPL, or a plain
 //! `cblas.h` (OpenBLAS and the rest). This port compiles the Accelerate arm
-//! alone (PLAN.md, Decision 60): every other arm links a vendor library, which
+//! alone: every other arm links a vendor library, which
 //! the library may not gain, and the port already links Accelerate on every
 //! Darwin target for the CPU backend's vDSP calls. `build.zig` refuses
 //! `-Dblas` elsewhere. Of the vendor thread-count calls the C++ makes before
@@ -363,8 +363,7 @@ fn deviceGetName(dev: c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
 
 /// Ports `ggml_backend_blas_device_get_description` (ggml-blas.cpp:328
 /// @b1b770d90): the `GGML_BLAS_USE_ACCELERATE` arm. v0.6.0's new
-/// `GGML_BLAS_USE_AOCL` arm (`AOCL-BLAS`) is a vendor library's and not built
-/// (`PLAN.md`, Decision 60).
+/// `GGML_BLAS_USE_AOCL` arm (`AOCL-BLAS`) is a vendor library's and not built.
 fn deviceGetDescription(dev: c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
     _ = dev;
     return "Accelerate";

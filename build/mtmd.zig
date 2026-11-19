@@ -1,4 +1,4 @@
-//! libmtmd's port (Stage 8): the `mtmd` module rooted at
+//! libmtmd's port: the `mtmd` module rooted at
 //! `src/mtmd/module.zig`, and its unit tests.
 //!
 //! **Not a port.** This is build description.
@@ -28,7 +28,7 @@ pub fn module(b: *std.Build, opts: Options) *std.Build.Module {
     return mod;
 }
 
-/// What a Stage 8 workstream's build file receives.
+/// What each libmtmd gate's build file receives.
 pub const GateOptions = struct {
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,

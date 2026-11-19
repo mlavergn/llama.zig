@@ -1,4 +1,4 @@
-//! Stage 10 step 2 (PLAN.md, Decision 65): the `http-diff` gate's two
+//! The `http-diff` gate's two
 //! harnesses, `zig build http-diff-bins` into `zig-out/http-diff/`.
 //!
 //! **Not a port.** This is build description.
@@ -85,7 +85,7 @@ fn refModule(b: *std.Build, opts: Options) *std.Build.Module {
 
 /// Adds `http-diff-bins`.
 pub fn add(b: *std.Build, opts: Options) void {
-    const step = b.step("http-diff-bins", "Build the http-diff harnesses (Stage 10 step 2) into zig-out/http-diff");
+    const step = b.step("http-diff-bins", "Build the http-diff harnesses into zig-out/http-diff");
     const dest: std.Build.Step.InstallArtifact.Options = .{ .dest_dir = .{ .override = .{ .custom = "http-diff" } } };
 
     // The port: a module tree like the tools', with the HTTP layer's

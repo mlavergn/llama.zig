@@ -7,7 +7,7 @@
 //! projector's graph inputs in `mtmd_subcontext::encode`, of
 //! `llama.cpp/tools/mtmd/mtmd-subcontext.cpp`, and
 //! `mtmd_model::n_output_tokens`'s token counts, of
-//! `llama.cpp/tools/mtmd/mtmd-model.cpp` -- both `clip.cpp` until v0.9.0. Each
+//! `llama.cpp/tools/mtmd/mtmd-model.cpp`. Each
 //! declaration names what it ports and the line it began at.
 //!
 //! # Numerics, as the reference compiler emits them

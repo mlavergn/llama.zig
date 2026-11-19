@@ -1,6 +1,6 @@
 //! Barrel for `cli/common_chat/`: upstream's `common/chat.h` -- the chat
-//! data model and the chat side of the PEG parser now, the template
-//! application and output parsing of Stage 9 step 4 later.
+//! data model, the chat side of the PEG parser, template application and
+//! output parsing.
 //!
 //! # Provenance
 //!

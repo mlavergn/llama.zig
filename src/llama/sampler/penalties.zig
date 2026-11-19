@@ -24,7 +24,7 @@
 //!
 //! - penalties, `float(count) * penalty_freq + float(count > 0) *
 //!   penalty_present`: `fmadd s6, s6, s1, s7` -- the **left** product is
-//!   fused with the rounded right one, the same shape `CLAUDE.md` records for
+//!   fused with the rounded right one, the same shape as
 //!   `xielu` and the repack epilogue.
 //! - DRY, `dry_multiplier * std::pow(dry_base, repeat_exp)`: `std::pow` of a
 //!   `float` and an `int` is the `double` overload, so it is libm's `pow`,

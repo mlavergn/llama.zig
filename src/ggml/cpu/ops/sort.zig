@@ -16,8 +16,8 @@
 //! `argsort` calls `std::sort` and `top_k` calls `std::partial_sort`. Neither
 //! is stable, so **the order the C produces among equal keys is whatever
 //! libc++'s introsort happens to do**, and libstdc++ would do something else.
-//! That is the category `CLAUDE.md` records under "Where the C's own answer is
-//! unspecified", and it gets the same treatment: the comparator is reproduced
+//! That is an answer the C leaves unspecified, and it gets the usual
+//! treatment: the comparator is reproduced
 //! exactly, the algorithm is a stable sort, and ties therefore resolve by
 //! index. Output depends only on input. On keys without ties — which is what
 //! `harness/ops_dump.c` feeds it — the two agree exactly.
@@ -378,8 +378,8 @@ pub export fn ggml_compute_forward_fwht(params: *const ComputeParams, dst: *Tens
     }
 }
 
-/// Ports `ggml_compute_forward_top_k_mask` (ops.cpp:11530 @b1b770d90), new at
-/// v0.8.0: top-k sparse attention's mask.
+/// Ports `ggml_compute_forward_top_k_mask` (ops.cpp:11530 @b1b770d90): top-k sparse
+/// attention's mask.
 ///
 /// Each row of `dst` starts at -inf and takes `mask`'s cell back for every
 /// cell of a live pick and every extra cell. `score`, `blocks` and `extra` are

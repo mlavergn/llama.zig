@@ -1,375 +1,225 @@
 # SYNC.md -- the upstream-sync prompt
 
-Not a port and not a record: this is the prompt that moves the port forward
-through upstream's releases. Paste it, or say "run SYNC.md". It can be re-run
-at any point. It reads where it is from `UPSTREAM.md` and carries on from
-there. The plan behind it is `MAINTENANCE.md`; its Decisions are cited as M1–M20.
+Moves the port forward through upstream's releases, one tag per run. Say "run
+SYNC.md". Re-runnable: it reads its state from "Current state" below.
 
-## Settings (edit these before a run)
+## Settings
 
 | Setting | Value | Meaning |
 |---|---|---|
-| Version mode | `upstream` | The version tracks upstream (M6, M12). It is `0.3.0` from the commit that closed the pre-sync work. A completed sync sets it to the bare upstream tag (`0.4.0`); commits between syncs add build metadata (`0.3.0+1`, `+2` …) |
-| Stop after | `latest` | A release tag (`v0.4.0`), or `latest` |
-| Push | `yes` | `git push origin master` after each sync commit, so the GB10 can pull it for its pickup. `no` stops the loop at each sync's pickup |
+| Stop after | `latest` | A release tag (`v1.1.0`), or `latest` |
+| Push | `yes` | `git push origin master` after each sync commit, so the other machines can pull it; `no` stops at each sync's pickup |
+
+## Rules
+
+- **One release at a time.** Never jump a tag, never move to `master`.
+- **Upstream is `https://github.com/ggml-org/llama.cpp`**, fetched by URL, never by whatever remote the checkout names.
+- **Every citation ends a sync at the new basis.** Unchanged ones are repinned mechanically; only entries in "Deferred" below may lag.
+- **New features inside the ported scope are ported in the same sync.** Deferring one needs a reason in "Deferred".
+- **Mac gates block the sync. Other machines' gates go on "Open pickups"** and must clear before the next sync starts.
+- **Version:** `build.zig.zon` is the bare upstream tag after a sync (`1.0.0`); any commit between syncs adds `+N` (`1.0.0+1`).
+- **Granted:**
+  - moving `llama.cpp/` and `llama.cpp.zmake/llama.cpp` to the next tag, and `.gitmodules`;
+  - editing `llama.cpp.zmake`'s `build.zig`, `build.zig.zon` and `Makefile` for that release, and committing there;
+  - one commit per sync here, plus one per pickup fix; pushing `master` when **Push** is `yes`;
+  - fixing `../zigjinja` on its current branch, committing and pinning, when `jinja-diff` needs it.
+- **Forbidden:** editing anything under `llama.cpp/` or `llama.cpp.zmake/llama.cpp/`; adding a dependency; force-pushing; changing Settings.
+
+## Current state
+
+- **Pin:** `build/upstream.zig` -- `v1.0.0`, `b1b770d90`, build `b12359`. `scripts/check-reference-pin` holds the submodule, zmake's checkout, its tarball URL and the version literals to it.
+- **zigjinja:** `6efb5e4` (v3.1.11, on its `main`), a path dependency at `../zigjinja`.
+
+### Open pickups (v1.0.0)
+
+The v1.0.0 sync ran on the GB10, so the Mac is the machine that has not seen it. On each machine first move `llama.cpp/` and zmake's checkout to `b1b770d90`, zmake to `c2d6b81`, zigjinja to `6efb5e4`.
+
+- **GB10 (`spark-dbff`): clear.** Unreachable on its hardware: CUDA cluster re-instantiation; Vulkan `write_n`/`write_2d` staging, the `!rebar` arm, GROUP_NORM's 2-D split, the Qualcomm/AMD driver arms; fit's skipped NextN layers; MTP device-row indexing on a trained model.
+- **Mac: open.**
+  1. Metal, never compiled or run (ported blind): the TOPK_MOE fusion rows and `checkTopkMoe`, `_topk_moe`, `_group_norm`, radix top-k without `smem_out`, `get_pipeline_topk_moe`/`group_norm`, `mul_mm` from K >= 32. Then `struct-layout`, `metal-diff`, `metal-ops-diff`, `tuning-diff`, `backend-ops --diff`, `node-diff ARGS=--gpu`.
+  2. Goldens: `make buildmacos`, then `vecdot-golden`, `vec-golden` (add `ggml_vec_dot_f16_f32`), `quants-golden`, each with `GOLDEN_CPU=generic`.
+  3. Apple CPU set: `ops-diff`, `repack-diff`, `node-diff`, `parity-port`, `parity-port-cpu` at default, `apple_m3`, `apple_a7`, `apple_a12`.
+  4. macOS-only: `graph-diff`, `sched-diff`, `abi-check`, `types-golden`, `opt-diff`, `opt-llama-diff`, `adapter-diff`, `meta-diff`, `sampler-diff` (a Linux copy fails 13 typical-sampler records; check on the Mac before reading anything into it).
+  5. Models and libmtmd on Metal: `context-diff --gpu`, `arch-model-diff`, `mtp-diff`, `gemma4-assistant-diff`, `mtmd-gates`, `mtmd-audio-diff`.
+  6. The rest: `vocab-diff`, `loader-diff`, `arch-diff`, `quant-diff`, `unicode-diff`, `xcframework-check` (after `make -C xcframework upstream`), `blas-diff`, `blas-node-diff`, `cnv-diff`, `parity-cli`.
+- **DESKTOP-BR7J5S9: open.** `make x86-gates` at `x86_64_v3`, `win-host-diffs`; new: the AVX/F16C `ggml_vec_dot_f16_f32` and F16×F32 tinyBLAS rows, the unbuffered `llama_file` arm via a `--direct-io` load. Check `llama-cli.exe` and the tools build.
+- **JWHLPTOP: excluded** (no access). Carries every AVX-512 item since v0.4.0, now including `ggml_vec_dot_f16_f32`.
+
+### Known not to reproduce against itself
+
+Not port bugs; run `--self` before reading a failure here.
+
+- GB10: `server-diff` `parallel`, `sleep`, and `decision`'s `!parallel` block (CUDA batches concurrent requests by timing; the 1 s idle timeout races startup).
 
 ---
 
-## The prompt
+## Steps
 
-You are moving the Zig port of llama.cpp forward through upstream's releases,
-**one release tag at a time**. Each tag goes through the same steps: pull it,
-diff it against the current basis, port what changed, gate it, record it,
-commit, then start on the next tag. Read `CLAUDE.md`, `MAINTENANCE.md` and
-`UPSTREAM.md` (if it exists) first. Then follow the steps below until you hit
-**Stop after**, a real blocker, or the latest release.
+### 0. Preflight (every run)
 
-### What this prompt grants, and what it does not
+1. `git status` clean here, in `llama.cpp.zmake` and in `../zigjinja`; no other agent or `zig build` running in this tree (`ps`). Otherwise stop and report.
+2. Basis A = the pin above.
+3. Next tag B:
+   - `git -C llama.cpp fetch --tags https://github.com/ggml-org/llama.cpp.git`
+   - `gh api 'repos/ggml-org/llama.cpp/releases?per_page=100'`: non-prerelease `v*` entries only (skip `bNNNNN`), `sort -V`, patch releases included; B is the first after A.
+   - B must resolve to `gh api repos/ggml-org/llama.cpp/commits/<tag> --jq .sha`. Never use `target_commitish` (it is the branch head, later than the tag).
+   - None: report the port is current and stop.
+4. Any pickup open above: run it (Step 8) first.
 
-- **Granted:** moving `llama.cpp/` (the submodule) and
-  `llama.cpp.zmake/llama.cpp` to the next release tag; editing
-  `llama.cpp.zmake/build.zig` when upstream adds, moves or drops sources (M4),
-  and committing that in `llama.cpp.zmake`; editing `.gitmodules`; **one
-  commit per completed sync** in this repository, plus one for the tooling
-  (iteration 0) and one per pickup fix; pushing `master` if **Push** is `yes`;
-  fixing `../zigjinja` on its current branch, committing there and pinning
-  the commit, when `jinja-diff` needs it (M13, M16).
-- **Still forbidden:** editing any file under `llama.cpp/` or
-  `llama.cpp.zmake/llama.cpp/`; jumping more than one release (M3); adding a
-  dependency; force-pushing; changing the Settings above on your own.
+### 1. Measure
 
-`CLAUDE.md` says `llama.cpp/` "is pinned deliberately". That rule now means
-"moved only by this procedure". Rewrite that paragraph and `PLAN.md` Decision 3
-("Freeze at v0.3.0") in iteration 0 to say so.
+- `git -C llama.cpp diff --stat A B`, `git log --oneline A B` over ported paths, plus the release notes.
+- Scratchpad sizing note: files changed, lines ±, new/deleted files, new architectures, ops, flags, `llama.h` symbols.
 
-### Step 0: preflight (every run)
+### 2. Move the reference
 
-1. `git status` must be clean in this repository, in `llama.cpp.zmake` and in
-   `../zigjinja`. Check `ps` for another agent or a `zig build` running in
-   this tree. If the tree is dirty or busy, stop and say what you found
-   (memory: parallel-agents-shared-tree).
-2. Read the basis from `UPSTREAM.md`. If it does not exist yet, the basis is
-   `v0.3.0` = `c1d0e7a00` and you start with iteration 0.
-3. Upstream is **`https://github.com/ggml-org/llama.cpp`**, and that is the
-   only source. Fetch from that URL explicitly, never from whatever remote the
-   checkout happens to name:
-   `git -C llama.cpp fetch --tags https://github.com/ggml-org/llama.cpp.git`.
-   Then ask GitHub what it has released:
-   `gh api 'repos/ggml-org/llama.cpp/releases?per_page=100'`. The releases
-   are the non-prerelease `v*` entries, and `releases/latest` names the
-   newest one. The `bNNNNN` entries are per-commit prereleases, so skip them.
-   List the releases after the basis in `sort -V` order, patch releases
-   included; the next tag is the first one on that list. Check that the
-   fetched tag resolves to the commit
-   `gh api repos/ggml-org/llama.cpp/commits/<tag> --jq .sha` gives. A
-   release's `target_commitish` is the branch head when the release was cut,
-   later than the tag (`v0.4.0`: tag `5266f24da`, target `427291b5b`), so
-   don't use it. If the list is
-   empty, report that the port is current and stop.
-4. **Pickups from the previous sync must be clear before this one starts**
-   (M7). If `UPSTREAM.md`'s last history row shows a pickup open, run it now
-   (Step 9) before going further.
+1. Check out B in `llama.cpp/` and `llama.cpp.zmake/llama.cpp`; update `.gitmodules` (`branch = B`), zmake's tarball URL in `build.zig.zon`, and `build/upstream.zig` (tag, `LLAMA_VERSION`, `GGML_VERSION` from `ggml/CMakeLists.txt`, commit, build number from `git describe --tags --match 'b*'`). Set `build.zig.zon`'s `.version` to B now.
+2. Sources added, moved or deleted: update `llama.cpp.zmake/build.zig` and `build/llamacpp.zig`.
+3. Rebuild the zmake reference and `zig build reference`, both `--release=fast`. **Hash the artifacts and confirm they changed**: a failed build leaves A's library and every gate passes against it.
 
-### Step 1: iteration 0 (once, while `UPSTREAM.md` or the sync tooling is missing)
+### 3. Work list
 
-Do `MAINTENANCE.md` Phases 1–3 as written there. In brief:
+- `scripts/upstream-map A B` > scratchpad. Three kinds: touched Zig functions; unmapped hunks (new definitions, uncited files, headers, structs, macros); deletions.
+- Each item ends ported, deferred (with a reason, in "Deferred"), or out of scope (per "Scope").
 
-- **`UPSTREAM.md`** records:
-  - the basis: tag, full SHA, the short SHA citations carry, build tag
-    (`git describe --tags --match 'b*'`), date and remote;
-  - a machine-readable line other scripts can read:
-    `basis: v0.3.0 c1d0e7a004015f23bc0233470b747b596f29b264 b10621`;
-  - the history table: from → to, date, port version, port commit, hunks
-    ported and deferred, and pickup status for each of GB10, DESKTOP and
-    JWHLPTOP;
-  - the deferred hunks, each with its reason;
-  - the scope map (ported / compiled unmodified / generated / not ported).
-- `.gitmodules` and `llama.cpp/`'s `origin` move to
-  `https://github.com/ggml-org/llama.cpp.git` (M11). `.gitmodules`'s
-  `branch =` follows the basis from now on.
-- **`scripts/port-audit`** is the reverse check of `port-links`, built from
-  the AST of what the target actually compiles (M5, M9). Teach `port-links`
-  the `inlining` clause and the forward check. Resolve `qwen3tts.cpp`,
-  delete `src/ggml/.mc.zig`, and give `epilogue.zig` citations. Fill the
-  gaps the audit reports, and add `port-audit` to `make validate`.
-- **`scripts/upstream-map A B`**, **`scripts/upstream-repin A B`**, and
-  **`port-links --basis <sha>`**, which reads the basis from `UPSTREAM.md`.
-- **Make every new checker fail before you trust it**, as `CLAUDE.md`'s
-  negative-test rule requires. For `port-audit`: drop a citation, drop an
-  exclusion, cite a dead arm. For `upstream-map`: a hunk inside a cited
-  function must map to that function, and a new definition must come out
-  unmapped. For `upstream-repin`: a changed definition must not be repinned.
-- The zigjinja pin (`MAINTENANCE.md` Phase 0 step 6, `PLAN.md` Decision 58):
-  if the commit is on its remote, pin it by URL and hash. If it is not, keep
-  the path dependency and record it in `UPSTREAM.md`.
-- Update `CLAUDE.md` and `PLAN.md` as above, and mark Phases 1–3 done in
-  `MAINTENANCE.md`.
+### 4. Regenerate
 
-Commit (Step 10) as the tooling commit, then go on to Step 2 with the first
-release. **`v0.3.0 → v0.4.0` is the tooling's first real run**: when the
-tooling gets something wrong there, fix the tooling, not just the output, and
-negative-test the fix.
+Never hand-edit generated files. `build/upstream.zig` must already be at B.
 
-### Step 2: measure the release (A = basis, B = next tag)
+- Scripts: `gen-arch`, `gen-kargs` (then `zig fmt`, `make struct-layout`), `gen-hparams`, `gen-model-tables`, `gen-layer`, `gen-unicode-data`, `gen-mtmd-names`, `gen-vk-push`, `gen-tuning-table` (then `make tuning-diff`), `gen-upstream-flags`, `iq-grids`.
+- A generator that stops on new C++: extend the generator, never the output.
+- Hand-kept lists they feed: `impl_c.zig`'s `count`, `harness/struct_layout.cpp`'s constants.
+- Goldens: `make buildmacos` first (they link upstream's CMake build), then `vecdot-golden`, `vec-golden`, `quants-golden`, each also with `GOLDEN_CPU=generic`.
+  - Delete the untracked `src/ggml/cpu/quants/golden_generic.zig` it writes.
+  - Restore `quants-golden`'s `IQ4_NL` `zeros` line (uninitialized read upstream; differs every capture).
+- Fixtures: `arch-fixtures`, `mmproj-fixtures`. Compare the "no fixture" count with the last sync's.
+- GB10 only (to the pickup): `gen-fattn-config`, `gen-mmq-config`, the CUDA fatbins and kernel table, the Vulkan SPIR-V.
+- **Diff every regenerated file**: a new ordinal, field or argument has a consumer to port.
 
-`git -C llama.cpp diff --stat A B` and `git log --oneline A B` over the ported
-paths, plus the release notes. Measure before estimating: `CLAUDE.md` records
-two survey counts that were low. Write a short sizing note in your scratchpad
-before touching anything: files changed, lines added and removed, new files,
-deleted files, and new architectures, ops, flags and `llama.h` symbols.
+### 5. Port
 
-### Step 3: move the reference
+Mechanical moves first:
 
-1. Check out `B` in `llama.cpp/` and in `llama.cpp.zmake/llama.cpp`, and
-   update `.gitmodules`. `scripts/check-reference-pin` must pass.
-   Set `build.zig.zon`'s `.version` to `B` without the `v` **now**, not at
-   the commit: the tree is at `B` from here on, and its version says so
-   while the sync is in progress (Step 10 only checks it).
-2. If upstream added, moved or deleted sources, update
-   `llama.cpp.zmake/build.zig` and `build/llamacpp.zig`. Rebuild the zmake
-   reference and `zig build reference` (`libllama-ref.a`), both
-   `--release=fast`. **Confirm both builds succeeded and that the artifacts
-   changed** (hash them). A failed build leaves the old library in place, and
-   every gate then passes against `A` (memory:
-   verify-the-apparatus-not-the-verdict).
+- `scripts/upstream-map --repin A B`: moves every citation whose definition is unchanged; refuses changed ones.
+- `scripts/upstream-relines --write A B`: moves the `"<file>.cpp", <LINE>` literals passed to `impl.assert`/`impl.abort`.
+  - **Run once**; it is not idempotent.
+  - `--keep <zig>:<file>:<N>` for literals already set by hand; `--skip <prefix>` for files another agent is editing.
+  - Its "changed at B" list is hand work.
+- After everything else: read `scripts/upstream-literals` (catches literals behind a name). A report, not a gate: check each before fixing.
 
-### Step 4: the work list
+Then by hand, in dependency order: ggml core, CPU kernels, backends, libllama, libmtmd, `cli/`, `tools/`.
 
-Run `scripts/upstream-map A B` and save its output to the scratchpad. It
-yields three kinds of work: touched Zig functions; **unmapped hunks** (new
-definitions, uncited files, header, struct and macro changes); and
-deletions. Each item ends in exactly one state: ported, deferred with a reason
-in `UPSTREAM.md`, or out of scope according to the scope map.
+- Every touched definition re-read and cited at B: ``(file.c:N @<B-sha>)``. `CLAUDE.md`'s porting rules apply.
+- Port CUDA and Vulkan host changes here too; the GB10 gates them.
+- New in upstream:
 
-### Step 5: regenerate the generated class
-
-Never hand-edit generated files.
-
-- **Scripts:** `gen-arch`, `gen-kargs` (then `zig fmt` and `make
-  struct-layout`), `gen-hparams`, `gen-model-tables`, `gen-layer`,
-  `gen-unicode-data`, `gen-mtmd-names`, `gen-vk-push`, `gen-tuning-table`
-  (then `make tuning-diff`), `gen-upstream-flags` and `iq-grids`. Each stamps
-  the pin from `build/upstream.zig` (`scripts/upstream_pin.py`); move
-  `build/upstream.zig` in Step 3 *before* running any of them.
-- **When a generator stops on new C++**, extend the generator, never the
-  output. At v0.4.0, `gen-hparams` silently dropped every member after the
-  first member function declared mid-struct, and `gen-model-tables` stopped
-  on an `if` in a conditional RoPE arm.
-- **Hand-kept lists the generators feed:** `impl_c.zig`'s `count` and
-  `harness/struct_layout.cpp`'s constant list.
-- **Goldens:** `vecdot-golden`, `vec-golden` and `quants-golden`, each with
-  its `GOLDEN_CPU=generic` sibling (`scripts/upstream_pin.sh` stamps
-  them). They link upstream's CMake build, which nothing else moves: run
-  `make buildmacos` first, or the kernels are linked against the previous
-  release's `libggml-base`. The `GOLDEN_CPU=generic` run of `vecdot-golden`
-  also writes `src/ggml/cpu/quants/golden_generic.zig`, which nothing
-  imports and the tree does not track; delete it. `quants-golden`'s
-  `IQ4_NL` `zeros` entry reads uninitialized memory and differs every
-  capture: restore the committed line.
-- **Fixtures:** `arch-fixtures` and `mmproj-fixtures`.
-- **GB10 only:** `gen-fattn-config` and `gen-mmq-config`, the CUDA fatbins
-  and their kernel table, and the Vulkan SPIR-V that is embedded from the
-  reference build. Put these on the GB10 pickup.
-
-**Diff each regenerated file against its previous version.** A change in a
-generated table is a work item in its own right: a new enum ordinal, struct
-field or kernel argument has a consumer to port.
-
-### Step 6: port
-
-Work through the list in dependency order: ggml core, then the CPU kernels,
-then the backends, then libllama, then libmtmd, then `cli/` and `tools/`.
-Every touched definition is re-read at `B` and cited at `B`
-(``(file.c:N @<B-short-sha>)``). `CLAUDE.md`'s porting rules apply
-unchanged: name a fused multiply-add only where an oracle confirms it,
-`impl.one` before indexing a C pointer, no `@panic` in library code, port a C
-`assert` as nothing, and so on.
-
-**New features inside the ported scope are ported in the same sync** (M8).
-Each kind has its own path:
-
-| New in upstream | What to do |
+| New | Do |
 |---|---|
-| Architecture | A file under `src/llama/models/`, a registry entry, a hparams arm, and an `arch-model-diff` fixture (`test-llama-archs.cpp` usually brings one) |
-| Op | Constructor, CPU kernel, the Metal encoder in `metal/ops.zig`, CUDA host launches, Vulkan host, `supports_op` on every backend, plus cases in `graph-diff` and `ops-diff` |
-| Sampler | A port plus `sampler-diff` coverage |
-| Flag | `cli/args.zig` (or `tools/common/`), `upstream_flags.zig`, and a `parity-cli` / `tools-diff` case |
-| `llama.h` or `mtmd.h` symbol | `api/` plus the export, and the `nm` count equal to the reference |
-| Projector type | An `arms_*.zig` arm and a `mmproj-fixtures` type |
+| Architecture | `src/llama/models/` file, registry entry, hparams arm, `arch-model-diff` fixture |
+| Op | Constructor, CPU kernel, `metal/ops.zig` encoder, CUDA and Vulkan host, `supports_op` everywhere, `graph-diff` and `ops-diff` cases |
+| Sampler | Port plus `sampler-diff` coverage |
+| Flag | `cli/args.zig` or `tools/common/`, `upstream_flags.zig`, a `parity-cli`/`tools-diff` case |
+| `llama.h`/`mtmd.h` symbol | `api/` plus export; `nm` count equal to the reference |
+| Projector type | `arms_*.zig` arm, `mmproj-fixtures` type |
+| Tool or backend | Out of scope: add it to "Not ported" |
 
-**The port is backend-generic.** Port CUDA and Vulkan host changes here, on
-the Mac, even though they are gated on the GB10 (memory:
-port-is-backend-generic). A brand-new upstream tool or backend is outside the
-scope: record it as not ported in the scope map rather than porting it.
+- Sub-agents: disjoint files, own scratch dirs; nothing registered in a `module.zig` until `zig build test-llama` passes with it.
+- Done when: `port-links` clean (bar "Deferred"); `git grep '@<A>' src cli tools` empty; `check-reference-pin` passes; every file header's "at vX (`sha`)" line moved.
 
-If you split the work across sub-agents, give each one a disjoint set of
-files and its own scratch directory. They must not register a file in a
-`module.zig` until `zig build test-llama` passes with it (memory:
-parallel-agents-shared-tree).
+### 6. Mac gates (block the sync)
 
-Then do the two mechanical moves, **before** hand-porting anything:
-
-- `scripts/upstream-map --repin A B` moves every citation whose definition
-  is unchanged. It refuses one whose text at B differs from A.
-- `scripts/upstream-relines --write A B` moves the `"<file>.cpp", <LINE>`
-  literals the port passes to `impl.assert` and `impl.abort`. Those are the
-  C's `__LINE__`, and gates compare abort messages. Its "changed at B" list
-  is hand work.
-  - **Run it exactly once.** It is not idempotent: a second `--write`
-    shifts the moved literals again.
-  - Pass `--keep <zig>:<file>:<N>` for any literal already set to B by hand,
-    and `--skip <prefix>` for files another agent is editing.
-  - It misses literals behind a name: an `impl.assert(x, src, N, ...)` with
-    a `src` constant, and the server's `ggmlAssert` wrapper. After every
-    area is in, read **`scripts/upstream-literals`**, which checks every
-    assert and abort literal against B's text (44 wrong at v0.8.0). It is a
-    report, not a gate: fix what it names by hand, after reading each, since
-    acting on its output blind broke two correct literals.
-
-After the port, `port-links` (and, once they exist, `port-links --basis B`
-and `port-audit`) must be clean, apart from the deferrals listed in
-`UPSTREAM.md` (M2). `git grep '@<A>' src cli tools` must be empty too.
-
-Also update the version files: `build/upstream.zig` (tag, `LLAMA_VERSION`,
-ggml's own `GGML_VERSION` from `ggml/CMakeLists.txt`, the commit, the build
-number from `git describe --tags --match 'b*'`), `llama.cpp.zmake/build.zig`'s
-copies, and the two literals in `src/ggml/runtime.zig` and
-`src/llama/api/llama.zig`. `scripts/check-reference-pin` fails until they
-agree. Then move every file header's "at vX (`sha`)" provenance line.
-
-### Step 7: Mac gates (these block; M7)
-
-1. `make validate` **first**, then `make probe` (both runs). On a machine
-   with `../styleguide/Makefile.in`, `validate` is the styleguide's: it runs
-   `clean`, which deletes `zig-out/` and `.zig-cache/`, and `zig fmt`, which
-   may rewrite sources. Fixtures generated before it (`make arch-fixtures`,
-   `make mmproj-fixtures`) are lost, and the gates that read them then run
-   without them. Generate them after it.
-2. The bit-exact CPU set: `ops-diff`, `repack-diff`, `node-diff`,
-   `parity-port` and `parity-port-cpu`. Run it at the default `GATE_CPU`,
-   then at `apple_m3` and at `generic`, plus `apple_a7` and `apple_a12`
-   whenever the sync touched `src/ggml/cpu/`.
+1. `make validate`, then `make probe` (both runs). With `../styleguide/Makefile.in`, `validate` runs `clean` and `zig fmt`: generate fixtures **after** it.
+2. Bit-exact CPU set -- `ops-diff`, `repack-diff`, `node-diff`, `parity-port`, `parity-port-cpu` -- at default `GATE_CPU`, `apple_m3`, `generic`; plus `apple_a7`, `apple_a12` if `src/ggml/cpu/` changed.
 3. `node-diff ARGS=--gpu`.
-4. Every other gate in `CLAUDE.md`'s list that runs on the Mac:
-   - `graph-diff`, `backend-ops` (with `--diff`), `sched-diff`, `metal-diff`,
-     `metal-ops-diff`, `tuning-diff`, `struct-layout` and `abi-check`;
-   - `sampler-diff`, `libcxx-diff`, `regex-diff` and `unicode-diff`;
-   - `vocab-diff`, `arch-diff`, `loader-diff` and `context-diff`;
-   - `arch-model-diff`, `mtp-diff`, `gemma4-assistant-diff` and
-     `moe-slru-diff`;
-   - `jinja-diff`, `cnv-diff`, `fit-diff` (and `FIT_DIFF_O=ReleaseSafe`)
-     and `tools-diff`, one tool at a time;
-   - `json-diff`, `schema-diff`, `peg-diff`, `chat-parse-diff`,
-     `chat-msg-diff` and `spec-diff`;
-   - `server-task-diff`, `http-diff` and `server-diff`, one case file at a
-     time (the Makefile's loop stops at the first failing file);
-   - `blas-diff`, `blas-node-diff` and `mtmd-gates`;
-   - `api-diff`, `adapter-diff`, `quant-diff`, `opt-diff` and
-     `opt-llama-diff`;
-   - `meta-diff`, `batch-diff`, `chat-diff` and `host-arms-diff`;
-   - `parity-cli` and `xcframework-check`, after `make -C xcframework
-     upstream` rebuilds upstream's own framework at the new pin (`compat`
-     refuses a build made at any other commit).
+4. Every other Mac gate:
+   - `graph-diff`, `backend-ops --diff`, `sched-diff`, `metal-diff`, `metal-ops-diff`, `tuning-diff`, `struct-layout`, `abi-check`
+   - `sampler-diff`, `libcxx-diff`, `regex-diff`, `unicode-diff`
+   - `vocab-diff`, `arch-diff`, `loader-diff`, `context-diff`
+   - `arch-model-diff`, `mtp-diff`, `gemma4-assistant-diff`, `moe-slru-diff`
+   - `jinja-diff`, `cnv-diff`, `fit-diff` (also `FIT_DIFF_O=ReleaseSafe`), `tools-diff` one tool at a time
+   - `json-diff`, `schema-diff`, `peg-diff`, `chat-parse-diff`, `chat-msg-diff`, `spec-diff`
+   - `server-task-diff`, `http-diff`, `server-diff` one case file at a time
+   - `blas-diff`, `blas-node-diff`, `mtmd-gates`
+   - `api-diff`, `adapter-diff`, `quant-diff`, `opt-diff`, `opt-llama-diff`
+   - `meta-diff`, `batch-diff`, `chat-diff`, `host-arms-diff`
+   - `parity-cli`; `xcframework-check` after `make -C xcframework upstream`
+- A gate that did not build is not a pass.
+- Every case added this sync: inject a fault, watch it fail, undo by reverse replacement.
+- Fix the port, not the gate, unless the gate is wrong.
 
-   `make arch-fixtures` reports an architecture the C++ cannot build as a
-   "no fixture" line, not a failure. Compare its count with the last
-   sync's: one that went missing takes its `arch-model-diff` coverage with
-   it, as Gemma 4's did at v0.4.1.
+### 7. Record
 
-**A gate that could not build is not a pass.** For every gate case you added
-in this sync, inject a fault, watch the case fail, and undo the injection by
-reverse replacement. When a gate fails, fix the port, not the gate, unless the
-gate itself is what is wrong. In that case, say so in `NOTES.md`.
+- `HISTORY.md`: one entry for B (see its format).
+- This file: "Current state" (pin, zigjinja, open pickups for B, all `open`), "Deferred".
+- `CLAUDE.md`: every count that changed (exports, architectures, projector types, gate counts, pinned tag). A stale number is a bug.
 
-### Step 8: record
+### 8. Pickups
 
-- **`UPSTREAM.md`:** the new basis line, a history row (pickups `open`), and
-  the deferrals.
-- **`NOTES.md`:** a section "Upstream sync A → B". It covers what moved, what
-  the work list held, what each gate caught, the injections and their
-  results, and anything the tooling got wrong.
-- **`PLAN.md`:** the GB10 and Windows pickup lists for this sync.
-- **`CLAUDE.md`:** every count that changed: exported symbols,
-  architectures, model files, projector types, gate check counts and the
-  pinned tag and commit in "`llama.cpp/` is reference material only". A
-  stale number in `CLAUDE.md` is a bug.
+Must clear before the next sync. The commit (Step 9) reaches GitHub first -- or, to run them beside Step 6, carry the uncommitted tree as a commit object (`git commit-tree` from a scratch index, never on a branch) in a bundle to a local branch there, and bring every fix back before committing.
 
-### Step 9: pickups
+Reaching the machines: `../zigupdater`'s `zigupdater`.
 
-These must clear before the next sync (M7), so drive them now. The commit
-from Step 10 has to reach GitHub first -- or, to start them beside Step 7's
-Mac pass, as v0.7.0 did, carry the uncommitted tree over as a commit object
-(`git commit-tree` from a scratch index, never on a branch) in a bundle onto
-a local branch there, and carry every fix back to the Mac before the commit
-(`NOTES.md`, "Upstream sync v0.6.0 → v0.7.0").
+- `tty <agent>` for a shell; it needs a terminal, so script it as `script -q /dev/null zigupdater tty <agent>`, one command line per session, long jobs under `nohup`.
+- `push <agent> <exe> --run` for programs. Executables only: ship files as a tar inside a carrier program (rebuild it with a changing `-D`; `zig cc` does not track an `.incbin`'d file).
+- One updater host on the Mac: concurrent pushes refuse each other (`scripts/win-run` retries).
 
-The machines are reached through `../zigupdater`'s `zigupdater`: `tty
-<agent>` for a shell (it needs a terminal: drive it from a script through
-`script -q /dev/null zigupdater tty <agent>`, one command line per
-session, long jobs under `nohup`) and `push <agent> <exe> --run` for
-programs. The link moves executables only, so files travel as a tar inside
-a small carrier program that writes it out (rebuild the carrier with a
-changing `-D`, since `zig cc` does not see an `.incbin`'d file as an
-input). The Mac has one updater Host: two pushes at once refuse each other,
-which `scripts/win-run` retries.
+Per machine:
 
-- **GB10** (`spark-dbff`, checkout `~/src/mlavergn/llama.zig`, through
-  `zigupdater tty`; memory: driving-agents-tty). Move `llama.cpp/` and the
-  zmake checkout to the new commit before anything else:
-  - the Step 5 regenerations, with the results committed back from the Mac;
-  - `cuda-ops-diff`, `cuda-node-diff` (per node and fused),
-    `cuda-backend-diff` and `cuda-parity-cli`;
-  - `vk-toolchain` if the pin moved;
-  - `vk-repro`, `vk-ops-diff`, `vk-node-diff`, `vk-backend-diff`,
-    `vk-push-layout` and `vk-parity-cli`, on all four arms. `vk-node-diff`
-    and `vk-backend-diff` loop over the arms themselves; **`vk-repro`,
-    `vk-ops-diff` and `vk-parity-cli` take the arm from the environment**
-    (`GGML_VK_DISABLE_COOPMAT2=1`, then with `_COOPMAT=1`, then with
-    `_INTEGER_DOT_PRODUCT=1`), so run them once per arm;
-  - the Linux arm64 CPU set and `host-arms-diff`. `sampler-diff` is a
-    macOS gate (it links Metal and calls `xcrun`); leave it off the list.
-- **DESKTOP-BR7J5S9:** `make x86-gates` at `x86_64_v3`, plus
-  `win-host-diffs`. `[The Agent could not open a terminal]` is usually the
-  laptop's Application Control refusing that build of the program; run it
-  in a `tty` to see.
-- **Every machine:** where the pickup names cases, find each in the gate's
-  output. A total does not say which cases ran (`vk-ops-diff` passed
-  16,417 at v0.4.1 with no fused case among them).
-- **JWHLPTOP:** `make x86-gates` with `X86_CPU=x86_64_v4` and again with
-  `tigerlake`. Confirm the 512-bit code by disassembly.
+- **GB10** (`spark-dbff`, `~/src/mlavergn/llama.zig`; needs a `llama.cpp.zmake -> ../llama.cpp.zmake` symlink):
+  - Step 4's GB10 regenerations, committed back from the Mac
+  - `cuda-ops-diff`, `cuda-node-diff` (per node and fused), `cuda-backend-diff`, `cuda-parity-cli`
+  - `vk-toolchain` if the pin moved; `vk-repro`, `vk-ops-diff`, `vk-node-diff`, `vk-backend-diff`, `vk-push-layout`, `vk-parity-cli` on all four arms. `vk-node-diff` and `vk-backend-diff` loop the arms themselves; the others take it from the environment: `GGML_VK_DISABLE_COOPMAT2=1`, then plus `_COOPMAT=1`, then plus `_INTEGER_DOT_PRODUCT=1`
+  - Linux arm64 CPU set, `host-arms-diff`, every model, libmtmd, chat, tools and server gate. Not `sampler-diff` (macOS only)
+- **DESKTOP-BR7J5S9:** `make x86-gates` at `x86_64_v3`, `win-host-diffs`, the 1M-deep `json-diff`; `llama-cli.exe` and the tools build. `[The Agent could not open a terminal]` usually means Application Control refused the binary; run it in a `tty` to see.
+- **JWHLPTOP** (unavailable): `make x86-gates` with `X86_CPU=x86_64_v4`, then `tigerlake`; confirm 512-bit code by disassembly.
+- Everywhere: find each named case in the gate's output; a total does not say which cases ran.
 
-Fix any failure on the Mac, then commit it (Step 10, message `… pickup fix
-for B`) and re-run the pickup. Then mark the machine `clear` in
-`UPSTREAM.md`.
+Fix failures on the Mac, commit (`… pickup fix for upstream B`), re-run, then mark the machine `clear` above. **An unreachable machine stops the loop.**
 
-**If a machine is unreachable, stop the loop and say so.** That is a real
-blocker. Do not start the next sync over an open pickup.
+### 9. Commit
 
-### Step 10: version and commit
+- Version: `B` without the `v` for a sync (set since Step 2); `+N` for a pickup fix.
+- Message: `v<version> sync upstream B (<B-short-sha>)`, or `v<version> pickup fix for upstream B`; then the attribution line.
+- One commit here; one in `llama.cpp.zmake` if it changed. Push if **Push** is `yes`.
 
-- **Version:** a sync has set `build.zig.zon` to `B` without the `v`
-  (`0.4.0`) since Step 3; check it. Any other commit (the tooling, a pickup
-  fix) adds the next `+N` to the current basis (`0.3.0+1`), set when that
-  work starts.
-- **Message:** `v<version> sync upstream B (<B-short-sha>)`, followed by the
-  attribution line from the system reminder. For a pickup fix:
-  `v<version> pickup fix for upstream B`.
-- **Commit:** one commit in this repository, and one in `llama.cpp.zmake`
-  if its `build.zig` changed.
-- **Push** if **Push** is `yes`.
+### 10. Next
 
-### Step 11: next
-
-Report in one or two lines: B, the port version, items ported and deferred,
-and pickup state. Then go back to Step 0. Stop only at **Stop after**, the
-latest release, or a real blocker:
+Report in one or two lines: B, version, items ported and deferred, pickup state. Back to Step 0. Stop only at **Stop after**, the latest release, or a blocker:
 
 - a gate failure you cannot resolve;
-- a pickup machine you cannot reach;
-- an upstream change that needs a decision only Marc can make, such as a new
-  dependency, a change that contradicts a `PLAN.md` Decision, or a new
-  backend or tool that might belong in scope.
+- an unreachable pickup machine;
+- a decision only a human can make: a new dependency, a change against a `CLAUDE.md` rule, a new backend or tool that may belong in scope.
 
-Never stop at a checkpoint whose question can be settled later (memory:
-dont-stop-at-checkpoints). If a question can wait, write it into the
-`NOTES.md` sync section and keep going.
+A question that can wait goes in the `HISTORY.md` entry; keep going.
+
+---
+
+## Deferred
+
+Upstream changes inside the ported scope deliberately not taken.
+
+| Since | Change | Reason |
+|---|---|---|
+| v0.4.0 | `llama-cli` `-lzm/--lazy-mode`, `-ncffn/--n-cpu-ffn` | Our `llama-cli` has no loading flags; `upstream_flags.zig` reports them as unsupported. `LLAMA_LAZY_MODE_AUTO` applies |
+| v0.4.1 | `llama-cli` `--log-jsonl`/`--no-log-jsonl` | No logging flags in our `llama-cli`; ported for `tools/common/` |
+| v0.6.0 | `llama-cli` `--spec-draft-sampling`, `--rpc` | No speculative decoding or RPC in our `llama-cli`; `tools/common/` takes the former |
+| v0.6.0 | zigjinja: `dict()`/`namespace()` positional args; `map`/`selectattr`/`rejectattr`/`join`/`sort`/`min`/`max` over array attributes; digit-string and bool indexes | No model template reaches them |
+| v0.6.0 | `llama_model_saver`'s `general.tensor_extra.*` order | Upstream iterates a pointer-keyed map (not reproducible); ours writes `tensors_by_name` order |
+| v0.7.0 | `llama-cli` `--moe-cache-mib`, `--spec-draft-n-ubatch` | As `-lzm`; `tools/common/` takes both |
+| v0.7.0 | `common_perf_print`'s "graph reallocs" line | Nothing ported calls it; the counters are ported |
+| v0.8.0 | `llama-cli` `-hf` | No download path; our `error: no model given` stands |
+| v0.8.0 | zigjinja: a list appended to itself | zigjinja copies by value, renders `[[]]` where upstream raises; no template does this |
+| v0.8.0 | zigjinja: `mark_used`'s depth limit, `gather_string_parts`' depth in `for`/`if` | Only a list ~120 deep shows either |
+| v0.9.0 | SVE arms in `arch/arm/repack.cpp` | No target here has SVE |
+| v0.9.0 | CUDA `ggml_backend_cuda_comm_init_rank`, its proc entry, NCCL `n_ranks` | `GGML_USE_NCCL` undefined; `cuda-backend-diff` checks the entry is null on both sides |
+| v0.9.0 | `mtmd_helper_video_seq` | C++-only test API; no `MTMD_VIDEO` |
+| v1.0.0 | `llama-cli` `--moe-cache-cpu-share`, `--ple/--shard` | As `-lzm`; `tools/common/` takes both |
+| v1.0.0 | `MTMD_DEBUG_FUNCTIONS` image writers | Compiled out upstream; `mtmd_debug_*` unported |
+| pre-v0.3.0 | CUDA `allreduce.cu` pipeline | Falls back to the meta backend's butterfly with the C's own warning, as the C does when its pipeline fails; single-GPU GB10 cannot gate a port |
+
+## Scope
+
+- **Ported** (cited Zig, synced through citations and `upstream-map`): ggml core, `ggml-cpu/`, the Metal, CUDA, Vulkan and BLAS host layers, `src/` (libllama, every architecture), `tools/mtmd/`, `tools/server/` (with cpp-httplib), the ten tools, and the parts of `common/` they and `cli/` use.
+- **Compiled unmodified:** CUDA `.cu`/`.cuh` (fatbins), Metal kernels (embedded), Vulkan SPIR-V (the reference build's, embedded), `ggml-metal-device.m`, `ggml-metal-context.m`.
+- **Generated** (Step 4): the `gen-*` scripts, `iq-grids`, the goldens, the arch and mmproj fixtures.
+- **Not ported:** Hexagon, OpenCL, SYCL, OpenVINO, RPC, CANN, MUSA, HIP, zDNN, WebGPU, ET; KleidiAI; `examples/`, `tests/`; `tools/ui` (built by npm, embedded); `common/` beyond what `cli/` and `tools/common/` mirror.

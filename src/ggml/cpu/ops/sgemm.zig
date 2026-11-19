@@ -9,7 +9,7 @@
 //! # Only a tenth of the file compiles here
 //!
 //! 391 live lines of 4,164: the templated x86 bulk is behind `__AVX__`,
-//! `__AVX512F__` and `__AVX2__`. `PLAN.md` once called this "the awkward
+//! `__AVX512F__` and `__AVX2__`. It was once called "the awkward
 //! one" on the raw count, which the measurement contradicted.
 //!
 //! **Five instantiations can be live**, chosen by the same feature macros
@@ -43,8 +43,8 @@
 //! `madd` (sgemm.cpp:134 @b1b770d90) *is* two roundings, but both live element types
 //! have an FMA specialisation, so it is never instantiated here.
 //!
-//! `hsum` is `vaddvq_f32`, which is **pairwise** — see `CLAUDE.md`,
-//! "Porting notes".
+//! `hsum` is `vaddvq_f32`, which is **pairwise**, not the ordered
+//! `@reduce(.Add, ...)`.
 //!
 //! # x86
 //!
@@ -165,7 +165,7 @@ inline fn loadAvx(comptime T: type, p: [*]const T) f32x8 {
 /// they read halves through: the first `n` elements of a vector's worth, widened as `load`
 /// widens them, and **zero** in every lane past `n` -- what
 /// `_mm256_maskload_ps`, `_mm512_maskz_loadu_ps` and the masked 16-bit loads
-/// leave there. x86 only, new at v0.6.0, for `gemm_bloc`'s `k % KN` tail.
+/// leave there. x86 only, for `gemm_bloc`'s `k % KN` tail.
 inline fn loadPartial(comptime V: type, comptime T: type, p: [*]const T, n: i64) V {
     const lanes = @typeInfo(V).vector.len;
     var buf: [lanes]T = undefined;
@@ -231,7 +231,7 @@ fn TinyBLAS(comptime KN: i64, comptime V: type, comptime TA: type, comptime TB: 
         }
 
         /// Ports `matmul` (sgemm.cpp:574 @b1b770d90): `RN` 6 and `bn` 12 with
-        /// 32 vector registers, `RN` 3 and `bn` 24 with 16. Since v0.6.0 x86
+        /// 32 vector registers, `RN` 3 and `bn` 24 with 16. x86
         /// takes a `k` that is not a whole number of vectors, finishing it in
         /// `gemmBloc`'s masked tail; elsewhere such a `k` is still refused.
         fn matmul(self: *const Self, m: i64, n: i64) bool {
@@ -1013,8 +1013,8 @@ fn q0(comptime TA: type, params: *const ComputeParams, m: i64, n: i64, k: i64, A
 /// arms -- lines 4011, 4081 and 4145 of `sgemm.cpp` at `b1b770d90` -- at v4,
 /// at v3 the `__AVX__ || __AVX2__` f32 arm, the `__AVX2__` bf16 arm and the
 /// F16C f16 arm -- the `#elif`s after each -- then the four
-/// `tinyBLAS_Q0_AVX` rows. Since v1.0.0 (#31854) both f16 arms also take an
-/// `f32` `B`, which is what `mul_mat` now hands an f16 weight.
+/// `tinyBLAS_Q0_AVX` rows. Both f16 arms (#31854) also take an
+/// `f32` `B`, which is what `mul_mat` hands an f16 weight.
 fn sgemmAvx(
     params: *const ComputeParams,
     m: i64,

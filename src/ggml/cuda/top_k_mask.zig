@@ -1,4 +1,4 @@
-//! `GGML_OP_TOP_K_MASK`, new at v0.8.0: a row of `-inf` with the mask cells
+//! `GGML_OP_TOP_K_MASK`: a row of `-inf` with the mask cells
 //! of the live top-k picks, and of any extra cells, copied through. The
 //! sparse-attention (QSA/DSA) mask.
 //!

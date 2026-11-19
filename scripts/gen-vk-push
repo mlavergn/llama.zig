@@ -8,8 +8,8 @@ the shader reads **by offset** -- the same position as Metal's kargs
 different number and nothing in the ported code can notice, so they are
 generated from the C++ rather than typed.
 
-Until v0.5.0 these structs lived inside the 19,787-line `.cpp`; since
-upstream split it they live in `ggml-vulkan-push-constants.h`. The
+These structs live in
+`ggml-vulkan-push-constants.h`. The
 generator reads both files (the `.cpp` holds none now, and must not grow
 one unnoticed), computes every struct's size and every field's offset
 itself, and writes the same numbers twice: as comptime assertions in the
@@ -103,7 +103,7 @@ while i < len(lines):
 declared = set(re.findall(r"^struct\s+(vk_\w+_push_constants)\b", "\n".join(lines), re.M))
 if declared != set(order):
     sys.exit(f"gen-vk-push: parsed {sorted(order)} but the file declares {sorted(declared)}")
-# Both checks above pass on nothing: at v0.5.0 the structs left the `.cpp`
+# Both checks above pass on nothing: if the structs left the `.cpp`
 # and a generator reading only it found none, consistently. Every file it
 # reads is named, so finding none means a file moved again.
 if not order:
@@ -142,8 +142,7 @@ z = ['''//! The push constants the Vulkan shaders read.
 //!
 //! Mirrors the `vk_*_push_constants` structs of
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-push-constants.h` at ''' + TAG + '''
-//! (`''' + COMMIT + '''`), which upstream split out of
-//! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` at v0.5.0.
+//! (`''' + COMMIT + '''`).
 //!
 //! # Generated, not written
 //!

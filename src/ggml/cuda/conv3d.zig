@@ -1,4 +1,4 @@
-//! `GGML_OP_CONV_3D`: 3-D convolution, new at v0.6.0.
+//! `GGML_OP_CONV_3D`: 3-D convolution.
 //!
 //! # Provenance
 //!

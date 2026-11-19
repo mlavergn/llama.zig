@@ -498,7 +498,7 @@ fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) callconv(.c) b
     //
     // Narrowed rather than left as `[*c]` because Zig 0.16 types
     // `p.*.ne[i]` on a C pointer as the whole array and indexes in steps of
-    // its size. See `CLAUDE.md`, "Threads in ported code".
+    // its size.
     const src0 = srcOf(op.src[0]);
     const src1 = srcOf(op.src[1]);
 

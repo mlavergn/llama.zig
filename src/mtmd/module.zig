@@ -12,8 +12,7 @@
 //! - `model.zig` -- `mtmd-model.h`
 //! - `graph.zig` -- `mtmd-graph.h` and `mtmd-graph.cpp`'s shared builders
 //! - `clip.zig` -- `mtmd-model.cpp` (the loader, `mtmd_model`'s methods) and
-//!   `mtmd-subcontext.cpp` (the shared backends, the subcontext, encoding);
-//!   until v0.9.0 all of it was `clip.cpp`, whence the name
+//!   `mtmd-subcontext.cpp` (the shared backends, the subcontext, encoding)
 //! - `arms_hparams.zig`, `arms_tensors.zig`, `arms_inputs.zig` -- the
 //!   per-projector switches of `mtmd-model.cpp` and `mtmd-subcontext.cpp`
 //! - `models/` -- `models/*.cpp`, the encoder graphs

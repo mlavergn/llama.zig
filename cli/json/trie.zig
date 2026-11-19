@@ -22,8 +22,8 @@
 
 const std = @import("std");
 
-/// Ports `utf8_parse_result` (common/unicode.h:10 @b1b770d90). Since
-/// v0.5.0 `bytes_consumed` is also set when decoding fails: it is then the
+/// Ports `utf8_parse_result` (common/unicode.h:10 @b1b770d90). `bytes_consumed`
+/// is also set when decoding fails: it is then the
 /// length of the valid prefix, at least one byte, which the PEG `until`
 /// consumes as one invalid run.
 pub const Utf8Parse = struct {

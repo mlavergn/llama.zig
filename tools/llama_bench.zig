@@ -14,7 +14,7 @@
 //! and ranges (`parse_int_range`, an `std::regex` matched here by hand with
 //! the same backtracking), booleans go through `std::istringstream >>
 //! bool`, and `-ts` splits on `std::sregex_token_iterator` over `[;/]+`.
-//! `-hf` downloads a model upstream; no download is ported (`SPEC.md`), so
+//! `-hf` downloads a model upstream; no download is ported, so
 //! it fails as upstream does when the download fails.
 
 const std = @import("std");

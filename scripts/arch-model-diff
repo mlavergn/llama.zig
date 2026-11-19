@@ -21,7 +21,7 @@
 #   UNPORTED  the port stopped at an architecture it has no
 #             `load_arch_hparams` or `load_arch_tensors` for
 #   REF-ABORT every case aborts in the C++ itself, and in the port on the
-#             same assertion: upstream cannot run this fixture (PLM since v0.3.0,
+#             same assertion: upstream cannot run this fixture (PLM,
 #             which upstream's own test skips as "TODO tensor shapes")
 # A fixture where only some cases abort that way still passes, and its count
 # reads `gpu:20+1abort`: the cases that ran matched, and the C++ and the port
@@ -29,8 +29,8 @@
 # A case where the C++ crashes with no assertion -- a segfault -- cannot say
 # where the port would stop; it reads `+1refcrash` and is listed, not passed
 # as a match.
-# UNPORTED and REF-ABORT are counted, not failed -- the milestone (PLAN.md,
-# Decision 36's first follow-on) is complete when UNPORTED reaches zero.
+# UNPORTED and REF-ABORT are counted, not failed -- the milestone
+# is complete when UNPORTED reaches zero.
 #
 # Usage: scripts/arch-model-diff [fixture-dir] [arch-substring...]
 #   Default fixture-dir zig-out/arch-fixtures; with substrings, only the
@@ -92,7 +92,7 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/context_diff" -Ofast -lc \
 #   +-2.1e9 in the decoder, different in every process. The logits agree,
 #   since the cells read are masked -- unless the index is far enough out
 #   that the GPU faults ("command buffer failed with status 5") or the
-#   process segfaults, which since v0.7.0 the harness's "q8_0 cache, attn rot
+#   process segfaults, which the harness's "q8_0 cache, attn rot
 #   off" case reaches: run alone, the C++ by itself segfaulted twice in three
 #   runs and failed the command buffer once, each with a different
 #   transcript. Both q8_0 cases are skipped. Metal only: on CUDA the same case is a
@@ -100,7 +100,7 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/context_diff" -Ofast -lc \
 #   `ggml_cuda_cpy` has no non-contiguous q8_0-to-q8_0 path -- which the
 #   crash split counts as `+1abort`.
 # - T5's "q8_0 cache, attn rot off" on the CPU, where a CUDA backend is
-#   registered (the GB10, v0.9.0 pickup): with op offload, the 314-token
+#   registered (the GB10): with op offload, the 314-token
 #   decode's layer-1 cross-attention reads the scheduler's copy of
 #   `cross_embd`, and that copy holds uninitialized memory -- different in
 #   every process, in pure upstream too (llama.cpp.zmake built `-Dcuda`,
@@ -152,9 +152,9 @@ abort_of() {
 
 # A one-side transcript up to its abort, normalized as `normalize` in
 # harness/context_diff.zig does -- each run of input-tensor lines sorted, their
-# order being a hash map's -- without the abort's own lines and backtrace. Since
-# v0.8.0 a case both sides abort on must agree on this too, as scripts/mtp-diff
-# has required since v0.7.0: the abort alone says only where they stopped.
+# order being a hash map's -- without the abort's own lines and backtrace.
+# A case both sides abort on must agree on this too, as scripts/mtp-diff
+# requires: the abort alone says only where they stopped.
 before_abort() {
     grep -v -E '^ggml_metal_library_compile_pipeline:|GGML_ASSERT\(|GGML_ABORT|^[0-9]+ +[^ ]+ +0x[0-9a-f]+ |^(ref|port): [0-9]+ nodes' "$1" \
         | sed -E 's/reserve took [0-9.]+ ms/reserve took N ms/; s/^(ggml_metal_log_allocated_size:[^(]*)\(.*/\1(N)/; s/available_memory_kb: .*/available_memory_kb: N/; s/[0-9]+ MiB free/N MiB free/; s/0x[0-9a-fA-F]*/0xP/g' \
@@ -228,7 +228,7 @@ for f in "$DIR"/*.gguf; do
     # ARCH_DIFF_MODELS names the configurations (arch_fixtures_draft.cpp's
     # qwen35-fusedqkv).
     case "$name" in *-fusedqkv) [ -z "${ARCH_DIFF_MODELS:-}" ] && models="$MODELS tensor" ;; esac
-    # Since v0.8.0 every device has the fused top-k mask, so the selection
+    # Every device has the fused top-k mask, so the selection
     # graphs without it run only on harness/proxy_dev.c's device, which declines
     # it: the k-pool indexers, `build_top_k_mask` and DSA's `build_attn`.
     case "$name" in glm5-next*|qwen4exp*|deepseek32*|deepseek4*|glm-dsa*|hy_v4*) [ -z "${ARCH_DIFF_MODELS:-}" ] && models="$MODELS proxy" ;; esac

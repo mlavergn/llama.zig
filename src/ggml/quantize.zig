@@ -8,8 +8,8 @@
 //!
 //! # This file dispatches; it does not quantize
 //!
-//! The arithmetic lives in `ggml-quants.c`, which is still C and is Stage 3
-//! step 3's problem. What is ported here is the entry point: validate, make
+//! The arithmetic lives in `ggml-quants.c`, ported in `quants/`. What is
+//! here is the entry point: validate, make
 //! sure any lookup tables the format needs are built, pick the routine, and
 //! check the result came out the expected size.
 //!

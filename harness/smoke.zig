@@ -4,8 +4,8 @@
 //! to Metal, and greedily decodes a few tokens. A green `zig build reference`
 //! only proves the tree compiles and links; this proves the result infers.
 //!
-//! It is also a rehearsal for the port. Every file ported in Stages 3 and 4
-//! keeps its C ABI so the C++ above it links unchanged, and this driver
+//! It is also a rehearsal for the port. Every ggml file ported
+//! kept its C ABI so the C++ above it links unchanged, and this driver
 //! exercises that same boundary from the Zig side.
 //!
 //! Usage: zig build smoke -- <model.gguf> [prompt] [n_predict]

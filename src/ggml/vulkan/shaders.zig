@@ -7,8 +7,7 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp` and
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v1.0.0
-//! (`b1b770d90`). Upstream split `ggml-vulkan.cpp` into those files at
-//! v0.5.0. The C++ spells each family of pipelines as a macro pasting the
+//! (`b1b770d90`). The C++ spells each family of pipelines as a macro pasting the
 //! shader's variable name together (`NAMELC ## F16ACC ## _cm2_data`); the
 //! port pastes the same name at comptime and looks it up in the generated
 //! shader table with `@field`, so a misspelt name is a compile error rather
@@ -2600,8 +2599,7 @@ test "matmulCm1IntShmemSupport sums the cm1 tile layout as the C++ does" {
     try std.testing.expect(!matmulCm1IntShmemSupport(&device, s_tile, false, c.GGML_TYPE_Q4_1));
 
     // nvfp4 matmul_id on the large K tile at 64 lanes: two scale sets, the
-    // kvalues, the ue4m3 table without OCP fp4, and the row ids (no ballots
-    // since v0.7.0).
+    // kvalues, the ue4m3 table without OCP fp4, and the row ids (no ballots).
     const l_k_tile = Tile.of(.{ 256, 64, 128, 32, 64, 32, 2, 16, 16, 16, 64, 5 });
     device.properties.limits.maxComputeSharedMemorySize = 18448;
     try std.testing.expect(matmulCm1IntShmemSupport(&device, l_k_tile, true, c.GGML_TYPE_NVFP4));

@@ -110,7 +110,7 @@ pub fn cStderr() *c.FILE {
 /// Library code never uses `std.debug.print`: it reaches `std.Io.Threaded`,
 /// which Zig 0.17 cannot compile for iOS (its `NullFile` has no `fd`; found
 /// when the xcframework's iOS slice failed to build), and whose dependency
-/// on compiler_rt brings in compiler_rt's `expf` and `logf` (`CLAUDE.md`).
+/// on compiler_rt brings in compiler_rt's `expf` and `logf`.
 /// A failed write is dropped, as the C ignores `fprintf`'s result.
 ///
 /// Parameters:

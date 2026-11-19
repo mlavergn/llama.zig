@@ -19,7 +19,7 @@
 //! # Remote media
 //!
 //! `handle_media`'s download of an `http(s)` URL goes through
-//! `download.zig`'s `common_remote_get_content` (Stage 10 step 7): plain
+//! `download.zig`'s `common_remote_get_content`: plain
 //! HTTP only, as the reference has no SSL.
 
 const std = @import("std");

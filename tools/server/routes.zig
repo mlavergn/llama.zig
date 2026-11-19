@@ -2216,8 +2216,8 @@ fn getResModelInfo(a: Allocator, meta: *const Meta) !Value {
     try o.put("created", @as(i64, ctime(null)));
     try o.put("owned_by", "llamacpp");
     var m = common.Obj.init(a);
-    // since v0.5.0 an enum is its underlying type in a `common_json_value`
-    // (json.h:86 @b1b770d90); before, `llama_vocab_type` converted to `bool`
+    // an enum is its underlying type in a `common_json_value`
+    // (json.h:86 @b1b770d90)
     try m.put("vocab_type", @as(c_uint, @intCast(meta.model_vocab_type)));
     try m.put("n_vocab", meta.model_vocab_n_tokens);
     try m.put("n_ctx", meta.slot_n_ctx);

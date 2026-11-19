@@ -291,7 +291,7 @@ pub export fn ggml_compute_forward_out_prod(params: *const ComputeParams, dst: *
 
 /// Ports `ggml_compute_forward_scale_f32` (ops.cpp:4856 @b1b770d90).
 ///
-/// Since v0.8.0 rows need only be contiguous within themselves, so each flat
+/// Rows need only be contiguous within themselves, so each flat
 /// row index is split into `i1`, `i2`, `i3` and every row addressed through
 /// its tensor's own strides.
 fn scaleF32(params: *const ComputeParams, dst: *Tensor) void {
@@ -345,8 +345,7 @@ fn scaleF32(params: *const ComputeParams, dst: *Tensor) void {
     }
 }
 
-/// Ports `ggml_compute_forward_scale_bf16` (ops.cpp:4908 @b1b770d90), new
-/// at v0.6.0.
+/// Ports `ggml_compute_forward_scale_bf16` (ops.cpp:4908 @b1b770d90).
 ///
 /// Unlike `scaleF32` there is no `b == 0` split: every element is
 /// `s*x + b`, one expression, which clang contracts to one fused

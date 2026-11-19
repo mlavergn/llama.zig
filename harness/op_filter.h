@@ -6,7 +6,7 @@
  * `op_filter_entry_matches` (test-backend-ops.cpp:1158, 1180 @cd959bae9).
  * An entry naming a full test case, `OP(...)`, matches no extra case.
  *
- * The extras compared the whole `-o` argument with `strcmp` until v0.8.0, so
+ * The extras compared the whole `-o` argument with `strcmp` before, so
  * any list or regex -- `-o 'MUL_MAT,MUL_MAT_ID'`, `-o 'RMS_NORM.*'` -- ran
  * upstream's cases alone and none of the extras written for them. */
 #ifndef LLAMAZIG_OP_FILTER_H

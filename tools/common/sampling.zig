@@ -9,7 +9,7 @@
 //! with `regex_escape` from `llama.cpp/common/common.cpp`. Each declaration
 //! names the C++ it replaces and the line it began at.
 //!
-//! Not ported: `common_perf_print` (v0.7.0 adds its `graph reallocs` line),
+//! Not ported: `common_perf_print` (it prints a `graph reallocs` line),
 //! which no ported tool or the server calls, and `llama_sampler_init_llg` (no llguidance in the reference
 //! build: a `%llguidance` grammar throws, as upstream's does).
 //!

@@ -10,9 +10,8 @@
 //! # The kernels are still C
 //!
 //! Every `quantize_row_*` and `ggml_vec_dot_*` below lives in
-//! `ggml-cpu/quants.c` and `ggml-cpu/arch/arm/quants.c`, which Stage 3 step 5
-//! ports. Until then this file is the boundary: the table is Zig, the
-//! functions it points at are not.
+//! `ggml-cpu/quants.c` and `ggml-cpu/arch/arm/quants.c`, ported in
+//! `cpu/quants/`.
 //!
 //! They are declared by hand rather than reached through `@cImport` because
 //! `quants.h` lives under `ggml/src/ggml-cpu/`, a directory the ported
@@ -49,7 +48,7 @@ const mmla_rows: i64 = if (has_matmul_int8) 2 else 1;
 // -----------------------------------------------------------------------------
 // The still-C kernels
 //
-// `quants.c` and `arch/arm/quants.c` at v0.4.1. Signatures come from
+// `quants.c` and `arch/arm/quants.c`. Signatures come from
 // `ggml-cpu/quants.h`.
 
 const quants = struct {

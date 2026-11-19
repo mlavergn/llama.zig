@@ -8,8 +8,8 @@
 //!
 //! # The swap
 //!
-//! libllama is one strongly connected component of C++ translation units
-//! (`PLAN.md`, Decision 42), so it swapped once, at `llama.h`. The sampler
+//! libllama is one strongly connected component of C++ translation units,
+//! so it swapped once, at `llama.h`. The sampler
 //! and grammar went first, their contract with the rest being C; every
 //! other translation unit followed together. `build/llamacpp.zig` roots
 //! `libllama.a` here and compiles no C or C++ into it: `exports.zig` exports

@@ -240,7 +240,7 @@ fn showParser(a: Allocator, p: *const chat.params.ChatParams) !void {
     try kv("parser", text);
 }
 
-/// The form `common_chat_msg_delimiters::to_json` wrote until v0.7.0.
+/// The form `common_chat_msg_delimiters::to_json` once wrote.
 fn showDelims(a: Allocator, p: *const chat.params.ChatParams) !void {
     var v = Value.emptyArray();
     for (p.message_delimiters.delimiters.items) |d| {

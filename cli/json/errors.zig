@@ -71,7 +71,7 @@ pub fn fail(kind: Kind, id: u16, comptime fmt: []const u8, args: anytype) Error 
 
 /// `fwrite(bytes, 1, n, stderr)` through the C library, as upstream's
 /// `fprintf(stderr, ...)` writes. Library code here never prints through
-/// `std.debug` (CLAUDE.md, "compiler_rt shadows the C library"), and
+/// `std.debug` (it pulls in `compiler_rt`'s libm), and
 /// `cli/json` links no `llama` module to reach `impl.cStderr` from.
 pub fn writeStderr(bytes: []const u8) void {
     const builtin = @import("builtin");

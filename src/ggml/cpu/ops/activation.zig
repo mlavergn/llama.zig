@@ -111,7 +111,7 @@ fn gegluQuickF32(n: i64, y: [*]f32, x: [*]const f32, g: [*]const f32) void {
 /// `ggml_compute_forward_gelu_quick_f16`, `ggml_compute_forward_silu_f32`
 /// and `ggml_compute_forward_silu_f16`
 /// (ops.cpp:2295, 2342, 2424, 2471, 2553, 2600 @b1b770d90), which are the
-/// same body over a different `ggml_vec_*`. Since v0.6.0 also
+/// same body over a different `ggml_vec_*`, and
 /// `ggml_compute_forward_unary_bf16_rows` (ops.cpp:2015 @b1b770d90), the C's
 /// template for the BF16 arms, whose body is this one over `ggml_bf16_t`.
 ///
@@ -156,7 +156,7 @@ fn unaryRows(
 }
 
 /// The type switch every activation dispatcher opens with: `f32`, `f16` or
-/// (since v0.6.0) `bf16`, and `GGML_ABORT` on anything else.
+/// `bf16`, and `GGML_ABORT` on anything else.
 fn unaryByType(
     comptime k32: anytype,
     comptime k16: anytype,
@@ -385,7 +385,7 @@ const GluRows = struct {
 /// `ggml_compute_forward_geglu_quick_f32` and
 /// `ggml_compute_forward_geglu_quick_f16`
 /// (ops.cpp:3082, 3141, 3235, 3294, 3679, 3738, 3832, 3891 @b1b770d90),
-/// which differ from it only in the `ggml_vec_*` called. Since v0.6.0 also
+/// which differ from it only in the `ggml_vec_*` called, and
 /// `ggml_compute_forward_glu_bf16_rows` (ops.cpp:2878 @b1b770d90), the C's
 /// template for the BF16 arms: the same body and assertions over
 /// `ggml_bf16_t`.
@@ -468,7 +468,7 @@ inline fn stdClamp(v: f32, lo: f32, hi: f32) f32 {
 /// The clamped SwiGLU of gpt-oss: the value is capped at `limit` from above
 /// only, the gate on both sides, and the sigmoid is scaled by `alpha`. No
 /// expression in the loop adds a product, so nothing here contracts. The f16
-/// variant (new at v0.7.0) widens through `GGML_CPU_FP16_TO_FP32` and narrows
+/// variant widens through `GGML_CPU_FP16_TO_FP32` and narrows
 /// through `GGML_CPU_FP32_TO_FP16`, unlike `swiglu_clamp`'s, which uses the
 /// non-CPU macros. Its `#ifndef NDEBUG` NaN/Inf scan is compiled out in the
 /// reference.

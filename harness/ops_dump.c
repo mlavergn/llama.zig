@@ -61,8 +61,8 @@ static int n_threads = 1;
  *
  * `ggml_quantize_chunk` is part of the library under test, and the two builds
  * do not agree: measured, Q6_K bytes differ between the port and the stock C
- * while Q4_K and Q8_0 match. That is a known and accepted consequence --
- * CLAUDE.md, "Float contraction": the quantizers deliberately leave their FMA
+ * while Q4_K and Q8_0 match. That is a known and accepted consequence:
+ * the quantizers deliberately leave their FMA
  * sites unnamed because there is no oracle for them, and the deliverable reads
  * model files and never writes one.
  *
@@ -340,7 +340,7 @@ static void run_amp(const char * label, struct ggml_tensor * node, int64_t bound
  * by `ith`/`nth` the way a real kernel would, so the dispatch's thread
  * arguments are part of what is compared. */
 /* A causal mask with -inf above the diagonal shifted by `n_past`, what
- * `ggml_diag_mask_inf` computed until v1.0.0 removed the op (#29801). The
+ * `ggml_diag_mask_inf` computed before the op's removal (#29801). The
  * flash-attention cases build their masks with it, in the graph, so both
  * sides compute the same mask with the same code. One task, f32. */
 static void causal_mask_fn(struct ggml_tensor * dst, const struct ggml_tensor * a, int ith, int nth, void * ud) {
@@ -386,7 +386,7 @@ static struct ggml_tensor * named(struct ggml_tensor * t, const char * fmt, int 
     return ggml_format_name(t, fmt, bound);
 }
 
-/* v0.8.0's TOP_K_MASK. Every optional source present and absent, over both
+/* TOP_K_MASK. Every optional source present and absent, over both
  * mask types, a mask that broadcasts and one that does not; then the same
  * with every source a strided view, so each stride the kernel reads is one
  * the contiguous cases would not notice it had swapped. */
@@ -428,7 +428,7 @@ static void top_k_mask_cases(void) {
     }
 }
 
-/* v0.8.0: an id of -1 skips the slot. `ggml-cpu.c` zeroes the row of the
+/* An id of -1 skips the slot. `ggml-cpu.c` zeroes the row of the
  * result, `repack.cpp` does too on its own path, and ADD_ID copies `a`.
  *
  * The repack half needs a weight in a real CPU_REPACK buffer: `run_amp`'s
@@ -531,7 +531,7 @@ static void skipped_slot_cases(void) {
     ggml_backend_free(backend);
 }
 
-/* v0.8.0's concat, one body for every type: a tile of rows at a time, memcpy
+/* Concat, one body for every type: a tile of rows at a time, memcpy
  * for a source with contiguous rows and element by element for a strided
  * one at each width. More than GGML_CONCAT_TILE (32) rows, so a tile ends on
  * the tile size, on the end of a thread's share, and for dim 1 on the end of
@@ -576,7 +576,7 @@ static void concat_cases(void) {
     }
 }
 
-/* v0.8.0: SCALE needs only contiguous rows, so a view with gaps between its
+/* SCALE needs only contiguous rows, so a view with gaps between its
  * rows reaches the kernel, with src0's strides unlike dst's; in place, dst's
  * are src0's. A view that keeps i2 and i3 apart, and a permutation. */
 static void scale_view_cases(void) {
@@ -602,9 +602,8 @@ static void scale_view_cases(void) {
     }
 }
 
-/* v0.8.0: `GGML_CPU_FP32_TO_FP16` is the hardware on NEON, where it had been
- * the software routine, so the bits move on a NaN. Every f32 whose low half
- * sits on a rounding boundary, through the row converter, whose tail is the
+/* `GGML_CPU_FP32_TO_FP16` is the hardware on NEON, so the bits move on a
+ * NaN. Every f32 whose low half sits on a rounding boundary, through the row converter, whose tail is the
  * macro; and the two tables `ggml_cpu_init` fills through it. */
 extern ggml_fp16_t ggml_table_gelu_f16[1 << 16];
 extern ggml_fp16_t ggml_table_gelu_quick_f16[1 << 16];
@@ -716,7 +715,7 @@ int main(int argc, char ** argv) {
     RW(ggml_xielu(ctx, a2, 0.5f, 1.5f, 0.25f, 1e-6f));
     RW(ggml_leaky_relu(ctx, a2, 0.01f, false));
     RW(ggml_clamp(ctx, a2, -0.5f, 0.5f));
-    {   /* v0.7.0 (#29517): a strided view and a permuted one */
+    {   /* #29517: a strided view and a permuted one */
         struct ggml_tensor * fb = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 12, 6, 3, 2);
         R(ggml_clamp(ctx, ggml_view_4d(ctx, fb, 8, 4, 3, 2, fb->nb[1], fb->nb[2], fb->nb[3], fb->nb[1]), -0.5f, 0.5f));
         R(ggml_clamp(ctx, ggml_permute(ctx, fb, 0, 2, 1, 3), -0.25f, 0.25f));
@@ -738,7 +737,7 @@ int main(int argc, char ** argv) {
     R(ggml_geglu_erf(ctx, a2));
     R(ggml_geglu_quick(ctx, a2));
     R(ggml_swiglu_oai(ctx, a2, b2, 1.702f, 7.0f));
-    /* v0.7.0 (#29200): an F16 arm, split and fused, and wide inputs so the
+    /* #29200: an F16 arm, split and fused, and wide inputs so the
      * `limit` clamps on both operands fire */
     {
         struct ggml_tensor * h = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, 16, 5);
@@ -752,7 +751,7 @@ int main(int argc, char ** argv) {
 
     puts("=== reductions ===");
     R(ggml_sum(ctx, a3));
-    /* v0.8.0: SUM on rows that are not contiguous */
+    /* SUM on rows that are not contiguous */
     R(ggml_sum(ctx, ggml_transpose(ctx, a2)));
     RW(ggml_sum(ctx, ggml_permute(ctx, a4, 1, 2, 0, 3)));
     RW(ggml_sum(ctx, ggml_view_3d(ctx, a4, 5, 3, 2, a4->nb[1], a4->nb[2], 3*a4->nb[0])));
@@ -799,7 +798,7 @@ int main(int argc, char ** argv) {
                 ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 512, 16),
                                   ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 512, 8)), 0, 1.0f);
 
-        /* v0.6.0: on x86 tinyBLAS no longer refuses `k % KN` (sgemm.cpp:568)
+        /* On x86 tinyBLAS does not refuse `k % KN`
          * and gemm_bloc finishes a row with a masked load_partial step
          * (sgemm.cpp:654) -- reached only when ne00 is not a multiple of 8
          * (AVX2's KN; 16 at AVX-512), which no other float mul_mat here is.
@@ -852,7 +851,7 @@ int main(int argc, char ** argv) {
 
     puts("=== matmul, the tiled path ===");
     {
-        /* tiled/tiled.cpp (v0.6.0, replacing iqp.cpp): the K-quants' and grid
+        /* tiled/tiled.cpp: the K-quants' and grid
          * IQ types' mul_mat and mul_mat_id as an integer GEMM, which x86
          * takes from AVX2 on once src1 has at least 8 columns (or an expert
          * at least 8 routed rows) -- shapes the sweep above, at 1, 2 and 7
@@ -960,7 +959,7 @@ int main(int argc, char ** argv) {
     R(ggml_upscale(ctx, a4, 2, GGML_SCALE_MODE_NEAREST));
     R(ggml_interpolate(ctx, a4, 24, 20, 8, 2, GGML_SCALE_MODE_BILINEAR));
     R(ggml_pad(ctx, a4, 2, 3, 0, 0));
-    /* v0.7.0 (#30526) splits pad's rows over threads and copies a contiguous
+    /* #30526 splits pad's rows over threads and copies a contiguous
      * row whole: padding on every axis, a negative (cropping) pad on axis 0,
      * a non-contiguous source, and the circular arm */
     R(ggml_pad_ext(ctx, a4, 1, 2, 1, 1, 1, 0, 0, 1));
@@ -1010,7 +1009,7 @@ int main(int argc, char ** argv) {
 
     puts("=== quick gelu, f32 ===");
     {
-        /* v0.8.0 computes it in f32 where a table lost precision: a vector
+        /* Computed in f32, not from a table: a vector
          * body and a scalar tail that round differently, so a width with a
          * remainder; and past the amplitude where exp overflows, where
          * `ggml_v_expf` leaves its fast path. */
@@ -1043,7 +1042,7 @@ int main(int argc, char ** argv) {
                      ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 3)), 10);
     RB(ggml_set_rows(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_Q8_0, 64, 10), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 64, 3),
                      ggml_new_tensor_1d(ctx, GGML_TYPE_I64, 3)), 10);
-    /* v0.7.0 (#30454): SET_ROWS is planned for every thread, and an F16
+    /* #30454: SET_ROWS is planned for every thread, and an F16
      * source converts through a per-thread row of the work buffer */
     RB(ggml_set_rows(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 64, 12), ggml_new_tensor_2d(ctx, GGML_TYPE_F16, 64, 7),
                      ggml_new_tensor_1d(ctx, GGML_TYPE_I64, 7)), 12);
@@ -1061,7 +1060,7 @@ int main(int argc, char ** argv) {
     puts("=== backward passes ===");
     R(ggml_soft_max_ext_back(ctx, a2, b2, 0.5f, 0.0f));
     /* 0.5 scales exactly, so where the scale is applied cannot show; 0.37
-     * is what tells v0.6.0's `scale * (dy - dot) * y` from v0.5.0's order. */
+     * is what tells `scale * (dy - dot) * y` from the other order. */
     R(ggml_soft_max_ext_back(ctx, a2, b2, 0.37f, 0.0f));
     {
         struct ggml_tensor * q   = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 64, 4, 6);
@@ -1088,7 +1087,7 @@ int main(int argc, char ** argv) {
         R(ggml_rope_ext(ctx, q, pos, NULL, 48, GGML_ROPE_TYPE_NEOX, 4096, 10000.0f, 1.0f, 0.0f, 1.0f, 32.0f, 1.0f)); /* partial */
         R(ggml_rope_ext(ctx, qh, pos, NULL, 64, GGML_ROPE_TYPE_NEOX, 4096, 10000.0f, 1.0f, 0.0f, 1.0f, 32.0f, 1.0f));
         R(ggml_rope_ext(ctx, q, pos, NULL, 64, GGML_ROPE_TYPE_NEOX, 2048, 10000.0f, 0.25f, 1.0f, 1.0f, 32.0f, 1.0f)); /* yarn */
-        /* v1.0.0 (#30206): YaRN with the correction bounds left fractional,
+        /* #30206: YaRN with the correction bounds left fractional,
          * through slot 3 of op_params, forward and back, both rope types. */
         run_amp("rope_ext yarn truncate=false neox", ggml_rope_set_truncate(
             ggml_rope_ext(ctx, q, pos, NULL, 64, GGML_ROPE_TYPE_NEOX, 2048, 10000.0f, 0.25f, 1.0f, 1.0f, 32.0f, 1.0f), false), 0, 1.0f);
@@ -1124,7 +1123,7 @@ int main(int argc, char ** argv) {
         R(ggml_swiglu_split(ctx, h2, g2));
         RW(ggml_gelu(ctx, h2));
         R(ggml_clamp(ctx, h2, -0.5f, 0.5f));
-        /* v0.7.0 (#29517): CLAMP on a non-contiguous view, rows addressed
+        /* #29517: CLAMP on a non-contiguous view, rows addressed
          * through all three outer strides */
         {
             struct ggml_tensor * hb = ggml_new_tensor_3d(ctx, GGML_TYPE_F16, 12, 6, 3);
@@ -1143,7 +1142,7 @@ int main(int argc, char ** argv) {
 
     puts("=== activations, bf16 ===");
     {
-        /* v0.6.0's BF16 arms of the unary and GLU ops and of scale: a scalar
+        /* BF16 arms of the unary and GLU ops and of scale: a scalar
          * loop each, f32 math narrowed back to BF16. 8 rows, so three
          * threads split them unevenly. */
         struct ggml_tensor * hb = ggml_new_tensor_2d(ctx, GGML_TYPE_BF16, 64, 8);
@@ -1191,8 +1190,7 @@ int main(int argc, char ** argv) {
 
     puts("=== convolution ===");
     {
-        /* v0.7.0 (#28738): batched input, whose rows used to come out in
-         * the wrong order */
+        /* #28738: batched input, whose rows must come out in order */
         R(ggml_conv_1d(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F16, 3, 4, 5), ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 17, 4, 3), 1, 1, 1));
         R(ggml_conv_1d(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3, 4, 5), ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 17, 4, 2), 2, 0, 2));
     }
@@ -1217,7 +1215,7 @@ int main(int argc, char ** argv) {
         R(ggml_conv_transpose_1d(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3, 4, 2), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 7, 2), 2, 0, 1));
         R(ggml_conv_transpose_1d(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F16, 3, 4, 2), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 7, 2), 1, 0, 1));
         R(ggml_conv_transpose_2d_p0(ctx, ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 3, 3, 4, 2), ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 5, 5, 2, 1), 2));
-        /* v1.0.0 (#31854) permutes the source into f32 ahead of the kernel
+        /* #31854 permutes the source into f32 ahead of the kernel
          * in the work buffer: an f32 kernel, a batch of two, and a channel
          * count past one f32 vector (ne03 = 37 for the f16 dot's tail). */
         R(ggml_conv_transpose_2d_p0(ctx, ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 3, 3, 4, 2), ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 5, 5, 2, 2), 2));
@@ -1229,7 +1227,7 @@ int main(int argc, char ** argv) {
         R(ggml_conv_2d_dw_direct(ctx, ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 3, 3, 1, 3), x2, 2, 1, 0, 1, 1, 1));
         R(ggml_conv_3d_direct(ctx, ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 3, 3, 3, 2 * 3), ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 6, 6, 5, 2 * 2),
                               1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3));
-        /* An f16 kernel: since v1.0.0 the patches stay f32 and the matmul
+        /* An f16 kernel: the patches stay f32 and the matmul
          * takes f16 x f32. */
         R(ggml_conv_3d_direct(ctx, ggml_new_tensor_4d(ctx, GGML_TYPE_F16, 3, 3, 3, 2 * 3), ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 6, 6, 5, 2 * 2),
                               1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3));
@@ -1268,7 +1266,7 @@ int main(int argc, char ** argv) {
             run_amp("flash_attn_ext prec=f32", o, 0, 1.0f);
         }
         {
-            /* v1.0.0 reads the precision through ggml_prec_get_acc and
+            /* The precision is read through ggml_prec_get_acc and
              * accepts BF16 beside F32 and UNDEFINED (#31896). */
             struct ggml_tensor * o = ggml_flash_attn_ext(ctx, q, k, v, m, 0.125f, 0.0f, 0.0f);
             ggml_prec_set_acc(o, GGML_PREC_BF16);
@@ -1318,11 +1316,10 @@ int main(int argc, char ** argv) {
             }
         }
         /* Head size 36: not a whole number of f32 vectors on x86 (8 or 16
-         * lanes), so before v0.6.0 x86 took the one-chunk path here, and
-         * now takes the tiled one with simd_gemm's masked tail; on ARM (4
-         * lanes) it was tiled all along. 150 keys end on a ragged KV tile,
-         * which with softcap is where v0.6.0 moved the softcap ahead of the
-         * -inf padding. */
+         * lanes), so x86 takes the tiled path with simd_gemm's masked tail;
+         * on ARM (4 lanes) it is tiled regardless. 150 keys end on a ragged
+         * KV tile, which with softcap is where the softcap is applied ahead of
+         * the -inf padding. */
         for (int kt = 0; kt < 2; kt++) {
             const enum ggml_type tkv = kt == 0 ? GGML_TYPE_F16 : GGML_TYPE_F32;
             struct ggml_tensor * qt = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 36, 70, 4, 1);
@@ -1346,7 +1343,7 @@ int main(int argc, char ** argv) {
         }
     }
 
-    /* v0.9.0: ggml_flash_attn_ext_rows. Each q slice i3 attends over its own
+    /* ggml_flash_attn_ext_rows. Each q slice i3 attends over its own
      * list of K/V rows, kv_rows[:, i3] (src[5]); a negative row is padding.
      * The kv_rows fill (`skip:`) puts -1 in a third of the slots and in all
      * of slice 1, so a slice with nothing to attend to is compared too. K and
@@ -1399,7 +1396,7 @@ int main(int argc, char ** argv) {
         }
     }
 
-    /* v0.9.0: GGML_TYPE_F8_E4M3 on the CPU. Its vec_dot takes f32 rows
+    /* GGML_TYPE_F8_E4M3 on the CPU. Its vec_dot takes f32 rows
      * directly (vec_dot_type F32) and runs 16 lanes at a time, then a scalar
      * tail, so the row lengths are chosen off multiples of 16; at amplitude
      * 30 the inputs reach the format's coarse top binades. The conversions
@@ -1545,7 +1542,7 @@ int main(int argc, char ** argv) {
         R(ggml_dsv4_hc_pre(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne, hc, nt), ggml_new_tensor_2d(ctx, GGML_TYPE_F32, hc, nt)));
         R(ggml_dsv4_hc_post(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne, nt), ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne, hc, nt),
                             ggml_new_tensor_2d(ctx, GGML_TYPE_F32, hc, nt), ggml_new_tensor_3d(ctx, GGML_TYPE_F32, hc, hc, nt)));
-        /* New at v0.5.0: the gated form -- a per-element sigmoid gate and a
+        /* The gated form -- a per-element sigmoid gate and a
          * scale in op_params -- and hc_post's identity comb (src[3] NULL).
          * The gate runs at amplitude 30 too, where the sigmoid saturates. */
         R(ggml_dsv4_hc_pre_gated(ctx, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne, hc, nt), ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne, hc, nt), 0.75f));
@@ -1571,7 +1568,7 @@ int main(int argc, char ** argv) {
         run_amp("mul_mat hint=hadamard (fwht)", h, 0, 1.0f);
     }
     {
-        /* New at v0.5.0: fwht reads F16 input, and the general mul_mat
+        /* fwht reads F16 input, and the general mul_mat
          * widens an F16 src1 for an F32 src0 -- reached under the hint only
          * with use_ref, and without the hint directly. */
         struct ggml_tensor * h = ggml_mul_mat(ctx, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 32, 32), ggml_new_tensor_2d(ctx, GGML_TYPE_F16, 32, 5));

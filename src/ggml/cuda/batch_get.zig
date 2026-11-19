@@ -5,7 +5,7 @@
 //!
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/batch-get.cu` and
 //! `llama.cpp/ggml/src/ggml-cuda/batch-get.cuh` at v1.0.0 (`b1b770d90`),
-//! new at v0.9.0, the non-HIP, non-MUSA arm. The kernel,
+//! the non-HIP, non-MUSA arm. The kernel,
 //! `ggml_cuda_batch_get_kernel`, stays CUDA, in a new top-level `.cu`.
 //! The caller is `backend.zig`'s `get_tensor_n`.
 

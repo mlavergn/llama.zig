@@ -8,8 +8,7 @@
 //! Ported from `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp`,
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-debug.cpp`, and
 //! `llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan-types.h` at v1.0.0
-//! (`b1b770d90`). Upstream split `ggml-vulkan.cpp` into those files at
-//! v0.5.0. Each declaration below names the C++ it replaces and the line it
+//! (`b1b770d90`). Each declaration below names the C++ it replaces and the line it
 //! began at.
 //!
 //! # Exceptions
@@ -35,7 +34,7 @@ comptime {
     // `VK_VALVE_shader_mixed_float_dot_product`,
     // `VK_EXT_shader_ocp_microscaling_types` and `VK_EXT_shader_float8`
     // (ggml-vulkan-types.h:28, 97, 114, 129, 144 @b1b770d90). The pinned SDK has
-    // all of them (PLAN.md, Decision 59), so the port needs none.
+    // all of them, so the port needs none.
     for (.{
         "VK_NV_cooperative_matrix_decode_vector",  "VK_KHR_shader_bfloat16",
         "VK_VALVE_shader_mixed_float_dot_product", "VK_EXT_shader_ocp_microscaling_types",

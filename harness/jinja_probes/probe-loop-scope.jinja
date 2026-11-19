@@ -1,4 +1,4 @@
-{#- v0.7.0: each loop iteration runs in its own scope. A `set` in the body reaches neither the next iteration nor the code after the loop; a namespace is shared; an `else` block runs in the enclosing scope. -#}
+{#- each loop iteration runs in its own scope. A `set` in the body reaches neither the next iteration nor the code after the loop; a namespace is shared; an `else` block runs in the enclosing scope. -#}
 {%- set x = 'outer' -%}
 {%- set ns = namespace(n=0, last='none') -%}
 {%- for m in messages -%}

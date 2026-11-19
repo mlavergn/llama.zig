@@ -1,9 +1,9 @@
 //! Barrel for the Vulkan host layer.
 //!
 //! **Not a port.** Everything it imports is; see each file. Built only with
-//! `-Dvulkan-port` until the swap (PLAN.md, "Stage 7 — Vulkan"), and then
+//! `-Dvulkan-port` until the swap, and then
 //! the files here replace upstream's `ggml-vulkan.cpp`, whose shaders travel
-//! as the reference generator's SPIR-V (Decisions 55 and 59).
+//! as the reference generator's SPIR-V.
 
 pub const common = @import("common.zig");
 pub const instance = @import("instance.zig");

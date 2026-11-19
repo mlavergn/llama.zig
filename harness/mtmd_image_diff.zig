@@ -51,10 +51,10 @@ const RefHparams = extern struct {
     image_std: [3]f32 = .{ 0.5, 0.5, 0.5 },
     dsv4_max_n_token: i32 = 0,
     dsv4_max_wh_ratio: i32 = 0,
-    max_slice_nums: i32 = 9, // v0.7.0
-    preproc_max_pixels_tolerance: f32 = 1.0, // v0.8.0
-    image_round_half_even: i32 = 0, // v0.8.0
-    image_floor_before_align: i32 = 0, // v0.8.0
+    max_slice_nums: i32 = 9,
+    preproc_max_pixels_tolerance: f32 = 1.0,
+    image_round_half_even: i32 = 0,
+    image_floor_before_align: i32 = 0,
 };
 
 const ImageSize = impl.ImageSize;
@@ -317,7 +317,7 @@ const sizes = [_][2]c_int{
     // exactly 8 tokens of 14-pixel patches merged 2x2 (6272 pixels) with
     // neither edge aligned, where glm5v's `>= min_px` keeps the scale at 1
     .{ 98, 64 },   .{ 64, 98 },
-    // v0.7.0: at minicpmv's 448 / 56, the overview's resize lands an edge
+    // at minicpmv's 448 / 56, the overview's resize lands an edge
     // on an odd multiple of half the alignment (476 = 8.5 * 56, 364 =
     // 6.5 * 56), where its round-half-to-even and std::round part
        .{ 100, 113 },  .{ 100, 151 },
@@ -348,7 +348,7 @@ fn extraSizes(kind: image.Kind) []const [2]c_int {
         // an overview edge at 14.5 * 28, where half to even and std::round
         // part
         .minicpm_ocr_1_0 => &.{ .{ 170, 140 }, .{ 140, 170 } },
-        // v1.0.0: past the 512-patch side limit at 14 and 16 (7168 and 8192
+        // past the 512-patch side limit at 14 and 16 (7168 and 8192
         // pixels) on either edge, exactly on it, an image the budget leaves
         // unscaled (the copy path), edges under one patch and a scale that
         // truncates an edge to 0 (the max then keeps it at 1)
@@ -395,10 +395,10 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
             };
         },
         .llava_uhd, .minicpmv, .internvl, .minicpm_ocr_1_0 => {
-            // v0.7.0: minicpmv at the 4x merge too (its slice align is
+            // minicpmv at the 4x merge too (its slice align is
             // patch * 4 whatever the merge), and max_slice_nums rotating
             // through the default, smaller caps and 0 (which means 9).
-            // v0.8.0: minicpm_ocr_1_0's slice align follows the merge, and
+            // minicpm_ocr_1_0's slice align follows the merge, and
             // a merge of 0 means 2 there
             var n_var: usize = 0;
             for ([_]bool{ false, true }) |pins| for ([_]i32{ 0, 1, 2, 4 }) |merge| for ([_][2]i32{ .{ 1, 0 }, .{ 0, 1 }, .{ 2, 2 } }) |algos| for ([_][2]i32{ .{ 1, 0 }, .{ 2, 1 }, .{ 0, 2 } }) |pads| {
@@ -442,7 +442,7 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
         .lfm3vl, .qwen3vl => {
             // as load_hparams sets it, PAD_NONE, and with padding; budgets
             // around the test sizes, an unset minimum; torchvision's resize
-            // (v0.9.0: qwen3vl is lfm3vl with dyn_size's image size)
+            // (qwen3vl is lfm3vl with dyn_size's image size)
             for ([_]i32{ 14, 16 }) |ps| for ([_][2]i32{ .{ 64, 256 }, .{ 16, 64 }, .{ 256, 1024 }, .{ 0, 4096 }, .{ -1, 8 } }) |mm| for ([_]i32{ 0, 1, 2, torch | 0, torch | 1 }) |algo| for ([_]i32{ 0, 1 }) |pad| {
                 // dyn_size's image size asserts both budgets
                 if (kind == .qwen3vl and mm[0] <= 0) continue;
@@ -556,7 +556,7 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
             };
         },
         .kimik25 => {
-            // v1.0.0, Kimi-K2.5 / K3.1: patch 14 (K2.5) and 16, merges 1, 2
+            // Kimi-K2.5 / K3.1: patch 14 (K2.5) and 16, merges 1, 2
             // and 4, a patch budget below and above the test sizes and one
             // past every size, each resize algorithm and torchvision's
             for ([_]i32{ 14, 16 }) |ps| for ([_]i32{ 1, 2, 4 }) |merge| for ([_]i32{ 16, 1024, 16384, 1 << 20 }) |np| for ([_]i32{ 0, 1, 2, torch | 0, torch | 1 }) |algo| {
@@ -745,7 +745,7 @@ fn sweepVideoFrame() !void {
         const rh: RefHparams = .{ .patch_size = ps, .n_merge = 2, .image_min_pixels = 64 * ps * ps * 4, .image_max_pixels = 256 * ps * ps * 4 };
         var hp = try toHparams(&rh);
         defer hp.deinit();
-        // v0.9.0: qwen3vl owns the video size, lfm3vl inherits it
+        // qwen3vl owns the video size, lfm3vl inherits it
         for ([_]struct { image.Kind, names.ProjectorType }{ .{ .lfm3vl, .lfm3vl }, .{ .qwen3vl, .qwen3vl } }) |kp| {
             const pp = image.Preprocessor.init(kp[0], &hp, kp[1]);
             var n_frames: c_int = 1;

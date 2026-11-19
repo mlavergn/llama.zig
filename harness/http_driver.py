@@ -467,7 +467,7 @@ def base_cases():
     c.append(("echo-large-keepalive", [("send", post("/echo", b"K" * 30000, ct="text/plain")), ("resp",), ("send", req("GET /health HTTP/1.1")), ("resp",)]))
     c.append(("echo-large-head", [("send", b"HEAD /status?body=" + b"h" * 17000 + b" HTTP/1.1\r\n" + H + b"\r\n"), ("head",),
                                   ("send", req("GET /health HTTP/1.1")), ("resp",)]))
-    # server-http.cpp v0.6.0: with the UI on, no /sw.js route
+    # server-http.cpp: with the UI on, no /sw.js route
     c.append(simple("sw-js-ui-on", req("GET /sw.js HTTP/1.1")))
     # cpp-httplib 0.60: more than one Host field line, or a Host value that
     # is not uri-host [":" port], is a 400 that closes the connection; it is
@@ -521,7 +521,7 @@ def base_cases():
 
 # cpp-httplib 0.62: what the request line, the framing and the Host rules
 # reject or close, what a bodyless status keeps, and the websocket route
-# v0.8.0's /v1/realtime stands on.
+# /v1/realtime stands on.
 def v062_cases():
     c = []
     c.append(simple("rl-two-spaces", b"GET  /echo HTTP/1.1\r\n" + H + b"\r\n"))
@@ -759,7 +759,7 @@ def small_cases():
     c.append(simple("post", post("/echo", b"x", "Authorization: Bearer abc")))
     c.append(simple("health", req("GET /health HTTP/1.1")))
     c.append(("stream", [("send", req("GET /stream HTTP/1.1", "Authorization: abc")), ("resp",)]))
-    # server-http.cpp v0.6.0: with the UI off ("auto"), /sw.js is a worker
+    # server-http.cpp: with the UI off ("auto"), /sw.js is a worker
     # that removes itself; "reuse" has it on, and an API key
     c.append(simple("sw-js", req("GET /sw.js HTTP/1.1", "Authorization: Bearer abc")))
     c.append(simple("sw-js-nokey", req("GET /sw.js HTTP/1.1")))
@@ -809,7 +809,7 @@ def gcp_cases():
 
 
 def multi_cases():
-    # v0.5.0: every listener has every route; "sock-" cases go to the Unix
+    # Every listener has every route; "sock-" cases go to the Unix
     # socket, the others to the TCP address
     c = []
     c.append(simple("echo", req("GET /echo?a=b HTTP/1.1", "Authorization: Bearer abc")))
@@ -843,7 +843,7 @@ def unix_cases():
 def rehost(cases_fn, host=b"localhost"):
     """`cases_fn` with every standard `Host: x` line naming `host` instead.
 
-    v1.0.0's DNS rebinding guard refuses a loopback request whose Host is
+    The DNS rebinding guard refuses a loopback request whose Host is
     neither loopback nor an allowed origin's host whenever --cors-origins is
     not "*"; the configs that test the API key and a CORS list send a Host
     the guard lets through, so they keep testing what they were written for.
@@ -863,7 +863,7 @@ def hreq(line, host, *headers, body=b""):
     return line.encode() + b"\r\n" + h + b"".join(x.encode() + b"\r\n" for x in headers) + b"\r\n" + body
 
 
-# server-http.cpp v1.0.0: the DNS rebinding guard (`request_host_is_allowed`)
+# server-http.cpp: the DNS rebinding guard (`request_host_is_allowed`)
 # and the CSRF guard (`request_origin_is_allowed`) under --cors-origins
 # localhost; the reply carries no Access-Control-Allow-Origin
 def corslocal_cases():
@@ -923,7 +923,7 @@ def v066_cases():
     return c
 
 
-# server-http.cpp v1.0.0: a router's child refuses what only a browser sends
+# server-http.cpp: a router's child refuses what only a browser sends
 def child_cases():
     c = []
     c.append(simple("plain", hreq("GET /echo HTTP/1.1", "localhost")))

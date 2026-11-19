@@ -1,6 +1,6 @@
 // CUB's device-wide algorithms behind a C ABI, for the Zig host layer.
 //
-// **Not a port.** PLAN.md, Decision 47: `argsort.cu` and `cumsum.cu` call
+// **Not a port.** `argsort.cu` and `cumsum.cu` call
 // CUB's device-wide sort and scan, whose host-side dispatch -- tuning
 // policies, temporary-storage layout, the kernel launches themselves --
 // lives in CUB's header templates and is library code, not ggml's. This
@@ -11,7 +11,7 @@
 //   `argsort_f32_i32_cuda_cub` (argsort.cu:45): `DeviceRadixSort`,
 //   `DeviceSegmentedRadixSort` and `DeviceSegmentedSort`, `SortPairs` and
 //   `SortPairsDescending`, each called once to size the temporary storage
-//   and once to sort. Since v0.5.0 the keys are sorted out of place, into
+//   and once to sort. The keys are sorted out of place, into
 //   a second pool buffer: CUB's sorts do not allow the input and output to
 //   alias. Both are still `float *`, so the instantiation is unchanged.
 // - `llama.cpp/ggml/src/ggml-cuda/cumsum.cu` (v0.3.0, `c1d0e7a00`),
@@ -47,8 +47,8 @@ using namespace cub;
 // argsort.cu's `STRIDED_ITERATOR_AVAILABLE` needs CCCL >= 3.1. Upstream
 // then passes a strided counting iterator as the segment offsets instead of
 // an `int *` -- a different instantiation. Fail loudly rather than wrap the
-// wrong one. The test is argsort.cu's own since v0.7.0 (argsort.cu:6), which
-// no longer misses a major version above 3 with a minor below 1.
+// wrong one. The test is argsort.cu's own (argsort.cu:6), which
+// does not miss a major version above 3 with a minor below 1.
 #if (CCCL_MAJOR_VERSION > 3 || (CCCL_MAJOR_VERSION == 3 && CCCL_MINOR_VERSION >= 1))
 #    error "CCCL >= 3.1: argsort.cu uses cuda::make_strided_iterator offsets; cub_shim.cu wraps the int * form"
 #endif

@@ -28,7 +28,7 @@
 //!
 //! # Chat templates
 //!
-//! One template object, `common_chat.templates`' (Stage 9 step 4), as
+//! One template object, `common_chat.templates`', as
 //! upstream's `common_chat_templates`: parsed with the Jinja engine at
 //! startup whether or not `--jinja` is on, for its capabilities and source
 //! (what `/props` reports), and rendered by `oaicompat.chatTemplatesApply`

@@ -1,4 +1,4 @@
-# The server's built-in tools on POST /tools (Stage 10 step 6):
+# The server's built-in tools on POST /tools:
 # scripts/server-diff tools. Each side works in its own copy of
 # tools.setup's tree ($WORK, !fresh); $DATA/bin holds the stand-in docker,
 # podman, ssh and timeout the isolate cases run through.

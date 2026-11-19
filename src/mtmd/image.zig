@@ -20,8 +20,7 @@
 //! `Preprocessor` carries a `Kind` and dispatches on it at the same points
 //! -- `preprocess`, `preprocessVideoFrame`, `getVideoFrameSize`, `targetSize`
 //! and `getSliceInstructions` -- so the call graph is upstream's. A
-//! preprocessor reads `mtmd_hparams` through its `mtmd_model` (a
-//! `clip_ctx` before v1.0.0), or since v0.8.0 is handed them, upstream; it
+//! preprocessor reads `mtmd_hparams` through its `mtmd_model` or is handed them, upstream; it
 //! takes a `*const Hparams` here, with the projector type `deepseekocr`
 //! reads off the model.
 //!
@@ -634,28 +633,28 @@ pub const Kind = enum {
     /// last so the earlier kinds keep their ordinals, which
     /// `harness/mtmd_image_ref.cpp` switches on
     deepseek4v,
-    /// `mtmd_image_preprocessor_glm5v` (mtmd-image.h:172 @b1b770d90), new
-    /// at v0.6.0, after `deepseek4v` for the same reason
+    /// `mtmd_image_preprocessor_glm5v` (mtmd-image.h:172 @b1b770d90),
+    /// after `deepseek4v` for the same reason
     glm5v,
-    /// `mtmd_image_preprocessor_cohere2v` (mtmd-image.h:279 @b1b770d90), new
-    /// at v0.7.0, last for the same reason
+    /// `mtmd_image_preprocessor_cohere2v` (mtmd-image.h:279 @b1b770d90),
+    /// after `glm5v` for the same reason
     cohere2v,
-    /// `mtmd_image_preprocessor_lfm3vl` (mtmd-image.h:166 @b1b770d90), new
-    /// at v0.8.0, after `cohere2v` for the same reason; derived from
-    /// `qwen3vl` since v0.9.0
+    /// `mtmd_image_preprocessor_lfm3vl` (mtmd-image.h:166 @b1b770d90),
+    /// after `cohere2v` for the same reason; derived from
+    /// `qwen3vl`
     lfm3vl,
     /// `mtmd_image_preprocessor_deepseek41v` (mtmd-image.h:201 @b1b770d90),
-    /// new at v0.8.0, after `lfm3vl` for the same reason
+    /// after `lfm3vl` for the same reason
     deepseek41v,
     /// `mtmd_image_preprocessor_minicpm_ocr_1_0` (mtmd-image.h:236
-    /// @b1b770d90), new at v0.8.0, after `deepseek41v` for the same reason
+    /// @b1b770d90), after `deepseek41v` for the same reason
     minicpm_ocr_1_0,
-    /// `mtmd_image_preprocessor_qwen3vl` (mtmd-image.h:153 @b1b770d90), new
-    /// at v0.9.0, last for the same reason: `dyn_size` for images, video
+    /// `mtmd_image_preprocessor_qwen3vl` (mtmd-image.h:153 @b1b770d90),
+    /// after `minicpm_ocr_1_0` for the same reason: `dyn_size` for images, video
     /// frames sized as `Qwen3VLVideoProcessor`
     qwen3vl,
-    /// `mtmd_image_preprocessor_kimik25` (mtmd-image.h:147 @b1b770d90), new
-    /// at v1.0.0 for Kimi-K2.5 and K3.1, last for the same reason
+    /// `mtmd_image_preprocessor_kimik25` (mtmd-image.h:147 @b1b770d90),
+    /// for Kimi-K2.5 and K3.1, last for the same reason
     kimik25,
 };
 
@@ -718,7 +717,7 @@ pub const Preprocessor = struct {
     min_tiles: c_int = 0,
     max_tiles: c_int = 0,
 
-    /// The constructors, from a model and since v0.8.0 from `hparams`
+    /// The constructors, from a model or from `hparams`
     /// themselves: `hparams` as `model->hparams`, `proj_type` as
     /// `model->proj_type` (only `deepseekocr` reads it, mtmd-image.h:287
     /// @b1b770d90). `hparams` must outlive the preprocessor.
@@ -1208,7 +1207,7 @@ pub const Preprocessor = struct {
     }
 
     /// Ports `smart_resize` (mtmd-image.cpp:865 @b1b770d90), a static member
-    /// of `mtmd_image_preprocessor_qwen3vl` (`lfm3vl`'s until v0.9.0): as transformers'
+    /// of `mtmd_image_preprocessor_qwen3vl` as transformers'
     /// Qwen2-VL `smart_resize`, rounding before the pixel checks (an edge may
     /// round to 0) and computing in `double`. With `temporal_factor > 1` it
     /// is the Qwen3-VL video variant over `n_frames`; upstream's defaults for
@@ -1278,7 +1277,7 @@ pub const Preprocessor = struct {
     }
 
     /// Ports `preprocess` (mtmd-image.cpp:933 @b1b770d90), a member of
-    /// `mtmd_image_preprocessor_glm5v`, new at v0.6.0: the canvas is
+    /// `mtmd_image_preprocessor_glm5v`: the canvas is
     /// ceil-aligned to `patch_size * n_merge` and fitted to the token budget;
     /// the image is rescaled only to meet the budget and sits top-left, with
     /// black padding on the right and bottom.

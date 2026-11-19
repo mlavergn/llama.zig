@@ -365,14 +365,14 @@ pub const Hparams = extern struct {
     }
 
     /// Ports `llama_hparams`'s `n_ff_exp` (llama-hparams.cpp:74 @b1b770d90):
-    /// the expert feed-forward size, per layer since v0.4.0.
+    /// the expert feed-forward size, per layer.
     pub fn nFfExp(self: *const Self, il: u32) u32 {
         if (il < self.n_layer_all) return self.n_ff_exp_arr[il];
         impl.abort("llama-hparams.cpp", 79, "fatal error");
     }
 
     /// Ports `llama_hparams`'s `n_expert_used` (llama-hparams.cpp:82 @b1b770d90):
-    /// the top-k routing count, per layer since v0.4.0.
+    /// the top-k routing count, per layer.
     pub fn nExpertUsed(self: *const Self, il: u32) u32 {
         if (il < self.n_layer_all) return self.n_expert_used_arr[il];
         impl.abort("llama-hparams.cpp", 87, "fatal error");

@@ -20,12 +20,12 @@
 //!
 //! # The contract is 102 symbols, not 82
 //!
-//! `PLAN.md` records 82. Measured against `zig c++ -c` at the pinned commit,
+//! An early survey recorded 82. Measured against `zig c++ -c` at the pinned commit,
 //! the unmangled export count across both halves is **102**; of 243 total
 //! exports the rest are template instantiations and inline functions. **None
 //! of the mangled names is referenced from any other object** in `libggml.a`
-//! or `libllama.a` — checked directly, not assumed — so the Stage 3 swap
-//! mechanism applies without qualification.
+//! or `libllama.a` — checked directly, not assumed — so the C-ABI swap
+//! applies without qualification.
 //!
 //! # It is C in a `.cpp` file
 //!
@@ -1479,7 +1479,7 @@ pub export fn ggml_backend_multi_buffer_set_usage(buffer: c.ggml_backend_buffer_
 /// at `nb`, so every scheduler input copy inherited its source's `op`,
 /// `op_params`, `flags` and first three `src` pointers. Outputs stayed right,
 /// which is why nothing caught it until `scripts/node-diff --gpu` printed the
-/// copies' ops. `p[0].arr[i]`, or a `*T`, indexes correctly. See NOTES.md.
+/// copies' ops. `p[0].arr[i]`, or a `*T`, indexes correctly.
 pub fn dupTensorLayout(ctx: ?*c.ggml_context, tensor: [*c]const c.ggml_tensor) [*c]c.ggml_tensor {
     const dup = impl.one(c.ggml_tensor, c.ggml_dup_tensor(ctx, tensor));
     const src = impl.one(c.ggml_tensor, @constCast(tensor));

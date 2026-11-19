@@ -5,10 +5,10 @@
 #
 # Runs four times: on the physical device; with `GGML_CUDA_DEVICES=3` --
 # three virtual devices on the one GB10 -- so per-device answers are compared
-# for a device index other than 0; and, since v0.7.0 read the backend's
-# environment once and turned three variables into flags (`atoi != 0`), with
-# `GGML_CUDA_NO_PINNED=0` (set but off: pinned host buffers stay on, where
-# v0.6.0 turned them off) and with `GGML_CUDA_NO_PINNED=1
+# for a device index other than 0; and, since the backend reads its
+# environment once and three variables are flags (`atoi != 0`), with
+# `GGML_CUDA_NO_PINNED=0` (set but off: pinned host buffers stay on)
+# and with `GGML_CUDA_NO_PINNED=1
 # GGML_OP_OFFLOAD_MIN_BATCH=8` (no pinned host buffer; the offload threshold
 # moved onto one of the probed batch sizes).
 #

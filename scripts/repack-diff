@@ -15,7 +15,7 @@
 # How the reference is reached: the three reference translation units are
 # compiled with every one of their unmangled exports renamed to `ref_*` on
 # the command line, so both implementations link into one process. That is
-# the same `-D` rename NOTES.md records as unusable for *swapping* a
+# the same `-D` rename found unusable for *swapping* a
 # translation unit -- it renames internal callers too -- which is exactly
 # what is wanted here: the renamed object is self-consistent and calls its
 # own kernels, not ours.

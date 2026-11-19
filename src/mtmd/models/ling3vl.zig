@@ -3,7 +3,7 @@
 //!
 //! # Provenance
 //!
-//! Ports `llama.cpp/tools/mtmd/models/ling3vl.cpp`, new at v1.0.0
+//! Ports `llama.cpp/tools/mtmd/models/ling3vl.cpp` at v1.0.0
 //! (`b1b770d90`), and the `mtmd_graph_ling3vl` declaration in
 //! `llama.cpp/tools/mtmd/models/models.h`. Each declaration names what it
 //! ports and the line it began at.

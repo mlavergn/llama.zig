@@ -1,4 +1,4 @@
-# LoRA adapters (Stage 10 step 3c): scripts/server-diff lora. An adapter over
+# LoRA adapters: scripts/server-diff lora. An adapter over
 # Qwen3-0.6B's first attention weight, loaded twice (subset.gguf from
 # harness/server/lora.setup; the full set's token-embedding adapter does not
 # fit the model's tied output); /lora-adapters lists and rescales them, and a

@@ -1320,8 +1320,8 @@ fn copyInput(sched: *Sched, split: *Split, input: *c.ggml_tensor) void {
     }
 }
 
-/// Ports `ggml_backend_sched_prefetch_inputs` (src/ggml-backend.cpp:2152 @b1b770d90),
-/// new at v1.0.0 (#31419, #32100).
+/// Ports `ggml_backend_sched_prefetch_inputs` (src/ggml-backend.cpp:2152 @b1b770d90)
+/// (#31419, #32100).
 ///
 /// The inputs of the next split that are computed on the backend of this
 /// split before it, and copied to host memory, are copied before this split
@@ -1401,8 +1401,7 @@ fn prefetchInputs(sched: *Sched, split_id: c_int) void {
 ///   have reused buffer regions across them.
 /// - **Host weights are copied last**, so the copy callback can read the
 ///   split's other inputs (the MoE expert ids) already on the split backend.
-///   The selective expert copy itself moved to libllama's MoE cache at
-///   v0.7.0.
+///   The selective expert copy itself lives in libllama's MoE cache.
 fn computeSplits(sched: *Sched) c.enum_ggml_status {
     const splits = impl.many(Split, sched.splits);
 

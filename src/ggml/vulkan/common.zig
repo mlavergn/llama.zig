@@ -16,8 +16,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 
-/// The Vulkan C API, `vulkan_core.h` at the pinned SDK (PLAN.md, Decision
-/// 59), translated with `VK_NO_PROTOTYPES`: every command is reached through
+/// The Vulkan C API, `vulkan_core.h` at the pinned SDK,
+/// translated with `VK_NO_PROTOTYPES`: every command is reached through
 /// `dispatch`, as `vulkan.hpp`'s dynamic dispatcher reaches it.
 pub const vk = @import("vulkan_c");
 
@@ -84,7 +84,7 @@ pub fn hasRebar(physical_device: vk.VkPhysicalDevice) bool {
 pub extern fn vkGetInstanceProcAddr(instance: vk.VkInstance, p_name: [*:0]const u8) vk.PFN_vkVoidFunction;
 
 /// The four commands the C++ calls by their exported names rather than
-/// through the dispatcher (`NOTES.md`, "Stage 7: the measurement").
+/// through the dispatcher (measured with `nm` on the reference).
 pub extern fn vkGetPhysicalDeviceFeatures2(physical_device: vk.VkPhysicalDevice, features: *vk.VkPhysicalDeviceFeatures2) void;
 
 /// Commands that need no instance: `vulkan.hpp`'s `init(vkGetInstanceProcAddr)`

@@ -8,8 +8,7 @@
 //
 // Input: one record per line, `<op> <payload>`, where the payload is JSON on
 // one line. Ops: M messages, T tools, C tool_choice, K continuation,
-// S split, F diff, R reasoning format, P tool parameters. (D, the message
-// delimiters' JSON form, went with upstream's v0.7.0.)
+// S split, F diff, R reasoning format, P tool parameters.
 
 #include "chat.h"
 #include "json.h"

@@ -34,7 +34,7 @@
 // Contraction is captured **on**, matching the ARM quant kernels and for the
 // same reason: the fusion sites here are explicit intrinsics
 // (`GGML_F32_VEC_FMA`), not expressions a compiler chose, so the port can name
-// them with `@mulAdd` and match exactly. See `CLAUDE.md`, "Float contraction".
+// them with `@mulAdd` and match exactly.
 //
 // Inputs are a fixed LCG so this is reproducible, captured once at the pin.
 //

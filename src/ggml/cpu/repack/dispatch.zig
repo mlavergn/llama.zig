@@ -15,9 +15,8 @@
 //! methods, a derived `extra_buffer_type`, and file-local statics. None of
 //! it appears in `nm -gU | grep -v _Z`, which is why `port-coverage` read
 //! `36 / 36 symbols (100%)` for a `repack.cpp` port that could not
-//! function. `repack.cpp` is one of the four translation units `CLAUDE.md`
-//! names as exceptions to the unmangled-exports contract, and this file is
-//! what that exception meant. `scripts/cluster-check` asserts
+//! function. For `repack.cpp` the unmangled exports
+//! are not the whole contract, and this file is what the rest of it is. `scripts/cluster-check` asserts
 //! `module.dispatch_implemented` at comptime so the count cannot read as
 //! complete again on its own.
 //!
@@ -749,7 +748,7 @@ pub fn getOptimalRepackType(cur: *const Tensor) ?*const extra.TensorTraits {
         if (features.ggml_cpu_has_neon() != 0 and features.ggml_cpu_has_dotprod() != 0) {
             if (@rem(ne1, 4) == 0) return traitsOf(inst.q4_0_4x4_q8_0);
         }
-        // s390x's arm, new at v0.4.1; `ggml_cpu_has_vxe` is 0 on every
+        // s390x's arm; `ggml_cpu_has_vxe` is 0 on every
         // target this port builds, so it is reached only there.
         if (features.ggml_cpu_has_vxe() != 0) {
             if (@rem(ne1, 4) == 0) return traitsOf(inst.q4_0_4x4_q8_0);
