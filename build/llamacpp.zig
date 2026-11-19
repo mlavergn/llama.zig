@@ -190,61 +190,9 @@ const ggml_base_sources = [_][]const u8{
     // Nothing under ggml/src/ is compiled as C any more.
 };
 
-const ggml_base_cxx_sources = [_][]const u8{
-    // ggml.cpp is dropped, not ported: it only
-    // installs a std::terminate handler that prints a ggml backtrace when a
-    // C++ exception escapes, and no C++ is left in the build to throw one.
-    //
-    // ggml-backend.cpp is ported: src/ggml/backend.zig and
-    // src/ggml/backend_sched.zig. 102 C-ABI symbols, not the 82 first
-    // estimated; none of its 141 mangled exports is reached from another
-    // object, so it swaps at its C ABI like ggml's C files.
-    // ggml-backend-meta.cpp is ported: src/ggml/backend_meta.zig, gated by
-    // scripts/meta-diff. The multi-device backend behind
-    // LLAMA_SPLIT_MODE_TENSOR.
-    //
-    // ggml-opt.cpp is ported: src/ggml/opt.zig, gated by scripts/opt-diff.
-    //
-    // ggml-threading.cpp is ported: src/ggml/threading.zig. The first C++
-    // translation unit to be swapped out.
-    //
-    // gguf.cpp is ported: src/ggml/gguf.zig. 61 C-ABI symbols -- the two the
-    // C++ additionally exports, `gguf_type_size` and `gguf_write_to_buf`, are
-    // declared in ggml-impl.h inside `#ifdef __cplusplus` for test code this
-    // project does not build, so their symbols are mangled and outside the
-    // contract.
-    //
-    // ggml-backend-reg.cpp is ported: src/ggml/backend_reg.zig. It took
-    // ggml-backend-dl.cpp with it -- the registry was its only caller, and its
-    // three `dl_*` wrappers have C++ linkage that Zig cannot provide.
-};
-
 const ggml_cpu_c_sources = [_][]const u8{
     // Empty: ggml-cpu.c, ggml-cpu/quants.c and ggml-cpu/arch/arm/quants.c are
     // all ported. **No C compiles anywhere under ggml/src/ any more.**
-};
-
-const ggml_cpu_cxx_sources = [_][]const u8{
-    // ggml-cpu.cpp, traits.cpp, repack.cpp and arch/arm/repack.cpp used to
-    // be here. They are ported now -- src/ggml/cpu/{cpu_backend,extra}.zig
-    // and src/ggml/cpu/repack/ -- and had to move together, because
-    // repack.cpp derives from the two abstract bases traits.cpp declares.
-    // What is left are three translation units that are empty on this
-    // target: hbm.cpp needs GGML_USE_CPU_HBM, the two amx files __AMX_INT8__.
-    "ggml/src/ggml-cpu/hbm.cpp",
-    "ggml/src/ggml-cpu/amx/amx.cpp",
-    "ggml/src/ggml-cpu/amx/mmq.cpp",
-};
-
-const ggml_metal_cxx_sources = [_][]const u8{
-    // ggml-metal.cpp is ported -- src/ggml/metal/backend.zig.
-    // ggml-metal-device.cpp is ported -- src/ggml/metal/library.zig.
-    // ggml-metal-common.cpp is ported -- src/ggml/metal/common.zig.
-    // ggml-metal-ops.cpp is ported -- src/ggml/metal/ops.zig.
-    // ggml-metal-tuning.cpp is ported -- src/ggml/metal/tuning.zig. Its
-    // seven entry points are C++-linkage, so the Zig exports them under
-    // their mangled names and the three C++ callers link unchanged.
-    // ggml-metal-fusion.cpp is ported -- src/ggml/metal/fusion.zig.
 };
 
 const ggml_metal_objc_sources = [_][]const u8{
@@ -436,7 +384,7 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
         .target = opts.target,
         .optimize = opts.optimize,
         .link_libc = true,
-        .link_libcpp = true,
+        .link_libcpp = if (opts.vulkan) |vk| !vk.port else false,
         // Upstream is not UBSan-clean -- it relies on pointer arithmetic that
         // is technically undefined but universally works, and Zig enables the
         // C sanitizers in Debug by default. This is reference code we compile
@@ -511,11 +459,6 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     // runtime,ops,graph,quantize}.zig, reached through the module barrel this
     // library is rooted at. Nothing compiles it any more, so the linker's
     // missing-symbol errors are what prove the port is complete.
-    mod.addCSourceFiles(.{
-        .root = b.path(root),
-        .files = &ggml_base_cxx_sources ++ &ggml_cpu_cxx_sources ++ &ggml_metal_cxx_sources,
-        .flags = flags(b, &.{ &cxx_flags, defines }),
-    });
 
     if (isApple(opts)) {
         mod.addCSourceFiles(.{
@@ -1386,25 +1329,6 @@ const ported_test_c_sources = [_][]const u8{
     // table resolves entirely to Zig.
 };
 
-const ported_test_cxx_sources = [_][]const u8{
-    // ggml-threading.cpp used to be here for the critical section; it is
-    // ported now (src/ggml/threading.zig) and comes from `ported.zig`.
-    //
-    // Linkable since the graph section landed: it needs the graph and
-    // allocator symbols, which the port now provides. Before that,
-    // `ported.zig` stubbed the one backend function the ported code called.
-    // ggml-backend.cpp used to be here; it is ported now
-    // (src/ggml/backend.zig, src/ggml/backend_sched.zig) and comes from
-    // `ported.zig`, and so does the meta-buffer backend it calls into
-    // (src/ggml/backend_meta.zig).
-    // All that is left under ggml-cpu/ are three translation units that are
-    // empty on this target: hbm.cpp needs GGML_USE_CPU_HBM, the two amx
-    // files __AMX_INT8__.
-    "ggml/src/ggml-cpu/hbm.cpp",
-    "ggml/src/ggml-cpu/amx/amx.cpp",
-    "ggml/src/ggml-cpu/amx/mmq.cpp",
-};
-
 /// Builds a static library from the ported Zig alone, for verification.
 ///
 /// The point is to make the ported constructors *reachable* before `ggml.c` is
@@ -1421,7 +1345,6 @@ pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
         .target = opts.target,
         .optimize = opts.optimize,
         .link_libc = true,
-        .link_libcpp = true,
         .sanitize_c = .off,
     });
 
@@ -1466,11 +1389,6 @@ pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
         .files = &ported_test_c_sources,
         .flags = flags(b, &.{ &c_flags, defines }),
     });
-    mod.addCSourceFiles(.{
-        .root = b.path(root),
-        .files = &ported_test_cxx_sources,
-        .flags = flags(b, &.{ &cxx_flags, defines }),
-    });
 
     if (isApple(opts)) {
         addSdkPaths(b, mod, opts.sdk);
@@ -1506,7 +1424,6 @@ fn portedTestModuleInner(
         .target = opts.target,
         .optimize = opts.optimize,
         .link_libc = true,
-        .link_libcpp = true,
         .sanitize_c = .off,
     });
 
@@ -1549,11 +1466,6 @@ fn portedTestModuleInner(
         .root = b.path(root),
         .files = c_sources,
         .flags = flags(b, &.{ &c_flags, defines }),
-    });
-    mod.addCSourceFiles(.{
-        .root = b.path(root),
-        .files = &ported_test_cxx_sources,
-        .flags = flags(b, &.{ &cxx_flags, defines }),
     });
 
     if (isApple(opts)) {

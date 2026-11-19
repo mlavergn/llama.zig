@@ -527,7 +527,6 @@ pub fn build(b: *std.Build) !void {
         .target = cfg.target,
         .optimize = cfg.optimize,
         .link_libc = true,
-        .link_libcpp = true,
     });
     smoke_module.addImport("llama_h", llama_h_module);
     smoke_module.linkLibrary(reference.llama);
@@ -567,7 +566,6 @@ pub fn build(b: *std.Build) !void {
         .target = cfg.target,
         .optimize = cfg.optimize,
         .link_libc = true,
-        .link_libcpp = true,
     });
     cli_module.addOptions("config", options);
     // The one permitted dependency, and only here: chat templates are Jinja,
@@ -713,7 +711,6 @@ pub fn build(b: *std.Build) !void {
         .target = cfg.target,
         .optimize = cfg.optimize,
         .link_libc = true,
-        .link_libcpp = true,
     });
     cli_tests_module.addOptions("config", options);
     cli_tests_module.addImport("zigjinja", jinja_module);
@@ -745,7 +742,6 @@ pub fn build(b: *std.Build) !void {
         .target = cfg.target,
         .optimize = cfg.optimize,
         .link_libc = true,
-        .link_libcpp = true,
     });
     cli_fit_tests_module.addImport("llama", reference.llama.root_module);
     llamacpp.addSdkPaths(b, cli_fit_tests_module, sdk);

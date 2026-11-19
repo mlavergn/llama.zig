@@ -229,7 +229,6 @@ pub fn add(b: *std.Build, opts: Options) !void {
             .target = opts.target,
             .optimize = opts.optimize,
             .link_libc = true,
-            .link_libcpp = true,
         });
         mod.addImport("tools_common", common_module);
         mod.addImport("tools_h", tools_h_module);
@@ -259,7 +258,6 @@ pub fn add(b: *std.Build, opts: Options) !void {
             .target = opts.target,
             .optimize = opts.optimize,
             .link_libc = true,
-            .link_libcpp = true,
         });
         mod.addImport("tools_common", common_module);
         mod.addImport("tools_h", tools_h_module);
