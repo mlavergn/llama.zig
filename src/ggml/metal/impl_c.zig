@@ -328,7 +328,7 @@ pub const N_MM_NK_TOTAL: c_int = SZ_SIMDGROUP * N_MM_NK;
 
 /// The count the gate cross-checks, so a constant added upstream and not
 /// here shows up as a mismatch rather than as nothing.
-pub const count: usize = 138;
+pub const count: usize = 139;
 
 // -----------------------------------------------------------------------------
 // The gate's view

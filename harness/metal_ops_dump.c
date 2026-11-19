@@ -427,21 +427,10 @@ static void mul_mat_id_cases(void) {
         finish(label, out);
     }
 
-    /* F32 `src[1]` precision: its own specialisation and two more kernels */
-    for (int skip = 0; skip < 2; skip++) {
-        begin(seed++);
-        struct ggml_tensor * w = ggml_new_tensor_3d(ctx, GGML_TYPE_F16, 128, 96, 16);
-        struct ggml_tensor * x = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 128, 4, 64);
-        struct ggml_tensor * ids = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 4, 64);
-        struct ggml_tensor * out = ggml_mul_mat_id(ctx, w, x, ids);
-        ggml_prec_set_src(out, GGML_PREC_F32, 1);
-        alloc_all();
-        fill_floats(w, 0.5f);
-        fill_floats(x, 1.0f);
-        fill_ids(ids, 16, skip);
-        snprintf(label, sizeof label, "MUL_MAT_ID prec=f32 skip=%d", skip);
-        finish(label, out);
-    }
+    /* No `src[1]` precision case: ggml-metal-device.m's
+     * `ggml_metal_supports_mul_mat_src1_prec` refuses GGML_PREC_F32
+     * outright, MUL_MAT_ID takes no other, and nothing past `supports_op`
+     * reads the precision, so a BF16 MUL_MAT is the plain kernel. */
 
     for (int skip = 0; skip < 2; skip++) {
         begin(seed++);

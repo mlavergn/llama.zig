@@ -974,7 +974,11 @@ static void fusion_diff(ggml_backend_buffer_type_t buft) {
             struct ggml_cgraph * gf = ggml_new_graph(ctx);
             if (refuse == 5) ggml_build_forward_expand(gf, scores);
             ggml_build_forward_expand(gf, weights);
-            ggml_build_forward_expand(gf, ggml_scale(ctx, weights, 1.5f));
+            /* The weights' consumer must not be a SCALE: the table takes the
+             * longest match, so a SCALE straight after the closing RESHAPE
+             * would turn every unscaled `norm` chain into its `norm_scale`
+             * row, and those rows would never be reached. */
+            ggml_build_forward_expand(gf, ggml_sqr(ctx, weights));
             fusion_alloc(ctx, buft);
             char name[32]; snprintf(name, sizeof name, "moe-gate g%d v%d", gate, variant);
             fusion_probe_graph(name, gf);

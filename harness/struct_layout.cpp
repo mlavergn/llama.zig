@@ -274,6 +274,7 @@ int main() {
             { "FC_LIGHTNING_INDEXER", (long) FC_LIGHTNING_INDEXER },
             { "FC_MUL_MV_MMA", (long) FC_MUL_MV_MMA },
             { "FC_TOP_K_MASK", (long) FC_TOP_K_MASK },
+            { "FC_GROUP_NORM", (long) FC_GROUP_NORM },
             { "OP_FLASH_ATTN_EXT_NQPSG", (long) OP_FLASH_ATTN_EXT_NQPSG },
             { "OP_FLASH_ATTN_EXT_NCPSG", (long) OP_FLASH_ATTN_EXT_NCPSG },
             { "OP_FLASH_ATTN_EXT_TENSOR_NQPSG", (long) OP_FLASH_ATTN_EXT_TENSOR_NQPSG },

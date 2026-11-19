@@ -1621,7 +1621,8 @@ test "the table's labels are its op names joined by +" {
     try std.testing.expectEqualStrings("MUL_MAT+ADD", std.mem.span(ggml_metal_fusion_info_label(finfo, fusions.len - 1)));
     // the labels name the non-empty ops: RESHAPE and VIEW are filtered out
     try std.testing.expectEqualStrings("SOFT_MAX+ARGSORT+GET_ROWS", std.mem.span(ggml_metal_fusion_info_label(finfo, 14)));
-    try std.testing.expectEqualStrings("MUL+ADD", std.mem.span(ggml_metal_fusion_info_label(finfo, 18)));
+    try std.testing.expectEqualStrings("SOFT_MAX+ARGSORT+GET_ROWS+SUM_ROWS+SCALE+DIV", std.mem.span(ggml_metal_fusion_info_label(finfo, 18)));
+    try std.testing.expectEqualStrings("MUL+ADD", std.mem.span(ggml_metal_fusion_info_label(finfo, 32)));
 
     ggml_metal_fusion_info_count_fusion(finfo, &fusions[4]);
     ggml_metal_fusion_info_count_fusion(finfo, &fusions[4]);
