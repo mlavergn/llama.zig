@@ -22,8 +22,8 @@ pub const build_target: [:0]const u8 = options.build_target ++ "";
 
 /// Ports `llama_print_build_info` (build-info.cpp.in:32 @b1b770d90): two lines
 /// on `stream`, which `build-info.h` defaults to `stderr` -- every caller
-/// ported passes `io.cStderr()`.
-pub fn print(version: [*:0]const u8, stream: *anyopaque) void {
+/// ported passes `io.stderr()`.
+pub fn print(version: [*:0]const u8, stream: *io.Stream) void {
     io.fprintf(stream, "version: %s (build %d, commit %s)\n", .{ version, build_number, commit.ptr });
     io.fprintf(stream, "built with %s for %s\n", .{ compiler.ptr, build_target.ptr });
 }

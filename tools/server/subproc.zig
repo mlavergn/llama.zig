@@ -58,7 +58,6 @@ pub const Stream = enum(u1) {
 pub const n_streams = 2;
 
 extern fn dup2(old: c_int, new: c_int) c_int;
-extern fn fflush(f: ?*anyopaque) c_int;
 extern fn fdopen(fd: c_int, mode: [*:0]const u8) ?*anyopaque;
 const F_DUPFD_CLOEXEC: c_int = if (@import("builtin").os.tag.isDarwin()) 67 else 1030;
 
@@ -68,10 +67,13 @@ const F_DUPFD_CLOEXEC: c_int = if (@import("builtin").os.tag.isDarwin()) 67 else
 /// reserved stream is not inherited, so grandchildren get stdout and
 /// stderr of their own.
 pub fn reserveStdout() *anyopaque {
-    _ = fflush(tools.io.cStdout());
-    const fd = fcntl(fileno(tools.io.cStdout()), F_DUPFD_CLOEXEC, @as(c_int, 0));
+    tools.io.flushStdout();
+    // `fileno(stdout)` and `fileno(stderr)`
+    const stdout_fd: c_int = 1;
+    const stderr_fd: c_int = 2;
+    const fd = fcntl(stdout_fd, F_DUPFD_CLOEXEC, @as(c_int, 0));
     common.ggmlAssert(fd >= 0, "server-common.cpp", 2132, "fd >= 0");
-    _ = dup2(fileno(tools.io.cStderr()), fileno(tools.io.cStdout()));
+    _ = dup2(stderr_fd, stdout_fd);
     const f = fdopen(fd, "w");
     common.ggmlAssert(f != null, "server-common.cpp", 2136, "f");
     return f.?;

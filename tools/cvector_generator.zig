@@ -34,7 +34,6 @@ fn ggmlAssert(ok: bool, comptime file: [*:0]const u8, comptime line: c_int, comp
 
 extern fn malloc(n: usize) ?*anyopaque;
 extern fn free(p: ?*anyopaque) void;
-extern fn time(t: ?*i64) i64;
 
 /// Ports `tokens_to_str` (cvector-generator.cpp:36 @b1b770d90).
 fn tokensToStr(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, tokens: []const c.llama_token) ![:0]u8 {
@@ -461,7 +460,7 @@ const PcaModel = struct {
         {
             const n: usize = @intCast(c.ggml_nelements(self.dev_eigenvector));
             const random_vec = try a.alloc(f32, n);
-            var generator = MinstdRand.init(@truncate(@as(u64, @bitCast(time(null)))));
+            var generator = MinstdRand.init(@truncate(@as(u64, @bitCast(tc.clock.timeSeconds()))));
             var sum_sqr: f32 = 0.0; // for normalizing random_vec
             for (random_vec) |*v| {
                 const f = generator.uniform01();
@@ -701,7 +700,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     params.cb_eval_user_data = &cb_data;
     params.warmup = false;
 
-    tc.build_info.print(c.llama_version(), tc.io.cStderr());
+    tc.build_info.print(c.llama_version(), tc.io.stderr());
     c.llama_backend_init();
     c.llama_numa_init(params.numa);
 
@@ -797,6 +796,9 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
 }
 
 pub fn main(init: std.process.Init) !u8 {
+    tc.io.begin();
+    tc.env.set(init.environ_map);
+    defer tc.io.end();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
     return run(init, arena, argv);

@@ -393,9 +393,9 @@ var media_marker: [:0]const u8 = "";
 
 fn initMediaMarker() void {
     // allow user to pin a reproducible marker via env var
-    if (std.c.getenv("LLAMA_MEDIA_MARKER")) |env| {
-        if (env[0] != 0) {
-            media_marker = std.heap.c_allocator.dupeSentinel(u8, std.mem.span(env), 0) catch "";
+    if (tools.env.get("LLAMA_MEDIA_MARKER")) |env| {
+        if (env.len != 0) {
+            media_marker = std.heap.c_allocator.dupeSentinel(u8, env, 0) catch "";
             return;
         }
     }

@@ -143,7 +143,7 @@ fn proxyRequest(req: *const http.Req, method: []const u8) !*http.Res {
     }
 
     // test-only escape hatch
-    const allow_private = if (std.c.getenv("LLAMA_SERVER_DEBUG_PROXY_ALLOW_PRIVATE")) |v| v[0] != 0 else false;
+    const allow_private = if (tc.env.get("LLAMA_SERVER_DEBUG_PROXY_ALLOW_PRIVATE")) |v| v.len != 0 else false;
     const resolved = try oaicompat.serverResolvePublicAddr(a, parsed_url.host, allow_private);
     const res = try proxy.Proxy.create(
         method,

@@ -361,9 +361,9 @@ pub const Meta = struct {
 
         // unified binary dispatches by subcommand, re-inject it right after the
         // binary path so the child starts as 'llama serve ...' not 'llama ...'
-        if (std.c.getenv("LLAMA_APP_CMD")) |app_cmd| {
-            if (app_cmd[0] != 0 and bin_path.len != 0) {
-                try args.insert(a, 1, try a.dupe(u8, std.mem.span(app_cmd)));
+        if (tc.env.get("LLAMA_APP_CMD")) |app_cmd| {
+            if (app_cmd.len != 0 and bin_path.len != 0) {
+                try args.insert(a, 1, try a.dupe(u8, app_cmd));
             }
         }
         self.args = args.items;
@@ -1434,7 +1434,7 @@ pub const Models = struct {
 
         try self.unfinished_downloads.load();
         try self.loadModels();
-        self.debug_fake_timing = std.c.getenv("LLAMA_SERVER_DEBUG_FAKE_TIMING") != null and std.c.getenv("LLAMA_SERVER_DEBUG_FAKE_TIMING").?[0] != 0;
+        self.debug_fake_timing = if (tc.env.get("LLAMA_SERVER_DEBUG_FAKE_TIMING")) |v| v.len != 0 else false;
     }
 
     /// The destructor: the monitor is joined first, as the C++'s member
@@ -3069,13 +3069,12 @@ pub const Role = struct {
     /// Ports `is_managed_by_router` (server-common.cpp:2304 @b1b770d90):
     /// true if the current process was spawned by a router.
     pub fn isManagedByRouter(_: *const Role) bool {
-        return std.c.getenv(env_router_port) != null;
+        return tc.env.get(env_router_port) != null;
     }
 
     /// Ports `get_role` (server-common.cpp:2308 @b1b770d90).
     pub fn getRole(_: *const Role) RoleType {
-        const role = std.c.getenv(env_child_role);
-        return roleTypeFromStr(if (role) |r| std.mem.span(r) else "");
+        return roleTypeFromStr(tc.env.get(env_child_role) orelse "");
     }
 
     /// `std::function<void(int)>` for `setup`'s shutdown handler.
@@ -3127,7 +3126,7 @@ pub const Role = struct {
                 }
                 if (eof) {
                     srv(.inf, "operator()", "%s", .{@as([*:0]const u8, "EOF on stdin detected, forcing shutdown...\n")});
-                    std.c.exit(1);
+                    tc.io.exitFlushed(1);
                 }
             }
         }.run, .{shutdown_handler}) catch null;

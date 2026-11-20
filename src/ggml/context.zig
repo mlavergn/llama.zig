@@ -25,7 +25,16 @@ const types = @import("types.zig");
 const c = impl.c;
 
 extern fn vsnprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ap: impl.CVaList) c_int;
-extern fn printf(fmt: [*:0]const u8, ...) c_int;
+extern fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
+
+/// `printf`, to the stdout the tools share (`sync.stdio`). A line longer
+/// than the buffer is cut; no line `ggml_print_object` prints comes close.
+fn printf(comptime fmt: [*:0]const u8, args: anytype) void {
+    var buf: [512]u8 = undefined;
+    const n = @call(.auto, snprintf, .{ &buf, buf.len, fmt } ++ args);
+    if (n <= 0) return;
+    @import("sync").stdio.stdout().write(buf[0..@min(@as(usize, @intCast(n)), buf.len - 1)]);
+}
 
 /// True when the C build would leave `NDEBUG` unset. `ggml_new_object` aborts
 /// rather than returning null in that case, and the difference is observable.
@@ -515,24 +524,23 @@ comptime {
 
 /// Ports `ggml_print_object` (ggml.c:1279 @b1b770d90).
 export fn ggml_print_object(obj: *const impl.Object) void {
-    _ = printf(
-        "%s: type = %d, offset = %zu, size = %zu, next = %p\n",
-        "ggml_print_object",
+    printf("%s: type = %d, offset = %zu, size = %zu, next = %p\n", .{
+        @as([*:0]const u8, "ggml_print_object"),
         obj.type,
         obj.offs,
         obj.size,
         obj.next,
-    );
+    });
 }
 
 /// Ports `ggml_print_objects` (ggml.c:1284 @b1b770d90).
 export fn ggml_print_objects(ctx: *const Context) void {
-    _ = printf("%s: objects in context %p:\n", "ggml_print_objects", ctx);
+    printf("%s: objects in context %p:\n", .{ @as([*:0]const u8, "ggml_print_objects"), ctx });
     var obj = ctx.objects_begin;
     while (obj) |o| : (obj = o.next) {
         ggml_print_object(o);
     }
-    _ = printf("%s: --- end ---\n", "ggml_print_objects");
+    printf("%s: --- end ---\n", .{@as([*:0]const u8, "ggml_print_objects")});
 }
 
 // -----------------------------------------------------------------------------

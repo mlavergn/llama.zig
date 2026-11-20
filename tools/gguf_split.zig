@@ -140,7 +140,7 @@ fn parseEx(argv: []const [:0]const u8, params: *Params, err: *ParseError, arena:
             printUsage(argv[0].ptr);
             common.cExit(0);
         } else if (std.mem.eql(u8, arg, "--version")) {
-            common.build_info.print(c.llama_version(), common.io.cStderr());
+            common.build_info.print(c.llama_version(), common.io.stderr());
             common.cExit(0);
         } else if (std.mem.eql(u8, arg, "--dry-run")) {
             arg_found = true;
@@ -659,6 +659,9 @@ fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
 
 /// Ports `main` (gguf-split.cpp:620 @b1b770d90).
 pub fn main(init: std.process.Init) !void {
+    common.io.begin();
+    common.env.set(init.environ_map);
+    defer common.io.end();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
 

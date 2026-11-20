@@ -206,7 +206,7 @@ fn loadImatrix(a: std.mem.Allocator, imatrix_file: [:0]const u8, imatrix_dataset
         common.cExit(1);
     }
 
-    const trace = std.c.getenv("LLAMA_TRACE") != null;
+    const trace = common.env.get("LLAMA_TRACE") != null;
     const names = try loaded.sortedNames(a);
     for (names) |name| {
         const entry = loaded.entries.get(name).?;
@@ -662,7 +662,7 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
         }
     }
 
-    common.build_info.print(c.llama_version(), common.io.cStderr());
+    common.build_info.print(c.llama_version(), common.io.stderr());
 
     if (params.dry_run) {
         io.eprintf("%s: calculating quantization size for '%s' as %s", .{ func, fname_inp.ptr, ftype_z.ptr });
@@ -705,6 +705,9 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
 
 /// Ports `main` (tools/quantize/main.cpp:3 @b1b770d90).
 pub fn main(init: std.process.Init) !u8 {
+    common.io.begin();
+    common.env.set(init.environ_map);
+    defer common.io.end();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
     return quantize(arena, init.io, argv);

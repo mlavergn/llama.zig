@@ -38,7 +38,6 @@ comptime {
 const mtmd_port = @import("mtmd");
 
 extern fn setlocale(cat: c_int, locale: [*:0]const u8) ?[*:0]const u8;
-extern fn getenv(name: [*:0]const u8) ?[*:0]const u8;
 extern fn atexit(f: *const fn () callconv(.c) void) c_int;
 extern fn _exit(code: c_int) noreturn;
 
@@ -85,7 +84,7 @@ fn sigintHandler(signo: std.posix.SIG) callconv(.c) void {
 /// Ports `inject_test_response_marker` (mtmd-cli.cpp:69 @b1b770d90): only
 /// used by upstream's tests.sh to capture the response.
 fn injectTestResponseMarker() void {
-    if (getenv("MTMD_TEST_RESPONSE_MARKER")) |env| log.out("%s\n", .{env});
+    if (tc.env.get("MTMD_TEST_RESPONSE_MARKER")) |env| log.out("%s\n", .{env.ptr});
 }
 
 /// Ports `mtmd_cli_context` (mtmd-cli.cpp:76 @b1b770d90).
@@ -217,7 +216,7 @@ const CliContext = struct {
                 mparams.image_min_tokens = @min(mparams.image_min_tokens, n_ubatch);
             }
         }
-        if (getenv("MTMD_DEBUG_GRAPH") != null) {
+        if (tc.env.get("MTMD_DEBUG_GRAPH") != null) {
             log.err("MTMD_DEBUG_GRAPH needs common_debug_cb_eval, which this port does not have\n", .{});
             tc.cExit(1);
         }
@@ -758,6 +757,9 @@ fn consoleCtrlHandler(ctrl_type: u32) callconv(.winapi) c_int {
 
 /// Ports `main` (mtmd-cli.cpp:520 @b1b770d90).
 pub fn main(init: std.process.Init) !u8 {
+    tc.io.begin();
+    tc.env.set(init.environ_map);
+    defer tc.io.end();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
     return run(init, arena, argv);

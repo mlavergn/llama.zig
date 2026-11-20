@@ -61,13 +61,15 @@ fn getKvF32(ctx_gguf: ?*c.gguf_context, key: [*:0]const u8) f32 {
 
 const Out = tc.file.Out;
 
-// The C's writes are unchecked: `fout`'s `failbit` exceptions would throw,
-// and the port has never raised them, so a failed write is dropped here as
-// there.
+/// `fout`'s `failbit` exception, which a failed write raises as a failed
+/// open does, to `main`, which prints it and exits 1.
+fn writeFailed() Throw {
+    return throw("ios_base::clear: unspecified iostream_category error", .{});
+}
 
 /// Ports `zeros` (export-lora.cpp:32 @b1b770d90).
-fn zeros(f: *Out, n: usize) void {
-    f.zeros(n) catch {};
+fn zeros(f: *Out, n: usize) !void {
+    f.zeros(n) catch return writeFailed();
 }
 
 /// Ports `ggml_ne_string` (export-lora.cpp:39 @b1b770d90).
@@ -271,7 +273,7 @@ const MergeCtx = struct {
         }
 
         // placeholder for the meta data
-        zeros(&self.fout, c.gguf_get_meta_size(self.ctx_out));
+        try zeros(&self.fout, c.gguf_get_meta_size(self.ctx_out));
 
         // process base model tensors
         var n_merged: usize = 0;
@@ -288,8 +290,8 @@ const MergeCtx = struct {
         {
             const data = try a.alloc(u8, c.gguf_get_meta_size(self.ctx_out));
             c.gguf_get_meta_data(self.ctx_out, data.ptr);
-            self.fout.seek(0) catch {};
-            self.fout.write(data) catch {};
+            self.fout.seek(0) catch return writeFailed();
+            self.fout.write(data) catch return writeFailed();
         }
 
         io.printf("%s : merged %zu tensors with lora adapters\n", .{ "run_merge", n_merged });
@@ -301,8 +303,8 @@ const MergeCtx = struct {
         io.printf("%s :  %s [%s]\n", .{ "copy_tensor", @as([*:0]const u8, @ptrCast(&base.name)), (try neString(self.a, base)).ptr });
         const len = c.ggml_nbytes(base);
         try self.base_model.readTensorData(self.a, std.mem.sliceTo(&base.name, 0), &self.read_buf);
-        self.fout.write(self.read_buf.items[0..len]) catch {};
-        zeros(&self.fout, pad(len) - len);
+        self.fout.write(self.read_buf.items[0..len]) catch return writeFailed();
+        try zeros(&self.fout, pad(len) - len);
     }
 
     /// Ports `merge_tensor` (export-lora.cpp:287 @b1b770d90), a member of `lora_merge_ctx`.
@@ -402,8 +404,8 @@ const MergeCtx = struct {
             const len = c.ggml_nbytes(result);
             if (self.read_buf.items.len < len) try self.read_buf.resize(a, len);
             c.ggml_backend_tensor_get(result, self.read_buf.items.ptr, 0, len);
-            self.fout.write(self.read_buf.items[0..len]) catch {};
-            zeros(&self.fout, pad(len) - len);
+            self.fout.write(self.read_buf.items[0..len]) catch return writeFailed();
+            try zeros(&self.fout, pad(len) - len);
         }
 
         c.ggml_free(ctx);
@@ -459,6 +461,9 @@ fn run(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u8 {
 }
 
 pub fn main(init: std.process.Init) !u8 {
+    tc.io.begin();
+    tc.env.set(init.environ_map);
+    defer tc.io.end();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
     return run(arena, init.io, argv);

@@ -228,6 +228,9 @@ fn ggmlAbort(file: [*:0]const u8, line: c_int, fmt: [*:0]const u8, ...) callconv
 /// is formatted: exported as `ggml_zig_abort_message` for `varargs.c` where
 /// that file defines `ggml_abort`.
 fn abortWith(message: [*:0]const u8) callconv(.c) noreturn {
+    // `fflush(stdout)`, for what a tool wrote through `sync.stdio`; the C
+    // library's own stdout was flushed before the message was formatted
+    @import("sync").stdio.stdout().flush();
     if (abort_callback) |callback| {
         callback(message);
     } else {

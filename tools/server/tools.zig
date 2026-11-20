@@ -87,8 +87,7 @@ pub const ListKind = enum { files, dirs, all };
 /// once, at first use; nothing here sets it, so reading it each time
 /// gives the same answer.
 fn homeDir() []const u8 {
-    const h = std.c.getenv("HOME") orelse return "";
-    return std.mem.span(h);
+    return tc.env.get("HOME") orelse "";
 }
 
 /// Ports `expand_home` (server-tools.cpp:128 @b1b770d90): a leading `~` or `~/`.
@@ -2040,9 +2039,9 @@ const ContainerRuntime = struct {
 /// `/tmp`, which must be a directory; empty on an error.
 fn tempDirectoryPath() []const u8 {
     var p: []const u8 = "/tmp";
-    for ([_][*:0]const u8{ "TMPDIR", "TMP", "TEMP", "TEMPDIR" }) |name| {
-        if (std.c.getenv(name)) |v| {
-            p = std.mem.span(v);
+    for ([_][:0]const u8{ "TMPDIR", "TMP", "TEMP", "TEMPDIR" }) |name| {
+        if (tc.env.get(name)) |v| {
+            p = v;
             break;
         }
     }

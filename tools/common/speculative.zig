@@ -33,6 +33,7 @@
 //! those names through libllama's module.
 
 const std = @import("std");
+const env_mod = @import("env.zig");
 const c = @import("tools_h");
 const llama = @import("llama");
 const params_mod = @import("params.zig");
@@ -499,7 +500,7 @@ pub const NgramMod = struct {
 
         const sinfos = gpa.alloc(SeqInfo, base.n_seq) catch oom();
         @memset(sinfos, .{});
-        return .{ .params = p, .mod = mod, .verbose = c.getenv("LLAMA_TRACE") != null, .sinfos = sinfos };
+        return .{ .params = p, .mod = mod, .verbose = env_mod.get("LLAMA_TRACE") != null, .sinfos = sinfos };
     }
 
     fn deinit(self: *NgramMod) void {

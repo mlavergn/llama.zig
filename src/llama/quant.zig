@@ -1575,6 +1575,8 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
 
             impl.logInfo("converting to %s .. ", .{typeName(new_type)});
             _ = c.fflush(impl.cStdout());
+            // and what a tool wrote through `sync.stdio`
+            @import("sync").stdio.stdout().flush();
 
             const n_per_row = tensor.ne[0];
             const nrows_per_expert = tensor.ne[1];

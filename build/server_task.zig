@@ -88,6 +88,8 @@ pub fn modules(b: *std.Build, opts: Options, optimize: std.builtin.OptimizeMode)
     // libllama's module, for what `common/speculative.cpp` reaches through
     // `llama-ext.h` (C++ linkage, so not in `tools_h`) and for `libcxx`.
     common_module.addImport("llama", opts.reference.llama.root_module);
+    // `io.zig` writes through `sync.stdio`, the one instance libggml flushes.
+    common_module.addImport("sync", llamacpp.syncOf(opts.reference.llama.root_module));
 
     // `json` is `cli_fit`'s `cli/json/` under the name `cli/common_chat/`
     // imports (`tools/server/json_module.zig` says why).

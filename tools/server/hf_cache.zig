@@ -336,7 +336,7 @@ fn getCacheDirectory() Error![]const u8 {
     defer cache_dir_mutex.unlock();
     if (cache_dir_value) |v| return v;
     const a = std.heap.c_allocator;
-    const Entry = struct { var_: [*:0]const u8, path: []const u8 };
+    const Entry = struct { var_: [:0]const u8, path: []const u8 };
     const entries = [_]Entry{
         .{ .var_ = "LLAMA_CACHE", .path = "" },
         .{ .var_ = "HF_HUB_CACHE", .path = "" },
@@ -346,8 +346,7 @@ fn getCacheDirectory() Error![]const u8 {
         .{ .var_ = "HOME", .path = ".cache/huggingface/hub" },
     };
     for (entries) |entry| {
-        if (std.c.getenv(entry.var_)) |p| {
-            const base = std.mem.span(p);
+        if (tc.env.get(entry.var_)) |base| {
             if (base.len == 0) continue;
             cache_dir_value = if (entry.path.len == 0) try a.dupe(u8, base) else try pathJoin(a, base, entry.path);
             return cache_dir_value.?;

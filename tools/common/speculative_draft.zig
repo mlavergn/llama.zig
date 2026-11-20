@@ -19,6 +19,7 @@
 //! before decoding, and the decoder reads the new row -- as upstream's does.
 
 const std = @import("std");
+const env_mod = @import("env.zig");
 const c = @import("tools_h");
 const S = @import("speculative.zig");
 const params_mod = @import("params.zig");
@@ -1095,12 +1096,12 @@ pub const DFlash = struct {
         // the device buffer keeps layers in ascending id order, the fc input expects target_layer_ids order
         var use_dev_features = false;
         {
-            const env = c.getenv("LLAMA_DFLASH_DEV");
+            const env = env_mod.get("LLAMA_DFLASH_DEV");
             const ascending = for (1..target_layer_ids_n) |k| {
                 if (target_layer_ids[k - 1] >= target_layer_ids[k]) break false;
             } else true;
 
-            use_dev_features = !is_lilicorr and ascending and (env == null or c.atoi(env) != 0);
+            use_dev_features = !is_lilicorr and ascending and (env == null or c.atoi(env.?.ptr) != 0);
             if (use_dev_features) {
                 ext.setEmbeddingsLayerInpDev(ctx_tgt, true);
                 use_dev_features = ext.supportsEmbdRow(ctx_dft);

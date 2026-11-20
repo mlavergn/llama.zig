@@ -18,6 +18,7 @@
 
 const std = @import("std");
 const fs_stat = @import("fs_stat.zig");
+const file = @import("file.zig");
 const c = @import("tools_h");
 const arg = @import("arg.zig");
 const params_mod = @import("params.zig");
@@ -120,12 +121,14 @@ fn createDirectories(a: std.mem.Allocator, path: []const u8) !c_int {
             .directory => {},
         }
     }
-    // `__create_directory`
-    if (std.c.mkdir(pz.ptr, 0o777) == 0) return 0;
-    const mec = std.c._errno().*;
-    if (mec != @backingInt(std.c.E.EXIST)) return mec;
-    var ignored: c_int = 0;
-    if (statOf(pz, &ignored) != .directory) return mec;
+    // `__create_directory`: `mkdir(p, 0777)`, its failure as an `errno`
+    std.Io.Dir.cwd().createDir(file.defaultIo(), pz, .default_dir) catch |err| {
+        const mec = file.errnoOf(err) orelse @backingInt(std.c.E.IO);
+        if (mec != @backingInt(std.c.E.EXIST)) return mec;
+        var ignored: c_int = 0;
+        if (statOf(pz, &ignored) != .directory) return mec;
+        return 0;
+    };
     return 0;
 }
 

@@ -1,17 +1,17 @@
-//! `stat` and `lstat`, as the ported tools ask them, on every POSIX target.
+//! `stat` and `lstat`, as the ported tools ask them, on `std.Io`.
 //!
 //! # Provenance
 //!
 //! **Not a port of a file.** Upstream calls `stat` through libc and
-//! `std::filesystem`; the port did too, through `std.c.Stat`, which is
-//! `void` on Linux (Zig 0.17 declares no glibc `struct stat`), so nothing
-//! that named it compiled there. On Linux this asks the kernel with
-//! `statx`, as `tools/quantize.zig`'s `sameFile` already did, which is what
-//! glibc's own `stat` does underneath; on Windows the CRT's `_wstat64`, the
-//! path widened from UTF-8; elsewhere it is libc's `stat`.
+//! `std::filesystem`; this asks `std.Io.Dir.statFile`, on every target, and
+//! answers in `stat`'s terms: the file type bits of `st_mode`, the size, and
+//! on failure the `errno` (`file.errnoOf`). On Windows the C runtime has no
+//! `lstat`, so a symlink is always followed, and MinGW's `stat` strips a
+//! trailing separator, short of a root; both are kept.
 
 const std = @import("std");
 const builtin = @import("builtin");
+const file = @import("file.zig");
 
 /// The file type bits of `st_mode`: the same on Linux, Darwin and the CRT.
 pub const IFMT: u32 = 0o170000;
@@ -19,53 +19,12 @@ pub const IFDIR: u32 = 0o040000;
 pub const IFREG: u32 = 0o100000;
 pub const IFLNK: u32 = 0o120000;
 
-/// What the tools read of a `struct stat`.
+/// What the tools read of a `struct stat`: the file type bits of `st_mode`
+/// (no permission bits) and the size.
 pub const Info = struct {
     mode: u32 = 0,
     size: u64 = 0,
 };
-
-extern "c" fn lstat(path: [*:0]const u8, buf: *std.c.Stat) c_int;
-
-/// The CRT's `struct _stat64`.
-const WinStat = extern struct {
-    dev: u32,
-    ino: u16,
-    mode: u16,
-    nlink: i16,
-    uid: i16,
-    gid: i16,
-    rdev: u32,
-    size: i64,
-    atime: i64,
-    mtime: i64,
-    ctime: i64,
-};
-
-extern "c" fn _wstat64(path: [*:0]const u16, buf: *WinStat) c_int;
-extern "c" fn _errno() *c_int;
-
-/// `ENOENT`, for a path `_wstat64` cannot be asked about.
-const win_enoent: c_int = 2;
-
-/// `stat` on Windows. The CRT has no `lstat`, so a symlink is always
-/// followed; and it refuses a directory named with a trailing separator,
-/// which MinGW's own `stat` strips, so this does too, short of a root.
-fn statWindows(path: [*:0]const u8, out: *Info) c_int {
-    var name: []const u8 = std.mem.span(path);
-    while (name.len > 1 and (name[name.len - 1] == '/' or name[name.len - 1] == '\\') and name[name.len - 2] != ':') {
-        name = name[0 .. name.len - 1];
-    }
-    var wide: [std.os.windows.PATH_MAX_WIDE + 1]u16 = undefined;
-    if (name.len >= wide.len) return win_enoent;
-    const n = std.unicode.utf8ToUtf16Le(&wide, name) catch return win_enoent;
-    wide[n] = 0;
-    var st: WinStat = undefined;
-    const wide_path: [*:0]const u16 = @ptrCast(&wide);
-    if (_wstat64(wide_path, &st) != 0) return _errno().*;
-    out.* = .{ .mode = st.mode, .size = @intCast(st.size) };
-    return 0;
-}
 
 /// `stat(path)`, or `lstat(path)` when `follow` is false.
 ///
@@ -75,21 +34,25 @@ fn statWindows(path: [*:0]const u8, out: *Info) c_int {
 ///   out    - receives the mode and size on success
 /// Return: 0 on success, else the `errno` value `stat` would have set.
 pub fn statErrno(path: [*:0]const u8, follow: bool, out: *Info) c_int {
-    if (comptime builtin.os.tag == .linux) {
-        const linux = std.os.linux;
-        var sx: linux.Statx = undefined;
-        const flags: u32 = if (follow) 0 else linux.AT.SYMLINK_NOFOLLOW;
-        const rc = linux.statx(linux.AT.FDCWD, path, flags, .{ .TYPE = true, .MODE = true, .SIZE = true }, &sx);
-        const e = linux.errno(rc);
-        if (e != .SUCCESS) return @intCast(@backingInt(e));
-        out.* = .{ .mode = sx.mode, .size = sx.size };
-        return 0;
+    var name: []const u8 = std.mem.span(path);
+    if (comptime builtin.os.tag == .windows) {
+        while (name.len > 1 and (name[name.len - 1] == '/' or name[name.len - 1] == '\\') and name[name.len - 2] != ':') {
+            name = name[0 .. name.len - 1];
+        }
     }
-    if (comptime builtin.os.tag == .windows) return statWindows(path, out);
-    var st: std.c.Stat = undefined;
-    const rc = if (follow) std.c.stat(path, &st) else lstat(path, &st);
-    if (rc != 0) return std.c._errno().*;
-    out.* = .{ .mode = @intCast(st.mode), .size = @intCast(st.size) };
+    const follow_symlinks = follow or builtin.os.tag == .windows;
+    const st = std.Io.Dir.cwd().statFile(file.defaultIo(), name, .{ .follow_symlinks = follow_symlinks }) catch |e| {
+        return file.errnoOf(e) orelse @backingInt(std.c.E.IO);
+    };
+    out.* = .{
+        .mode = switch (st.kind) {
+            .directory => IFDIR,
+            .file => IFREG,
+            .sym_link => IFLNK,
+            else => 0,
+        },
+        .size = st.size,
+    };
     return 0;
 }
 
@@ -115,5 +78,19 @@ test "stat classifies a directory and a missing path" {
     const dir = stat(".", true) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqual(IFDIR, dir.mode & IFMT);
     var info: Info = .{};
-    try std.testing.expect(statErrno("/nonexistent/llamazig", true, &info) != 0);
+    try std.testing.expectEqual(@as(c_int, @backingInt(std.c.E.NOENT)), statErrno("/nonexistent/llamazig", true, &info));
+}
+
+test "a file is regular, with its size" {
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var buf: [64]u8 = undefined;
+    const path = try std.fmt.bufPrintSentinel(&buf, ".zig-cache/tmp/{s}/f", .{&tmp.sub_path}, 0);
+    var out = try file.Out.create(io, path);
+    try out.write("12345");
+    out.close(io);
+    const info = stat(path, true) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(IFREG, info.mode & IFMT);
+    try std.testing.expectEqual(@as(u64, 5), info.size);
 }

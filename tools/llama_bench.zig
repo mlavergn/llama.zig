@@ -33,20 +33,14 @@ comptime {
 
 const gpa = std.heap.c_allocator;
 
-extern fn fprintf(stream: *anyopaque, format: [*:0]const u8, ...) c_int;
-extern fn fflush(stream: ?*anyopaque) c_int;
 extern fn rand() c_int;
 extern fn strtoull(s: [*:0]const u8, end: *?[*:0]const u8, base: c_int) c_ulonglong;
-extern fn time(t: ?*i64) i64;
-extern fn gmtime(t: *const i64) ?*anyopaque;
-extern fn strftime(buf: [*]u8, max: usize, format: [*:0]const u8, tm: ?*const anyopaque) usize;
 extern fn setlocale(category: c_int, locale: ?[*:0]const u8) ?[*:0]const u8;
-extern fn sleep(seconds: c_uint) c_uint;
 
 const Override = c.llama_model_tensor_buft_override;
 
-fn fput(f: *anyopaque, comptime fmt: [*:0]const u8, args: anytype) void {
-    _ = @call(.auto, fprintf, .{ f, fmt } ++ args);
+fn fput(f: *io.Stream, comptime fmt: [*:0]const u8, args: anytype) void {
+    io.fprintf(f, fmt, args);
 }
 
 /// `GGML_ASSERT`, which upstream keeps in every build mode.
@@ -677,7 +671,7 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
         try printUsage(a, argv[0].ptr);
         exitWith(0);
     } else if (std.mem.eql(u8, cur, "--version")) {
-        tc.build_info.print(c.llama_version(), tc.io.cStderr());
+        tc.build_info.print(c.llama_version(), tc.io.stderr());
         exitWith(0);
     } else if (eql(cur, &.{ "-m", "--model" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
@@ -915,7 +909,7 @@ fn parseCmdParams(a: std.mem.Allocator, argv: []const [:0]const u8) !CmdParams {
     var argbuf: []const u8 = "";
     var invalid_param = false;
 
-    if (std.c.getenv("HF_TOKEN")) |env| params.hf_token = std.mem.span(env);
+    if (tc.env.get("HF_TOKEN")) |env| params.hf_token = env;
 
     var i: usize = 1;
     outer: while (i < argv.len) : (i += 1) {
@@ -1246,8 +1240,8 @@ const Test = struct {
         _ = c.llama_model_desc(lmodel, &buf, buf.len);
         const model_type = try a.dupeSentinel(u8, std.mem.sliceTo(&buf, 0), 0);
         // RFC 3339 date-time format
-        const t = time(null);
-        const n = strftime(&buf, buf.len, "%FT%TZ", gmtime(&t));
+        var time_buf: [32]u8 = undefined;
+        const test_time = try tc.clock.isoUtc(&time_buf, tc.clock.timeSeconds());
         return .{
             .cpu_info = try devInfo(a, false),
             .gpu_info = try devInfo(a, true),
@@ -1255,7 +1249,7 @@ const Test = struct {
             .model_type = model_type,
             .model_size = c.llama_model_size(lmodel),
             .model_n_params = c.llama_model_n_params(lmodel),
-            .test_time = try a.dupeSentinel(u8, buf[0..n], 0),
+            .test_time = try a.dupeSentinel(u8, test_time, 0),
         };
     }
 
@@ -1500,7 +1494,7 @@ fn fieldDisplayName(field: []const u8) []const u8 {
 /// Ports `printer` (llama-bench.cpp:1735 @b1b770d90) and its five subclasses.
 const Printer = struct {
     format: OutputFormat,
-    fout: *anyopaque,
+    fout: *io.Stream,
     a: std.mem.Allocator,
     /// `json_printer::first`.
     first: bool = true,
@@ -1643,7 +1637,7 @@ const Printer = struct {
                 fput(f, "    \"samples_ns\": [ %s ],\n", .{(try join(a, u64, t.samples_ns.items, ", ")).ptr});
                 fput(f, "    \"samples_ts\": [ %s ]\n", .{(try join(a, f64, try t.getTs(a), ", ")).ptr});
                 fput(f, "  }", .{});
-                _ = fflush(f);
+                f.flush();
             },
             .jsonl => {
                 fput(f, "{", .{});
@@ -1655,7 +1649,7 @@ const Printer = struct {
                 fput(f, "\"samples_ns\": [ %s ],", .{(try join(a, u64, t.samples_ns.items, ", ")).ptr});
                 fput(f, "\"samples_ts\": [ %s ]", .{(try join(a, f64, try t.getTs(a), ", ")).ptr});
                 fput(f, "}\n", .{});
-                _ = fflush(f);
+                f.flush();
             },
             .sql => {
                 fput(f, "INSERT INTO llama_bench (%s) ", .{(try join(a, []const u8, &Test.fields, ", ")).ptr});
@@ -1860,8 +1854,8 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     }
 
     // initialize printer
-    var p: ?Printer = if (params.output_format == .none) null else .{ .format = params.output_format, .fout = io.cStdout(), .a = a };
-    var p_err: ?Printer = if (params.output_format_stderr == .none) null else .{ .format = params.output_format_stderr, .fout = io.cStderr(), .a = a };
+    var p: ?Printer = if (params.output_format == .none) null else .{ .format = params.output_format, .fout = io.stdout(), .a = a };
+    var p_err: ?Printer = if (params.output_format_stderr == .none) null else .{ .format = params.output_format_stderr, .fout = io.stderr(), .a = a };
 
     if (p) |*pr| try pr.printHeader(&params);
     if (p_err) |*pr| try pr.printHeader(&params);
@@ -1954,7 +1948,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
         c.llama_memory_clear(c.llama_get_memory(ctx), false);
 
         // cool off before the test
-        if (params.delay != 0) _ = sleep(@intCast(params.delay));
+        if (params.delay != 0) try tc.clock.sleepSeconds(@intCast(params.delay));
 
         var tpp = c.ggml_threadpool_params_default(inst.n_threads);
         if (!tc.arg_options.parseCpuMask(inst.cpu_mask, &tpp.cpumask)) {
@@ -2033,11 +2027,11 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
 
         if (p) |*pr| {
             try pr.printTest(&t);
-            _ = fflush(pr.fout);
+            pr.fout.flush();
         }
         if (p_err) |*pr| {
             try pr.printTest(&t);
-            _ = fflush(pr.fout);
+            pr.fout.flush();
         }
 
         c.llama_perf_context_print(ctx);
@@ -2059,6 +2053,9 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
 
 /// Ports `main` (tools/llama-bench/main.cpp:3 @b1b770d90).
 pub fn main(init: std.process.Init) !u8 {
+    tc.io.begin();
+    tc.env.set(init.environ_map);
+    defer tc.io.end();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
     return run(init, arena, argv);

@@ -23,6 +23,7 @@
 //! external dependency.
 
 const std = @import("std");
+const env_mod = @import("env.zig");
 const builtin = @import("builtin");
 const c = @import("tools_h");
 const params_mod = @import("params.zig");
@@ -73,7 +74,6 @@ extern fn snprintf(buf: ?[*]u8, size: usize, format: [*:0]const u8, ...) c_int;
 extern fn strtol(s: [*:0]const u8, end: *?[*:0]const u8, base: c_int) c_long;
 extern fn strtoul(s: [*:0]const u8, end: *?[*:0]const u8, base: c_int) c_ulong;
 extern fn strtof(s: [*:0]const u8, end: *?[*:0]const u8) f32;
-extern fn getenv(name: [*:0]const u8) ?[*:0]const u8;
 
 fn errnoRange() bool {
     return std.c._errno().* == @backingInt(std.c.E.RANGE);
@@ -213,10 +213,10 @@ pub const Arg = struct {
             // for compatibility, we need to check LLAMA_ARG_NO_ env as well
             var buf: [256]u8 = undefined;
             if (self.negEnv(&buf)) |neg| {
-                if (getenv(neg.ptr) != null) return "0"; // falsey
+                if (env_mod.get(neg) != null) return "0"; // falsey
             }
         }
-        if (getenv(env.ptr)) |v| return std.mem.span(v);
+        if (env_mod.get(env)) |v| return v;
         return null;
     }
 
@@ -226,10 +226,10 @@ pub const Arg = struct {
         if (self.args_neg.len != 0) {
             var buf: [256]u8 = undefined;
             if (self.negEnv(&buf)) |neg| {
-                if (getenv(neg.ptr) != null) return true;
+                if (env_mod.get(neg) != null) return true;
             }
         }
-        return getenv(env.ptr) != null;
+        return env_mod.get(env) != null;
     }
 
     /// Ports `to_string` (arg.cpp:161 @b1b770d90), a member of `common_arg`: the option
@@ -442,9 +442,9 @@ fn refuseSystemConfig(a: std.mem.Allocator) !void {
 
 /// `common_get_env` (common/common.cpp:949 @b1b770d90), read as a path: an
 /// unset or empty variable is an empty path.
-fn nonEmptyEnv(name: [*:0]const u8) ?[*:0]const u8 {
-    const v = getenv(name) orelse return null;
-    return if (v[0] == 0) null else v;
+fn nonEmptyEnv(name: [:0]const u8) ?[*:0]const u8 {
+    const v = env_mod.get(name) orelse return null;
+    return if (v.len == 0) null else v.ptr;
 }
 
 extern fn getpwuid(uid: c_uint) ?*const anyopaque;
@@ -470,9 +470,8 @@ fn pwDir(pw: *const anyopaque) ?[*:0]const u8 {
         @as(*const Glibc, @ptrCast(@alignCast(pw))).pw_dir;
 }
 
-extern fn exit(code: c_int) noreturn;
 fn exitC(code: c_int) noreturn {
-    exit(code);
+    io.exitFlushed(code);
 }
 
 /// Ports `postprocess_cpu_params` (common/common.cpp:309 @b1b770d90).

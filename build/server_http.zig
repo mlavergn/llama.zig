@@ -116,6 +116,7 @@ pub fn add(b: *std.Build, opts: Options) void {
     common_module.addImport("tools_h", tools_h_module);
     common_module.addOptions("build_info", build_info);
     common_module.addImport("cli_fit", fit_module);
+    common_module.addImport("sync", llamacpp.syncOf(opts.reference.llama.root_module));
 
     const http_module = b.createModule(.{ .root_source_file = b.path("tools/server/http.zig"), .target = opts.target, .optimize = safe, .link_libc = true });
     http_module.addImport("tools_common", common_module);

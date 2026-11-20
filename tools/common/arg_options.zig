@@ -42,8 +42,6 @@ const SamplerType = params_mod.SamplerType;
 const throw = arg.throw;
 const throwStr = arg.throwStr;
 
-extern fn exit(code: c_int) noreturn;
-
 /// `"true"` or `"false"`, as `%s` takes them.
 fn tf(b: bool) [*:0]const u8 {
     return if (b) "true" else "false";
@@ -281,8 +279,8 @@ fn addPart1(ctx: *Context) !void {
     // arg.cpp:1461
     try ctx.add(.{ .args = &.{"--version"}, .help = "show version and build info", .handler = .{ .void_ = struct {
         fn f(_: *Params) !void {
-            build_info.print(c.llama_version(), io.cStderr());
-            exit(0);
+            build_info.print(c.llama_version(), io.stderr());
+            io.exitFlushed(0);
         }
     }.f } });
     // arg.cpp:1469

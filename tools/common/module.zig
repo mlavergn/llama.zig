@@ -42,6 +42,7 @@ pub const chat = @import("chat.zig");
 pub const subproc = @import("subproc.zig");
 pub const fs_stat = @import("fs_stat.zig");
 pub const file = @import("file.zig");
+pub const env = @import("env.zig");
 pub const clock = @import("clock.zig");
 
 /// `LLM_KV_SPLIT_NO`, `LLM_KV_SPLIT_COUNT`, `LLM_KV_SPLIT_TENSORS_COUNT`
@@ -50,11 +51,10 @@ pub const kv_split_no = "split.no";
 pub const kv_split_count = "split.count";
 pub const kv_split_tensors_count = "split.tensors.count";
 
-extern fn exit(code: c_int) noreturn;
-
-/// The C's `exit`: flushes stdio, as upstream's tools rely on.
+/// The C's `exit`: what is buffered for stdout and stderr is written first,
+/// as C's `exit` flushes stdio and upstream's tools rely on.
 pub fn cExit(code: c_int) noreturn {
-    exit(code);
+    io.exitFlushed(code);
 }
 
 // -----------------------------------------------------------------------------

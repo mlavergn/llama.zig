@@ -131,8 +131,31 @@ const win32 = struct {
     extern "c" fn fgetwc(stream: ?*anyopaque) u16;
 };
 
-fn out() ?*anyopaque {
-    return out_stream orelse io.cStdout();
+// The display: `stdout`, through the stream the tools share, until `init`
+// opens the terminal. `/dev/tty` stays a C stream while the cursor query
+// reads its answer back with `fscanf`, until the console's input moves to
+// `std.Io`.
+
+fn outWrite(bytes: []const u8) void {
+    if (out_stream) |f| {
+        _ = fwrite(bytes.ptr, 1, bytes.len, f);
+    } else io.stdout().write(bytes);
+}
+
+fn outPutc(ch: u8) void {
+    outWrite(&[_]u8{ch});
+}
+
+fn outPrintf(comptime fmt: [*:0]const u8, args: anytype) void {
+    if (out_stream) |f| {
+        _ = @call(.auto, fprintf, .{ f, fmt } ++ args);
+    } else io.printf(fmt, args);
+}
+
+fn outFlush() void {
+    if (out_stream) |f| {
+        _ = fflush(f);
+    } else io.stdout().flush();
 }
 
 const lc_all: c_int = if (builtin.os.tag.isDarwin()) 0 else 6;
@@ -227,9 +250,9 @@ pub fn setDisplay(display: Display) void {
             .user_input => ansi_bold ++ ansi_color_green,
             .err => ansi_bold ++ ansi_color_red,
         };
-        _ = fprintf(out(), "%s", code);
+        outWrite(std.mem.span(code));
         current_display = display;
-        _ = fflush(out());
+        outFlush();
     }
 }
 
@@ -280,6 +303,7 @@ fn getchar32Windows() u32 {
 /// 32-bit `wchar_t`, so no surrogate handling.
 fn getchar32() u32 {
     if (comptime is_windows) return getchar32Windows();
+    io.beforeRead();
     const wc = getwchar();
     if (wc == weof) return weof;
     return wc;
@@ -304,7 +328,7 @@ fn popCursor() void {
             return;
         }
     }
-    _ = fputc('\x08', out());
+    outPutc('\x08');
 }
 
 /// Ports `estimateWidth` (console.cpp:287 @b1b770d90).
@@ -344,7 +368,7 @@ fn putCodepoint(utf8: []const u8, expected_width: c_int) c_int {
     if (comptime is_windows) return putCodepointWindows(utf8, expected_width);
     // We can trust expectedWidth if we've got one
     if (expected_width >= 0 or tty == null) {
-        _ = fwrite(utf8.ptr, utf8.len, 1, out());
+        outWrite(utf8);
         return expected_width;
     }
 
@@ -381,7 +405,7 @@ fn replaceLast(ch: u8) void {
         _ = putCodepoint(&.{ch}, 1);
         return;
     }
-    _ = fprintf(out(), "\x08%c", @as(c_int, ch));
+    outPrintf("\x08%c", .{@as(c_int, ch)});
 }
 
 /// Ports `decode_utf8` (console.cpp:366 @b1b770d90).
@@ -494,7 +518,7 @@ const Editor = struct {
         const tail_width = self.redrawTail(self.byte_pos, self.char_pos);
 
         var i: c_int = 0;
-        while (i < w) : (i += 1) _ = fputc(' ', out());
+        while (i < w) : (i += 1) outPutc(' ');
 
         moveCursor(-(tail_width + w));
     }
@@ -506,7 +530,7 @@ const Editor = struct {
 
         if (total_width > 0) {
             var i: c_int = 0;
-            while (i < total_width) : (i += 1) _ = fputc(' ', out());
+            while (i < total_width) : (i += 1) outPutc(' ');
             moveCursor(-total_width);
         }
     }
@@ -657,10 +681,10 @@ fn moveCursor(delta: c_int) void {
     }
     if (delta < 0) {
         var i: c_int = 0;
-        while (i < -delta) : (i += 1) _ = fprintf(out(), "\x08");
+        while (i < -delta) : (i += 1) outWrite("\x08");
     } else {
         var i: c_int = 0;
-        while (i < delta) : (i += 1) _ = fprintf(out(), "\x1b[C");
+        while (i < delta) : (i += 1) outWrite("\x1b[C");
     }
 }
 
@@ -736,7 +760,7 @@ fn historyNext(a: std.mem.Allocator, ed: *Editor) !void {
 /// in place with the cursor keys, backspace and history. A submitted line
 /// always ends with a newline.
 fn readlineAdvanced(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_input: bool) !bool {
-    if (out() != io.cStdout()) _ = fflush(io.cStdout());
+    if (out_stream != null) io.stdout().flush();
 
     line.clearRetainingCapacity();
     var ed: Editor = .{ .a = a, .line = line };
@@ -745,7 +769,7 @@ fn readlineAdvanced(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_in
     var end_of_stream = false;
 
     while (true) {
-        _ = fflush(out()); // Ensure all output is displayed before waiting for input
+        outFlush(); // Ensure all output is displayed before waiting for input
         const input_char = getchar32();
 
         if (input_char == '\r' or input_char == '\n') break;
@@ -876,7 +900,7 @@ fn readlineAdvanced(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_in
 
                 // clear display
                 var i: c_int = 0;
-                while (i < w) : (i += 1) _ = fputc(' ', out());
+                while (i < w) : (i += 1) outPutc(' ');
                 moveCursor(-(tail_width + w));
             }
         } else {
@@ -927,7 +951,7 @@ fn readlineAdvanced(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_in
         const last = line.pop().?;
         if (last == '\\') {
             try line.append(a, '\n');
-            _ = fputc('\n', out());
+            outPutc('\n');
             has_more = !has_more;
         } else {
             // llama will just eat the single space, it won't act as a space
@@ -943,7 +967,7 @@ fn readlineAdvanced(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_in
             has_more = false;
         } else {
             try line.append(a, '\n');
-            _ = fputc('\n', out());
+            outPutc('\n');
         }
     }
 
@@ -954,7 +978,7 @@ fn readlineAdvanced(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_in
         try history.add(std.heap.c_allocator, hline);
     }
 
-    _ = fflush(out());
+    outFlush();
     return has_more;
 }
 
@@ -966,6 +990,7 @@ fn readLinePosix(a: std.mem.Allocator, line: *std.ArrayList(u8)) !bool {
     var buf: ?[*]u8 = null;
     var cap: usize = 0;
     defer free(buf);
+    io.beforeRead();
     const n = getline(&buf, &cap, io.cStdin());
     if (n < 0) return false;
     var got = buf.?[0..@intCast(n)];
@@ -984,6 +1009,7 @@ fn readLineWindows(a: std.mem.Allocator, line: *std.ArrayList(u8)) !bool {
     defer wline.deinit(a);
     var any = false;
     while (true) {
+        io.beforeRead();
         const wc = win32.fgetwc(io.cStdin());
         if (wc == weof) break;
         any = true;

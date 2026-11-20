@@ -247,6 +247,9 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
 
 /// Ports `main` (tools/batched-bench/main.cpp:3 @b1b770d90).
 pub fn main(init: std.process.Init) !u8 {
+    tc.io.begin();
+    tc.env.set(init.environ_map);
+    defer tc.io.end();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
     return run(arena, argv);

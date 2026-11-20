@@ -677,9 +677,8 @@ const GcpParams = struct {
 
     /// Ports `getenv` (server-http.cpp:185 @b1b770d90), a member of
     /// `gcp_params`.
-    fn getenvOr(a: std.mem.Allocator, name: [*:0]const u8, default_value: []const u8, ensure_leading_slash: bool) error{OutOfMemory}![]const u8 {
-        const value = std.c.getenv(name) orelse return default_value;
-        const val = std.mem.span(value);
+    fn getenvOr(a: std.mem.Allocator, name: [:0]const u8, default_value: []const u8, ensure_leading_slash: bool) error{OutOfMemory}![]const u8 {
+        const val = tools_common.env.get(name) orelse return default_value;
         if (val.len == 0) return default_value;
         if (ensure_leading_slash and val[0] != '/') return std.mem.concat(a, u8, &.{ "/", val });
         return a.dupe(u8, val);
@@ -867,7 +866,7 @@ pub const Context = struct {
         }
 
         // a router child has no API key; the router strips the browser headers, so only a browser sends them here
-        self.managed_by_router = std.c.getenv(server_env_router_port) != null;
+        self.managed_by_router = tools_common.env.get(server_env_router_port) != null;
 
         // register server middlewares
         srv.setPreRoutingHandler(.{ .ctx = self, .func = preRouting });

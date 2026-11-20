@@ -203,6 +203,9 @@ fn run(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u8 {
 }
 
 pub fn main(init: std.process.Init) !u8 {
+    tc.io.begin();
+    tc.env.set(init.environ_map);
+    defer tc.io.end();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
     return run(arena, init.io, argv);

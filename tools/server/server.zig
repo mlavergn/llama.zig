@@ -74,8 +74,6 @@ var shutdown_mcp: ?*mcp_mod.Mcp = null;
 /// Ports `is_terminating` (server.cpp:30 @b1b770d90).
 var is_terminating: std.atomic.Value(bool) = .init(false);
 
-extern fn exit(code: c_int) noreturn;
-
 /// Ports `signal_handler` (server.cpp:32 @b1b770d90).
 fn signalHandler(sig: std.posix.SIG) callconv(.c) void {
     const signal: c_int = @intCast(@backingInt(sig));
@@ -83,7 +81,7 @@ fn signalHandler(sig: std.posix.SIG) callconv(.c) void {
         // in case it hangs, we can force terminate the server by hitting Ctrl+C twice
         // this is for better developer experience, we can remove when the server is stable enough
         io.eprintf("Received second interrupt, terminating immediately.\n", .{});
-        exit(1);
+        io.exitFlushed(1);
     }
 
     if (shutdown_handler) |h| h(signal);

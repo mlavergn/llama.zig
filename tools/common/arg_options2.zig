@@ -51,8 +51,6 @@ pub fn listBuiltinChatTemplates(a: std.mem.Allocator) ![:0]const u8 {
 /// mmproj.
 pub const mmproj_examples = [_]params_mod.Example{ .mtmd, .server, .cli, .tts };
 
-extern fn exit(code: c_int) noreturn;
-
 fn tf(b: bool) [*:0]const u8 {
     return if (b) "true" else "false";
 }
@@ -571,7 +569,7 @@ pub fn add(ctx: *Context) !void {
     try ctx.add(.{ .args = &.{"--list-devices"}, .help = "print list of available devices and exit", .handler = .{ .void_ = struct {
         fn f(q: *Params) !void {
             try printAvailableDevices(q.arena);
-            exit(0);
+            io.exitFlushed(0);
         }
     }.f } });
     // arg.cpp:2765

@@ -8,6 +8,7 @@
 
 const std = @import("std");
 const server = @import("server.zig");
+const tc = @import("tools_common");
 
 comptime {
     // libllama, compiled in (see `build/tools.zig`).
@@ -16,6 +17,9 @@ comptime {
 
 /// Ports `main` (tools/server/main.cpp:3 @b1b770d90).
 pub fn main(init: std.process.Init) !u8 {
+    tc.io.begin();
+    tc.env.set(init.environ_map);
+    defer tc.io.end();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
     return server.run(arena, argv);

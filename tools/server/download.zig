@@ -86,9 +86,8 @@ pub fn commonGetModelEndpoint(a: Allocator) Allocator.Error![]const u8 {
 }
 
 /// Ports `common_get_env` (common/common.cpp:949 @b1b770d90).
-fn getEnv(name: [*:0]const u8) []const u8 {
-    const v = std.c.getenv(name) orelse return "";
-    return std.mem.span(v);
+fn getEnv(name: [:0]const u8) []const u8 {
+    return tc.env.get(name) orelse "";
 }
 
 /// Ports `get_home_directory` (common/common.cpp:967 @b1b770d90): `HOME`,
@@ -374,9 +373,8 @@ fn commonHttpProxyBypass(a: Allocator, no_proxy: []const u8, host: []const u8) A
 }
 
 /// The `getenv_s` lambda of `common_http_client`: the upper-case name first.
-fn getenvS(upper: [*:0]const u8, lower: [*:0]const u8) []const u8 {
-    const v = std.c.getenv(upper) orelse std.c.getenv(lower) orelse return "";
-    return std.mem.span(v);
+fn getenvS(upper: [:0]const u8, lower: [:0]const u8) []const u8 {
+    return tc.env.get(upper) orelse tc.env.get(lower) orelse "";
 }
 
 /// Ports `common_http_client` (http.h:234 @b1b770d90): a client for the

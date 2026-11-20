@@ -20,16 +20,13 @@
 //! the last digit of a rounded float.
 
 const std = @import("std");
+const env_mod = @import("env.zig");
 const builtin = @import("builtin");
 const io = @import("io.zig");
+const file_mod = @import("file.zig");
 const json = @import("cli_fit").json;
 
 extern fn snprintf(buf: ?[*]u8, size: usize, format: [*:0]const u8, ...) c_int;
-extern fn fputs(s: [*:0]const u8, stream: *anyopaque) c_int;
-extern fn fflush(stream: ?*anyopaque) c_int;
-extern fn getenv(name: [*:0]const u8) ?[*:0]const u8;
-extern fn isatty(fd: c_int) c_int;
-extern fn _isatty(fd: c_int) c_int;
 
 /// `ggml_log_level`.
 pub const Level = enum(c_int) { none = 0, debug = 1, info = 2, warn = 3, err = 4, cont = 5 };
@@ -64,7 +61,10 @@ pub fn setJsonl(on: bool) void {
 /// The logger's settings, `common_log`'s members.
 var colors: ?bool = null;
 var paused: bool = false;
-var file: ?*anyopaque = null;
+/// The `--log-file`, opened as C's `fopen(path, "w")` opens it: text mode on
+/// Windows. Written through `file_stream`.
+var file: ?std.Io.File = null;
+var file_stream: io.Stream = .{ .target = .out };
 /// Ports `stdo` (common/log.cpp:194 @b1b770d90), a member of `common_log`:
 /// whether messages go to stdout and stderr; set to true by its constructor
 /// (common/log.cpp:163 @b1b770d90).
@@ -107,14 +107,10 @@ pub fn getColors() bool {
     return useColors();
 }
 
-extern fn fileno(stream: *anyopaque) c_int;
-extern fn _fileno(stream: *anyopaque) c_int;
-
 /// Ports `common_is_tty` (common/common.cpp:1032 @b1b770d90): whether
-/// `file` is attached to a terminal.
-pub fn isTty(stream: *anyopaque) bool {
-    if (comptime builtin.os.tag == .windows) return _isatty(_fileno(stream)) != 0;
-    return isatty(fileno(stream)) != 0;
+/// `f` is attached to a terminal.
+pub fn isTty(f: std.Io.File) bool {
+    return f.isTty(file_mod.defaultIo()) catch false;
 }
 
 const win = struct {
@@ -146,16 +142,16 @@ pub fn ttyEnableAnsi() bool {
 /// Ports `tty_can_use_colors` (common/common.cpp:1040 @b1b770d90).
 pub fn ttyCanUseColors() bool {
     // Check NO_COLOR environment variable (https://no-color.org/)
-    if (getenv("NO_COLOR")) |no_color| {
-        if (no_color[0] != 0) return false;
+    if (env_mod.get("NO_COLOR")) |no_color| {
+        if (no_color.len != 0) return false;
     }
     // Check TERM environment variable
-    if (getenv("TERM")) |term| {
-        if (std.mem.eql(u8, std.mem.span(term), "dumb")) return false;
+    if (env_mod.get("TERM")) |term| {
+        if (std.mem.eql(u8, term, "dumb")) return false;
     }
     // Check if stdout and stderr are connected to a terminal
     // We check both because log messages can go to either
-    return isTty(io.cStdout()) or isTty(io.cStderr());
+    return isTty(std.Io.File.stdout()) or isTty(std.Io.File.stderr());
 }
 
 /// Ports `common_log_set_colors` (common/log.cpp:516 @b1b770d90) for an explicit
@@ -179,15 +175,14 @@ pub fn unpause() void {
     paused = false;
 }
 
-extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
-extern fn fclose(f: *anyopaque) c_int;
-
 /// Ports `common_log_set_file` (common/log.cpp:508 @b1b770d90): every message is
 /// also written to `path`.
 pub fn setFile(path: ?[*:0]const u8) void {
     main();
-    if (file) |f| _ = fclose(f);
-    file = if (path) |p| fopen(p, "w") else null;
+    const std_io = file_mod.defaultIo();
+    if (file) |f| f.close(std_io);
+    file = if (path) |p| std.Io.Dir.cwd().createFile(std_io, std.mem.span(p), .{}) catch null else null;
+    if (file) |f| file_stream = .{ .target = .{ .file = f }, .buffering = .full };
 }
 
 /// Ports `common_log_set_stdo` and `set_stdo` (common/log.cpp:512, 407
@@ -279,7 +274,7 @@ fn printEntry(entry: Entry) void {
     if (stdo) {
         print(entry, null);
     }
-    if (file) |f| print(entry, f);
+    if (file != null) print(entry, &file_stream);
 }
 
 /// Ports `level_str` (common/log.cpp:67 @b1b770d90).
@@ -309,24 +304,25 @@ const Entry = struct {
 /// `stdout` or `stderr` by level -- or, as JSONL, to `stdout` whatever the
 /// level. A warning's, error's or debug message's colour reset goes before
 /// its trailing newlines, so that every line carries its own colours.
-fn print(entry: Entry, to: ?*anyopaque) void {
+fn print(entry: Entry, to: ?*io.Stream) void {
     const level = entry.level;
     const msg = entry.msg;
     const timestamp = entry.timestamp;
-    var fcur: *anyopaque = undefined;
+    var fcur: *io.Stream = undefined;
     if (to) |t| {
         fcur = t;
     } else {
         // stderr displays DBG messages only when their verbosity level is not
         // higher than the threshold
         if (level == .debug and verbosity_thold < level_debug) return;
-        fcur = if (level != .none and !entry.jsonl) io.cStderr() else io.cStdout();
+        fcur = if (level != .none and !entry.jsonl) io.stderr() else io.stdout();
     }
 
     if (entry.jsonl) {
         if (entry.is_json) {
-            fprintfTo(fcur, "%s\n", .{msg});
-            _ = fflush(fcur);
+            fcur.write(std.mem.span(msg));
+            fcur.write("\n");
+            fcur.flush();
             return;
         }
 
@@ -344,16 +340,17 @@ fn print(entry: Entry, to: ?*anyopaque) void {
                 try t.append(al, 0);
             }
         }).build(&text, a, entry) catch return;
-        fprintfTo(fcur, "%s\n", .{@as([*:0]const u8, @ptrCast(text.items.ptr))});
-        _ = fflush(fcur);
+        fcur.write(text.items[0 .. text.items.len - 1]);
+        fcur.write("\n");
+        fcur.flush();
         return;
     }
 
-    // One message is one `fputs`: upstream's single worker thread writes a
+    // One message is one write: upstream's single worker thread writes a
     // whole entry before the next, and here every thread writes its own, so
     // a prefix written by one call could be split from its text by another
     // thread's line (a server's HTTP thread against its decode loop). Each
-    // stdio call holds the stream's lock; one call per line keeps lines whole.
+    // write holds the stream's lock; one write per line keeps lines whole.
     var head: [96]u8 = undefined;
     var n_head: usize = 0;
     if (level != .none and level != .cont and prefix) {
@@ -378,22 +375,17 @@ fn print(entry: Entry, to: ?*anyopaque) void {
     while (end > 0 and whole[end - 1] == '\n') end -= 1;
 
     const a = std.heap.c_allocator;
-    if (std.mem.concatWithSentinel(a, u8, &.{ head[0..n_head], whole[0..end], reset_str, whole[end..] }, 0)) |line| {
+    if (std.mem.concat(a, u8, &.{ head[0..n_head], whole[0..end], reset_str, whole[end..] })) |line| {
         defer a.free(line);
-        _ = fputs(line.ptr, fcur);
+        fcur.write(line);
     } else |_| {
-        head[n_head] = 0;
-        _ = fputs(@ptrCast(&head), fcur);
-        fprintfTo(fcur, "%.*s%s%s", .{ @as(c_int, @intCast(end)), msg, if (reset) col(col_default) else @as([*:0]const u8, ""), msg + end });
+        fcur.write(head[0..n_head]);
+        fcur.write(whole[0..end]);
+        fcur.write(reset_str);
+        fcur.write(whole[end..]);
     }
 
-    _ = fflush(fcur);
-}
-
-extern fn fprintf(stream: *anyopaque, format: [*:0]const u8, ...) c_int;
-
-fn fprintfTo(stream: *anyopaque, comptime fmt: [*:0]const u8, args: anytype) void {
-    _ = @call(.auto, fprintf, .{ stream, fmt } ++ args);
+    fcur.flush();
 }
 
 /// Ports `LOG_TMPL` (common/log.h:112 @b1b770d90): `LOGV`, `LOG_DBGV` and the other

@@ -189,7 +189,7 @@ pub const ServerConnect = struct {
             srv(.wrn, "find_binary", "could not resolve the llama-server path (%s), looking for llama-connect in PATH only\n", .{try zs(a, common.what(e))});
         }
 
-        const path_env: []const u8 = if (std.c.getenv("PATH")) |v| std.mem.span(v) else "";
+        const path_env: []const u8 = tc.env.get("PATH") orelse "";
         var pos: usize = 0;
         while (pos <= path_env.len) {
             const end = std.mem.indexOfScalarPos(u8, path_env, pos, ':') orelse path_env.len;

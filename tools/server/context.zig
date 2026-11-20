@@ -2112,9 +2112,9 @@ pub const Impl = struct {
         }
     }
 
-    fn envInt(name: [*:0]const u8) c_int {
-        const v = std.c.getenv(name) orelse return 0;
-        return std.c.atoi(@ptrCast(v));
+    fn envInt(name: [:0]const u8) c_int {
+        const v = tc.env.get(name) orelse return 0;
+        return std.c.atoi(@ptrCast(v.ptr));
     }
 
     /// Ports `server_context_impl`'s `init` (server-context.cpp:1647

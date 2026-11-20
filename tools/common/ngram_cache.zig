@@ -309,6 +309,20 @@ pub fn draft(inp: []const c.llama_token, draft_out: *std.ArrayList(c.llama_token
     }
 }
 
+/// What `save` writes through: `std::ofstream` without exceptions, whose
+/// first failed write sets badbit and makes every later one a no-op.
+const Out = struct {
+    w: *std.Io.Writer,
+    failed: bool = false,
+
+    fn put(self: *Out, bytes: []const u8) void {
+        if (self.failed) return;
+        self.w.writeAll(bytes) catch {
+            self.failed = true;
+        };
+    }
+};
+
 /// Ports `common_ngram_cache_save` (ngram-cache.cpp:198 @b1b770d90): each
 /// n-gram's 16 bytes, its token count, and its `(token, count)` pairs, in
 /// iteration order. A file that cannot be opened is written to as the
@@ -325,8 +339,9 @@ pub fn save(cache: *const Cache, filename: [:0]const u8) void {
     // and written out before the file closes
     var buf: [64 * 1024]u8 = undefined;
     var fw = f.writer(std_io, &buf);
-    defer fw.interface.flush() catch {};
-    const w = &fw.interface;
+    // `std::ofstream`'s badbit: once a write fails the rest write nothing,
+    // and the walk, with its assertions, goes on
+    var out: Out = .{ .w = &fw.interface };
     var it = cache.iterator();
     while (it.next()) |item| {
         const ngram = item.key;
@@ -335,18 +350,19 @@ pub fn save(cache: *const Cache, filename: [:0]const u8) void {
         const ntokens: i32 = @intCast(token_counts.count());
         if (!(ntokens > 0)) _ = c.ggml_abort("ngram-cache.cpp", 205, "GGML_ASSERT(%s) failed", "ntokens > 0");
 
-        w.writeAll(std.mem.asBytes(&ngram)) catch {};
-        w.writeAll(std.mem.asBytes(&ntokens)) catch {};
+        out.put(std.mem.asBytes(&ngram));
+        out.put(std.mem.asBytes(&ntokens));
         var it2 = token_counts.iterator();
         while (it2.next()) |item2| {
             const token = item2.key;
             const count_ = item2.value.*;
             if (!(count_ > 0)) _ = c.ggml_abort("ngram-cache.cpp", 212, "GGML_ASSERT(%s) failed", "count > 0");
 
-            w.writeAll(std.mem.asBytes(&token)) catch {};
-            w.writeAll(std.mem.asBytes(&count_)) catch {};
+            out.put(std.mem.asBytes(&token));
+            out.put(std.mem.asBytes(&count_));
         }
     }
+    if (!out.failed) out.w.flush() catch return;
 }
 
 /// `std::istream::read`'s answer: all `n` bytes or a failed stream at
