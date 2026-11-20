@@ -19,6 +19,7 @@
 //! before decoding, and the decoder reads the new row -- as upstream's does.
 
 const std = @import("std");
+const ggml = @import("ggml.zig");
 const num = @import("num.zig");
 const env_mod = @import("env.zig");
 const c = @import("tools_h");
@@ -40,12 +41,11 @@ const spcErr = S.spcErr;
 const gpa = std.heap.c_allocator;
 
 fn assertC(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void {
-    if (!ok) _ = c.ggml_abort("speculative.cpp", line, "GGML_ASSERT(%s) failed", expr);
+    ggml.ggmlAssert(ok, "speculative.cpp", line, expr);
 }
 
 fn oom() noreturn {
-    _ = c.ggml_abort("speculative.cpp", 0, "out of memory");
-    unreachable;
+    ggml.oom("speculative.cpp");
 }
 
 /// The draft samplers' parameters: top-k 10 and nothing else, with

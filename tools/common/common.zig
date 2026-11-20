@@ -10,6 +10,8 @@
 //! ports and the line it began at.
 
 const std = @import("std");
+const ggml = @import("ggml.zig");
+const cpu = @import("cpu.zig");
 const builtin = @import("builtin");
 const c = @import("tools_h");
 const log = @import("log.zig");
@@ -453,8 +455,7 @@ pub fn replayLastToken(a: std.mem.Allocator, ctx: ?*c.llama_context, last_token:
 }
 
 fn oom() noreturn {
-    _ = c.ggml_abort("common.cpp", 0, "out of memory");
-    unreachable;
+    ggml.oom("common.cpp");
 }
 
 // -----------------------------------------------------------------------------
@@ -617,7 +618,7 @@ fn comLog(comptime level: enum { trc, inf, err }, comptime func: [*:0]const u8, 
 
 /// `std::thread::hardware_concurrency()`.
 fn hardwareConcurrency() usize {
-    return std.Thread.getCpuCount() catch 0;
+    return cpu.hardwareConcurrency();
 }
 
 /// Ports `common_params_get_system_info` (common/common.cpp:442 @b1b770d90).

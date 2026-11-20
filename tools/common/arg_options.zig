@@ -136,14 +136,6 @@ pub fn parseCsvRow(a: std.mem.Allocator, input: []const u8) !std.ArrayList([:0]c
     return fields;
 }
 
-/// `std::stoull` on part of a range.
-fn stoull(s: []const u8) !u64 {
-    const p = num.strtoull(std.mem.sliceTo(s, 0), 10);
-    if (p.range) return throwStr("stoull: out of range");
-    if (p.end == 0) return throwStr("stoull: no conversion");
-    return p.value;
-}
-
 /// Ports `parse_cpu_range` (common/common.cpp:333 @b1b770d90).
 pub fn parseCpuRange(range: []const u8, boolmask: *[c.GGML_MAX_N_THREADS]bool) !bool {
     const func = "parse_cpu_range";
@@ -156,7 +148,7 @@ pub fn parseCpuRange(range: []const u8, boolmask: *[c.GGML_MAX_N_THREADS]bool) !
     var end_i: u64 = 0;
 
     if (dash_loc != 0) {
-        start_i = try stoull(range[0..dash_loc]);
+        start_i = try arg.stoull(range[0..dash_loc]);
         if (start_i >= c.GGML_MAX_N_THREADS) {
             log.comErr(func, "%s", .{@as([*:0]const u8, "Start index out of bounds!\n")});
             return false;
@@ -166,7 +158,7 @@ pub fn parseCpuRange(range: []const u8, boolmask: *[c.GGML_MAX_N_THREADS]bool) !
     if (dash_loc == range.len - 1) {
         end_i = c.GGML_MAX_N_THREADS - 1;
     } else {
-        end_i = try stoull(range[dash_loc + 1 ..]);
+        end_i = try arg.stoull(range[dash_loc + 1 ..]);
         if (end_i >= c.GGML_MAX_N_THREADS) {
             log.comErr(func, "%s", .{@as([*:0]const u8, "End index out of bounds!\n")});
             return false;

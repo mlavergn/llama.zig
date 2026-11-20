@@ -17,8 +17,8 @@
 //! `server_subproc` wraps a `common_subproc` (`common/subproc.cpp`), for
 //! the built-in tools and router mode. It is written against the members
 //! it calls -- `alive()`, `terminate()`, `join()`, `stdoutFile()` and
-//! `stderrFile()`, the child's two output pipes as C `FILE *`s or null -- so `Subproc(P)` is
-//! the C++ struct over any such `P`. Windows' arms (`PeekNamedPipe`) wait
+//! `stderrFile()`, the child's two output pipes as `std.Io.File`s or null
+//! -- so `Subproc(P)` is the C++ struct over any such `P`. Windows' arms (`PeekNamedPipe`) wait
 //! for the Windows server.
 
 const std = @import("std");
@@ -27,24 +27,22 @@ const common = @import("common.zig");
 
 const log = tools.log;
 
-extern fn fileno(f: *anyopaque) c_int;
-extern fn fcntl(fd: c_int, cmd: c_int, ...) c_int;
-extern fn read(fd: c_int, buf: [*]u8, len: usize) isize;
-extern fn write(fd: c_int, buf: [*]const u8, len: usize) isize;
-extern fn close(fd: c_int) c_int;
-extern fn pipe(fds: *[2]c_int) c_int;
-extern fn strerror(e: c_int) [*:0]const u8;
+const fd_t = std.posix.fd_t;
 
-const F_GETFL: c_int = 3;
-const F_SETFL: c_int = 4;
-const O_NONBLOCK: c_int = if (@import("builtin").os.tag.isDarwin()) 0x0004 else 0o4000;
-
-fn errno() c_int {
-    return std.c._errno().*;
+/// A pipe end as std reads it.
+fn pipeFile(fd: fd_t) std.Io.File {
+    return .{ .handle = fd, .flags = .{ .nonblocking = false } };
 }
 
-fn setNonBlocking(fd: c_int) void {
-    _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, @as(c_int, 0)) | O_NONBLOCK);
+/// Reads what is there without blocking: EINTR is retried.
+///
+/// Return: the bytes read; null when nothing is available (EAGAIN); 0 at
+/// end of file or on an error.
+fn readNonBlocking(fd: fd_t, buf: []u8) ?usize {
+    return pipeFile(fd).readStreaming(tools.file.defaultIo(), &.{buf}) catch |err| switch (err) {
+        error.WouldBlock => null,
+        else => 0,
+    };
 }
 
 /// Ports `server_subproc_stream` (server-common.h:695 @b1b770d90): a
@@ -57,26 +55,23 @@ pub const Stream = enum(u1) {
 /// `SERVER_SUBPROC_STREAMS` (server-common.h:698 @b1b770d90).
 pub const n_streams = 2;
 
-extern fn dup2(old: c_int, new: c_int) c_int;
-extern fn fdopen(fd: c_int, mode: [*:0]const u8) ?*anyopaque;
-const F_DUPFD_CLOEXEC: c_int = if (@import("builtin").os.tag.isDarwin()) 67 else 1030;
-
 /// Ports `server_reserve_stdout` (server-common.cpp:2120 @b1b770d90), its
 /// POSIX arm: gives the current stdout to the caller as a stream of its
 /// own, and sends everything else written to stdout to stderr. The
 /// reserved stream is not inherited, so grandchildren get stdout and
 /// stderr of their own.
-pub fn reserveStdout() *anyopaque {
+///
+/// Return: the reserved stream, the C's `fdopen(fd, "w")` without a
+/// `FILE`; that call's `GGML_ASSERT(f)` has nothing left to fail.
+pub fn reserveStdout() std.Io.File {
     tools.io.flushStdout();
     // `fileno(stdout)` and `fileno(stderr)`
-    const stdout_fd: c_int = 1;
-    const stderr_fd: c_int = 2;
-    const fd = fcntl(stdout_fd, F_DUPFD_CLOEXEC, @as(c_int, 0));
-    common.ggmlAssert(fd >= 0, "server-common.cpp", 2132, "fd >= 0");
-    _ = dup2(stderr_fd, stdout_fd);
-    const f = fdopen(fd, "w");
-    common.ggmlAssert(f != null, "server-common.cpp", 2136, "f");
-    return f.?;
+    const stdout_fd: fd_t = 1;
+    const stderr_fd: fd_t = 2;
+    const fd = std.posix.system.fcntl(stdout_fd, std.posix.F.DUPFD_CLOEXEC, @as(c_int, 0));
+    common.ggmlAssert(std.posix.errno(fd) == .SUCCESS, "server-common.cpp", 2132, "fd >= 0");
+    _ = std.posix.system.dup2(stderr_fd, stdout_fd);
+    return pipeFile(@intCast(fd));
 }
 
 /// Ports `server_subproc` (server-common.h:706 @b1b770d90) over a
@@ -110,18 +105,14 @@ pub fn Subproc(comptime P: type) type {
         /// both output pipes of the child are available; the first call
         /// makes each non-blocking.
         pub fn hasOutput(self: *Self) bool {
-            const files = [n_streams]?*anyopaque{ @ptrCast(self.sproc.stdoutFile()), @ptrCast(self.sproc.stderrFile()) };
+            const files = [n_streams]?std.Io.File{ self.sproc.stdoutFile(), self.sproc.stderrFile() };
             for (0..n_streams) |i| {
                 if (self.out_handles[i] >= 0) {
                     continue;
                 }
                 const f = files[i] orelse return false;
-                const fd = fileno(f);
-                if (fd < 0) {
-                    return false;
-                }
-                setNonBlocking(fd);
-                self.out_handles[i] = fd;
+                tools.subproc.setNonBlocking(f.handle);
+                self.out_handles[i] = f.handle;
             }
             return true;
         }
@@ -146,21 +137,12 @@ pub fn Subproc(comptime P: type) type {
                 self.out_closed[s] = true;
                 return -1;
             }
-            while (true) {
-                const r = read(@intCast(self.out_handles[s]), buf.ptr, buf.len);
-                if (r > 0) {
-                    return @intCast(r);
-                }
-                const e = errno();
-                if (r < 0 and e == @backingInt(std.posix.E.INTR)) {
-                    continue;
-                }
-                if (r < 0 and e == @backingInt(std.posix.E.AGAIN)) {
-                    return 0;
-                }
-                self.out_closed[s] = true; // EOF or error
-                return -1;
+            const r = readNonBlocking(@intCast(self.out_handles[s]), buf) orelse return 0;
+            if (r > 0) {
+                return @intCast(r);
             }
+            self.out_closed[s] = true; // EOF or error
+            return -1;
         }
     };
 }
@@ -168,28 +150,29 @@ pub fn Subproc(comptime P: type) type {
 /// Ports `server_subproc`'s `waiter` (server-common.h:725 @b1b770d90): a
 /// self-pipe to wake a `poll` on the children's output.
 pub const Waiter = struct {
-    wake_fd: [2]c_int = .{ -1, -1 }, // POSIX self-pipe
+    wake_fd: [2]fd_t = .{ -1, -1 }, // POSIX self-pipe
 
     /// Ports the constructor of `server_subproc`'s `waiter` (server-common.cpp:2214 @b1b770d90).
     pub fn init() Waiter {
-        var fds: [2]c_int = undefined;
-        common.ggmlAssert(pipe(&fds) == 0, "server-common.cpp", 2217, "pipe(fds) == 0");
+        // pipe(), not close-on-exec: the C's children inherit it too
+        const fds = std.Io.Threaded.pipe2(.{}) catch [2]fd_t{ -1, -1 };
+        common.ggmlAssert(fds[0] >= 0, "server-common.cpp", 2217, "pipe(fds) == 0");
         for (fds) |fd| {
-            setNonBlocking(fd);
+            tools.subproc.setNonBlocking(fd);
         }
         return .{ .wake_fd = fds };
     }
 
     /// Ports the destructor of `server_subproc`'s `waiter` (server-common.cpp:2226 @b1b770d90).
     pub fn deinit(self: *Waiter) void {
-        _ = close(self.wake_fd[0]);
-        _ = close(self.wake_fd[1]);
+        _ = std.posix.system.close(self.wake_fd[0]);
+        _ = std.posix.system.close(self.wake_fd[1]);
     }
 
     /// Ports `server_subproc::waiter`'s `wake` (server-common.cpp:2233 @b1b770d90): thread-safe.
     pub fn wake(self: *Waiter) void {
-        const ch: u8 = 1;
-        _ = write(self.wake_fd[1], (&ch)[0..1].ptr, 1);
+        const ch = [1]u8{1};
+        _ = std.posix.system.write(self.wake_fd[1], &ch, 1);
     }
 
     /// Ports `server_subproc::waiter`'s `wait` (server-common.cpp:2240 @b1b770d90), its POSIX
@@ -212,13 +195,14 @@ pub const Waiter = struct {
             }
         }
         const timeout: c_int = if (timeout_ms < 0) -1 else @intCast(@min(timeout_ms, std.math.maxInt(c_int)));
-        const r = std.c.poll(pfds.items.ptr, @intCast(pfds.items.len), timeout);
-        if (r < 0 and errno() != @backingInt(std.posix.E.INTR)) {
-            log.err("%s: poll() failed: %s\n", .{ "wait", strerror(errno()) });
+        // the C library's poll on Darwin, the system call on Linux
+        const e = std.posix.errno(std.posix.system.poll(pfds.items.ptr, @intCast(pfds.items.len), @intCast(timeout)));
+        if (e != .SUCCESS and e != .INTR) {
+            log.err("%s: poll() failed: %s\n", .{ "wait", tools.strings.strerror(@backingInt(e)) });
         }
         if (pfds.items[0].revents != 0) {
             var buf: [64]u8 = undefined;
-            while (read(self.wake_fd[0], &buf, buf.len) > 0) {}
+            while ((readNonBlocking(self.wake_fd[0], &buf) orelse 0) > 0) {}
         }
         for (procs, 0..) |p, i| {
             ready[i] = !p.hasOutput();
@@ -236,13 +220,11 @@ test {
     std.testing.refAllDecls(@This());
 }
 
-extern fn fclose(f: *anyopaque) c_int;
-
 /// A `common_subproc` stand-in over a pipe: its read end is the "child's"
 /// output.
 const PipeProc = struct {
-    file: ?*anyopaque,
-    err: ?*anyopaque,
+    file: ?std.Io.File,
+    err: ?std.Io.File,
     pub fn alive(_: *PipeProc) bool {
         return true;
     }
@@ -250,23 +232,22 @@ const PipeProc = struct {
     pub fn join(_: *PipeProc) c_int {
         return 0;
     }
-    pub fn stdoutFile(self: *PipeProc) ?*anyopaque {
+    pub fn stdoutFile(self: *PipeProc) ?std.Io.File {
         return self.file;
     }
-    pub fn stderrFile(self: *PipeProc) ?*anyopaque {
+    pub fn stderrFile(self: *PipeProc) ?std.Io.File {
         return self.err;
     }
 };
 
 test "read_output is non-blocking per pipe, and the waiter wakes on output and on wake()" {
-    var fds: [2]c_int = undefined;
-    var efds: [2]c_int = undefined;
-    try std.testing.expectEqual(@as(c_int, 0), pipe(&fds));
-    try std.testing.expectEqual(@as(c_int, 0), pipe(&efds));
-    defer _ = close(fds[1]);
-    var sp: Subproc(PipeProc) = .{ .sproc = .{ .file = fdopen(fds[0], "r"), .err = fdopen(efds[0], "r") } };
-    defer _ = fclose(sp.sproc.file.?);
-    defer _ = fclose(sp.sproc.err.?);
+    const io = std.testing.io;
+    const fds = try std.Io.Threaded.pipe2(.{});
+    const efds = try std.Io.Threaded.pipe2(.{});
+    defer pipeFile(fds[1]).close(io);
+    var sp: Subproc(PipeProc) = .{ .sproc = .{ .file = pipeFile(fds[0]), .err = pipeFile(efds[0]) } };
+    defer sp.sproc.file.?.close(io);
+    defer sp.sproc.err.?.close(io);
     var buf: [16]u8 = undefined;
     try std.testing.expectEqual(@as(c_int, 0), sp.readOutput(.stdout, &buf));
     try std.testing.expectEqual(@as(c_int, 0), sp.readOutput(.stderr, &buf));
@@ -279,19 +260,19 @@ test "read_output is non-blocking per pipe, and the waiter wakes on output and o
     try w.wait(std.testing.allocator, &procs, &ready, 1000);
     try std.testing.expect(!ready[0]);
 
-    _ = write(efds[1], "log", 3);
+    try pipeFile(efds[1]).writeStreamingAll(io, "log");
     try w.wait(std.testing.allocator, &procs, &ready, 1000);
     try std.testing.expect(ready[0]);
     try std.testing.expectEqual(@as(c_int, 0), sp.readOutput(.stdout, &buf));
     try std.testing.expectEqual(@as(c_int, 3), sp.readOutput(.stderr, &buf));
 
-    _ = write(fds[1], "hi", 2);
+    try pipeFile(fds[1]).writeStreamingAll(io, "hi");
     try w.wait(std.testing.allocator, &procs, &ready, 1000);
     try std.testing.expect(ready[0]);
     try std.testing.expectEqual(@as(c_int, 2), sp.readOutput(.stdout, &buf));
 
     // one pipe closed is not the output closed
-    _ = close(efds[1]);
+    pipeFile(efds[1]).close(io);
     try std.testing.expectEqual(@as(c_int, -1), sp.readOutput(.stderr, &buf));
     try std.testing.expect(!sp.outputClosed());
     try std.testing.expectEqual(@as(c_int, -1), sp.readOutput(.stderr, &buf));

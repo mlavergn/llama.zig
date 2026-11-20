@@ -60,7 +60,7 @@ const fnan = std.math.nan(f32);
 
 /// `GGML_ASSERT`, which upstream keeps in every build mode.
 fn ggmlAssert(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void {
-    if (!ok) _ = c.ggml_abort("imatrix.cpp", line, "GGML_ASSERT(%s) failed", expr);
+    tc.ggml.ggmlAssert(ok, "imatrix.cpp", line, expr);
 }
 
 /// `std::clamp(v, lo, hi)`: `v < lo ? lo : hi < v ? hi : v`, a NaN kept.
@@ -777,7 +777,7 @@ fn resizeF32(v: *std.ArrayList(f32), n: usize) !void {
 }
 
 fn pad(x: usize, n: usize) usize {
-    return (x + n - 1) & ~(n - 1);
+    return tc.ggml.pad(x, n);
 }
 
 fn lessThan(_: void, a: []const u8, b: []const u8) bool {
@@ -840,8 +840,7 @@ fn processTensorName(input: []const u8, layer: *[]const u8, tensor: *[]const u8,
 }
 
 fn oom() noreturn {
-    _ = c.ggml_abort("imatrix.cpp", 0, "out of memory");
-    unreachable;
+    tc.ggml.oom("imatrix.cpp");
 }
 
 /// The block number of `tensor`, through `process_tensor_name` and `std::stoi`.

@@ -19,7 +19,6 @@
 //! `llama-server`.
 
 const std = @import("std");
-const num = @import("num.zig");
 const c = @import("tools_h");
 const arg = @import("arg.zig");
 const params_mod = @import("params.zig");
@@ -749,11 +748,11 @@ pub fn add(ctx: *Context) !void {
                     const max = c.llama_max_devices();
                     if (split_arg.items.len >= max) return throw("got %zu input configs, but system only has %zu devices", .{ split_arg.items.len, max });
                     if (split_arg.items.len == 1) {
-                        const v = (try stoull(split_arg.items[0])) *% 1024 *% 1024;
+                        const v = (try arg.stoull(split_arg.items[0])) *% 1024 *% 1024;
                         for (q.fit_params_target.items) |*t| t.* = v;
                         return;
                     }
-                    for (split_arg.items, 0..) |s, i| q.fit_params_target.items[i] = (try stoull(s)) *% 1024 *% 1024;
+                    for (split_arg.items, 0..) |s, i| q.fit_params_target.items[i] = (try arg.stoull(s)) *% 1024 *% 1024;
                 }
             }.f,
         },
@@ -1023,14 +1022,6 @@ pub fn add(ctx: *Context) !void {
             try q.n_pl.appendSlice(q.arena, v.items);
         }
     }.f } }).setExamples(&.{.bench}));
-}
-
-/// `std::stoull`.
-fn stoull(s: [:0]const u8) !u64 {
-    const p = num.strtoull(s, 10);
-    if (p.range) return throwStr("stoull: out of range");
-    if (p.end == 0) return throwStr("stoull: no conversion");
-    return p.value;
 }
 
 // -----------------------------------------------------------------------------

@@ -16,7 +16,10 @@ extern fn sysctlbyname(name: [*:0]const u8, oldp: ?*anyopaque, oldlenp: ?*usize,
 // `std.c` declares no `fgets`.
 
 /// `std::thread::hardware_concurrency()`.
-fn hardwareConcurrency() u32 {
+/// `std::thread::hardware_concurrency()`.
+///
+/// Return: the logical CPU count, 0 when it cannot be read.
+pub fn hardwareConcurrency() u32 {
     return @intCast(std.Thread.getCpuCount() catch 0);
 }
 

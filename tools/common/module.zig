@@ -19,6 +19,7 @@ pub const build_info = @import("build_info.zig");
 pub const io = @import("io.zig");
 pub const log = @import("log.zig");
 pub const strings = @import("strings.zig");
+pub const ggml = @import("ggml.zig");
 pub const hash_map = @import("hash_map.zig");
 pub const imatrix_loader = @import("imatrix_loader.zig");
 pub const params = @import("params.zig");

@@ -233,6 +233,11 @@ pub fn add(b: *std.Build, opts: Options) !Exports {
         const host_test_step = b.step("test-server-host", "Run the unit tests of the router, the downloader and --connect (tools/server/models*.zig, download.zig, connect.zig)");
         host_test_step.dependOn(&b.addRunArtifact(host_test).step);
     }
+    // `tools/common/`'s own tests, which no tool's test root reaches: Zig
+    // runs only the root module's tests, so the module is the root here.
+    const common_test = b.addTest(.{ .root_module = common_module });
+    const common_test_step = b.step("test-tools-common", "Run the unit tests of tools/common/ (num, strings, env, subproc, clock, ...)");
+    common_test_step.dependOn(&b.addRunArtifact(common_test).step);
     // `llama-server-core`, for a consumer that drives `ServerContext`
     // in-process: `llama-server`'s module minus its HTTP front. `build.zig`
     // exports it.

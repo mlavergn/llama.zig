@@ -21,6 +21,7 @@
 //! upstream builds a `common_trie` from `std::vector<uint32_t>`.
 
 const std = @import("std");
+const ggml = @import("ggml.zig");
 const c = @import("tools_h");
 const log = @import("log.zig");
 const common = @import("common.zig");
@@ -30,8 +31,7 @@ const gpa = std.heap.c_allocator;
 
 /// What upstream's `new` does when it fails: `std::bad_alloc`, uncaught.
 fn oom() noreturn {
-    _ = c.ggml_abort("reasoning-budget.cpp", 0, "out of memory");
-    unreachable;
+    ggml.oom("reasoning-budget.cpp");
 }
 
 /// Ports `common_reasoning_budget_state` (reasoning-budget.h:10 @b1b770d90).

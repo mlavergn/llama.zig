@@ -36,10 +36,6 @@ const MemoryBreakdownRow = @import("cli_fit").MemoryBreakdownRow;
 /// then the measure child is killed.
 const measure_timeout = 300;
 
-fn zs(a: Allocator, s: []const u8) Allocator.Error![*:0]const u8 {
-    return (try a.dupeSentinel(u8, s, 0)).ptr;
-}
-
 const mib: usize = 1024 * 1024;
 
 // -----------------------------------------------------------------------------
@@ -292,7 +288,7 @@ pub const Sched = struct {
     /// entry, so they all need only one slot and all get unblocked by the
     /// single load that entry performs.
     pub fn join(self: *Sched, model_id: []const u8) !void {
-        const z = try zs(gpa, model_id);
+        const z = try common.zs(gpa, model_id);
         defer gpa.free(std.mem.span(z));
         if (self.find(model_id)) |e| {
             e.n_waiters += 1;
@@ -394,7 +390,7 @@ pub const Sched = struct {
             if (victim.len == 0) {
                 return; // all remaining models are busy, wait for a request to end
             }
-            const z = zs(gpa, victim) catch return;
+            const z = common.zs(gpa, victim) catch return;
             defer gpa.free(std.mem.span(z));
             srv(.inf, "tick", "evicting idle LRU name=%s for a queued request\n", .{z});
             models.requestStop(victim, true);
@@ -452,9 +448,9 @@ pub const Sched = struct {
             if (!verbose) {
                 break;
             }
-            const nz = zs(gpa, name) catch break;
+            const nz = common.zs(gpa, name) catch break;
             defer gpa.free(std.mem.span(nz));
-            const dz = zs(gpa, e.dev) catch break;
+            const dz = common.zs(gpa, e.dev) catch break;
             defer gpa.free(std.mem.span(dz));
             if (any_running) {
                 srv(.dbg, "limits_exceeded", "model name=%s is short by %zu MiB on %s\n", .{ nz, e.bytes / mib, dz });
@@ -483,7 +479,7 @@ pub const Sched = struct {
             defer models.mutex.unlock();
             try self.enqueueMeasure(name, true);
             if (!self.isMeasured(name)) {
-                const z = try zs(gpa, name);
+                const z = try common.zs(gpa, name);
                 defer gpa.free(std.mem.span(z));
                 srv(.inf, "make_room", "waiting for the memory measurement of model name=%s\n", .{z});
                 while (!self.isMeasured(name)) models.cv.wait(&models.mutex);
@@ -505,7 +501,7 @@ pub const Sched = struct {
             if (lru_model_name.len == 0) {
                 return; // every running model is busy, load() reports the limit
             }
-            const z = try zs(gpa, lru_model_name);
+            const z = try common.zs(gpa, lru_model_name);
             defer gpa.free(std.mem.span(z));
             srv(.inf, "make_room", "limits reached, removing LRU name=%s\n", .{z});
             try models.unload(lru_model_name);
@@ -594,7 +590,7 @@ pub const Sched = struct {
         for (self.measure_queue.items) |n| gpa.free(n);
         self.measure_queue.clearRetainingCapacity();
         if (self.measure_proc) |proc| {
-            const z = zs(gpa, self.measuring) catch "";
+            const z = common.zs(gpa, self.measuring) catch "";
             srv(.inf, "cancel_measurements", "stopping measure process for model name=%s\n", .{z});
             proc.proc.terminate();
             // the monitor reaps it and clears measuring
@@ -655,7 +651,7 @@ pub const Sched = struct {
                 continue; // measured meanwhile
             }
             const meta = &it.meta;
-            const z = try zs(sa, name);
+            const z = try common.zs(sa, name);
 
             // same args as the instance, --offline: never download
             var child_args: std.ArrayList([]const u8) = .empty;
@@ -700,7 +696,7 @@ pub const Sched = struct {
         if (models.find(name)) |it| {
             if (it.meta.memory.status == .measuring) {
                 // exited without a result: crashed, or killed after the timeout
-                const z = zs(gpa, name) catch "";
+                const z = common.zs(gpa, name) catch "";
                 srv(.wrn, "on_measure_exit", "measure process for model name=%s exited with status %d before reporting, memory limits will not apply to it\n", .{ z, exit_code });
                 it.meta.memory.status = .failed;
                 self.notifyMemory(name, &it.meta.memory);
@@ -732,19 +728,19 @@ pub const Sched = struct {
         var scratch = std.heap.ArenaAllocator.init(gpa);
         defer scratch.deinit();
         const sa = scratch.allocator();
-        const nz = zs(sa, name) catch return;
+        const nz = common.zs(sa, name) catch return;
         const result = common.jsonValue(payload, "result", []const u8, "");
 
         var ok = std.mem.eql(u8, result, "measured");
         if (ok) {
             self.parseMeasured(it.alloc(), info, payload) catch |e| {
-                srv(.err, func, "malformed memory measurement for model name=%s: %s\n", .{ nz, zs(sa, context.whatOf(e)) catch "" });
+                srv(.err, func, "malformed memory measurement for model name=%s: %s\n", .{ nz, common.zs(sa, context.whatOf(e)) catch "" });
                 info.min = null;
                 info.max = null;
                 ok = false;
             };
         } else {
-            srv(.wrn, func, "measuring memory for model name=%s failed: %s\n", .{ nz, zs(sa, common.jsonValue(payload, "error", []const u8, "unknown error")) catch "" });
+            srv(.wrn, func, "measuring memory for model name=%s failed: %s\n", .{ nz, common.zs(sa, common.jsonValue(payload, "error", []const u8, "unknown error")) catch "" });
         }
 
         if (ok) {
@@ -761,7 +757,7 @@ pub const Sched = struct {
                 }
                 srv(.inf, func, "model name=%s needs on %s: %zu MiB at n_ctx=%u (min), %zu MiB at n_ctx=%u (max), %zu MiB free\n", .{
                     nz,
-                    zs(sa, mn.devices[i].name) catch "",
+                    common.zs(sa, mn.devices[i].name) catch "",
                     mn.devices[i].selfBytes() / mib,
                     mn.n_ctx,
                     mx.devices[i].selfBytes() / mib,
@@ -812,7 +808,7 @@ pub const Sched = struct {
             const dm = gop.value_ptr;
             dm.total = @bitCast(d.total);
             dm.external = @max(0, dm.total -% @as(i64, @bitCast(d.free)) -% self_bytes -% tracked);
-            const z = try zs(gpa, d.name);
+            const z = try common.zs(gpa, d.name);
             defer gpa.free(std.mem.span(z));
             srv(.dbg, "calibrate", "device %s: total=%lld MiB, external=%lld MiB, available=%lld MiB\n", .{
                 z,

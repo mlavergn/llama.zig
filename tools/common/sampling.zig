@@ -28,6 +28,7 @@
 //! and `no_perf` are ever read back, so only those are kept.
 
 const std = @import("std");
+const ggml = @import("ggml.zig");
 const c = @import("tools_h");
 const params_mod = @import("params.zig");
 const log = @import("log.zig");
@@ -42,12 +43,11 @@ const SamplerType = params_mod.SamplerType;
 const gpa = std.heap.c_allocator;
 
 fn assertC(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void {
-    if (!ok) _ = c.ggml_abort("sampling.cpp", line, "GGML_ASSERT(%s) failed", expr);
+    ggml.ggmlAssert(ok, "sampling.cpp", line, expr);
 }
 
 fn oom() noreturn {
-    _ = c.ggml_abort("sampling.cpp", 0, "out of memory");
-    unreachable;
+    ggml.oom("sampling.cpp");
 }
 
 /// A C++ `throw std::runtime_error(msg)` nothing catches.

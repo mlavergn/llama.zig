@@ -51,7 +51,7 @@ const gpa = std.heap.c_allocator;
 
 /// `GGML_ASSERT`, which upstream keeps in every build mode.
 fn ggmlAssert(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void {
-    if (!ok) _ = c.ggml_abort("perplexity.cpp", line, "GGML_ASSERT(%s) failed", expr);
+    tc.ggml.ggmlAssert(ok, "perplexity.cpp", line, expr);
 }
 
 fn cint(v: anytype) c_int {
@@ -59,7 +59,7 @@ fn cint(v: anytype) c_int {
 }
 
 fn hardwareConcurrency() usize {
-    return std.Thread.getCpuCount() catch 0;
+    return tc.cpu.hardwareConcurrency();
 }
 
 /// Ports `softmax` (perplexity.cpp:40 @b1b770d90).

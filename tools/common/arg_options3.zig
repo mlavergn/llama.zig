@@ -17,6 +17,7 @@
 //! `common_json`, reached as `cli_fit`'s `json`.
 
 const std = @import("std");
+const strings = @import("strings.zig");
 const fs_stat = @import("fs_stat.zig");
 const file = @import("file.zig");
 const c = @import("tools_h");
@@ -132,8 +133,6 @@ fn createDirectories(a: std.mem.Allocator, path: []const u8) !c_int {
     return 0;
 }
 
-extern fn strerror(errnum: c_int) [*:0]const u8;
-
 /// The handlers of `--slot-save-path` and `--media-path`: a directory, with
 /// a separator at its end.
 fn directoryWithSeparator(q: *Params, value: S) ![]const u8 {
@@ -162,7 +161,7 @@ pub fn add(ctx: *Context) !void {
             q.hostnames.clearRetainingCapacity();
             const hosts = try options1.parseCsvRow(q.arena, value);
             for (hosts.items) |h| {
-                const host = @import("strings.zig").strip(h);
+                const host = strings.strip(h);
                 if (host.len != 0) try q.hostnames.append(q.arena, host);
             }
             if (q.hostnames.items.len == 0) return throwStr("--host requires at least one address");
@@ -653,7 +652,7 @@ pub fn add(ctx: *Context) !void {
             q.path_prompts_log_dir = try arg.dupe(q, value);
             const e = try createDirectories(q.arena, value);
             if (e != 0) {
-                io.eprintf("warning: failed to create prompts-log-dir '%s': %s\n", .{ value.ptr, strerror(e) });
+                io.eprintf("warning: failed to create prompts-log-dir '%s': %s\n", .{ value.ptr, strings.strerror(e) });
             }
         }
     }.f } }).setExamples(&.{ .server, .cli }));

@@ -14,6 +14,7 @@
 //! where `strtol` and `strtoul` saturate.
 
 const std = @import("std");
+const strings = @import("strings.zig");
 const builtin = @import("builtin");
 
 /// What a conversion answers: the value, the offset where it stopped (`end
@@ -26,14 +27,9 @@ pub fn Parsed(comptime T: type) type {
     };
 }
 
-/// `isspace` in the C locale.
-fn isSpace(ch: u8) bool {
-    return ch == ' ' or (ch >= '\t' and ch <= '\r');
-}
-
 fn skipSpace(s: []const u8) usize {
     var i: usize = 0;
-    while (i < s.len and isSpace(s[i])) i += 1;
+    while (i < s.len and strings.isSpace(s[i])) i += 1;
     return i;
 }
 
@@ -149,22 +145,35 @@ pub fn atof(s: []const u8) f64 {
 /// base 10, then `invalid_argument` if nothing converted and
 /// `out_of_range` if `errno` says so or the value leaves `int`, with the
 /// messages libc++ throws, which upstream prints through `e.what()`.
-pub const Stoi = union(enum) {
-    ok: c_int,
-    /// `std::invalid_argument`, `what()` "stoi: no conversion".
-    no_conversion,
-    /// `std::out_of_range`, `what()` "stoi: out of range".
-    out_of_range,
+/// What `std::stoi` or `std::stoull` gives: the value, or which of its two
+/// exceptions it throws.
+///
+/// Parameters:
+/// - `T`: the result type.
+/// - `name`: the function, as its `what()` names it.
+pub fn Converted(comptime T: type, comptime name: []const u8) type {
+    return union(enum) {
+        ok: T,
+        /// `std::invalid_argument`, `what()` "<name>: no conversion".
+        no_conversion,
+        /// `std::out_of_range`, `what()` "<name>: out of range".
+        out_of_range,
 
-    /// `e.what()` for the two throws.
-    pub fn what(self: Stoi) [*:0]const u8 {
-        return switch (self) {
-            .ok => "",
-            .no_conversion => "stoi: no conversion",
-            .out_of_range => "stoi: out of range",
-        };
-    }
-};
+        /// `e.what()` for the two throws.
+        pub fn what(self: @This()) [*:0]const u8 {
+            return switch (self) {
+                .ok => "",
+                .no_conversion => name ++ ": no conversion",
+                .out_of_range => name ++ ": out of range",
+            };
+        }
+    };
+}
+
+/// `std::stoi`'s result.
+pub const Stoi = Converted(c_int, "stoi");
+/// `std::stoull`'s result.
+pub const Stoull = Converted(u64, "stoull");
 
 /// `std::stoi(s)`.
 pub fn stoi(s: [:0]const u8) Stoi {
@@ -173,6 +182,17 @@ pub fn stoi(s: [:0]const u8) Stoi {
     if (p.end == 0) return .no_conversion;
     if (p.range or v < std.math.minInt(c_int) or v > std.math.maxInt(c_int)) return .out_of_range;
     return .{ .ok = @intCast(v) };
+}
+
+/// `std::stoull(s)` in base 10: `strtoull` over the C string, its range
+/// error and a string with no digits as the two throws.
+///
+/// Return: the value, or which exception upstream throws.
+pub fn stoull(s: []const u8) Stoull {
+    const p = strtoull(std.mem.sliceTo(s, 0), 10);
+    if (p.end == 0) return .no_conversion;
+    if (p.range) return .out_of_range;
+    return .{ .ok = p.value };
 }
 
 /// `strtod`.
@@ -478,4 +498,13 @@ test "stoi converts a prefix and throws as libc++ does" {
     try std.testing.expectEqual(Stoi{ .ok = 12 }, stoi(" 12abc"));
     try std.testing.expectEqual(Stoi.no_conversion, stoi("abc"));
     try std.testing.expectEqual(Stoi.out_of_range, stoi("99999999999"));
+}
+
+test "stoull converts a prefix, wraps a sign and throws as libc++ does" {
+    try std.testing.expectEqual(Stoull{ .ok = 42 }, stoull(" 42x"));
+    try std.testing.expectEqual(Stoull{ .ok = std.math.maxInt(u64) }, stoull("-1"));
+    try std.testing.expectEqual(Stoull{ .ok = 7 }, stoull("7\x00 9"));
+    try std.testing.expectEqual(Stoull.no_conversion, stoull("abc"));
+    try std.testing.expectEqual(Stoull.out_of_range, stoull("18446744073709551616"));
+    try std.testing.expectEqualStrings("stoull: out of range", std.mem.span((Stoull{ .out_of_range = {} }).what()));
 }

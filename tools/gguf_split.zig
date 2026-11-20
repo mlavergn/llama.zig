@@ -252,8 +252,7 @@ fn cstr(buf: *const [path_max:0]u8) [*:0]const u8 {
 
 /// `GGML_PAD(x, GGUF_DEFAULT_ALIGNMENT)`.
 fn pad(x: usize) usize {
-    const a: usize = c.GGUF_DEFAULT_ALIGNMENT;
-    return (x + a - 1) & ~(a - 1);
+    return common.ggml.pad(x, c.GGUF_DEFAULT_ALIGNMENT);
 }
 
 // -----------------------------------------------------------------------------

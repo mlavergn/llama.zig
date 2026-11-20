@@ -44,7 +44,7 @@ fn fput(f: *io.Stream, comptime fmt: [*:0]const u8, args: anytype) void {
 
 /// `GGML_ASSERT`, which upstream keeps in every build mode.
 fn ggmlAssert(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void {
-    if (!ok) _ = c.ggml_abort("llama-bench.cpp", line, "GGML_ASSERT(%s) failed", expr);
+    tc.ggml.ggmlAssert(ok, "llama-bench.cpp", line, expr);
 }
 
 /// Ports `get_time_ns` (llama-bench.cpp:40 @b1b770d90).
@@ -377,14 +377,6 @@ fn splitBool(a: std.mem.Allocator, s: []const u8) !std.ArrayList(bool) {
         try out.append(a, n == 1);
     }
     return out;
-}
-
-/// `std::stoull`, as libc++ throws.
-fn stoull(s: []const u8) !u64 {
-    const p = tc.num.strtoull(s, 10);
-    if (p.range) return arg.throwStr("stoull: out of range");
-    if (p.end == 0) return arg.throwStr("stoull: no conversion");
-    return p.value;
 }
 
 /// `std::sregex_token_iterator(s, std::regex("[;/]+"), -1)`: the text
@@ -888,7 +880,7 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
         params.no_warmup = true;
     } else if (eql(cur, &.{ "-fitt", "--fit-target" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        for ((try tc.strings.split(a, v, split_delim)).items) |x| try params.fit_params_target.append(a, try stoull(x));
+        for ((try tc.strings.split(a, v, split_delim)).items) |x| try params.fit_params_target.append(a, try arg.stoull(x));
     } else if (eql(cur, &.{ "-fitc", "--fit-ctx" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
         for ((try tc.strings.split(a, v, split_delim)).items) |x| {

@@ -91,10 +91,6 @@ const child_addr = "127.0.0.1";
 /// the generation proxy.
 const stream_lookup_timeout_ms = 250;
 
-fn zs(a: Allocator, s: []const u8) Allocator.Error![*:0]const u8 {
-    return (try a.dupeSentinel(u8, s, 0)).ptr;
-}
-
 fn timeMs() i64 {
     return c.ggml_time_ms();
 }
@@ -153,17 +149,16 @@ pub const SharedProc = struct {
     }
 };
 
-extern fn fprintf(stream: *anyopaque, format: [*:0]const u8, ...) c_int;
 extern fn time(t: ?*i64) i64;
-extern fn fflush(stream: ?*anyopaque) c_int;
-extern fn fclose(stream: *anyopaque) c_int;
 
 /// Ports `request_child_exit` (server-models.cpp:43 @b1b770d90): the exit
 /// command on the child's stdin. SIGPIPE is ignored by the server.
 fn requestChildExit(proc: *ServerSubproc) void {
     if (proc.sproc.stdinFile()) |stdin_file| {
-        _ = fprintf(stdin_file, "%s\n", @as([*:0]const u8, cmd_router_to_child_exit));
-        _ = fflush(stdin_file);
+        // fprintf and fflush: one write of the whole line
+        stdin_file.writeStreamingAll(tc.file.defaultIo(), cmd_router_to_child_exit ++ "\n") catch |err| switch (err) {
+            else => {}, // a child already gone: EPIPE, SIGPIPE being ignored
+        };
     }
 }
 
@@ -391,7 +386,7 @@ pub const Meta = struct {
         self.resolveModel(sa, &params) catch |e| {
             if (e == error.OutOfMemory) return error.OutOfMemory;
             const w = if (e == error.Throw) tc.arg.what() else context.whatOf(e);
-            log.wrn("failed to resolve the model of '%s': %s\n", .{ try zs(sa, self.name), try zs(sa, w) });
+            log.wrn("failed to resolve the model of '%s': %s\n", .{ try common.zs(sa, self.name), try common.zs(sa, w) });
             return;
         };
 
@@ -400,7 +395,7 @@ pub const Meta = struct {
         var gen_audio = false;
         if (!params.no_mmproj and params.mmproj.path.len != 0) {
             // mtmd_get_cap_from_file() returns no capabilities on a bad file, it does not throw
-            const caps = c.mtmd_get_cap_from_file(try zs(sa, params.mmproj.path));
+            const caps = c.mtmd_get_cap_from_file(try common.zs(sa, params.mmproj.path));
             inp_image = caps.inp_vision;
             inp_audio = caps.inp_audio;
             gen_audio = caps.gen_audio;
@@ -560,15 +555,14 @@ pub fn getServerExecPath(a: Allocator) Error![]const u8 {
     }
 }
 
-extern var environ: [*:null]?[*:0]u8;
-
 /// Ports `get_environment` (server-models.cpp:306 @b1b770d90), its POSIX
 /// arm.
 fn getEnvironment(a: Allocator) Allocator.Error![]const []const u8 {
     var env: std.ArrayList([]const u8) = .empty;
-    var i: usize = 0;
-    while (environ[i]) |e| : (i += 1) {
-        try env.append(a, try a.dupe(u8, std.mem.span(e)));
+    const inherited = tc.env.map() orelse return env.items;
+    var it = inherited.iterator();
+    while (it.next()) |e| {
+        try env.append(a, try std.mem.concat(a, u8, &.{ e.key_ptr.*, "=", e.value_ptr.* }));
     }
     return env.items;
 }
@@ -648,7 +642,7 @@ const Monitor = struct {
             ch.deadline = timeMs() + @as(i64, kill_after) * 1000;
         }
         if (!ch.proc.proc.hasOutput()) {
-            const z = try zs(gpa, name);
+            const z = try common.zs(gpa, name);
             defer gpa.free(std.mem.span(z));
             srv(.err, "watch", "failed to get stdout/stderr of child process for name=%s\n", .{z});
             ch.eof = true;
@@ -838,7 +832,7 @@ const Monitor = struct {
             while (i < self.children.items.len) {
                 const it = &self.children.items[i];
                 if (it.deadline != 0 and now >= it.deadline and !it.proc.proc.stopped.load(.acquire)) {
-                    const z = zs(gpa, it.name) catch "";
+                    const z = common.zs(gpa, it.name) catch "";
                     srv(.wrn, "run", "force-killing child process for name=%s after timeout\n", .{z});
                     it.proc.proc.terminate();
                     it.deadline = 0;
@@ -847,7 +841,7 @@ const Monitor = struct {
                     const exit_code = it.proc.proc.join();
                     it.proc.proc.stopped.store(true, .release);
                     self.models.onChildExit(it.name, it.proc, it.role, exit_code);
-                    const z = zs(gpa, it.name) catch "";
+                    const z = common.zs(gpa, it.name) catch "";
                     srv(.inf, "run", "instance name=%s exited with status %d\n", .{ z, exit_code });
                     var removed = self.children.orderedRemove(i);
                     removed.deinit();
@@ -1153,7 +1147,7 @@ pub const UnfinishedDownloads = struct {
         defer self.mutex.unlock();
         self.parse(sa, raw) catch |e| {
             if (e == error.OutOfMemory) return error.OutOfMemory;
-            log.wrn("failed to read unfinished downloads: %s\n", .{try zs(sa, context.whatOf(e))});
+            log.wrn("failed to read unfinished downloads: %s\n", .{try common.zs(sa, context.whatOf(e))});
         };
     }
 
@@ -1200,7 +1194,7 @@ pub const UnfinishedDownloads = struct {
         defer scratch.deinit();
         const sa = scratch.allocator();
         self.saveImpl(sa) catch |e| {
-            log.wrn("failed to record unfinished downloads: %s\n", .{zs(sa, context.whatOf(e)) catch ""});
+            log.wrn("failed to record unfinished downloads: %s\n", .{common.zs(sa, context.whatOf(e)) catch ""});
         };
     }
 
@@ -1426,7 +1420,7 @@ pub const Models = struct {
         // set binary path
         self.bin_path = getServerExecPath(a) catch |e| blk: {
             if (e == error.OutOfMemory) return error.OutOfMemory;
-            const w = try zs(a, common.what(e));
+            const w = try common.zs(a, common.what(e));
             srv(.wrn, "server_models", "failed to get server executable path: %s\n", .{w});
             srv(.wrn, "server_models", "using original argv[0] as fallback: %s\n", .{argv[0].ptr});
             break :blk argv[0];
@@ -1576,7 +1570,7 @@ pub const Models = struct {
             try result.kind.router.data.set(a, "data", try d.clone(a));
         };
         const dump = try common.safeJsonToStr(a, &result.kind.router.data);
-        srv(.dbg, "notify_sse", "notifying SSE clients about event '%s' for model '%s': %s\n", .{ try zs(a, event), try zs(a, model_id), try zs(a, dump) });
+        srv(.dbg, "notify_sse", "notifying SSE clients about event '%s' for model '%s': %s\n", .{ try common.zs(a, event), try common.zs(a, model_id), try common.zs(a, dump) });
         try self.sse.broadcast(result);
     }
 
@@ -1595,13 +1589,13 @@ pub const Models = struct {
         // 1. cached models
         var cached_models = try presetCall(ctx.loadFromCache());
         defer cached_models.deinit(gpa);
-        srv(.trc, "load_models", "Loaded %zu cached model presets from %s\n", .{ cached_models.count(), try zs(sa, try hf_cache.getCachePath()) });
+        srv(.trc, "load_models", "Loaded %zu cached model presets from %s\n", .{ cached_models.count(), try common.zs(sa, try hf_cache.getCachePath()) });
         // 2. local models from --models-dir
         var local_models: Presets = .{};
         defer local_models.deinit(gpa);
         if (self.base_params.models_dir.len != 0) {
             local_models = try presetCall(ctx.loadFromModelsDir(self.base_params.models_dir));
-            srv(.trc, "load_models", "Loaded %zu local model presets from %s\n", .{ local_models.count(), try zs(sa, self.base_params.models_dir) });
+            srv(.trc, "load_models", "Loaded %zu local model presets from %s\n", .{ local_models.count(), try common.zs(sa, self.base_params.models_dir) });
         }
         // 3. custom-path models from presets
         var global: Preset = .{};
@@ -1610,7 +1604,7 @@ pub const Models = struct {
         defer custom_presets.deinit(gpa);
         if (self.base_params.models_preset.len != 0) {
             custom_presets = try presetCall(ctx.loadFromIni(self.base_params.models_preset, &global));
-            srv(.trc, "load_models", "Loaded %zu custom model presets from %s\n", .{ custom_presets.count(), try zs(sa, self.base_params.models_preset) });
+            srv(.trc, "load_models", "Loaded %zu custom model presets from %s\n", .{ custom_presets.count(), try common.zs(sa, self.base_params.models_preset) });
         }
 
         // cascade, apply global preset first
@@ -1690,7 +1684,7 @@ pub const Models = struct {
                     }
                     const path = try download.resolvePath(sa, p.name, "");
                     if (path.len != 0 and preset_paths.contains(path)) {
-                        srv(.inf, "load_models", "hiding cache model name=%s (deduplicated by a preset)\n", .{try zs(sa, p.name)});
+                        srv(.inf, "load_models", "hiding cache model name=%s (deduplicated by a preset)\n", .{try common.zs(sa, p.name)});
                         try hidden_models.insert(sa, p.name);
                     }
                 }
@@ -1760,7 +1754,7 @@ pub const Models = struct {
 
             // unload() acquires the lock internally, so release before each call
             for (to_unload.items) |name| {
-                srv(.inf, "load_models", "(reload) unloading model name=%s (source updated or removed)\n", .{try zs(sa, name)});
+                srv(.inf, "load_models", "(reload) unloading model name=%s (source updated or removed)\n", .{try common.zs(sa, name)});
                 self.mutex.unlock();
                 self.unload(name) catch |err| switch (err) {
                     error.OutOfMemory => {},
@@ -1790,7 +1784,7 @@ pub const Models = struct {
                     // download finished, safe to erase
                     self.eraseAt(i);
                 } else if (final_presets.get(inst.meta.name) == null) {
-                    srv(.inf, "load_models", "(reload) removing model name=%s (no longer in source)\n", .{try zs(sa, inst.meta.name)});
+                    srv(.inf, "load_models", "(reload) removing model name=%s (no longer in source)\n", .{try common.zs(sa, inst.meta.name)});
                     self.eraseAt(i);
                 } else {
                     i += 1;
@@ -1825,7 +1819,7 @@ pub const Models = struct {
                     for (self.mapping.items) |other| {
                         if (std.mem.eql(u8, other.meta.name, inst.meta.name)) continue;
                         if (std.mem.eql(u8, other.meta.name, alias) or other.meta.aliases.contains(alias)) {
-                            srv(.wrn, "load_models", "(reload) alias '%s' for model '%s' conflicts with model '%s', skipping\n", .{ try zs(sa, alias), try zs(sa, inst.meta.name), try zs(sa, other.meta.name) });
+                            srv(.wrn, "load_models", "(reload) alias '%s' for model '%s' conflicts with model '%s', skipping\n", .{ try common.zs(sa, alias), try common.zs(sa, inst.meta.name), try common.zs(sa, other.meta.name) });
                             conflict = true;
                             break;
                         }
@@ -1901,7 +1895,7 @@ pub const Models = struct {
                     try info.print(sa, " [tags: {s}]", .{try inst.meta.tags.joinComma(sa)});
                 }
 
-                srv(.inf, "operator()", "  [%10s] %s%s\n", .{ try zs(sa, source), try zs(sa, inst.meta.name), try zs(sa, info.items) });
+                srv(.inf, "operator()", "  [%10s] %s%s\n", .{ try common.zs(sa, source), try common.zs(sa, inst.meta.name), try common.zs(sa, info.items) });
             }
         }
     }
@@ -1914,7 +1908,7 @@ pub const Models = struct {
                 const z = gpa.dupeSentinel(u8, val, 0) catch continue;
                 defer gpa.free(z);
                 inst.meta.stop_timeout = tc.arg.stoi(z) catch blk: {
-                    srv(.wrn, "operator()", "invalid stop-timeout value '%s' for model '%s', using default %d seconds\n", .{ z.ptr, zs(inst.alloc(), inst.meta.name) catch "", @as(c_int, default_stop_timeout) });
+                    srv(.wrn, "operator()", "invalid stop-timeout value '%s' for model '%s', using default %d seconds\n", .{ z.ptr, common.zs(inst.alloc(), inst.meta.name) catch "", @as(c_int, default_stop_timeout) });
                     break :blk default_stop_timeout;
                 };
             }
@@ -1947,7 +1941,7 @@ pub const Models = struct {
             self.startup_models = null;
         }
         for (to_load.items) |name| {
-            const z = try zs(gpa, name);
+            const z = try common.zs(gpa, name);
             defer gpa.free(std.mem.span(z));
             srv(.inf, "load_startup_models", "(startup) loading model %s\n", .{z});
             try self.load(name, .{});
@@ -2036,7 +2030,7 @@ pub const Models = struct {
             return throw(error.RuntimeError, "model name={s} is not found", .{name});
         }
         const ok = try download.remove(sa, name);
-        srv(.inf, "unfinished_downloads_remove", "removing unfinished download name=%s (%s)\n", .{ try zs(sa, name), @as([*:0]const u8, if (ok) "succeeded" else "nothing cached") });
+        srv(.inf, "unfinished_downloads_remove", "removing unfinished download name=%s (%s)\n", .{ try common.zs(sa, name), @as([*:0]const u8, if (ok) "succeeded" else "nothing cached") });
         // other clients still list it as a paused download
         self.notifySse("model_remove", name, null);
     }
@@ -2059,7 +2053,7 @@ pub const Models = struct {
         var ok = try self.unfinished_downloads.removeSidecar(name, kind);
         const opts = sidecarDownloadOpts(&self.base_params, &.{kind});
         ok = (try download.removeSidecars(sa, name, &opts)) or ok;
-        srv(.inf, "remove_sidecar", "removing sidecar %s of model name=%s (%s)\n", .{ try zs(sa, kind), try zs(sa, name), @as([*:0]const u8, if (ok) "succeeded" else "nothing cached") });
+        srv(.inf, "remove_sidecar", "removing sidecar %s of model name=%s (%s)\n", .{ try common.zs(sa, kind), try common.zs(sa, name), @as([*:0]const u8, if (ok) "succeeded" else "nothing cached") });
         return ok;
     }
 
@@ -2073,7 +2067,7 @@ pub const Models = struct {
         // the fake load time of a model; a download worker loads none
         if (self.debug_fake_timing and opts.role == .instance) {
             // do not hold the mutex here, other requests must keep making progress
-            sleepMs(2000);
+            tc.clock.sleepMs(2000);
         }
 
         if (opts.custom_meta == null) {
@@ -2107,7 +2101,7 @@ pub const Models = struct {
                 if (cur.source != .cache) {
                     return throw(error.InvalidArgument, "model '{s}' already exists", .{name});
                 }
-                srv(.inf, "load", "resuming download for model '%s'\n", .{try zs(sa, name)});
+                srv(.inf, "load", "resuming download for model '%s'\n", .{try common.zs(sa, name)});
             }
 
             // two downloads writing the same partial would interleave their bytes
@@ -2128,7 +2122,7 @@ pub const Models = struct {
 
         var meta: Meta = if (opts.custom_meta) |m| try m.clone(sa) else try (try self.getOrCreate(name)).meta.clone(sa);
         if (meta.status != .unloaded) {
-            srv(.inf, "load", "model %s is not ready\n", .{try zs(sa, name)});
+            srv(.inf, "load", "model %s is not ready\n", .{try common.zs(sa, name)});
             return;
         }
 
@@ -2155,7 +2149,7 @@ pub const Models = struct {
         var proc_owned = true;
         defer if (proc_owned) proc.release();
         {
-            srv(.inf, "load", "spawning server instance with name=%s on port %d\n", .{ try zs(sa, meta.name), meta.port });
+            srv(.inf, "load", "spawning server instance with name=%s on port %d\n", .{ try common.zs(sa, meta.name), meta.port });
 
             try meta.updateArgs(sa, self.ctx_preset, self.bin_path); // render args
 
@@ -2191,7 +2185,7 @@ pub const Models = struct {
 
             srv(.inf, "load", "%s", .{@as([*:0]const u8, "spawning server instance with args:\n")});
             for (child_args) |arg| {
-                srv(.inf, "load", "  %s\n", .{try zs(sa, arg)});
+                srv(.inf, "load", "  %s\n", .{try common.zs(sa, arg)});
             }
             meta.args = child_args; // save for debugging
 
@@ -2210,7 +2204,7 @@ pub const Models = struct {
         // old process should have exited already, but just in case, we clean it up here
         if (self.find(name)) |old| {
             if (old.subproc.proc.isAlive()) {
-                srv(.wrn, "load", "old process for model name=%s is still alive, this is unexpected\n", .{try zs(sa, name)});
+                srv(.wrn, "load", "old process for model name=%s is still alive, this is unexpected\n", .{try common.zs(sa, name)});
                 old.subproc.proc.terminate(); // force kill
             }
         }
@@ -2303,7 +2297,7 @@ pub const Models = struct {
     pub fn unload(self: *Models, name: []const u8) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
-        const z = try zs(gpa, name);
+        const z = try common.zs(gpa, name);
         defer gpa.free(std.mem.span(z));
         if (self.find(name)) |it| {
             if (it.meta.status == .downloading) {
@@ -2340,7 +2334,7 @@ pub const Models = struct {
         defer self.mutex.unlock();
         self.sched.cancelMeasurements();
         for (self.mapping.items) |inst| {
-            const z = zs(gpa, inst.meta.name) catch continue;
+            const z = common.zs(gpa, inst.meta.name) catch continue;
             defer gpa.free(std.mem.span(z));
             if (inst.meta.status == .downloading) {
                 srv(.inf, "unload_all", "cancelling download for model name=%s\n", .{z});
@@ -2510,7 +2504,7 @@ pub const Models = struct {
         var scratch = std.heap.ArenaAllocator.init(gpa);
         defer scratch.deinit();
         const sa = scratch.allocator();
-        const z = try zs(sa, name);
+        const z = try common.zs(sa, name);
         // do everything under one lock acquisition; avoid get_meta() /
         // unload() because they can trigger load_models() which erases
         // transient DOWNLOADING / DOWNLOADED entries as a side-effect
@@ -2588,7 +2582,7 @@ pub const Models = struct {
         var scratch = std.heap.ArenaAllocator.init(gpa);
         defer scratch.deinit();
         const sa = scratch.allocator();
-        const z = try zs(sa, name);
+        const z = try common.zs(sa, name);
         const meta = (try self.getMeta(sa, name)) orelse {
             return throw(error.RuntimeError, "model name={s} is not found", .{name});
         };
@@ -2641,7 +2635,7 @@ pub const Models = struct {
     /// The waiting loop of `ensure_model_ready`, from `saw_loading`
     /// (server-models.cpp:1639 @b1b770d90) on, with the mutex held.
     fn ensureWait(self: *Models, sa: Allocator, name: []const u8, should_stop: ?http.ShouldStop, queued: *bool, did_load: *bool) !void {
-        const z = try zs(sa, name);
+        const z = try common.zs(sa, name);
         var saw_loading = false;
         while (true) {
             const it = self.find(name) orelse break; // removed by another code path, nothing to wait for
@@ -2699,7 +2693,7 @@ pub const Models = struct {
                         return e;
                     }
                     // lost a race for the slot, stay in line and retry
-                    srv(.wrn, "ensure_model_ready", "queued load of name=%s did not go through: %s\n", .{ z, try zs(sa, context.whatOf(e)) });
+                    srv(.wrn, "ensure_model_ready", "queued load of name=%s did not go through: %s\n", .{ z, try common.zs(sa, context.whatOf(e)) });
                     ok = false;
                 }
                 self.mutex.lock();
@@ -2736,9 +2730,9 @@ pub const Models = struct {
         }
         if (self.debug_fake_timing) {
             // sleep after req_count++, so the model counts as busy while we wait here
-            sleepMs(2000);
+            tc.clock.sleepMs(2000);
         }
-        srv(.trc, "proxy_request", "proxying request to model %s on port %d\n", .{ try zs(sa, name), meta.port });
+        srv(.trc, "proxy_request", "proxying request to model %s on port %d\n", .{ try common.zs(sa, name), meta.port });
         var proxy_path = try sa.dupe(u8, req.path);
         if (req.query_string.len != 0) {
             proxy_path = try std.mem.concat(sa, u8, &.{ proxy_path, "?", req.query_string });
@@ -2802,7 +2796,7 @@ pub const Models = struct {
             inst.meta.last_used = timeMs();
             inst.req_count += 1;
         }
-        srv(.trc, "proxy_ws", "proxying websocket to model %s on port %d\n", .{ try zs(sa, name), meta.?.port });
+        srv(.trc, "proxy_ws", "proxying websocket to model %s on port %d\n", .{ try common.zs(sa, name), meta.?.port });
 
         var url = try std.fmt.allocPrint(sa, "ws://{s}:{d}{s}", .{ child_addr, meta.?.port, req.path });
         if (req.query_string.len != 0) {
@@ -2886,7 +2880,7 @@ pub const Models = struct {
 
         parse: {
             var data = json.parse(sa, raw_input[cmd_child_to_router_state.len..]) catch {
-                srv(.err, "handle_child_state", "failed to parse child state update for name=%s: %s\n", .{ zs(sa, name) catch "", zs(sa, json.what()) catch "" });
+                srv(.err, "handle_child_state", "failed to parse child state update for name=%s: %s\n", .{ common.zs(sa, name) catch "", common.zs(sa, json.what()) catch "" });
                 return;
             };
             const s = common.jsonValue(&data, "state", []const u8, "");
@@ -2931,7 +2925,7 @@ pub const Models = struct {
                 if (info.contains("memory")) {
                     if (info.at("memory")) |jm| {
                         memory = models_sched.ServerModelMemory.fromJson(sa, jm) catch |e| blk: {
-                            srv(.wrn, "handle_child_state", "malformed memory report from model name=%s: %s\n", .{ zs(sa, name) catch "", zs(sa, context.whatOf(e)) catch "" });
+                            srv(.wrn, "handle_child_state", "malformed memory report from model name=%s: %s\n", .{ common.zs(sa, name) catch "", common.zs(sa, context.whatOf(e)) catch "" });
                             break :blk null;
                         };
                     } else |_| {}
@@ -3028,11 +3022,6 @@ fn presetOptionsEqualForCompare(a: Allocator, x: *const Preset, y: *const Preset
     return true;
 }
 
-fn sleepMs(ms: u64) void {
-    var ts: std.c.timespec = .{ .sec = @intCast(ms / 1000), .nsec = @intCast((ms % 1000) * std.time.ns_per_ms) };
-    while (std.c.nanosleep(&ts, &ts) != 0) {}
-}
-
 // -----------------------------------------------------------------------------
 // server_role
 
@@ -3043,7 +3032,7 @@ fn sleepMs(ms: u64) void {
 pub const Role = struct {
     // serializes the notify_to_router writes
     mtx_stdout: Mutex = .{},
-    cmd_out: ?*anyopaque = null, // the stdout the router reads the commands from
+    cmd_out: ?std.Io.File = null, // the stdout the router reads the commands from
 
     /// Ports the constructor of `server_role` (server-common.cpp:2292
     /// @b1b770d90): in a child, keeps stdout for the commands to the
@@ -3061,7 +3050,7 @@ pub const Role = struct {
     /// @b1b770d90).
     pub fn deinit(self: *Role) void {
         if (self.cmd_out) |f| {
-            _ = fclose(f);
+            f.close(tc.file.defaultIo());
             self.cmd_out = null;
         }
     }
@@ -3103,7 +3092,9 @@ pub const Role = struct {
                     var got_any = false;
                     while (true) {
                         var ch: [1]u8 = undefined;
-                        const n = std.c.read(0, &ch, 1);
+                        // the system's read, as cin's: EINTR ends the line too
+                        const rc = std.posix.system.read(0, &ch, 1);
+                        const n: isize = if (std.posix.errno(rc) == .SUCCESS) @intCast(rc) else -1;
                         if (n <= 0) {
                             if (!got_any) {
                                 // EOF detected, that means the router server is unexpectedly exit or killed
@@ -3143,12 +3134,14 @@ pub const Role = struct {
         o.put("payload", payload.clone(a) catch return) catch return;
         var data = o.done();
         const dump = common.safeJsonToStr(a, &data) catch return;
-        const dz = a.dupeSentinel(u8, dump, 0) catch return;
         self.mtx_stdout.lock();
         defer self.mtx_stdout.unlock();
         // fprintf(nullptr) crashes in the C++ too: a child is always constructed with its stream
-        _ = fprintf(self.cmd_out.?, "%s%s\n", @as([*:0]const u8, cmd_child_to_router_state), dz.ptr);
-        _ = fflush(self.cmd_out);
+        // fprintf and fflush: the line in one write
+        const line = std.mem.concat(a, u8, &.{ cmd_child_to_router_state, dump, "\n" }) catch return;
+        self.cmd_out.?.writeStreamingAll(tc.file.defaultIo(), line) catch |err| switch (err) {
+            else => {}, // fprintf's result unchecked
+        };
     }
 
     /// The `set_state_callback` (server.cpp:693 @b1b770d90) lambda a child
@@ -3213,7 +3206,7 @@ const SseClient = struct {
                 if (result.toJson(a)) |v| {
                     var vv = v;
                     const d = common.safeJsonToStr(a, &vv) catch "";
-                    srv(.dbg, "next", "recv result for client_id=%d: %s\n", .{ self.client_id, zs(a, d) catch "" });
+                    srv(.dbg, "next", "recv result for client_id=%d: %s\n", .{ self.client_id, common.zs(a, d) catch "" });
                 } else |_| {}
             }
             return result;
@@ -3340,7 +3333,7 @@ pub const ModelsRoutes = struct {
         const cfg = self.params.ui_config_json;
         if (cfg.len != 0) {
             const json_settings = json.parse(self.ui_arena.allocator(), cfg) catch |e| {
-                const w = try zs(self.ui_arena.allocator(), context.whatOf(e));
+                const w = try common.zs(self.ui_arena.allocator(), context.whatOf(e));
                 log.err("%s: failed to parse UI config: %s\n", .{ @as([*:0]const u8, "server_models_routes"), w });
                 return e;
             };
@@ -3463,7 +3456,7 @@ pub const ModelsRoutes = struct {
         const should_stop: ?http.ShouldStop = if (ticket == 0) req.should_stop else null;
         const waited = autoload and try self.models.ensureModelReady(name, should_stop);
         if (ticket != 0 and !self.models.conv_models.alive(conv_id, ticket)) {
-            srv(.inf, "operator()", "request for conv_id=%s cancelled while model name=%s was loading\n", .{ try zs(a, conv_id), try zs(a, name) });
+            srv(.inf, "operator()", "request for conv_id=%s cancelled while model name=%s was loading\n", .{ try common.zs(a, conv_id), try common.zs(a, name) });
             var e = try common.formatErrorResponse(a, "request cancelled by a stop while the model was loading", .invalid_request);
             try resErr(error_res, &e);
             return error_res;
@@ -3730,7 +3723,7 @@ pub const ModelsRoutes = struct {
         // validate by fetching metadata, through the plan the download follows
         const opts = sidecarDownloadOpts(&self.params, sidecars);
         const plan = download.getHfPlan(a, &model, &opts) catch |e| {
-            srv(.err, "operator()", "unknown error while validating model '%s'\n", .{try zs(a, name)});
+            srv(.err, "operator()", "unknown error while validating model '%s'\n", .{try common.zs(a, name)});
             // other exceptions will be handled by the outer ex_wrapper()
             return e;
         };
@@ -3741,7 +3734,7 @@ pub const ModelsRoutes = struct {
         }
 
         // then, proceed with the actual download; load() decides over an existing entry
-        srv(.inf, "operator()", "starting download for model '%s'\n", .{try zs(a, name)});
+        srv(.inf, "operator()", "starting download for model '%s'\n", .{try common.zs(a, name)});
         {
             const custom: Meta = .{ .source = .cache, .name = name };
             try self.models.load(name, .{
@@ -3836,7 +3829,7 @@ pub const ModelsRoutes = struct {
         if (from.len != 0) {
             child_path = try std.mem.concat(a, u8, &.{ child_path, "&from=", from });
         }
-        srv(.trc, "operator()", "proxying stream resume to model %s on port %d, path=%s\n", .{ try zs(a, owner.name), owner.port, try zs(a, child_path) });
+        srv(.trc, "operator()", "proxying stream resume to model %s on port %d, path=%s\n", .{ try common.zs(a, owner.name), owner.port, try common.zs(a, child_path) });
         const proxy = try proxy_mod.Proxy.create(
             "GET",
             "http",
@@ -3948,9 +3941,9 @@ pub const ModelsRoutes = struct {
         } else if (try self.models.conv_models.lookup(a, conv_id)) |tracked| {
             // the entry exists but its model is still loading: the forget below erases it,
             // which cancels the request parked in proxy_post before the generation starts
-            srv(.inf, "operator()", "router stop for conv_id=%s while model name=%s is loading, cancelling the pending request\n", .{ try zs(a, conv_id), try zs(a, tracked) });
+            srv(.inf, "operator()", "router stop for conv_id=%s while model name=%s is loading, cancelling the pending request\n", .{ try common.zs(a, conv_id), try common.zs(a, tracked) });
         } else {
-            srv(.wrn, "operator()", "router stop for unknown conv_id=%s, no owning child in the conv map\n", .{try zs(a, conv_id)});
+            srv(.wrn, "operator()", "router stop for unknown conv_id=%s, no owning child in the conv map\n", .{try common.zs(a, conv_id)});
         }
         // drop the tracking entry, the session is being torn down
         self.models.conv_models.forget(conv_id);

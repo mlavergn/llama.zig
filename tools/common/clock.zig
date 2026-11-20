@@ -64,6 +64,14 @@ pub fn isoUtc(buf: *[32]u8, t: i64) error{NoSpaceLeft}![]const u8 {
     });
 }
 
+/// `std::this_thread::sleep_for(std::chrono::milliseconds(ms))`.
+pub fn sleepMs(ms: u64) void {
+    const d: std.Io.Clock.Duration = .{ .raw = .fromMilliseconds(@intCast(ms)), .clock = .awake };
+    d.sleep(file.defaultIo()) catch |err| switch (err) {
+        error.Canceled => {}, // the global Io cannot be canceled
+    };
+}
+
 /// `sleep(seconds)`.
 ///
 /// Return: nothing; `error.Canceled` never, as the global `Io` cannot be

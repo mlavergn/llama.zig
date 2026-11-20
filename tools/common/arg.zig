@@ -75,12 +75,20 @@ extern fn snprintf(buf: ?[*]u8, size: usize, format: [*:0]const u8, ...) c_int;
 
 /// `std::stoi`, as libc++ throws (string.cpp's `as_integer_helper`).
 pub fn stoi(s: [:0]const u8) error{Throw}!c_int {
-    const p = num.strtol(s, 10);
-    const v = p.value;
-    if (p.range) return throwStr("stoi: out of range");
-    if (p.end == 0) return throwStr("stoi: no conversion");
-    if (v < std.math.minInt(c_int) or v > std.math.maxInt(c_int)) return throwStr("stoi: out of range");
-    return @intCast(v);
+    return switch (num.stoi(s)) {
+        .ok => |v| v,
+        else => |e| throwStr(std.mem.span(e.what())),
+    };
+}
+
+/// `std::stoull(s)`, its exceptions thrown as upstream throws them.
+///
+/// Return: the value, or `error.Throw` with the exception set.
+pub fn stoull(s: []const u8) error{Throw}!u64 {
+    return switch (num.stoull(s)) {
+        .ok => |v| v,
+        else => |e| throwStr(std.mem.span(e.what())),
+    };
 }
 
 /// `std::stoul`.

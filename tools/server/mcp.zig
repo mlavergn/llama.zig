@@ -30,7 +30,6 @@
 
 const std = @import("std");
 const sync = @import("sync");
-const builtin = @import("builtin");
 const json = @import("json");
 const tc = @import("tools_common");
 const common = @import("common.zig");
@@ -42,39 +41,22 @@ const srv = common.srv;
 
 const gpa = std.heap.c_allocator;
 
-extern fn fileno(f: *anyopaque) c_int;
-extern fn fcntl(fd: c_int, cmd: c_int, ...) c_int;
 extern fn read(fd: c_int, buf: [*]u8, n: usize) isize;
-extern fn write(fd: c_int, buf: [*]const u8, n: usize) isize;
 
-const F_GETFL: c_int = 3;
-const F_SETFL: c_int = 4;
-const O_NONBLOCK: c_int = if (builtin.os.tag.isDarwin()) 0x0004 else 0o4000;
-
-fn errno() c_int {
-    return std.c._errno().*;
-}
-
-fn isErr(e: c_int, comptime which: std.posix.E) bool {
-    return e == @backingInt(which);
+/// `poll(fds, 1, timeout_ms)`, the C library's on Darwin and the system
+/// call on Linux, as `std.posix.system` resolves it.
+///
+/// Return: the ready count, or the `errno` when it failed.
+fn pollOne(pfd: *[1]std.posix.pollfd, timeout_ms: c_int) union(enum) { ready: usize, err: std.posix.E } {
+    const rc = std.posix.system.poll(pfd, 1, @intCast(timeout_ms));
+    const e = std.posix.errno(rc);
+    if (e != .SUCCESS) return .{ .err = e };
+    return .{ .ready = @intCast(rc) };
 }
 
 /// `std::chrono::steady_clock::now()`, in nanoseconds.
 pub fn nowNs() i128 {
-    var ts: std.c.timespec = undefined;
-    _ = std.c.clock_gettime(std.c.CLOCK.MONOTONIC, &ts);
-    return @as(i128, ts.sec) * std.time.ns_per_s + ts.nsec;
-}
-
-/// `std::this_thread::sleep_for`.
-pub fn sleepMs(ms: u64) void {
-    var ts: std.c.timespec = .{ .sec = @intCast(ms / 1000), .nsec = @intCast((ms % 1000) * std.time.ns_per_ms) };
-    while (std.c.nanosleep(&ts, &ts) != 0) {}
-}
-
-/// A NUL-terminated copy for a `%s` argument, freed with `common.freeZ`.
-fn z(s: []const u8) [*:0]const u8 {
-    return common.dupZ(s);
+    return tc.clock.monotonicNs();
 }
 
 /// `std::mutex`.
@@ -110,34 +92,31 @@ const StringPipe = common.Pipe([]u8);
 /// from a child pipe, calling `on_line` per line until `running` clears, EOF
 /// or an error, or `on_line` returns false. Polled, not blocking: a
 /// grandchild can inherit the pipe's write end and hold it open.
-fn pumpNdjson(f: ?*anyopaque, running: *std.atomic.Value(bool), ctx: anytype, comptime on_line: fn (@TypeOf(ctx), []u8) bool) void {
+fn pumpNdjson(f: ?std.Io.File, running: *std.atomic.Value(bool), ctx: anytype, comptime on_line: fn (@TypeOf(ctx), []u8) bool) void {
     const file = f orelse return;
+    const io = tc.file.defaultIo();
     const poll_ms: c_int = 50;
     const max_line: usize = 8 * 1024 * 1024; // drop any single NDJSON line larger than this, so a child that never emits '\n' can't grow buf without bound
-    const fd = fileno(file);
-    const fl = fcntl(fd, F_GETFL, @as(c_int, 0));
-    if (fl >= 0) _ = fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+    const fd = file.handle;
+    tc.subproc.setNonBlocking(fd);
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(gpa);
     var skipping = false; // discarding an over-long line until its terminating newline
     var chunk: [4096]u8 = undefined;
     while (running.load(.seq_cst)) {
         var pfd = [_]std.posix.pollfd{.{ .fd = fd, .events = std.posix.POLL.IN, .revents = 0 }};
-        const pr = std.c.poll(&pfd, 1, poll_ms);
-        if (pr < 0) {
-            if (isErr(errno(), .INTR)) continue;
-            break;
-        }
+        const pr = switch (pollOne(&pfd, poll_ms)) {
+            .ready => |n| n,
+            .err => |e| if (e == .INTR) continue else break,
+        };
         if (pr == 0) continue; // timeout -> re-check running
         if ((pfd[0].revents & (std.posix.POLL.ERR | std.posix.POLL.NVAL)) != 0) break;
-        const r = read(fd, &chunk, chunk.len);
-        if (r < 0) {
-            const e = errno();
-            if (isErr(e, .INTR) or isErr(e, .AGAIN)) continue;
-            break;
-        }
-        if (r == 0) break; // EOF: child (and any pipe writers) closed the stream
-        buf.appendSlice(gpa, chunk[0..@intCast(r)]) catch break;
+        // EINTR is retried; EOF means the child (and any pipe writers) closed the stream
+        const r = file.readStreaming(io, &.{&chunk}) catch |err| switch (err) {
+            error.WouldBlock => continue,
+            else => break,
+        };
+        buf.appendSlice(gpa, chunk[0..r]) catch break;
 
         // resync after an over-long, unterminated line: discard bytes until the next newline
         if (skipping) {
@@ -173,27 +152,26 @@ fn pumpNdjson(f: ?*anyopaque, running: *std.atomic.Value(bool), ctx: anytype, co
 /// hangs.
 ///
 /// Return: false on an error, a close or shutdown.
-fn writeAll(f: ?*anyopaque, data: []const u8, running: *std.atomic.Value(bool)) bool {
+fn writeAll(f: ?std.Io.File, data: []const u8, running: *std.atomic.Value(bool)) bool {
     const file = f orelse return false;
+    const io = tc.file.defaultIo();
     var total: usize = 0;
-    const fd = fileno(file);
-    const fl = fcntl(fd, F_GETFL, @as(c_int, 0));
-    if (fl >= 0) _ = fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+    const fd = file.handle;
+    tc.subproc.setNonBlocking(fd);
     while (total < data.len and running.load(.seq_cst)) {
-        const n = write(fd, data[total..].ptr, data.len - total);
+        // EINTR is retried; EAGAIN waits for room below
+        const n = file.writeStreaming(io, "", &.{data[total..]}, 1) catch |err| switch (err) {
+            error.WouldBlock => 0,
+            else => return false,
+        };
         if (n > 0) {
-            total += @intCast(n);
+            total += n;
             continue;
         }
-        if (n == 0) return false;
-        const e = errno();
-        if (isErr(e, .INTR)) continue;
-        if (!isErr(e, .AGAIN)) return false;
         var pfd = [_]std.posix.pollfd{.{ .fd = fd, .events = std.posix.POLL.OUT, .revents = 0 }};
-        const pr = std.c.poll(&pfd, 1, 50);
-        if (pr < 0) {
-            if (isErr(errno(), .INTR)) continue;
-            return false;
+        switch (pollOne(&pfd, 50)) {
+            .ready => {},
+            .err => |e| if (e == .INTR) continue else return false,
         }
         if ((pfd[0].revents & (std.posix.POLL.ERR | std.posix.POLL.NVAL | std.posix.POLL.HUP)) != 0) return false;
     }
@@ -268,7 +246,7 @@ pub const ServerConfig = struct {
             }
 
             if (sc.command.len == 0) {
-                const n = z(sc.name);
+                const n = common.dupZ(sc.name);
                 defer common.freeZ(n);
                 srv(.wrn, "parse_cursor_format", "MCP server '%s' has no command, skipping\n", .{n});
                 continue;
@@ -644,9 +622,9 @@ pub const Transport = struct {
         const ok = handle.create(argv_s.items, options, envp_s, if (config.cwd.len == 0) null else config.cwd);
         if (!ok) {
             gpa.destroy(handle);
-            const n = z(config.name);
+            const n = common.dupZ(config.name);
             defer common.freeZ(n);
-            const cmd = z(config.command);
+            const cmd = common.dupZ(config.command);
             defer common.freeZ(cmd);
             srv(.wrn, "start", "MCP '%s': failed to spawn '%s'\n", .{ n, cmd });
             return false;
@@ -739,9 +717,9 @@ pub const Transport = struct {
         const P = struct {
             fn onLine(t: *Transport, line: []u8) bool {
                 defer gpa.free(line);
-                const n = z(t.name);
+                const n = common.dupZ(t.name);
                 defer common.freeZ(n);
-                const l = z(line);
+                const l = common.dupZ(line);
                 defer common.freeZ(l);
                 srv(.dbg, "operator()", "MCP '%s' stderr: %s\n", .{ n, l });
                 t.err_mu.lock();
@@ -789,11 +767,11 @@ pub const Transport = struct {
 /// environment with the configured overrides applied, `KEY=VALUE`.
 fn buildEnv(a: Allocator, config: *const ServerConfig) ![]const []const u8 {
     var env: std.ArrayList([]const u8) = .empty;
-    var i: usize = 0;
-    while (std.c.environ[i]) |e_ptr| : (i += 1) {
-        const e = std.mem.span(e_ptr);
-        const key = if (std.mem.findScalar(u8, e, '=')) |eq| e[0..eq] else e;
-        if (!config.findEnv(key)) try env.append(a, e);
+    if (tc.env.map()) |inherited| {
+        var it = inherited.iterator();
+        while (it.next()) |e| {
+            if (!config.findEnv(e.key_ptr.*)) try env.append(a, try std.mem.concat(a, u8, &.{ e.key_ptr.*, "=", e.value_ptr.* }));
+        }
     }
     for (config.env.items) |kv| try env.append(a, try std.mem.concat(a, u8, &.{ kv.key, "=", kv.value }));
     return env.items;
@@ -912,7 +890,7 @@ pub const Mcp = struct {
         for (parsed.items) |p| {
             // names must be unique across both config sources: get_or_create / find_config key on the name
             if (self.findConfig(p.name) != null) {
-                const n = z(p.name);
+                const n = common.dupZ(p.name);
                 defer common.freeZ(n);
                 srv(.wrn, "operator()", "MCP config: duplicate server name '%s', skipping\n", .{n});
                 continue;
@@ -947,9 +925,9 @@ pub const Mcp = struct {
             if (!t.start()) {
                 var arena = std.heap.ArenaAllocator.init(gpa);
                 defer arena.deinit();
-                const n = z(cfg.name);
+                const n = common.dupZ(cfg.name);
                 defer common.freeZ(n);
-                const d = z(try t.diagnostics(arena.allocator()));
+                const d = common.dupZ(try t.diagnostics(arena.allocator()));
                 defer common.freeZ(d);
                 srv(.wrn, "start", "MCP warmup: failed to spawn '%s': %s\n", .{ n, d });
                 continue;
@@ -966,7 +944,7 @@ pub const Mcp = struct {
             var stop: Stop = .{ .mgr = self, .deadline = nowNs() + warmup_timeout_seconds * std.time.ns_per_s };
             const tools = try t.listTools(.{ .ctx = &stop, .f = Stop.f });
             defer if (tools.len != 0) gpa.free(tools);
-            const n = z(cfg.name);
+            const n = common.dupZ(cfg.name);
             defer common.freeZ(n);
             srv(.inf, "start", "MCP warmup: '%s' discovered %zu tools\n", .{ n, tools.len });
             try discovered.appendSlice(gpa, tools);
@@ -1043,9 +1021,9 @@ pub const Mcp = struct {
                 if (t.value.isAlive()) return t.value.retain();
                 var arena = std.heap.ArenaAllocator.init(gpa);
                 defer arena.deinit();
-                const n = z(name);
+                const n = common.dupZ(name);
                 defer common.freeZ(n);
-                const d = z(try t.value.diagnostics(arena.allocator()));
+                const d = common.dupZ(try t.value.diagnostics(arena.allocator()));
                 defer common.freeZ(d);
                 srv(.wrn, "get_or_create", "MCP '%s' is no longer alive: %s\n", .{ n, d });
                 try to_close.append(gpa, t.value);
@@ -1061,9 +1039,9 @@ pub const Mcp = struct {
                 } else {
                     var arena = std.heap.ArenaAllocator.init(gpa);
                     defer arena.deinit();
-                    const n = z(name);
+                    const n = common.dupZ(name);
                     defer common.freeZ(n);
-                    const d = z(try fresh.diagnostics(arena.allocator()));
+                    const d = common.dupZ(try fresh.diagnostics(arena.allocator()));
                     defer common.freeZ(d);
                     srv(.wrn, "get_or_create", "MCP '%s': failed to start: %s\n", .{ n, d });
                     try to_close.append(gpa, fresh);

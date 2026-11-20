@@ -55,12 +55,6 @@ pub fn pathJoin(a: Allocator, p: []const u8, q: []const u8) Allocator.Error![]u8
     return std.mem.concat(a, u8, &.{ p, "/", q });
 }
 
-/// `path::filename()`: what follows the last separator.
-pub fn pathFilename(p: []const u8) []const u8 {
-    const i = std.mem.lastIndexOfScalar(u8, p, '/') orelse return p;
-    return p[i + 1 ..];
-}
-
 /// `path::parent_path()`: the path without its last element; a path whose
 /// last element is its root keeps the root.
 pub fn pathParent(p: []const u8) []const u8 {
@@ -186,7 +180,6 @@ extern fn rename(old: [*:0]const u8, new: [*:0]const u8) c_int;
 extern fn unlink(path: [*:0]const u8) c_int;
 extern fn rmdir(path: [*:0]const u8) c_int;
 extern fn readlink(path: [*:0]const u8, buf: [*]u8, len: usize) isize;
-extern fn strerror(e: c_int) [*:0]const u8;
 extern fn remove(path: [*:0]const u8) c_int;
 extern fn getuid() c_uint;
 extern fn getpwuid(uid: c_uint) ?*anyopaque;
@@ -308,7 +301,7 @@ fn canonical(a: Allocator, p: []const u8) ?[]u8 {
 
 /// `std::error_code::message()` for an `errno`.
 pub fn errMessage(e: c_int) [*:0]const u8 {
-    return strerror(e);
+    return tc.strings.strerror(e);
 }
 
 /// `std::filesystem::absolute`: a relative path under the working
@@ -954,7 +947,7 @@ pub fn finalizeFile(a: Allocator, file: *const HfFile, keep_waiting: ?file_lock.
     }
 
     if (!symlinks_disabled.swap(true, .seq_cst)) {
-        log.wrn("%s: failed to create symlink: %s\n", .{ func, strerror(ec) });
+        log.wrn("%s: failed to create symlink: %s\n", .{ func, tc.strings.strerror(ec) });
         log.wrn("%s: switching to degraded mode\n", .{func});
     }
 
@@ -962,9 +955,9 @@ pub fn finalizeFile(a: Allocator, file: *const HfFile, keep_waiting: ?file_lock.
     const zf = try zpath(a, final_path);
     if (rename(zl.ptr, zf.ptr) != 0) {
         ec = errno();
-        log.wrn("%s: failed to move file to snapshots: %s\n", .{ func, strerror(ec) });
+        log.wrn("%s: failed to move file to snapshots: %s\n", .{ func, tc.strings.strerror(ec) });
         if (!copyFile(a, local_path, final_path)) {
-            log.err("%s: failed to copy file to snapshots: %s\n", .{ func, strerror(errno()) });
+            log.err("%s: failed to copy file to snapshots: %s\n", .{ func, tc.strings.strerror(errno()) });
         }
     }
     return file.final_path;
@@ -1000,7 +993,7 @@ pub fn removeCachedRepo(a: Allocator, repo_id: []const u8) Error!bool {
     const repo_path = try getRepoPath(a, repo_id);
     const r = removeAll(a, repo_path);
     if (r.err != 0) {
-        log.err("%s: failed to remove repo cache %s: %s\n", .{ func, (try zpath(a, repo_path)).ptr, strerror(r.err) });
+        log.err("%s: failed to remove repo cache %s: %s\n", .{ func, (try zpath(a, repo_path)).ptr, tc.strings.strerror(r.err) });
         return false;
     }
     return r.n > 0;

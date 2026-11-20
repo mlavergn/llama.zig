@@ -11,6 +11,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const strings = @import("strings.zig");
 
 /// The `Io` for shared code no `main` hands one to: `tools_common` is also
 /// compiled into `llama-server-core`, whose callers pass none. The global
@@ -115,8 +116,6 @@ pub fn readAt(io: std.Io, f: std.Io.File, buf: []u8, off: u64) bool {
     return n == buf.len;
 }
 
-extern "c" fn strerror(errnum: c_int) [*:0]const u8;
-
 /// The `errno` a file error came from, for upstream's `strerror(errno)`.
 /// std keeps most apart; where it folds several into one error, the one a
 /// model or data file meets: `EINVAL` for a bad name, `ENXIO` for no device,
@@ -159,7 +158,7 @@ pub fn errnoOf(err: anyerror) ?c_int {
 ///
 /// Return: the text, static or the C library's; valid until the next call.
 pub fn errnoText(err: anyerror) [*:0]const u8 {
-    if (errnoOf(err)) |n| return strerror(n);
+    if (errnoOf(err)) |n| return strings.strerror(n);
     return @errorName(err);
 }
 
@@ -215,6 +214,6 @@ test "a file error reads as the C library's text for its errno" {
     const io = std.testing.io;
     const missing = openIn(io, "/nonexistent/file.gguf");
     try std.testing.expectError(error.FileNotFound, missing);
-    try std.testing.expectEqualStrings(std.mem.span(strerror(@backingInt(std.c.E.NOENT))), std.mem.span(errnoText(error.FileNotFound)));
+    try std.testing.expectEqualStrings(std.mem.span(strings.strerror(@backingInt(std.c.E.NOENT))), std.mem.span(errnoText(error.FileNotFound)));
     try std.testing.expectEqualStrings("Unexpected", std.mem.span(errnoText(error.Unexpected)));
 }

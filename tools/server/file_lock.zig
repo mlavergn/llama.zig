@@ -16,7 +16,6 @@ const Allocator = std.mem.Allocator;
 
 extern "c" fn flock(fd: c_int, op: c_int) c_int;
 extern "c" fn fchmod(fd: c_int, mode: std.c.mode_t) c_int;
-extern "c" fn strerror(e: c_int) [*:0]const u8;
 
 const LOCK_EX: c_int = 2;
 const LOCK_NB: c_int = 4;
@@ -92,7 +91,7 @@ pub const FileLock = struct {
             return .busy;
         }
         // flock is not implemented (some NFS/FUSE mounts): report it instead of racing
-        log.err("%s: file locking failed (%s)\n", .{ func, strerror(e) });
+        log.err("%s: file locking failed (%s)\n", .{ func, tc.strings.strerror(e) });
         return .err;
     }
 

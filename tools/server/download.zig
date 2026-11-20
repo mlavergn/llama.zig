@@ -56,10 +56,6 @@ const HfFile = hf_cache.HfFile;
 pub const Error = common.Error;
 const throw = common.throw;
 
-fn zs(a: Allocator, s: []const u8) Allocator.Error![*:0]const u8 {
-    return (try a.dupeSentinel(u8, s, 0)).ptr;
-}
-
 /// Ports `llama_build_info` (build-info.cpp.in:27 @b1b770d90): `b<number>-<commit>`.
 pub fn buildInfo() []const u8 {
     return @import("result.zig").build_info;
@@ -156,7 +152,7 @@ pub fn fsWriteAtomic(a: Allocator, path: []const u8, data: []const u8) Error!voi
 
     var ec = false;
     if (!fail) {
-        ec = cRename(try zs(a, path_tmp), try zs(a, path)) != 0;
+        ec = cRename(try common.zs(a, path_tmp), try common.zs(a, path)) != 0;
     }
 
     if (fail or ec) {
@@ -417,7 +413,7 @@ pub fn commonHttpClient(a: Allocator, url: []const u8) Error!HttpClient {
         } else |e| {
             if (e == error.OutOfMemory) return error.OutOfMemory;
             // fall back to a direct connection, the URL itself is not logged as it can carry credentials
-            log.wrn("%s: ignoring malformed proxy URL from the environment: %s\n", .{ @as([*:0]const u8, "common_http_client"), try zs(a, common.what(e)) });
+            log.wrn("%s: ignoring malformed proxy URL from the environment: %s\n", .{ @as([*:0]const u8, "common_http_client"), try common.zs(a, common.what(e)) });
         }
     }
 
@@ -606,7 +602,7 @@ const partial_suffix = ".downloadInProgress";
 fn writeEtag(a: Allocator, path: []const u8, etag: []const u8) Error!void {
     const etag_path = try std.mem.concat(a, u8, &.{ path, ".etag" });
     try fsWriteAtomic(a, etag_path, etag);
-    log.dbg("%s: file etag saved: %s\n", .{ @as([*:0]const u8, "write_etag"), try zs(a, etag_path) });
+    log.dbg("%s: file etag saved: %s\n", .{ @as([*:0]const u8, "write_etag"), try common.zs(a, etag_path) });
 }
 
 /// Ports `read_etag` (download.cpp:52 @b1b770d90): the first line of
@@ -617,7 +613,7 @@ fn readEtag(a: Allocator, path: []const u8) Allocator.Error![]const u8 {
         return "";
     }
     const etag = (try hf_cache.readFirstLine(a, etag_path)) orelse {
-        log.err("%s: could not open .etag file for reading: %s\n", .{ @as([*:0]const u8, "read_etag"), try zs(a, etag_path) });
+        log.err("%s: could not open .etag file for reading: %s\n", .{ @as([*:0]const u8, "read_etag"), try common.zs(a, etag_path) });
         return "";
     };
     return etag;
@@ -779,7 +775,7 @@ const PullState = struct {
                 // attempt starts over instead of wedging on the same answer
                 _ = std.c.close(self.fd);
                 self.fd_open = false;
-                _ = cRemove(zs(self.a, self.path_tmp) catch return false);
+                _ = cRemove(common.zs(self.a, self.path_tmp) catch return false);
             }
             return false;
         }
@@ -804,7 +800,7 @@ const PullState = struct {
         while (off < data.len) {
             const n = std.c.write(self.fd, data[off..].ptr, data.len - off);
             if (n <= 0) {
-                log.err("%s: error writing to file: %s\n", .{ func, zs(self.a, self.path_tmp) catch "" });
+                log.err("%s: error writing to file: %s\n", .{ func, common.zs(self.a, self.path_tmp) catch "" });
                 return false;
             }
             off += @intCast(n);
@@ -829,10 +825,10 @@ const PullState = struct {
 /// `std::stoull` on a header value; `error.Throw` where it throws (no
 /// digits, out of range).
 fn stoull(s: []const u8) !usize {
-    const p = tc.num.strtoull(s, 10);
-    if (p.end == 0) return error.Throw;
-    if (p.range) return error.Throw;
-    return @intCast(p.value);
+    return switch (tc.num.stoull(s)) {
+        .ok => |v| @intCast(v),
+        else => error.Throw,
+    };
 }
 const c_stdio = struct {
     extern "c" fn remove(path: [*:0]const u8) c_int;
@@ -872,7 +868,7 @@ fn commonPullFile(a: Allocator, cli: *HttpClient, resolve_path: []const u8, path
     const res = cli.getStream(a, resolve_path, &headers, &state, PullState.onResponse, PullState.onData);
 
     if (res.res == null) {
-        log.err("%s: download failed: %s (status: %d)\n", .{ func, (try zs(a, errorToString(res.err))), @as(c_int, -1) });
+        log.err("%s: download failed: %s (status: %d)\n", .{ func, (try common.zs(a, errorToString(res.err))), @as(c_int, -1) });
         return false;
     }
 
@@ -918,7 +914,7 @@ const OnlineState = struct {
     fn keepWaiting(ctx: ?*anyopaque) bool {
         const self: *OnlineState = @ptrCast(@alignCast(ctx.?));
         if (!self.waited) {
-            const name = zs(self.a, urlGetFilename(self.url)) catch "";
+            const name = common.zs(self.a, urlGetFilename(self.url)) catch "";
             log.inf("%s: file '%s' is being downloaded by another process, waiting...\n", .{ @as([*:0]const u8, "operator()"), name });
             self.waited = true;
         }
@@ -957,7 +953,7 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
     var st: OnlineState = .{ .a = a, .url = url, .opts = opts, .path = path, .alt_path = alt_path, .lock = &lock, .p = &p };
 
     if (skip_etag and st.cacheHit()) {
-        log.dbg("%s: using cached file: %s\n", .{ func, try zs(a, path) });
+        log.dbg("%s: using cached file: %s\n", .{ func, try common.zs(a, path) });
         return st.finish(304); // 304 Not Modified - fake cached response
     }
 
@@ -970,7 +966,7 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
     const file_exists = st.cacheHit();
 
     if (file_exists and skip_etag) {
-        log.dbg("%s: using cached file: %s\n", .{ func, try zs(a, path) });
+        log.dbg("%s: using cached file: %s\n", .{ func, try common.zs(a, path) });
         return st.finish(304); // 304 Not Modified - fake cached response
     }
 
@@ -994,14 +990,14 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
     if (file_exists) {
         last_etag = try readEtag(a, path);
     } else {
-        log.dbg("%s: no previous model file found %s\n", .{ func, try zs(a, path) });
+        log.dbg("%s: no previous model file found %s\n", .{ func, try common.zs(a, path) });
     }
 
     const head = cli.head(a, parts.path);
     if (head.res == null or head.res.?.status < 200 or head.res.?.status >= 300) {
         log.trc("%s: HEAD failed, status: %d\n", .{ func, if (head.res != null) head.res.?.status else @as(c_int, -1) });
         if (file_exists) {
-            log.trc("%s: using cached file (HEAD failed): %s\n", .{ func, try zs(a, path) });
+            log.trc("%s: using cached file (HEAD failed): %s\n", .{ func, try common.zs(a, path) });
             return st.finish(304); // 304 Not Modified - fake cached response
         }
         return st.finish(if (head.res != null) head.res.?.status else -1);
@@ -1028,16 +1024,16 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
 
     if (file_exists) {
         if (etag.len == 0) {
-            log.dbg("%s: using cached file (no server etag): %s\n", .{ func, try zs(a, path) });
+            log.dbg("%s: using cached file (no server etag): %s\n", .{ func, try common.zs(a, path) });
             return st.finish(304); // 304 Not Modified - fake cached response
         }
         if (last_etag.len != 0 and std.mem.eql(u8, last_etag, etag)) {
-            log.dbg("%s: using cached file (same etag): %s\n", .{ func, try zs(a, path) });
+            log.dbg("%s: using cached file (same etag): %s\n", .{ func, try common.zs(a, path) });
             return st.finish(304); // 304 Not Modified - fake cached response
         }
         // pass this point, the file exists but is different from the server version, so we need to redownload it
-        if (cRemove(try zs(a, path)) != 0) {
-            log.err("%s: unable to delete file: %s\n", .{ func, try zs(a, path) });
+        if (cRemove(try common.zs(a, path)) != 0) {
+            log.err("%s: unable to delete file: %s\n", .{ func, try common.zs(a, path) });
             return st.finish(-1);
         }
     }
@@ -1051,9 +1047,9 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
 
     if (!skip_etag and etag.len != 0) {
         if (hf_cache.exists(a, path_temporary) and !std.mem.eql(u8, try readEtag(a, path_temporary), etag)) {
-            log.wrn("%s: partial file does not match the server etag, discarding it: %s\n", .{ func, try zs(a, path_temporary) });
-            if (cRemove(try zs(a, path_temporary)) != 0) {
-                log.err("%s: unable to delete file: %s\n", .{ func, try zs(a, path_temporary) });
+            log.wrn("%s: partial file does not match the server etag, discarding it: %s\n", .{ func, try common.zs(a, path_temporary) });
+            if (cRemove(try common.zs(a, path_temporary)) != 0) {
+                log.err("%s: unable to delete file: %s\n", .{ func, try common.zs(a, path_temporary) });
                 return st.finish(-1);
             }
         }
@@ -1073,7 +1069,7 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
         };
         if (i != 0) {
             log.wrn("%s: retrying after %d seconds...\n", .{ func, delay });
-            sleepSeconds(delay);
+            tc.clock.sleepMs(@as(u64, @intCast(@max(delay, 0))) * 1000);
             delay *= retry_delay_seconds;
         }
 
@@ -1082,24 +1078,24 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
         if (hf_cache.exists(a, path_temporary)) {
             if (supports_ranges) {
                 existing_size = fileSize(a, path_temporary);
-            } else if (cRemove(try zs(a, path_temporary)) != 0) {
-                log.err("%s: unable to delete file: %s\n", .{ func, try zs(a, path_temporary) });
+            } else if (cRemove(try common.zs(a, path_temporary)) != 0) {
+                log.err("%s: unable to delete file: %s\n", .{ func, try common.zs(a, path_temporary) });
                 break;
             }
         }
 
         p.downloaded = existing_size;
 
-        log.dbg("%s: downloading from %s to %s (etag:%s)...\n", .{ func, try zs(a, try commonHttpShowMaskedUrl(a, &parts)), try zs(a, path_temporary), try zs(a, etag) });
+        log.dbg("%s: downloading from %s to %s (etag:%s)...\n", .{ func, try common.zs(a, try commonHttpShowMaskedUrl(a, &parts)), try common.zs(a, path_temporary), try common.zs(a, etag) });
 
         if (try commonPullFile(a, &cli, parts.path, path_temporary, supports_ranges, &p, opts.callback)) {
-            if (cRename(try zs(a, path_temporary), try zs(a, path)) != 0) {
-                log.err("%s: unable to rename file: %s to %s\n", .{ func, try zs(a, path_temporary), try zs(a, path) });
+            if (cRename(try common.zs(a, path_temporary), try common.zs(a, path)) != 0) {
+                log.err("%s: unable to rename file: %s to %s\n", .{ func, try common.zs(a, path_temporary), try common.zs(a, path) });
                 break;
             }
             if (etag.len != 0 and !skip_etag) {
                 try writeEtag(a, path, etag);
-                _ = cRemove(try zs(a, try std.mem.concat(a, u8, &.{ path_temporary, ".etag" })));
+                _ = cRemove(try common.zs(a, try std.mem.concat(a, u8, &.{ path_temporary, ".etag" })));
             }
             success = true;
             break;
@@ -1112,11 +1108,6 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
     }
 
     return st.finish(if (success) hres.status else -1);
-}
-
-fn sleepSeconds(s: c_int) void {
-    var ts: std.c.timespec = .{ .sec = s, .nsec = 0 };
-    while (std.c.nanosleep(&ts, &ts) != 0) {}
 }
 
 fn fileSize(a: Allocator, p: []const u8) usize {
@@ -1212,11 +1203,11 @@ pub fn downloadFileSingle(a: Allocator, url: []const u8, path: []const u8, opts:
     }
 
     if (!hf_cache.exists(a, path)) {
-        log.err("%s: required file is not available in cache (offline mode): %s\n", .{ func, try zs(a, path) });
+        log.err("%s: required file is not available in cache (offline mode): %s\n", .{ func, try common.zs(a, path) });
         return -1;
     }
 
-    log.dbg("%s: using cached file (offline mode): %s\n", .{ func, try zs(a, path) });
+    log.dbg("%s: using cached file (offline mode): %s\n", .{ func, try common.zs(a, path) });
 
     // notify the callback that the file was cached
     if (opts.callback) |cb| {
@@ -1517,7 +1508,7 @@ fn listAvailableGgufFiles(a: Allocator, files: []const HfFile) Allocator.Error!v
     log.inf("Available GGUF files:\n", .{});
     for (files) |f| {
         if (std.mem.endsWith(u8, f.path, ".gguf")) {
-            log.inf(" - %s\n", .{try zs(a, f.path)});
+            log.inf(" - %s\n", .{try common.zs(a, f.path)});
         }
     }
 }
@@ -1560,7 +1551,7 @@ pub fn getHfPlan(a: Allocator, model: *const ModelParams, opts: *const Opts) Err
             }
         }
         if (primary.path.len == 0) {
-            log.err("%s: file '%s' not found in repository\n", .{ func, try zs(a, model.hf_file) });
+            log.err("%s: file '%s' not found in repository\n", .{ func, try common.zs(a, model.hf_file) });
             try listAvailableGgufFiles(a, all);
             return plan;
         }
@@ -1572,7 +1563,7 @@ pub fn getHfPlan(a: Allocator, model: *const ModelParams, opts: *const Opts) Err
             if (sc.draft and @field(opts, sc.opt)) want_draft = true;
         }
         if (primary.path.len == 0 and !want_draft) {
-            log.err("%s: no GGUF files found in repository %s\n", .{ func, try zs(a, repo) });
+            log.err("%s: no GGUF files found in repository %s\n", .{ func, try common.zs(a, repo) });
             try listAvailableGgufFiles(a, all);
             return plan;
         }
@@ -1599,7 +1590,7 @@ pub fn getHfPlan(a: Allocator, model: *const ModelParams, opts: *const Opts) Err
         if (sc.draft and @field(plan, sc.file).local_path.len != 0) has_draft = true;
     }
     if (primary.path.len == 0 and !has_draft) {
-        log.err("%s: no GGUF files found in repository %s\n", .{ func, try zs(a, repo) });
+        log.err("%s: no GGUF files found in repository %s\n", .{ func, try common.zs(a, repo) });
         try listAvailableGgufFiles(a, all);
     }
 
@@ -1726,10 +1717,10 @@ pub fn dockerResolveModel(a: Allocator, docker: []const u8) Error![]const u8 {
         repo = try std.mem.concat(a, u8, &.{ "ai/", repo });
     }
 
-    log.inf("%s: Downloading Docker Model: %s:%s\n", .{ func, try zs(a, repo), try zs(a, tag) });
+    log.inf("%s: Downloading Docker Model: %s:%s\n", .{ func, try common.zs(a, repo), try common.zs(a, tag) });
     return dockerResolveImpl(a, repo, tag) catch |e| {
         if (e != error.OutOfMemory) {
-            log.err("%s: Docker Model download failed: %s\n", .{ func, try zs(a, common.what(e)) });
+            log.err("%s: Docker Model download failed: %s\n", .{ func, try common.zs(a, common.what(e)) });
         }
         return e;
     };
@@ -1775,7 +1766,7 @@ fn dockerResolveImpl(a: Allocator, repo: []const u8, tag: []const u8) Error![]co
 
     // Validate & normalize digest
     gguf_digest = try validateOciDigest(a, gguf_digest);
-    log.dbg("%s: Using validated digest: %s\n", .{ func, try zs(a, gguf_digest) });
+    log.dbg("%s: Using validated digest: %s\n", .{ func, try common.zs(a, gguf_digest) });
 
     // Prepare local filename
     var model_filename = try a.dupe(u8, repo);
@@ -1790,7 +1781,7 @@ fn dockerResolveImpl(a: Allocator, repo: []const u8, tag: []const u8) Error![]co
         return throw(error.RuntimeError, "Failed to download Docker Model", .{});
     }
 
-    log.inf("%s: Downloaded Docker Model to: %s\n", .{ func, try zs(a, local_path) });
+    log.inf("%s: Downloaded Docker Model to: %s\n", .{ func, try common.zs(a, local_path) });
     return local_path;
 }
 
@@ -1956,7 +1947,7 @@ fn removeSnapshotEntries(a: Allocator, repo_id: []const u8, to_remove: []const [
     for (to_remove) |p| {
         const ec = hf_cache.removeFile(a, p);
         if (ec != 0) {
-            log.wrn("%s: failed to remove %s: %s\n", .{ func, try zs(a, p), hf_cache.errMessage(ec) });
+            log.wrn("%s: failed to remove %s: %s\n", .{ func, try common.zs(a, p), hf_cache.errMessage(ec) });
         }
     }
 
@@ -1980,7 +1971,7 @@ fn removeSnapshotEntries(a: Allocator, repo_id: []const u8, to_remove: []const [
         if (!still_referenced.contains(blob)) {
             const ec = hf_cache.removeFile(a, blob);
             if (ec != 0) {
-                log.wrn("%s: failed to remove blob %s: %s\n", .{ func, try zs(a, blob), hf_cache.errMessage(ec) });
+                log.wrn("%s: failed to remove blob %s: %s\n", .{ func, try common.zs(a, blob), hf_cache.errMessage(ec) });
             }
         }
     }
@@ -2373,7 +2364,7 @@ pub fn modelsHandlerApply(a: Allocator, handler: *ModelsHandler, params: *Params
         var unique_tasks_vec: std.ArrayList(Task) = .empty;
         var it = unique_tasks.iterator();
         while (it.next()) |e| {
-            log.dbg("download task: %s -> %s\n", .{ try zs(a, e.value.*.url), try zs(a, e.value.*.local_path) });
+            log.dbg("download task: %s -> %s\n", .{ try common.zs(a, e.value.*.url), try common.zs(a, e.value.*.local_path) });
             try unique_tasks_vec.append(a, e.value.*.*);
         }
         try runTasks(a, unique_tasks_vec.items);

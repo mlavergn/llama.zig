@@ -23,6 +23,7 @@ const llama = @import("llama");
 const params_mod = @import("params.zig");
 const log = @import("log.zig");
 const common = @import("common.zig");
+const strings = @import("strings.zig");
 const arg = @import("arg.zig");
 const fit = @import("cli_fit");
 const sampling = @import("sampling.zig");
@@ -195,7 +196,6 @@ fn threadpoolsInit(res: *InitResult, ctx: ?*c.llama_context, p: *const Params) v
 }
 
 extern fn setpriority(which: c_int, who: c_uint, prio: c_int) c_int;
-extern fn strerror(e: c_int) [*:0]const u8;
 
 /// Ports `set_process_priority` (common/common.cpp:281 @b1b770d90), the POSIX arm;
 /// Windows has its own, through `SetPriorityClass`.
@@ -229,7 +229,7 @@ pub fn setProcessPriority(prio: c.ggml_sched_priority) bool {
     };
     if (setpriority(0, 0, v) != 0) {
         const e = std.c._errno().*;
-        comWrn("set_process_priority", "failed to set process priority %d : %s (%d)\n", .{ @as(c_int, @intCast(prio)), strerror(e), e });
+        comWrn("set_process_priority", "failed to set process priority %d : %s (%d)\n", .{ @as(c_int, @intCast(prio)), strings.strerror(e), e });
         return false;
     }
     return true;

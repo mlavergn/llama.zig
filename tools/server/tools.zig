@@ -50,9 +50,6 @@ const throw = common.throw;
 
 const gpa = std.heap.c_allocator;
 
-extern fn fileno(f: *anyopaque) c_int;
-extern fn fwrite(p: [*]const u8, size: usize, n: usize, f: *anyopaque) usize;
-extern fn fflush(f: *anyopaque) c_int;
 extern fn read(fd: c_int, buf: [*]u8, n: usize) isize;
 extern fn write(fd: c_int, buf: [*]const u8, n: usize) isize;
 extern fn getcwd(buf: [*]u8, size: usize) ?[*:0]u8;
@@ -62,11 +59,6 @@ extern fn pthread_self() usize;
 
 fn errno() c_int {
     return std.c._errno().*;
-}
-
-/// A NUL-terminated copy for a `%s` argument, freed with `common.freeZ`.
-fn z(s: []const u8) [*:0]const u8 {
-    return common.dupZ(s);
 }
 
 // -----------------------------------------------------------------------------
@@ -131,13 +123,6 @@ fn pathJoin(a: Allocator, lhs: []const u8, rhs: []const u8) ![]u8 {
     if (isAbsolute(rhs)) return a.dupe(u8, rhs);
     if (lhs.len == 0 or lhs[lhs.len - 1] == '/') return std.mem.concat(a, u8, &.{ lhs, rhs });
     return std.mem.concat(a, u8, &.{ lhs, "/", rhs });
-}
-
-/// `fs::path::filename()`: the last element, empty after a trailing
-/// separator.
-fn pathFilename(p: []const u8) []const u8 {
-    const slash = std.mem.findScalarLast(u8, p, '/') orelse return p;
-    return p[slash + 1 ..];
 }
 
 /// `fs::path::parent_path()` of a path whose last element is a name.
@@ -325,7 +310,7 @@ fn runSubprocess(
                     self.proc.terminate();
                     return;
                 }
-                mcp.sleepMs(100);
+                tc.clock.sleepMs(100);
             }
         }
     };
@@ -337,9 +322,10 @@ fn runSubprocess(
     if (proc.stdinFile()) |in| {
         if (stdin_data) |d| {
             // a short write is not an error by itself, the exit code below decides
-            if (d.len != 0) _ = fwrite(d.ptr, 1, d.len, in);
+            if (d.len != 0) in.writeStreamingAll(tc.file.defaultIo(), d) catch |err| switch (err) {
+                else => {}, // fwrite's count unchecked
+            };
         }
-        _ = fflush(in);
     }
     proc.closeStdin();
 
@@ -349,13 +335,10 @@ fn runSubprocess(
         // read raw bytes, not lines: the output can hold NUL and must arrive as soon as it is ready
         // keep draining past the size cap, else the child blocks on a full pipe
         var buf: [4096]u8 = undefined;
-        const fd = fileno(f);
         while (true) {
-            var n = read(fd, &buf, buf.len);
-            while (n < 0 and errno() == @backingInt(std.posix.E.INTR)) n = read(fd, &buf, buf.len);
-            if (n <= 0) break;
+            // EINTR is retried; end of file or an error ends the output
+            const len = f.readStreaming(tc.file.defaultIo(), &.{&buf}) catch break;
             if (truncated) continue;
-            const len: usize = @intCast(n);
             if (output.items.len + len <= max_output) {
                 try output.appendSlice(a, buf[0..len]);
                 if (on_chunk) |cb| {
@@ -1046,7 +1029,7 @@ fn globMatchAt(pattern_in: []const u8, str_in: []const u8, depth: usize) bool {
 /// matches the basename at any depth; otherwise the full relative path,
 /// anchored with `**/` unless it already is.
 fn pathGlobMatch(a: Allocator, pattern: []const u8, rel_path: []const u8) !bool {
-    if (std.mem.findScalar(u8, pattern, '/') == null) return globMatch(pattern, pathFilename(rel_path));
+    if (std.mem.findScalar(u8, pattern, '/') == null) return globMatch(pattern, common.pathFilename(rel_path));
     if (std.mem.eql(u8, pattern, "**") or std.mem.startsWith(u8, pattern, "**/") or std.mem.startsWith(u8, pattern, "/")) {
         return globMatch(pattern, rel_path);
     }
@@ -1983,9 +1966,9 @@ const ContainerRuntime = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         if (!self.proc.alive()) {
-            const b = z(self.bin);
+            const b = common.dupZ(self.bin);
             defer common.freeZ(b);
-            const c = z(self.container_id);
+            const c = common.dupZ(self.container_id);
             defer common.freeZ(c);
             srv(.wrn, "spec", "%s tools runtime container \"%s\" died, respawning\n", .{ b, c });
             try self.spawn();
@@ -2019,7 +2002,7 @@ const ContainerRuntime = struct {
             if (readWhole(a, cidfile)) |text| {
                 cid = if (std.mem.findScalar(u8, text, '\n')) |nl| text[0..nl] else text;
             }
-            if (cid.len == 0) mcp.sleepMs(100);
+            if (cid.len == 0) tc.clock.sleepMs(100);
         }
         _ = unlink(cz.ptr);
         if (cid.len == 0) {
@@ -2199,9 +2182,9 @@ pub const Tools = struct {
             for (list) |*def| {
                 const mcp_name = try std.mem.concat(gpa, u8, &.{ def.server_name, "_", def.name });
                 if (seen_names.contains(mcp_name)) {
-                    const n = z(mcp_name);
+                    const n = common.dupZ(mcp_name);
                     defer common.freeZ(n);
-                    const s = z(def.server_name);
+                    const s = common.dupZ(def.server_name);
                     defer common.freeZ(s);
                     srv(.wrn, "setup", "MCP tool \"%s\" from server \"%s\" collides with an existing tool, skipping\n", .{ n, s });
                     gpa.free(mcp_name);

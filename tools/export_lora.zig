@@ -84,8 +84,7 @@ fn neString(a: std.mem.Allocator, t: *const c.ggml_tensor) ![:0]u8 {
 
 /// `GGML_PAD(x, GGUF_DEFAULT_ALIGNMENT)`.
 fn pad(x: usize) usize {
-    const al: usize = c.GGUF_DEFAULT_ALIGNMENT;
-    return (x + al - 1) & ~(al - 1);
+    return tc.ggml.pad(x, c.GGUF_DEFAULT_ALIGNMENT);
 }
 
 /// Ports `load_gguf` (export-lora.cpp:50 @b1b770d90).

@@ -60,8 +60,27 @@ pub const token_null: Token = c.LLAMA_TOKEN_NULL;
 // logging and assertions
 
 /// `GGML_ASSERT(cond)` as a header or source file of the server states it.
+/// `std::filesystem::path(p).filename()` on POSIX: what follows the last
+/// `/`, all of `p` when there is none.
+///
+/// Return: a slice of `p`.
+pub fn pathFilename(p: []const u8) []const u8 {
+    const i = std.mem.findScalarLast(u8, p, '/') orelse return p;
+    return p[i + 1 ..];
+}
+
+/// A NUL-terminated copy for a `%s` argument.
+///
+/// Parameters:
+/// - `a`: owns the copy, usually a request's arena.
+///
+/// Return: the copy, freed with `a`.
+pub fn zs(a: std.mem.Allocator, s: []const u8) std.mem.Allocator.Error![*:0]const u8 {
+    return (try a.dupeSentinel(u8, s, 0)).ptr;
+}
+
 pub fn ggmlAssert(ok: bool, comptime file: [*:0]const u8, comptime line: c_int, comptime cond: [*:0]const u8) void {
-    if (!ok) _ = c.ggml_abort(file, line, "GGML_ASSERT(%s) failed", cond);
+    tools.ggml.ggmlAssert(ok, file, line, cond);
 }
 
 /// The levels of the `SRV_*` macros.

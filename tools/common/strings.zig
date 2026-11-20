@@ -6,6 +6,9 @@
 //! and the `std::string` specialisation of `string_split` from
 //! `llama.cpp/common/common.cpp` and `common/common.h` (v1.0.0, `b1b770d90`).
 //! Each declaration names what it ports and the line it began at.
+//!
+//! Also `strerror`, **not a port**: the C library's text for an `errno`,
+//! read in this one place.
 
 const std = @import("std");
 const num = @import("num.zig");
@@ -32,7 +35,10 @@ pub fn strip(str: []const u8) []const u8 {
 }
 
 /// `std::isspace` in the "C" locale.
-fn isSpace(ch: u8) bool {
+///
+/// Return: whether `ch` is a space, tab, newline, vertical tab, form feed
+/// or carriage return.
+pub fn isSpace(ch: u8) bool {
     return ch == ' ' or (ch >= '\t' and ch <= '\r');
 }
 
@@ -96,6 +102,19 @@ pub fn parseKvOverride(data: [:0]const u8, overrides: *std.ArrayList(c.llama_mod
     }
     try overrides.append(allocator, kvo);
     return true;
+}
+
+const c_strerror = @extern(*const fn (errnum: c_int) callconv(.c) [*:0]const u8, .{ .name = "strerror" });
+
+/// `strerror(errnum)`: the C library's text for an `errno`, the words
+/// upstream prints; std has no table of its own.
+///
+/// Parameters:
+/// - `errnum`: an `errno` value.
+///
+/// Return: static, or valid until the next call.
+pub fn strerror(errnum: c_int) [*:0]const u8 {
+    return c_strerror(errnum);
 }
 
 // -----------------------------------------------------------------------------

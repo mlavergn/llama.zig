@@ -24,8 +24,6 @@ const Allocator = std.mem.Allocator;
 const srv = common.srv;
 const gpa = context.gpa;
 
-extern "c" fn fgets(buf: [*]u8, n: c_int, stream: *anyopaque) ?[*:0]u8;
-
 /// Ports `CONNECT_ROOM_CODE_LEN` and `CONNECT_PASS_CODE_LEN`
 /// (server-connect.cpp:18, 19 @b1b770d90): share code = room code + pass
 /// code, must match llama-connect and the Web UI.
@@ -41,10 +39,6 @@ const connect_exe_name = "llama-connect";
 /// Ports `CONNECT_STOP_TIMEOUT_MS` (server-connect.cpp:32 @b1b770d90): how
 /// long to wait for the child to notice the closed stdin before killing it.
 const connect_stop_timeout_ms = 3000;
-
-fn zs(a: Allocator, s: []const u8) Allocator.Error![*:0]const u8 {
-    return (try a.dupeSentinel(u8, s, 0)).ptr;
-}
 
 /// Ports `gen_share_code` (server-connect.cpp:35 @b1b770d90): the pass code
 /// guards the tunnel, so it is drawn from the system's random device,
@@ -77,11 +71,6 @@ fn formatShareCode(a: Allocator, code: []const u8) Allocator.Error![]u8 {
     return out.items;
 }
 
-/// `std::isspace` in the "C" locale.
-fn isSpace(ch: u8) bool {
-    return ch == ' ' or (ch >= '\t' and ch <= '\r');
-}
-
 /// Ports `normalize_share_code` (server-connect.cpp:60 @b1b770d90):
 /// whitespace is tolerated, the Web UI shows the code in blocks and users
 /// paste it back.
@@ -90,7 +79,7 @@ fn isSpace(ch: u8) bool {
 fn normalizeShareCode(a: Allocator, key: []const u8) Allocator.Error![]const u8 {
     var code: std.ArrayList(u8) = .empty;
     for (key) |ch| {
-        if (!isSpace(ch)) {
+        if (!tc.strings.isSpace(ch)) {
             try code.append(a, ch);
         }
     }
@@ -186,7 +175,7 @@ pub const ServerConnect = struct {
             }
         } else |e| {
             if (e == error.OutOfMemory) return error.OutOfMemory;
-            srv(.wrn, "find_binary", "could not resolve the llama-server path (%s), looking for llama-connect in PATH only\n", .{try zs(a, common.what(e))});
+            srv(.wrn, "find_binary", "could not resolve the llama-server path (%s), looking for llama-connect in PATH only\n", .{try common.zs(a, common.what(e))});
         }
 
         const path_env: []const u8 = tc.env.get("PATH") orelse "";
@@ -237,6 +226,24 @@ pub const ServerConnect = struct {
         return if (code.len == 0) try genShareCode(a) else try normalizeShareCode(a, code);
     }
 
+    /// `fgets(buf, sizeof(buf), stream)`: up to `buf.len - 1` bytes, through
+    /// the first newline, NUL-terminated.
+    ///
+    /// Return: the line in `buf`, or null at end of file or on an error with
+    /// nothing read.
+    fn fgets(r: *std.Io.Reader, buf: []u8) ?[:0]u8 {
+        var n: usize = 0;
+        while (n + 1 < buf.len) {
+            const b = r.takeByte() catch break;
+            buf[n] = b;
+            n += 1;
+            if (b == '\n') break;
+        }
+        if (n == 0) return null;
+        buf[n] = 0;
+        return buf[0..n :0];
+    }
+
     /// The `log_thread` lambda of `start`: the child's output forwarded until
     /// EOF, which means the child is gone.
     fn logLoop(self: *ServerConnect) void {
@@ -244,9 +251,11 @@ pub const ServerConnect = struct {
             srv(.err, "operator()", "%s", .{@as([*:0]const u8, "failed to get stdout of the llama-connect process\n")});
             return;
         };
+        var read_buf: [4096]u8 = undefined;
+        var reader = out.readerStreaming(tc.file.defaultIo(), &read_buf);
         var buf: [4096]u8 = undefined;
-        while (fgets(&buf, buf.len, out) != null) {
-            forwardChildLog(@ptrCast(&buf));
+        while (fgets(&reader.interface, &buf)) |line| {
+            forwardChildLog(line.ptr);
         }
         // EOF means the child is gone
         if (!self.stopping.load(.acquire)) {
@@ -293,7 +302,7 @@ pub const ServerConnect = struct {
             tc.subproc.option_inherit_environment;
 
         if (!proc.create(&args, options, &.{}, null)) {
-            srv(.err, func, "failed to spawn '%s'\n", .{try zs(a, bin)});
+            srv(.err, func, "failed to spawn '%s'\n", .{try common.zs(a, bin)});
             proc.deinit();
             gpa.destroy(proc);
             return false;
@@ -304,7 +313,7 @@ pub const ServerConnect = struct {
 
         srv(.inf, func, "%s", .{@as([*:0]const u8, "-----------------\n")});
         srv(.inf, func, "%s", .{@as([*:0]const u8, "remote access is enabled via llama-connect\n")});
-        srv(.inf, func, "share code (enter it in the Web UI under Settings -> Remote Access): %s\n", .{try zs(a, try formatShareCode(a, code))});
+        srv(.inf, func, "share code (enter it in the Web UI under Settings -> Remote Access): %s\n", .{try common.zs(a, try formatShareCode(a, code))});
         srv(.wrn, func, "%s", .{@as([*:0]const u8, "anyone with this code can use this server, do not share it publicly\n")});
         srv(.inf, func, "%s", .{@as([*:0]const u8, "-----------------\n")});
 

@@ -27,11 +27,6 @@ comptime {
     _ = @import("llama");
 }
 
-/// `GGML_ASSERT`, which upstream keeps in every build mode.
-fn ggmlAssert(ok: bool, comptime file: [*:0]const u8, comptime line: c_int, comptime expr: [*:0]const u8) void {
-    if (!ok) _ = c.ggml_abort(file, line, "GGML_ASSERT(%s) failed", expr);
-}
-
 extern fn malloc(n: usize) ?*anyopaque;
 extern fn free(p: ?*anyopaque) void;
 
@@ -82,7 +77,7 @@ const CallbackData = struct {
 
     /// Ports `save_tensor_for_layer` (cvector-generator.cpp:71 @b1b770d90), a member of `callback_data`.
     fn saveTensorForLayer(self: *CallbackData, t: *c.ggml_tensor) !void {
-        ggmlAssert(t.type == c.GGML_TYPE_F32, "cvector-generator.cpp", 72, "t->type == GGML_TYPE_F32");
+        tc.ggml.ggmlAssert(t.type == c.GGML_TYPE_F32, "cvector-generator.cpp", 72, "t->type == GGML_TYPE_F32");
 
         if (self.ctx_ggml == null) {
             // alloc a new ctx_ggml if needed
@@ -136,7 +131,7 @@ const CallbackData = struct {
         // get "n_nonzero_rows" for the output "diff_filtered"
         const n_nonzero_rows: c_int = @intCast(rows_to_copy.items.len);
         const n_embd: c_int = @intCast(a.ne[0]);
-        ggmlAssert(n_nonzero_rows > 0, "cvector-generator.cpp", 141, "n_nonzero_rows > 0");
+        tc.ggml.ggmlAssert(n_nonzero_rows > 0, "cvector-generator.cpp", 141, "n_nonzero_rows > 0");
 
         // diff_filtered: [n_embd, n_nonzero_rows]
         const diff_filtered = c.ggml_new_tensor_2d(self.ctx_ggml, c.GGML_TYPE_F32, n_embd, n_nonzero_rows);
@@ -200,7 +195,7 @@ const TrainContext = struct {
 
     /// Ports `concat_diff_tmp` (cvector-generator.cpp:220 @b1b770d90), a member of `train_context`.
     fn concatDiffTmp(self: *TrainContext, diff_filtered: []const *c.ggml_tensor) !void {
-        ggmlAssert(@as(c_int, @intCast(diff_filtered.len)) == self.n_layers - 1, "cvector-generator.cpp", 221, "(int) diff_filtered.size() == n_layers - 1");
+        tc.ggml.ggmlAssert(@as(c_int, @intCast(diff_filtered.len)) == self.n_layers - 1, "cvector-generator.cpp", 221, "(int) diff_filtered.size() == n_layers - 1");
         for (0..@intCast(self.n_layers - 1)) |il| {
             const t = diff_filtered[il];
             const bytes: [*]const u8 = @ptrCast(t.data);
@@ -215,7 +210,7 @@ const TrainContext = struct {
         while (il < self.n_layers - 1) : (il += 1) {
             const diff_tmp = &self.v_diff_tmp.items[@intCast(il)];
             const n_elem: c_int = @intCast(diff_tmp.items.len / @sizeOf(f32));
-            ggmlAssert(@rem(n_elem, self.n_embd) == 0, "cvector-generator.cpp", 238, "n_elem % n_embd == 0");
+            tc.ggml.ggmlAssert(@rem(n_elem, self.n_embd) == 0, "cvector-generator.cpp", 238, "n_elem % n_embd == 0");
             const n_rows = @divTrunc(n_elem, self.n_embd);
             const diff = if (transpose)
                 c.ggml_new_tensor_2d(self.ctx_ggml, c.GGML_TYPE_F32, n_rows, self.n_embd)
@@ -487,7 +482,7 @@ var piter_buf: ?[]u8 = null;
 
 /// Ports `build_graph_piter` (pca.hpp:134 @b1b770d90), a member of `PCA`.
 fn buildGraphPiter(params: *const PcaParams, model: *const PcaModel, calc_square: bool) !*c.ggml_cgraph {
-    ggmlAssert(params.n_batch > 0, "pca.hpp", 138, "params.n_batch > 0");
+    tc.ggml.ggmlAssert(params.n_batch > 0, "pca.hpp", 138, "params.n_batch > 0");
     const buf_size = c.ggml_tensor_overhead() * c.GGML_DEFAULT_GRAPH_SIZE + c.ggml_graph_overhead();
     if (piter_buf == null) piter_buf = try std.heap.c_allocator.alloc(u8, buf_size);
 
@@ -604,19 +599,19 @@ fn powerIteration(a: std.mem.Allocator, params: *const PcaParams, input: *c.ggml
 
         if (calc_square) {
             // copy and store the square matrix if needed
-            ggmlAssert(result.calculated_square != null, "pca.hpp", 272, "result.calculated_square != NULL");
+            tc.ggml.ggmlAssert(result.calculated_square != null, "pca.hpp", 272, "result.calculated_square != NULL");
             c.ggml_backend_tensor_copy(result.calculated_square, model.dev_square);
         }
 
         // copy last eigen vector and store as input for next iteration
-        ggmlAssert(last_eigenvector != null, "pca.hpp", 278, "last_eigenvector != NULL");
+        tc.ggml.ggmlAssert(last_eigenvector != null, "pca.hpp", 278, "last_eigenvector != NULL");
         c.ggml_backend_tensor_copy(last_eigenvector, model.dev_eigenvector);
 
         io.printf("%s: layer %d/%d, iteration: %d / total: %d (batch = %d) ...\n", .{ "power_iteration", params.i_layer + 1, params.n_layers, iter + 1, n_iters, params.n_batch });
     }
 
     // get output tensor
-    ggmlAssert(last_eigenvector != null, "pca.hpp", 287, "last_eigenvector");
+    tc.ggml.ggmlAssert(last_eigenvector != null, "pca.hpp", 287, "last_eigenvector");
     c.ggml_backend_tensor_get(last_eigenvector, output.data, 0, c.ggml_nbytes(last_eigenvector));
     c.ggml_gallocr_free(allocr);
 }
@@ -646,7 +641,7 @@ fn runMean(v_input: []const *c.ggml_tensor, v_output: []const *c.ggml_tensor) vo
         _ = c.ggml_format_name(ctrl_out, "direction.%zu", il + 1);
 
         // calculate mean vector
-        ggmlAssert(t_layer.ne[0] == ctrl_out.ne[0], "mean.hpp", 22, "t_layer->ne[0] == ctrl_out->ne[0]"); // == n_embd
+        tc.ggml.ggmlAssert(t_layer.ne[0] == ctrl_out.ne[0], "mean.hpp", 22, "t_layer->ne[0] == ctrl_out->ne[0]"); // == n_embd
         var ic: c_int = 0;
         while (ic < t_layer.ne[0]) : (ic += 1) {
             var f: f32 = 0.0;
