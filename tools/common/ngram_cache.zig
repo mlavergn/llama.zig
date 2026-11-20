@@ -12,13 +12,13 @@
 //! Both levels are `std::unordered_map`s, and their order is observable: a
 //! draft takes the *first* token with the highest count, so ties go to
 //! whichever comes first in the part, and `save` writes the cache in
-//! iteration order. Both are `cxx.HashMap`, libc++'s layout. Where the C++
+//! iteration order. Both are `hash_map.HashMap`, libc++'s layout. Where the C++
 //! copies a part before iterating it, the copy keeps the source's structure
 //! (libc++ 22's `__copy_construct`), so iterating the original is the same.
 
 const std = @import("std");
 const c = @import("tools_h");
-const cxx = @import("cxx.zig");
+const hash_map = @import("hash_map.zig");
 const log = @import("log.zig");
 const io = @import("io.zig");
 const file = @import("file.zig");
@@ -80,11 +80,11 @@ pub fn ngramHash(ngram: Ngram) u64 {
 
 /// Ports `common_ngram_cache_part` (ngram-cache.h:58 @b1b770d90): token to
 /// the number of times it has been seen, keyed by `std::hash<int>`.
-pub const CachePart = cxx.HashMap(c.llama_token, i32, cxx.hashInt, cxx.eqlInt);
+pub const CachePart = hash_map.HashMap(c.llama_token, i32, hash_map.hashInt, hash_map.eqlInt);
 
 /// Ports `common_ngram_cache` (ngram-cache.h:61 @b1b770d90): n-gram to the
 /// empirical distribution of the tokens following it. Owns its parts.
-pub const Cache = cxx.HashMap(Ngram, CachePart, ngramHash, Ngram.eql);
+pub const Cache = hash_map.HashMap(Ngram, CachePart, ngramHash, Ngram.eql);
 
 /// Frees a cache and its parts.
 pub fn deinitCache(cache: *Cache) void {
@@ -539,7 +539,7 @@ test "save and load round-trip in iteration order, and merge adds counts" {
 test "a map keyed by the Fibonacci hash iterates as libc++'s does" {
     // measured: libc++ 22 (zig c++) iterates these keys emplaced in this
     // order as 11 2 9 3 100 7 -1 5 over 11 buckets
-    const M = cxx.HashMap(c.llama_token, i32, tokenHash, cxx.eqlInt);
+    const M = hash_map.HashMap(c.llama_token, i32, tokenHash, hash_map.eqlInt);
     var m = try M.init(std.testing.allocator);
     defer m.deinit();
     for ([_]c.llama_token{ 5, -1, 7, 100, 3, 9, 11, 2 }) |k| _ = try m.emplace(k, 1);

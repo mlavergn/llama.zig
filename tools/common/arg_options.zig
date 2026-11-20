@@ -24,6 +24,7 @@
 //! handler's error.
 
 const std = @import("std");
+const num = @import("num.zig");
 const builtin = @import("builtin");
 const c = @import("tools_h");
 const arg = @import("arg.zig");
@@ -136,19 +137,15 @@ pub fn parseCsvRow(a: std.mem.Allocator, input: []const u8) !std.ArrayList([:0]c
 }
 
 /// `std::stoull` on part of a range.
-fn stoull(a: std.mem.Allocator, s: []const u8) !u64 {
-    const z = try a.dupeSentinel(u8, s, 0);
-    var end: ?[*:0]const u8 = null;
-    std.c._errno().* = 0;
-    const v = strtoull(z.ptr, &end, 10);
-    if (std.c._errno().* == @backingInt(std.c.E.RANGE)) return throwStr("stoull: out of range");
-    if (end == z.ptr) return throwStr("stoull: no conversion");
-    return v;
+fn stoull(s: []const u8) !u64 {
+    const p = num.strtoull(std.mem.sliceTo(s, 0), 10);
+    if (p.range) return throwStr("stoull: out of range");
+    if (p.end == 0) return throwStr("stoull: no conversion");
+    return p.value;
 }
-extern fn strtoull(s: [*:0]const u8, end: *?[*:0]const u8, base: c_int) c_ulonglong;
 
 /// Ports `parse_cpu_range` (common/common.cpp:333 @b1b770d90).
-pub fn parseCpuRange(a: std.mem.Allocator, range: []const u8, boolmask: *[c.GGML_MAX_N_THREADS]bool) !bool {
+pub fn parseCpuRange(range: []const u8, boolmask: *[c.GGML_MAX_N_THREADS]bool) !bool {
     const func = "parse_cpu_range";
     const dash_loc = std.mem.indexOfScalar(u8, range, '-') orelse {
         log.comErr(func, "%s", .{@as([*:0]const u8, "Format of CPU range is invalid! Expected [<start>]-[<end>].\n")});
@@ -159,7 +156,7 @@ pub fn parseCpuRange(a: std.mem.Allocator, range: []const u8, boolmask: *[c.GGML
     var end_i: u64 = 0;
 
     if (dash_loc != 0) {
-        start_i = try stoull(a, range[0..dash_loc]);
+        start_i = try stoull(range[0..dash_loc]);
         if (start_i >= c.GGML_MAX_N_THREADS) {
             log.comErr(func, "%s", .{@as([*:0]const u8, "Start index out of bounds!\n")});
             return false;
@@ -169,7 +166,7 @@ pub fn parseCpuRange(a: std.mem.Allocator, range: []const u8, boolmask: *[c.GGML
     if (dash_loc == range.len - 1) {
         end_i = c.GGML_MAX_N_THREADS - 1;
     } else {
-        end_i = try stoull(a, range[dash_loc + 1 ..]);
+        end_i = try stoull(range[dash_loc + 1 ..]);
         if (end_i >= c.GGML_MAX_N_THREADS) {
             log.comErr(func, "%s", .{@as([*:0]const u8, "End index out of bounds!\n")});
             return false;
@@ -320,7 +317,7 @@ fn addPart1(ctx: *Context) !void {
     try ctx.add(.{ .args = &.{ "-Cr", "--cpu-range" }, .value_hint = "lo-hi", .help = "range of CPUs for affinity. Complements --cpu-mask", .handler = .{ .string = struct {
         fn f(q: *Params, range: S) !void {
             q.cpuparams.mask_valid = true;
-            if (!try parseCpuRange(q.arena, range, &q.cpuparams.cpumask)) return throwStr("invalid range");
+            if (!try parseCpuRange(range, &q.cpuparams.cpumask)) return throwStr("invalid range");
         }
     }.f } });
     // arg.cpp:1567
@@ -353,7 +350,7 @@ fn addPart1(ctx: *Context) !void {
     try ctx.add(.{ .args = &.{ "-Crb", "--cpu-range-batch" }, .value_hint = "lo-hi", .help = "ranges of CPUs for affinity. Complements --cpu-mask-batch", .handler = .{ .string = struct {
         fn f(q: *Params, range: S) !void {
             q.cpuparams_batch.mask_valid = true;
-            if (!try parseCpuRange(q.arena, range, &q.cpuparams_batch.cpumask)) return throwStr("invalid range");
+            if (!try parseCpuRange(range, &q.cpuparams_batch.cpumask)) return throwStr("invalid range");
         }
     }.f } });
     // arg.cpp:1611

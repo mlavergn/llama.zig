@@ -74,7 +74,7 @@ fn stoiOr(s: []const u8) ?c_int {
     if (s.len >= buf.len) {
         const z = gpa.dupeSentinel(u8, s, 0) catch return null;
         defer gpa.free(z);
-        return switch (tc.cxx.stoi(z)) {
+        return switch (tc.num.stoi(z)) {
             .ok => |v| v,
             else => null,
         };
@@ -82,7 +82,7 @@ fn stoiOr(s: []const u8) ?c_int {
     @memcpy(buf[0..s.len], s);
     buf[s.len] = 0;
     const z: [:0]const u8 = buf[0..s.len :0];
-    return switch (tc.cxx.stoi(z)) {
+    return switch (tc.num.stoi(z)) {
         .ok => |v| v,
         else => null,
     };

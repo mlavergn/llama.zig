@@ -735,7 +735,7 @@ fn getLines(a: std.mem.Allocator, s: []const u8) !std.ArrayList([]const u8) {
 
 /// The C++ throwing `std::stoi` out of `main`: libc++ reports it and aborts.
 fn stoiOrTerminate(a: std.mem.Allocator, s: []const u8) !c_int {
-    return switch (tc.cxx.stoi(try a.dupeSentinel(u8, s, 0))) {
+    return switch (tc.num.stoi(try a.dupeSentinel(u8, s, 0))) {
         .ok => |v| v,
         .no_conversion => {
             io.eprintf("libc++abi: terminating due to uncaught exception of type std::invalid_argument: stoi: no conversion\n", .{});

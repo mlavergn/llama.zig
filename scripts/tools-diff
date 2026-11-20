@@ -78,6 +78,11 @@ zig build tools tools-ref --release="${TOOLS_O:-fast}" >/dev/null 2>&1 \
 port="$ROOT/zig-out/bin/llama-$tool"
 ref="$ROOT/zig-out/tools-ref/bin/llama-$tool"
 for b in "$port" "$ref"; do [ -x "$b" ] || { echo "FAIL: missing $b" >&2; exit 2; }; done
+# A linked-in compiler_rt shadows the C library's expf and logf and moves the
+# sampling math by an ULP; every case would then differ somewhere downstream.
+# This names it first. See scripts/platform-libs.
+. "$ROOT/scripts/platform-libs"
+libm_check "$ref" "$port" || exit 1
 
 work="${TOOLS_DIFF_OUT:-$(mktemp -d)}"
 mkdir -p "$work/ref/files" "$work/port/files"

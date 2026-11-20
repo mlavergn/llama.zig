@@ -16,6 +16,7 @@
 //! `sampling.zig`'s, whole.
 
 const std = @import("std");
+const num = @import("num.zig");
 const builtin = @import("builtin");
 const c = @import("tools_h");
 const llama = @import("llama");
@@ -95,18 +96,16 @@ fn initSamplerFromModel(p: *Params, model: ?*const c.llama_model) !void {
             if (cfg & user != 0) return;
             var buf: [64]u8 = @splat(0);
             if (c.llama_model_meta_val_str(m, c.llama_model_meta_key_str(key), &buf, buf.len) > 0) {
-                var end: ?[*:0]u8 = null;
-                const v = std.c.strtol(@ptrCast(&buf), @ptrCast(&end), 10);
-                if (end != null and end != @as([*:0]u8, @ptrCast(&buf))) dst.* = @truncate(v);
+                const parsed = num.strtol(std.mem.sliceTo(&buf, 0), 10);
+                if (parsed.end != 0) dst.* = @truncate(parsed.value);
             }
         }
         fn float(m: ?*const c.llama_model, cfg: u64, key: c.llama_model_meta_key, dst: *f32, user: u64) void {
             if (cfg & user != 0) return;
             var buf: [128]u8 = @splat(0);
             if (c.llama_model_meta_val_str(m, c.llama_model_meta_key_str(key), &buf, buf.len) > 0) {
-                var end: ?[*:0]u8 = null;
-                const v = strtof(@ptrCast(&buf), &end);
-                if (end != null and end != @as([*:0]u8, @ptrCast(&buf))) dst.* = v;
+                const parsed = num.strtof(std.mem.sliceTo(&buf, 0));
+                if (parsed.end != 0) dst.* = parsed.value;
             }
         }
     };
@@ -135,8 +134,6 @@ fn initSamplerFromModel(p: *Params, model: ?*const c.llama_model) !void {
     Get.float(model, config, c.LLAMA_MODEL_META_KEY_SAMPLING_MIROSTAT_TAU, &sp.mirostat_tau, Cfg.mirostat_tau);
     Get.float(model, config, c.LLAMA_MODEL_META_KEY_SAMPLING_MIROSTAT_ETA, &sp.mirostat_eta, Cfg.mirostat_eta);
 }
-
-extern fn strtof(s: [*:0]const u8, end: *?[*:0]u8) f32;
 
 /// What `common_sampler_init` throws; `common_init_from_params` does not
 /// catch it, so it escapes `main`.

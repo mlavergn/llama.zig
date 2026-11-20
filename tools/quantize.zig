@@ -113,7 +113,7 @@ fn tryParseFtype(arena: std.mem.Allocator, ftype_str_in: [:0]const u8, ftype: *c
             return true;
         }
     }
-    switch (common.cxx.stoi(ftype_str)) {
+    switch (common.num.stoi(ftype_str)) {
         .ok => |ftype_int| for (quant_options) |it| {
             if (it.ftype == ftype_int) {
                 ftype.* = it.ftype;
@@ -352,8 +352,6 @@ fn parseTensorType(a: std.mem.Allocator, data: [:0]const u8, tensor_type: *std.A
     return true;
 }
 
-extern fn atoi(s: [*:0]const u8) c_int;
-
 /// Ports `parse_tensor_type_file` (quantize/quantize.cpp:349 @b1b770d90): each
 /// white-space-separated word of the file, as `file >> arg` reads them.
 fn parseTensorTypeFile(a: std.mem.Allocator, std_io: std.Io, filename: [:0]const u8, tensor_type: *std.ArrayList(TensorTypeOption)) !bool {
@@ -379,7 +377,7 @@ fn parseLayerPrune(a: std.mem.Allocator, data: [:0]const u8, prune_layers: *std.
     defer block_ids.deinit(a);
     for (block_ids.items) |block_id| {
         const z = try a.dupeSentinel(u8, block_id, 0);
-        const id: c_int = switch (common.cxx.stoi(z)) {
+        const id: c_int = switch (common.num.stoi(z)) {
             .ok => |v| v,
             else => -1,
         };
@@ -527,7 +525,7 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
         } else if (std.mem.eql(u8, arg, "--max-buffer-size")) {
             if (last) usage(exe);
             arg_idx += 1;
-            const mib = atoi(argv[arg_idx].ptr);
+            const mib = common.num.atoi(argv[arg_idx]);
             if (mib <= 0) {
                 io.eprintf("%s: invalid --max-buffer-size '%s'\n", .{ func, argv[arg_idx].ptr });
                 return 1;
@@ -644,7 +642,7 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
 
     // parse nthreads
     if (argv.len > arg_idx) {
-        switch (common.cxx.stoi(argv[arg_idx])) {
+        switch (common.num.stoi(argv[arg_idx])) {
             .ok => |n| params.nthread = n,
             else => |e| {
                 io.eprintf("%s: invalid nthread '%s' (%s)\n", .{ func, argv[arg_idx].ptr, e.what() });

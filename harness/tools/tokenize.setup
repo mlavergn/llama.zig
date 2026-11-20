@@ -1,0 +1,11 @@
+#!/bin/bash
+# Writes tokenize's inputs into $DATA: the exit grace for the --log-jsonl
+# error case (harness/tools/exit_grace.c). Run by scripts/tools-diff.
+set -eu
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# The exit grace for the --log-jsonl error case (harness/tools/exit_grace.c).
+if [ "$(uname)" = Darwin ]; then
+    zig cc -O2 -dynamiclib "$ROOT/harness/tools/exit_grace.c" -o "$DATA/exit_grace.so"
+else
+    zig cc -O2 -shared -fPIC "$ROOT/harness/tools/exit_grace.c" -o "$DATA/exit_grace.so"
+fi

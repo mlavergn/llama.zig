@@ -659,6 +659,13 @@ def main():
     for b in (ref_bin, port_bin):
         if not os.access(b, os.X_OK):
             die(f"missing {b}")
+    # a linked-in compiler_rt shadows the C library's expf and logf and moves
+    # the sampling math by an ULP: name it before the transcripts differ
+    # (scripts/platform-libs)
+    if not self_mode:
+        libm = subprocess.run(["bash", "-c", '. "$0/scripts/platform-libs"; libm_check "$1" "$2"', ROOT, ref_bin, port_bin])
+        if libm.returncode != 0:
+            die("the port and the reference take libm from different places")
 
     out = os.environ.get("SERVER_DIFF_OUT") or tempfile.mkdtemp(prefix="server-diff.")
     data = os.path.join(out, "data")

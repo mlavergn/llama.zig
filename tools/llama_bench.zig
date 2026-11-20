@@ -34,7 +34,6 @@ comptime {
 const gpa = std.heap.c_allocator;
 
 extern fn rand() c_int;
-extern fn strtoull(s: [*:0]const u8, end: *?[*:0]const u8, base: c_int) c_ulonglong;
 extern fn setlocale(category: c_int, locale: ?[*:0]const u8) ?[*:0]const u8;
 
 const Override = c.llama_model_tensor_buft_override;
@@ -381,14 +380,11 @@ fn splitBool(a: std.mem.Allocator, s: []const u8) !std.ArrayList(bool) {
 }
 
 /// `std::stoull`, as libc++ throws.
-fn stoull(a: std.mem.Allocator, s: []const u8) !u64 {
-    const z = try a.dupeSentinel(u8, s, 0);
-    var end: ?[*:0]const u8 = null;
-    std.c._errno().* = 0;
-    const v = strtoull(z.ptr, &end, 10);
-    if (std.c._errno().* == @backingInt(std.c.E.RANGE)) return arg.throwStr("stoull: out of range");
-    if (end == z.ptr) return arg.throwStr("stoull: no conversion");
-    return v;
+fn stoull(s: []const u8) !u64 {
+    const p = tc.num.strtoull(s, 10);
+    if (p.range) return arg.throwStr("stoull: out of range");
+    if (p.end == 0) return arg.throwStr("stoull: no conversion");
+    return p.value;
 }
 
 /// `std::sregex_token_iterator(s, std::regex("[;/]+"), -1)`: the text
@@ -892,7 +888,7 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
         params.no_warmup = true;
     } else if (eql(cur, &.{ "-fitt", "--fit-target" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        for ((try tc.strings.split(a, v, split_delim)).items) |x| try params.fit_params_target.append(a, try stoull(a, x));
+        for ((try tc.strings.split(a, v, split_delim)).items) |x| try params.fit_params_target.append(a, try stoull(x));
     } else if (eql(cur, &.{ "-fitc", "--fit-ctx" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
         for ((try tc.strings.split(a, v, split_delim)).items) |x| {

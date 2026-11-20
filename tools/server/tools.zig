@@ -58,7 +58,6 @@ extern fn write(fd: c_int, buf: [*]const u8, n: usize) isize;
 extern fn getcwd(buf: [*]u8, size: usize) ?[*:0]u8;
 extern fn mkdir(path: [*:0]const u8, mode: c_uint) c_int;
 extern fn unlink(path: [*:0]const u8) c_int;
-extern fn strtoull(s: [*:0]const u8, end: *?[*:0]const u8, base: c_int) c_ulonglong;
 extern fn pthread_self() usize;
 
 fn errno() c_int {
@@ -632,12 +631,9 @@ const Isolate = struct {
     fn fileSize(self: *const Isolate, a: Allocator, path: []const u8, out_size: *u64) !bool {
         const res = try self.exec(a, &.{ "sh", "-c", "wc -c < \"$1\"", "_", try self.resolve(a, path) }, 64, true);
         if (res.exit_code != 0 or res.timed_out) return false;
-        const sz = try a.dupeSentinel(u8, res.output, 0);
-        var end: ?[*:0]const u8 = null;
-        std.c._errno().* = 0;
-        const v = strtoull(sz.ptr, &end, 10);
-        if (end == null or end.? == sz.ptr or errno() == @backingInt(std.posix.E.RANGE)) return false;
-        out_size.* = v;
+        const p = tc.num.strtoull(res.output, 10);
+        if (p.end == 0 or p.range) return false;
+        out_size.* = p.value;
         return true;
     }
 

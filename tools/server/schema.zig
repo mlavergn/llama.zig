@@ -464,8 +464,6 @@ fn hReasoningBudgetMessage(ctx: *EvalContext, data: *const Value) Error!void {
     }
 }
 
-extern fn strtol(s: [*:0]const u8, end: *[*:0]const u8, base: c_int) c_long;
-
 /// The `parse_bias` lambda: a number, or `false` to ban the token.
 fn parseBias(v: *const Value, bias: *f32) Error!bool {
     if (v.isNumber()) {
@@ -504,10 +502,11 @@ fn hLogitBias(ctx: *EvalContext, data: *const Value) Error!void {
         while (it.next()) |el| {
             var bias: f32 = 0;
             if (!try parseBias(el.value, &bias)) continue;
-            const key = try ctx.a.dupeSentinel(u8, el.key, 0);
-            var end: [*:0]const u8 = key.ptr;
-            const tok: Token = @truncate(strtol(key.ptr, &end, 10));
-            if (end[0] == 0) {
+            // `std::stoi`-free `strtol` over the key's `c_str()`: whole up to its NUL
+            const key = std.mem.sliceTo(el.key, 0);
+            const parsed = tools.num.strtol(key, 10);
+            const tok: Token = @truncate(parsed.value);
+            if (parsed.end == key.len) {
                 if (tok >= 0 and tok < n_vocab) try s.logit_bias.append(ctx.a, .{ .token = tok, .bias = bias });
             } else {
                 for (try common.tokenize(ctx.a, ctx.vocab, el.key, false, false)) |t|

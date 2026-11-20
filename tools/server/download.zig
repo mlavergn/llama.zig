@@ -788,7 +788,7 @@ const PullState = struct {
             return false;
         }
         if (p.total == 0 and response.hasHeader("Content-Length")) {
-            if (stoull(self.a, response.getHeaderValue("Content-Length"))) |content_length| {
+            if (stoull(response.getHeaderValue("Content-Length"))) |content_length| {
                 p.total = p.downloaded + content_length;
             } else |_| {
                 log.wrn("%s: invalid Content-Length header: %s\n", .{ func, @as([*:0]const u8, "stoull: no conversion") });
@@ -828,14 +828,11 @@ const PullState = struct {
 
 /// `std::stoull` on a header value; `error.Throw` where it throws (no
 /// digits, out of range).
-fn stoull(a: Allocator, s: []const u8) !usize {
-    const z = try a.dupeSentinel(u8, s, 0);
-    var end: ?[*:0]const u8 = null;
-    std.c._errno().* = 0;
-    const v = strtoull(z.ptr, &end, 10);
-    if (end == z.ptr) return error.Throw;
-    if (std.c._errno().* == @backingInt(std.c.E.RANGE)) return error.Throw;
-    return @intCast(v);
+fn stoull(s: []const u8) !usize {
+    const p = tc.num.strtoull(s, 10);
+    if (p.end == 0) return error.Throw;
+    if (p.range) return error.Throw;
+    return @intCast(p.value);
 }
 const c_stdio = struct {
     extern "c" fn remove(path: [*:0]const u8) c_int;
@@ -847,7 +844,6 @@ fn cRemove(p: [*:0]const u8) c_int {
 fn cRename(o: [*:0]const u8, n: [*:0]const u8) c_int {
     return c_stdio.rename(o, n);
 }
-extern fn strtoull(s: [*:0]const u8, end: *?[*:0]const u8, base: c_int) c_ulonglong;
 
 /// Ports `common_pull_file` (download.cpp:175 @b1b770d90): a GET appended
 /// to `path_tmp`, from `p.downloaded` with a `Range` when the server takes
@@ -1018,7 +1014,7 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
     }
 
     if (hres.hasHeader("Content-Length")) {
-        if (stoull(a, hres.getHeaderValue("Content-Length"))) |v| {
+        if (stoull(hres.getHeaderValue("Content-Length"))) |v| {
             p.total = v;
         } else |_| {
             log.wrn("%s: invalid Content-Length in HEAD response: %s\n", .{ func, @as([*:0]const u8, "stoull: no conversion") });

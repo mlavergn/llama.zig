@@ -8,11 +8,9 @@
 //! Each declaration names what it ports and the line it began at.
 
 const std = @import("std");
+const num = @import("num.zig");
 const c = @import("tools_h");
 const log = @import("log.zig");
-
-extern fn atol(s: [*:0]const u8) c_long;
-extern fn atof(s: [*:0]const u8) f64;
 
 /// Ports `string_remove_suffix` (common/common.h:887 @b1b770d90), returning the
 /// shortened string where the C shortens in place and returns true.
@@ -68,10 +66,10 @@ pub fn parseKvOverride(data: [:0]const u8, overrides: *std.ArrayList(c.llama_mod
     const sep = data[sep_idx + 1 ..];
     if (std.mem.startsWith(u8, sep, "int:")) {
         kvo.tag = c.LLAMA_KV_OVERRIDE_TYPE_INT;
-        kvo.unnamed_0.val_i64 = atol(sep[4..].ptr);
+        kvo.unnamed_0.val_i64 = num.atol(std.mem.sliceTo(sep[4..], 0));
     } else if (std.mem.startsWith(u8, sep, "float:")) {
         kvo.tag = c.LLAMA_KV_OVERRIDE_TYPE_FLOAT;
-        kvo.unnamed_0.val_f64 = atof(sep[6..].ptr);
+        kvo.unnamed_0.val_f64 = num.atof(std.mem.sliceTo(sep[6..], 0));
     } else if (std.mem.startsWith(u8, sep, "bool:")) {
         kvo.tag = c.LLAMA_KV_OVERRIDE_TYPE_BOOL;
         const v = sep[5..];

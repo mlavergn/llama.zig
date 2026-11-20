@@ -23,6 +23,7 @@
 //! external dependency.
 
 const std = @import("std");
+const num = @import("num.zig");
 const env_mod = @import("env.zig");
 const builtin = @import("builtin");
 const c = @import("tools_h");
@@ -71,43 +72,31 @@ pub fn throwStr(s: []const u8) error{Throw} {
 }
 
 extern fn snprintf(buf: ?[*]u8, size: usize, format: [*:0]const u8, ...) c_int;
-extern fn strtol(s: [*:0]const u8, end: *?[*:0]const u8, base: c_int) c_long;
-extern fn strtoul(s: [*:0]const u8, end: *?[*:0]const u8, base: c_int) c_ulong;
-extern fn strtof(s: [*:0]const u8, end: *?[*:0]const u8) f32;
-
-fn errnoRange() bool {
-    return std.c._errno().* == @backingInt(std.c.E.RANGE);
-}
 
 /// `std::stoi`, as libc++ throws (string.cpp's `as_integer_helper`).
 pub fn stoi(s: [:0]const u8) error{Throw}!c_int {
-    var end: ?[*:0]const u8 = null;
-    std.c._errno().* = 0;
-    const v = strtol(s.ptr, &end, 10);
-    if (errnoRange()) return throwStr("stoi: out of range");
-    if (end == s.ptr) return throwStr("stoi: no conversion");
+    const p = num.strtol(s, 10);
+    const v = p.value;
+    if (p.range) return throwStr("stoi: out of range");
+    if (p.end == 0) return throwStr("stoi: no conversion");
     if (v < std.math.minInt(c_int) or v > std.math.maxInt(c_int)) return throwStr("stoi: out of range");
     return @intCast(v);
 }
 
 /// `std::stoul`.
 pub fn stoul(s: [:0]const u8) error{Throw}!c_ulong {
-    var end: ?[*:0]const u8 = null;
-    std.c._errno().* = 0;
-    const v = strtoul(s.ptr, &end, 10);
-    if (errnoRange()) return throwStr("stoul: out of range");
-    if (end == s.ptr) return throwStr("stoul: no conversion");
-    return v;
+    const p = num.strtoul(s, 10);
+    if (p.range) return throwStr("stoul: out of range");
+    if (p.end == 0) return throwStr("stoul: no conversion");
+    return p.value;
 }
 
 /// `std::stof`.
 pub fn stof(s: [:0]const u8) error{Throw}!f32 {
-    var end: ?[*:0]const u8 = null;
-    std.c._errno().* = 0;
-    const v = strtof(s.ptr, &end);
-    if (errnoRange()) return throwStr("stof: out of range");
-    if (end == s.ptr) return throwStr("stof: no conversion");
-    return v;
+    const p = num.strtof(s);
+    if (p.range) return throwStr("stof: out of range");
+    if (p.end == 0) return throwStr("stof: no conversion");
+    return p.value;
 }
 
 /// `std::string(s)` for a value the handler keeps.
@@ -768,10 +757,10 @@ pub fn processEscapes(a: std.mem.Allocator, input: []const u8) ![]const u8 {
                 'x' => {
                     // Handle \x12, etc
                     if (input_idx + 2 < input_len) {
-                        const x = [3:0]u8{ input[input_idx + 1], input[input_idx + 2], 0 };
-                        var err_p: ?[*:0]const u8 = null;
-                        const val = strtol(&x, &err_p, 16);
-                        if (err_p == @as([*:0]const u8, &x) + 2) {
+                        const x = [2]u8{ input[input_idx + 1], input[input_idx + 2] };
+                        const parsed = num.strtol(&x, 16);
+                        const val = parsed.value;
+                        if (parsed.end == 2) {
                             input_idx += 2;
                             out[output_idx] = @truncate(@as(c_ulong, @bitCast(val)));
                             output_idx += 1;

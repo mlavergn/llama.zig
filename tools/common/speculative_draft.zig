@@ -19,6 +19,7 @@
 //! before decoding, and the decoder reads the new row -- as upstream's does.
 
 const std = @import("std");
+const num = @import("num.zig");
 const env_mod = @import("env.zig");
 const c = @import("tools_h");
 const S = @import("speculative.zig");
@@ -1019,7 +1020,7 @@ pub const DFlash = struct {
         {
             var buf = std.mem.zeroes([32]u8);
             if (c.llama_model_meta_val_str(model_dft, "dflash.block_size", &buf, buf.len) >= 0) {
-                block_size = c.atoi(@ptrCast(&buf));
+                block_size = num.atoi(std.mem.sliceTo(&buf, 0));
             }
             if (c.llama_model_meta_val_str(model_dft, "dflash.sample_from_anchor", &buf, buf.len) >= 0) {
                 sample_from_anchor = std.mem.eql(u8, std.mem.sliceTo(&buf, 0), "true");
@@ -1036,7 +1037,7 @@ pub const DFlash = struct {
         @memset(dflash2_seed, -1);
         var lilicorr_meta = std.mem.zeroes([32]u8);
         const lilicorr_top_k: i32 = if (c.llama_model_meta_val_str(model_dft, "lilicorr.candidate_topk", &lilicorr_meta, lilicorr_meta.len) >= 0)
-            c.atoi(@ptrCast(&lilicorr_meta))
+            num.atoi(std.mem.sliceTo(&lilicorr_meta, 0))
         else
             0;
         const is_lilicorr = lilicorr_top_k > 0;
@@ -1101,7 +1102,7 @@ pub const DFlash = struct {
                 if (target_layer_ids[k - 1] >= target_layer_ids[k]) break false;
             } else true;
 
-            use_dev_features = !is_lilicorr and ascending and (env == null or c.atoi(env.?.ptr) != 0);
+            use_dev_features = !is_lilicorr and ascending and (env == null or num.atoi(env.?) != 0);
             if (use_dev_features) {
                 ext.setEmbeddingsLayerInpDev(ctx_tgt, true);
                 use_dev_features = ext.supportsEmbdRow(ctx_dft);

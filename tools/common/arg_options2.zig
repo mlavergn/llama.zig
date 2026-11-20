@@ -19,6 +19,7 @@
 //! `llama-server`.
 
 const std = @import("std");
+const num = @import("num.zig");
 const c = @import("tools_h");
 const arg = @import("arg.zig");
 const params_mod = @import("params.zig");
@@ -1026,14 +1027,11 @@ pub fn add(ctx: *Context) !void {
 
 /// `std::stoull`.
 fn stoull(s: [:0]const u8) !u64 {
-    var end: ?[*:0]const u8 = null;
-    std.c._errno().* = 0;
-    const v = strtoull(s.ptr, &end, 10);
-    if (std.c._errno().* == @backingInt(std.c.E.RANGE)) return throwStr("stoull: out of range");
-    if (end == s.ptr) return throwStr("stoull: no conversion");
-    return v;
+    const p = num.strtoull(s, 10);
+    if (p.range) return throwStr("stoull: out of range");
+    if (p.end == 0) return throwStr("stoull: no conversion");
+    return p.value;
 }
-extern fn strtoull(s: [*:0]const u8, end: *?[*:0]const u8, base: c_int) c_ulonglong;
 
 // -----------------------------------------------------------------------------
 // Unit Tests

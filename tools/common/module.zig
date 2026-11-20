@@ -19,7 +19,7 @@ pub const build_info = @import("build_info.zig");
 pub const io = @import("io.zig");
 pub const log = @import("log.zig");
 pub const strings = @import("strings.zig");
-pub const cxx = @import("cxx.zig");
+pub const hash_map = @import("hash_map.zig");
 pub const imatrix_loader = @import("imatrix_loader.zig");
 pub const params = @import("params.zig");
 pub const arg = @import("arg.zig");
@@ -43,6 +43,7 @@ pub const subproc = @import("subproc.zig");
 pub const fs_stat = @import("fs_stat.zig");
 pub const file = @import("file.zig");
 pub const env = @import("env.zig");
+pub const num = @import("num.zig");
 pub const clock = @import("clock.zig");
 
 /// `LLM_KV_SPLIT_NO`, `LLM_KV_SPLIT_COUNT`, `LLM_KV_SPLIT_TENSORS_COUNT`

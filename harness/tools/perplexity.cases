@@ -66,4 +66,7 @@
 --log-jsonl -m $PLAIN -f $DATA/text.txt -c 64 --chunks 2
 --log-jsonl -m $PLAIN -f $DATA/text.txt -c 64 --chunks 2 -lv 4
 -m $PLAIN -f $DATA/text.txt -c 64 --chunks 2 --log-jsonl --no-log-jsonl
+# upstream's leaked logger loses what its worker has not written when the
+# tool exits at once; both sides wait for it (harness/tools/exit_grace.c)
+!preload $DATA/exit_grace.so
 !fail --log-jsonl -m /nonexistent.gguf -f $DATA/text.txt

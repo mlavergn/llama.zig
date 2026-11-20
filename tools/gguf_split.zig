@@ -171,7 +171,7 @@ fn parseEx(argv: []const [:0]const u8, params: *Params, err: *ParseError, arena:
                 return err.set("error: either --split-max-tensors or --split-max-size can be specified, but not both", .{});
             }
             params.mode = .tensor;
-            params.n_split_tensors = c.atoi(argv[arg_idx].ptr);
+            params.n_split_tensors = common.num.atoi(argv[arg_idx]);
         } else if (std.mem.eql(u8, arg, "--split-max-size")) {
             arg_idx += 1;
             if (arg_idx >= argv.len) {

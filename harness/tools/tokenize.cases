@@ -75,4 +75,7 @@
 !fail -m $VOCAB/ggml-vocab-gpt-2.gguf -p hi --no-mmap
 !fail -m $VOCAB/ggml-vocab-gpt-2.gguf -p hi -dio
 !mask s/"time":[0-9]+/"time":T/g
+# upstream's leaked logger loses what its worker has not written when the
+# tool exits at once; both sides wait for it (harness/tools/exit_grace.c)
+!preload $DATA/exit_grace.so
 !fail --log-jsonl -m /nonexistent/model.gguf -p hi

@@ -766,66 +766,34 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
 // -----------------------------------------------------------------------------
 // the transcriptions API
 
-extern fn strtoul(s: [*:0]const u8, end: *[*:0]const u8, base: c_int) c_ulong;
-extern fn strtoll(s: [*:0]const u8, end: *[*:0]const u8, base: c_int) c_longlong;
-extern fn strtof(s: [*:0]const u8, end: *[*:0]const u8) f32;
-
-/// The C library's `errno`, as `std::stoul` and `std::stof` read it.
-fn errnoPtr() *c_int {
-    return std.c._errno();
-}
-
-const erange: c_int = @backingInt(std.posix.E.RANGE);
-
 /// Ports libc++'s `std::stoul` (`as_integer` over `strtoul`, base 10) on
 /// `c_str()`: `invalid_argument` "stoul: no conversion" when nothing
 /// parses, `out_of_range` "stoul: out of range" on `ERANGE` (thrown here
 /// as `error.RuntimeError`, which the server answers as it answers any
 /// exception but `invalid_argument`). A minus sign negates modulo 2^64.
 pub fn stoul(s: []const u8) Error!c_ulong {
-    const z = common.dupZ(s);
-    defer common.freeZ(z);
-    var end: [*:0]const u8 = z;
-    const saved = errnoPtr().*;
-    errnoPtr().* = 0;
-    const r = strtoul(z, &end, 10);
-    const e = errnoPtr().*;
-    errnoPtr().* = saved;
-    if (e == erange) return throw(error.RuntimeError, "stoul: out of range", .{});
-    if (end == z) return throw(error.InvalidArgument, "stoul: no conversion", .{});
-    return r;
+    const p = tools.num.strtoul(std.mem.sliceTo(s, 0), 10);
+    if (p.range) return throw(error.RuntimeError, "stoul: out of range", .{});
+    if (p.end == 0) return throw(error.InvalidArgument, "stoul: no conversion", .{});
+    return p.value;
 }
 
 /// Ports libc++'s `std::stoll` (`as_integer` over `strtoll`, base 10) on
 /// `c_str()`, as `stoul` does.
 pub fn stoll(s: []const u8) Error!c_longlong {
-    const z = common.dupZ(s);
-    defer common.freeZ(z);
-    var end: [*:0]const u8 = z;
-    const saved = errnoPtr().*;
-    errnoPtr().* = 0;
-    const r = strtoll(z, &end, 10);
-    const e = errnoPtr().*;
-    errnoPtr().* = saved;
-    if (e == erange) return throw(error.RuntimeError, "stoll: out of range", .{});
-    if (end == z) return throw(error.InvalidArgument, "stoll: no conversion", .{});
-    return r;
+    const p = tools.num.strtoll(std.mem.sliceTo(s, 0), 10);
+    if (p.range) return throw(error.RuntimeError, "stoll: out of range", .{});
+    if (p.end == 0) return throw(error.InvalidArgument, "stoll: no conversion", .{});
+    return p.value;
 }
 
 /// Ports libc++'s `std::stof` (`as_float` over `strtof`) on `c_str()`, as
 /// `stoul` does.
 pub fn stof(s: []const u8) Error!f32 {
-    const z = common.dupZ(s);
-    defer common.freeZ(z);
-    var end: [*:0]const u8 = z;
-    const saved = errnoPtr().*;
-    errnoPtr().* = 0;
-    const r = strtof(z, &end);
-    const e = errnoPtr().*;
-    errnoPtr().* = saved;
-    if (e == erange) return throw(error.RuntimeError, "stof: out of range", .{});
-    if (end == z) return throw(error.InvalidArgument, "stof: no conversion", .{});
-    return r;
+    const p = tools.num.strtof(std.mem.sliceTo(s, 0));
+    if (p.range) return throw(error.RuntimeError, "stof: out of range", .{});
+    if (p.end == 0) return throw(error.InvalidArgument, "stof: no conversion", .{});
+    return p.value;
 }
 
 /// Ports `convert_transcriptions_to_chatcmpl` (server-chat.cpp:711

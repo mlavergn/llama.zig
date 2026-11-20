@@ -18,6 +18,7 @@
 //! is where this port refuses it.
 
 const std = @import("std");
+const num = @import("num.zig");
 const c = @import("tools_h");
 const arg = @import("arg.zig");
 const params_mod = @import("params.zig");
@@ -97,19 +98,14 @@ fn typesFromNames(a: std.mem.Allocator, names: []const []const u8) !std.ArrayLis
     return types;
 }
 
-extern fn strtod(s: [*:0]const u8, end: *?[*:0]const u8) f64;
-
 /// `std::stod(text, &pos)`, as libc++'s `as_float_helper` throws.
 ///
 /// Return: the value and how many bytes it read.
-fn stod(a: std.mem.Allocator, text: []const u8) !struct { f64, usize } {
-    const s = try a.dupeSentinel(u8, text, 0);
-    var end: ?[*:0]const u8 = null;
-    std.c._errno().* = 0;
-    const v = strtod(s.ptr, &end);
-    if (std.c._errno().* == @backingInt(std.c.E.RANGE)) return throwStr("stod: out of range");
-    if (end == s.ptr) return throwStr("stod: no conversion");
-    return .{ v, @intFromPtr(end.?) - @intFromPtr(s.ptr) };
+fn stod(text: []const u8) !struct { f64, usize } {
+    const p = num.strtod(std.mem.sliceTo(text, 0));
+    if (p.range) return throwStr("stod: out of range");
+    if (p.end == 0) return throwStr("stod: no conversion");
+    return .{ p.value, p.end };
 }
 
 /// The handler of the `--spec-ngram-*-size-n` and `-size-m` options: a
@@ -165,7 +161,7 @@ pub fn add(ctx: *Context) !void {
     try ctx.add((Arg{ .args = &.{ "--spec-draft-cpu-range", "-Crd", "--cpu-range-draft" }, .value_hint = "lo-hi", .help = "Ranges of CPUs for affinity. Complements --cpu-mask-draft", .handler = .{ .string = struct {
         fn f(q: *Params, range: S) !void {
             q.speculative.draft.cpuparams.mask_valid = true;
-            if (!try options1.parseCpuRange(q.arena, range, &q.speculative.draft.cpuparams.cpumask)) return throwStr("invalid range");
+            if (!try options1.parseCpuRange(range, &q.speculative.draft.cpuparams.cpumask)) return throwStr("invalid range");
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4077
@@ -198,7 +194,7 @@ pub fn add(ctx: *Context) !void {
     try ctx.add((Arg{ .args = &.{ "--spec-draft-cpu-range-batch", "-Crbd", "--cpu-range-batch-draft" }, .value_hint = "lo-hi", .help = "Ranges of CPUs for affinity. Complements --cpu-mask-draft-batch)", .handler = .{ .string = struct {
         fn f(q: *Params, range: S) !void {
             q.speculative.draft.cpuparams_batch.mask_valid = true;
-            if (!try options1.parseCpuRange(q.arena, range, &q.speculative.draft.cpuparams_batch.cpumask)) return throwStr("invalid cpumask");
+            if (!try options1.parseCpuRange(range, &q.speculative.draft.cpuparams_batch.cpumask)) return throwStr("invalid cpumask");
         }
     }.f } }).setSpec().setExamples(&.{.speculative}));
     // arg.cpp:4121
@@ -282,7 +278,7 @@ pub fn add(ctx: *Context) !void {
     try ctx.add((Arg{ .args = &.{"--spec-synth-len"}, .value_hint = "L", .help = "target mean synthetic acceptance length, including the target token (benchmarking only)", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             const text = strings.strip(value);
-            const length, const pos = try stod(q.arena, text);
+            const length, const pos = try stod(text);
             if (pos != text.len or length == -1.0) return throwStr("invalid value");
             q.speculative.synth_len = length;
         }
@@ -294,7 +290,7 @@ pub fn add(ctx: *Context) !void {
             var rates: std.ArrayList(f64) = .empty;
             for (values.items) |raw| {
                 const text = strings.strip(raw);
-                const rate, const pos = try stod(q.arena, text);
+                const rate, const pos = try stod(text);
                 if (pos != text.len) return throwStr("invalid value");
                 try rates.append(q.arena, rate);
             }

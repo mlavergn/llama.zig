@@ -65,9 +65,6 @@ fn orderValue(o: DecisionOrder) i32 {
 
 extern "c" fn exp(x: f64) f64;
 extern "c" fn log(x: f64) f64;
-extern "c" fn strtof(s: [*:0]const u8, end: ?*[*:0]u8) f32;
-extern "c" fn strtoul(s: [*:0]const u8, end: ?*[*:0]u8, base: c_int) c_ulong;
-extern "c" fn strtod(s: [*:0]const u8, end: ?*[*:0]u8) f64;
 extern "c" fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
 
 /// Ports `server_decision_question_type` (server-decision.h:15 @b1b770d90).
@@ -225,7 +222,7 @@ pub const DecisionContext = struct {
             if (c.llama_model_meta_val_str_by_index(model, i, &val, val.len) < 0) {
                 continue;
             }
-            const temp = strtof(@ptrCast(&val), null);
+            const temp = tc.num.strtof(std.mem.sliceTo(&val, 0)).value;
             const key_s = std.mem.sliceTo(&key, 0);
             if (temp <= 0.0) {
                 return throw(error.RuntimeError, "invalid decision temperature: {s} = {s}", .{ key_s, std.mem.sliceTo(&val, 0) });
@@ -262,8 +259,8 @@ pub const DecisionContext = struct {
             var level: usize = 0;
             if (n_parts == 2) {
                 const dot = std.mem.indexOfScalar(u8, rest, '.').?;
-                n = strtoul((try ar.dupeSentinel(u8, rest[0..dot], 0)).ptr, null, 10);
-                level = strtoul((try ar.dupeSentinel(u8, rest[dot + 1 ..], 0)).ptr, null, 10);
+                n = tc.num.strtoul(rest[0..dot], 10).value;
+                level = tc.num.strtoul(rest[dot + 1 ..], 10).value;
             }
             if (n < 2 or n > 255 or level >= n) {
                 return throw(error.RuntimeError, "invalid decision score bias: {s}", .{key_s});
@@ -277,7 +274,7 @@ pub const DecisionContext = struct {
                 };
                 @memset(gop.value_ptr.*, 0.0);
             }
-            gop.value_ptr.*[level] = strtof(@ptrCast(&val), null);
+            gop.value_ptr.*[level] = tc.num.strtof(std.mem.sliceTo(&val, 0)).value;
         }
 
         switch (model_type) {
@@ -341,8 +338,7 @@ pub const DecisionContext = struct {
                 self.text_marker = try gpa.dupe(u8, try tc.common.tokenToPiece(ar, self.vocab, self.token_marker, true));
 
                 const val = try metaStr(ar, model, try std.mem.concat(ar, u8, &.{ prefix, "max_head_tokens" }));
-                const valz = try ar.dupeSentinel(u8, val, 0);
-                self.max_head_tokens = strtoul(valz.ptr, null, 10);
+                self.max_head_tokens = tc.num.strtoul(std.mem.sliceTo(val, 0), 10).value;
                 if (self.max_head_tokens == 0) {
                     return throw(error.RuntimeError, "decision model has no valid max_head_tokens", .{});
                 }
@@ -2192,7 +2188,7 @@ fn pyFloat(a: Allocator, out: *std.ArrayList(u8), v: f64) Error!void {
     var prec: c_int = 0;
     while (prec < 17) : (prec += 1) {
         n_written = @intCast(snprintf(&buf, buf.len, "%.*e", prec, v));
-        if (strtod(&buf, null) == v) {
+        if (tc.num.strtod(std.mem.sliceTo(&buf, 0)).value == v) {
             break;
         }
     }
